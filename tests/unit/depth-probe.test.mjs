@@ -52,6 +52,7 @@ test("windowFor: every current canonical id resolves to its priced or provisiona
   assert.deepEqual(windowFor("claude-fable-5-1"), { window: 1_000_000 });
   assert.deepEqual(windowFor("claude-sonnet-5-5"), { window: 1_000_000 });
   assert.deepEqual(windowFor("claude-haiku-4-5-20251001"), { window: 200_000 });
+  assert.deepEqual(windowFor("claude-haiku-5-5"), { window: 1_000_000 });
   assert.deepEqual(windowFor("claude-haiku-4-5"), { window: 200_000, windowProvisionalAs: "claude-haiku-4-5-20251001" });
   assert.deepEqual(windowFor("claude-opus-6"), { window: 1_000_000, windowProvisionalAs: "claude-opus-5-5" });
 });

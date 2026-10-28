@@ -26,6 +26,7 @@ test("budgetBand: over budget from 15% of the window, hard stop from 20%", () =>
 
 test("windowFor: a priced, a provisional, an assumed and an unknowable window", () => {
   assert.deepEqual(bands.windowFor("claude-haiku-4-5-20251001"), { window: 200_000 });
+  assert.deepEqual(bands.windowFor("claude-haiku-5-5"), { window: 1_000_000 });
   assert.deepEqual(bands.windowFor("claude-haiku-4-5"), { window: 200_000, windowProvisionalAs: "claude-haiku-4-5-20251001" });
   assert.deepEqual(bands.windowFor("claude-mythos-9"), { window: bands.ASSUMED_WINDOW, windowAssumed: true });
   assert.equal(bands.windowFor("claude-sonnet-4-5-20250929"), null);

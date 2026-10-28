@@ -5,6 +5,35 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-27 — Haiku 5.5 is priced, doctor comments on an open issue instead of filing a duplicate, and inherited-model counts what the hooks module saw (#363, #343, #361, #378, #273, #300, #312, #327, #362, #379, #295)
+
+**Decision:** `claude-haiku-5-5` is an exact `scripts/pricing.mjs` row at its up-to-100K list price
+with a 1M window; tiered pricing stays out until the price schema takes a prompt-length threshold.
+`playbooks/profiling-sessions.md` checks the open issues for the draft's exact title after the
+redaction screen and offers a comment on a hit, never writing a `Drafted:` line for it. The
+`inherited-model` compliance candidate reads the hooks module's `agent-trace` rows for the governed
+agents (`KNOB_GOVERNED_AGENTS` in `scripts/doctor.mjs`) and prints that as `observed=`, keeping the
+coordinator's `modelSource` count as a separate fallback; the two are never summed.
+
+**Why:** one unpriced model became four `[doctor:unpriced-model]` issues and one inherited-model
+finding five `[compliance:inherited-model]` issues, because the filer never looked for an open issue
+and a human filed each time (#363, #343, #361, #378, #300, #312, #327, #362, #379). The window gap
+made the driver's pre-flight refuse the model and the depth probe band a fresh session
+`over-budget`. The coordinator's own `modelSource` field was the only signal behind the inherited
+count, although the hooks module records what the Task call passed (#273).
+
+**Supersedes:** `docs/platform-notes.md` § (k)'s 2026-10-08 depth-probe record, whose `over-budget`
+cause (no `claude-haiku-5-5` row, a 200k window taken from `claude-haiku-4-5-20251001`) the row
+fixes; it also removes the `docs/known-issues.md` entry for the assumed 200k window.
+
+**Budgets:** the filer's new step grows `playbooks/profiling-sessions.md` and the runtime surface;
+`references/model-routing.md`'s two rewordings (#295) are byte-neutral and move no ceiling.
+
+```text
+budget: context-budget.json playbooks/profiling-sessions.md 40093
+budget: surface-budget.json surfaceTotal 6389
+```
+
 ## 2026-10-25 — Driven-run economy: a drive band instead of relayed turns, a lean driven surface, explicit effort, folded task scripts (#372, #373, #375, #374)
 
 **Decision:** Watching an unattended run costs no model turn: devcycle's hooks module draws the
