@@ -367,7 +367,7 @@ test("a session that ends mid-wave is respawned, and the safety valve's label is
   assert.deepEqual(r.records.map((x) => x.exitReason), ["valve", "handoff", "handoff"]);
 });
 
-test("sessions without a ledger line beyond a dispatch are stalls: --max-stalls in a row exits 5 with the last result text, and progress resets the count", async () => {
+test("sessions without a ledger line beyond a dispatch's start or ending are stalls: --max-stalls in a row exits 5 with the last result text, and progress resets the count", async () => {
   const root = makeCycle();
   const question = "Which state file should I resume: .devcycle/state.md or sub/.devcycle/state.md?";
   const r = await drive(root, [{ result: "nothing to do" }, { ledger: [line(1, "report-received")] }, { result: "still nothing" }, { result: question }]);
@@ -379,12 +379,12 @@ test("sessions without a ledger line beyond a dispatch are stalls: --max-stalls 
   assert.equal(three.calls.length, 3);
   const dispatchOnly = await drive(makeCycle(), [{ ledger: [line(1, "dispatched")] }]);
   assert.equal(dispatchOnly.code, 5, dispatchOnly.out);
-  assert.match(dispatchOnly.out, /stalled: 2 sessions in a row added no ledger line beyond a dispatch/);
+  assert.match(dispatchOnly.out, /stalled: 2 sessions in a row added no ledger line beyond a dispatch's start or ending/);
   assert.deepEqual(dispatchOnly.records.map((x) => [x.exitReason, x.stallCount]), [["stalled", 1], ["stalled", 2]]);
   // A review round is the reviewer's dispatch.
   const reviewOnly = await drive(makeCycle(), [{ ledger: [line(1, "review-round")] }]);
   assert.equal(reviewOnly.code, 5, reviewOnly.out);
-  assert.match(reviewOnly.out, /stalled: 2 sessions in a row added no ledger line beyond a dispatch/);
+  assert.match(reviewOnly.out, /stalled: 2 sessions in a row added no ledger line beyond a dispatch's start or ending/);
   assert.deepEqual(reviewOnly.records.map((x) => [x.exitReason, x.stallCount]), [["stalled", 1], ["stalled", 2]]);
 });
 
@@ -530,14 +530,14 @@ test("a session silent past the idle limit after its result is no usage limit; o
   const hung = await drive(makeCycle(), [{ ledger: [line(1, "dispatched")], hangMs: 60000 }],
     { flags: ["--max-backoff", "0", "--max-stalls", "1"], env: { DEVCYCLE_DRIVE_IDLE_MS: "5000" } });
   assert.equal(hung.code, 5, hung.out);
-  assert.match(hung.out, /stalled: 1 sessions in a row added no ledger line beyond a dispatch; the last went silent with no usage-limit signal/);
+  assert.match(hung.out, /stalled: 1 sessions in a row added no ledger line beyond a dispatch's start or ending; the last went silent with no usage-limit signal/);
   assert.deepEqual(hung.records.map((x) => [x.exitReason, x.stallCount]), [["stalled", 1]]);
 
   // A stall count built partly by a session that ended is not a run of silent sessions.
   const mixed = await drive(makeCycle(), [{ ledger: [line(1, "dispatched")] }, { hangMs: 60000 }],
     { flags: ["--max-backoff", "0", "--max-stalls", "2"], env: { DEVCYCLE_DRIVE_IDLE_MS: "5000" } });
   assert.equal(mixed.code, 5, mixed.out);
-  assert.match(mixed.out, /stalled: 2 sessions in a row added no ledger line beyond a dispatch; the last went silent/);
+  assert.match(mixed.out, /stalled: 2 sessions in a row added no ledger line beyond a dispatch's start or ending; the last went silent/);
   assert.deepEqual(mixed.records.map((x) => [x.exitReason, x.stallCount]), [["stalled", 1], ["stalled", 2]]);
 });
 

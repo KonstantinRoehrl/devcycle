@@ -634,9 +634,9 @@ function waveEnds(planText, waveAtStart, waveAfter) {
   return waves.filter((w) => w >= waveAtStart && (waveAfter === null || w < waveAfter)).map((w) => `wave ${w} of ${waves.at(-1)} complete`);
 }
 
-// Progress, judged the same however a session ended: a ledger line beyond a dispatch resets the
-// stall count, and a report, verdict or commit the churn count too: churn is such lines but no task
-// outcome. A session a usage limit held adds to neither count.
+// Progress, judged the same however a session ended: a ledger line beyond a dispatch's start or
+// ending resets the stall count, and a report, verdict or commit the churn count too: churn is such
+// lines but no task outcome. A session a usage limit held adds to neither count.
 function progressCounts(before, after, { stalls, churn }, limited) {
   const advanced = after.advanced > before.advanced;
   const step = limited ? 0 : 1;
@@ -661,7 +661,7 @@ function judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, atte
   const counts = progressCounts(before, after, { stalls, churn }, Boolean(s.limit || transient));
   const budgetSpent = () => verdict("budget", 6, `spent $${spent.toFixed(2)} of --max-usd ${opts.maxUsd}`, { ...counts, reason: "max-usd" });
   const said = `The last session said:\n${s.resultText || "(no result)"}`;
-  const stalled = (how = "") => verdict("stalled", 5, `stalled: ${counts.stalls} sessions in a row added no ledger line beyond a dispatch${how}. ${said}`, counts);
+  const stalled = (how = "") => verdict("stalled", 5, `stalled: ${counts.stalls} sessions in a row added no ledger line beyond a dispatch's start or ending${how}. ${said}`, counts);
   const churned = () => verdict("stalled", 5, `stalled: ${counts.churn} sessions in a row added ledger lines but no report, verdict or commit. ${said}`, counts);
   if (s.limit?.resetAt) {
     if (overBudget) return budgetSpent();

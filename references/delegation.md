@@ -175,8 +175,8 @@ envelope cannot carry. A missing report or findings file is never evidence that 
 still running; only `scripts/dispatch-health.mjs` says so.
 
 **Milestones.** A long non-task dispatch may carry `**Milestones:** <n>`, optional
-`**Timebox:** <minutes>`, and a prompt-named log `.devcycle/progress/<id>.log` (`<id>`: letters,
-digits, `.`, `_`, `-`; coordinator-picked). Per milestone it appends
+`**Timebox:** <minutes>`, and a prompt-named log `.devcycle/progress/<id>.log` (`<id>`: coordinator-picked, a
+letter or digit first, then letters, digits, `.`, `_`, `-`). Each milestone appends
 `mkdir -p .devcycle/progress && printf '%s <i>/<n> <what finished>\n' "$(date -u +%FT%TZ)" >> <log>`.
 From any stage the coordinator reads progress off the `progress <id> · … · <i>/<n> <what finished>`
 line of `node "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch-health.mjs"`, not the transcript; past the
