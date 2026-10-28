@@ -15,12 +15,13 @@ const INTAKE_BOUNCE = "rejected (intake bounce)";
 const STEPS = {
   "not-dispatched": "pending", dispatched: "implementing", "missing-report": "implementing",
   "report-received": "reviewing", "review-round": "reviewing", "missing-findings": "reviewing",
+  "dead-implementer": "implementing", "dead-reviewer": "reviewing",
   rejected: "fixing", "intake-bounce": "fixing", accepted: "committing", deferred: "committing", committed: "committed",
 };
 
 // An implementer dispatched after a rejection or an intake bounce is a fix pass: it writes a fresh
 // `dispatched` line, so the rejection is only visible in the task's own ledger lines.
-const IMPLEMENTER_POSITIONS = new Set(["dispatched", "missing-report"]);
+const IMPLEMENTER_POSITIONS = new Set(["dispatched", "missing-report", "dead-implementer"]);
 
 // The round of the task's latest review-round line, read as nextReviewRound reads it; 0 before any.
 function roundOf(entries) {

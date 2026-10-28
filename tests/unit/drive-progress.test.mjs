@@ -148,3 +148,11 @@ test("planProgress is null for a ledger another plan wrote, a state naming no pl
     for (const root of roots) rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a dispatch that ended without its output shows its role's step until it is redispatched; past the cap it waits on a person", () => {
+  const dispatched = entry(5, "dispatched", "model x", "5/dispatched/0/0");
+  const dead = (role, retry) => entry(5, "dispatch-ended", `without output (${role})`, `5/dispatch-ended/0/${retry}`);
+  assert.equal(stepOf([dispatched, dead("implementer", 0)]).step, "implementing");
+  assert.equal(stepOf([dispatched, dead("reviewer", 0)]).step, "reviewing");
+  assert.equal(stepOf([dispatched, dead("implementer", 0), dead("implementer", 1)]).step, "needs-user");
+});
