@@ -1,5 +1,11 @@
 # Changelog
 
+A driven or walked session no longer treats a subagent that has ended as one still working (#385). When an implementer's turn ended on a denied tool call without writing its report, the session read "no report yet" as "still implementing" and slept on a 1200 s wakeup, and the driver's idle limit never fired because the wakeup kept producing stream events.
+
+Three layers now catch a dead dispatch. A `SubagentStop` sensor marks a dispatch ended the moment its agent stops. `scripts/dispatch-health.mjs` classifies each in-flight dispatch from its transcript, and the coordinator runs it instead of sleeping on in-flight work. The driver also runs a watchdog that judges liveness from subagent-transcript activity and acts only once nothing else is live. A dispatch that ended without its report is redispatched once, then raised as a `needs-user` stop naming the task. A dispatch is never recorded dead while its transcripts or its output can be seen.
+
+Every dispatch now reports elapsed time, tool-use count, time since last activity and last tool, and the drive band shows each task's health, including a distinct "quiet" and "ended without report" state (#330). Long non-task dispatches can append milestone lines to a progress log. A PreToolUse guard denies an unbounded `until`/`while ... sleep` poll loop in a guarded devcycle subagent, including one spelled through a wrapper or a `shell -c` string, and the implementer brief says to run long captures with a Bash timeout or in the background. In a concurrent wave an implementer's before/after captures narrow to the task's own test command, so a sibling's red tests no longer fail them; the coordinator's isolated green gate remains the whole-gate proof at commit. executing-waves' safety valve now applies to walked sessions as well, so they stop at a checkpoint on `hard-stop` (#380).
+
 ## 0.28.1 — 2026-10-28
 
 - fix(pricing): price claude-haiku-5-5 and count observed inherited-model dispatches (#363, #273, #379)
