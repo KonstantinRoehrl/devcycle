@@ -28,7 +28,8 @@
 // command it runs; a command word that is a substitution naming git (`$(which git)`) is read as git,
 // and so is the variable `$GIT` as a command's first word (not behind a launcher); and `rtk` is a
 // transparent launcher whose git is classified like any other.
-// Scope is git-only; non-git commands (tests, greps) are allowed. Four dispatch origins are guarded
+// Scope is git, plus one non-git rule for the guarded dispatches below: no until/while loop that
+// sleeps (hooks/lib/poll-guard.mjs). Other non-git commands (tests, greps) are allowed. Four dispatch origins are guarded
 // by the allowlist — task-reviewer, red-team-reviewer, since #235 implementer and, since #304,
 // spec-reviewer — and the main
 // thread (no agent_type) is guarded for `git stash` while a .devcycle/state.md above the call's cwd
@@ -61,6 +62,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findStateFile } from "./lib/find-state-file.mjs";
+import { POLL_DENY_TAIL, isPollLoop } from "./lib/poll-guard.mjs";
 import { DRIVE_LOCK_REL, readLiveDriveLock } from "../scripts/drive-lock.mjs";
 
 let input = {};
@@ -138,6 +140,12 @@ const denyReason = (guardedTail, mainThreadTail) =>
     ? `devcycle: reviewer/implementer dispatch (${agentType}) may not ${guardedTail}`
     : `devcycle: main thread may not run git stash while a devcycle cycle is active (stage: ${cycleStage}) — ${mainThreadTail}`) +
   ` command: ${command.slice(0, 200)}`;
+
+// The one non-git rule: a guarded dispatch may not wait in a loop that sleeps (hooks/lib/poll-guard.mjs).
+// An error inside that guard reads as "not a poll loop", so it can never crash the hook.
+let pollLoop = false;
+try { pollLoop = guarded && isPollLoop(command); } catch { /* not a poll loop */ }
+if (pollLoop) deny(denyReason(POLL_DENY_TAIL, ""));
 
 // Clearly read-only git subcommands (unconditional).
 const READ_ONLY = new Set([
