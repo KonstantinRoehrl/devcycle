@@ -7,22 +7,46 @@
 // One left-to-right pass, linear in the command's length (a hook must answer whatever it is fed): a
 // word counts as a loop keyword or as `sleep` only in command position and unquoted, comments and
 // heredoc bodies are skipped as data, and a `sleep` is a poll only inside an open until/while
-// loop's own do…done body, nested loops tracked on a stack. Like the git guard beside it, this is a
-// backstop for cooperative dispatches, not a shell parser: a heredoc a shell then runs, a function
-// that hides the loop, or `case` patterns spelling keywords are left alone.
+// loop's own do…done body (or its condition), nested loops tracked on a stack. A sleep spelled by path
+// (`/bin/sleep`) or behind a wrapper (`env`, `timeout`, `nohup`…) still counts, and the string a
+// `bash -c` or `eval` runs is scanned as a script of its own, to a fixed depth so the work stays linear.
+// Like the git guard beside it, this is a backstop for cooperative dispatches, not a shell parser:
+// another interpreter's sleep (`python -c time.sleep`, `node -e setTimeout`), a heredoc a shell then
+// runs, a function that hides the loop, or `case` patterns spelling keywords are left alone.
 
 // Separators end a command, so the next word is in command position again.
 const SEPARATORS = new Set([";", "&", "|", "(", ")", "`", "\n"]);
 // Reserved words after which the next word is still in command position.
-const LEADS_A_COMMAND = new Set(["while", "until", "do", "then", "else", "elif", "if", "!", "{", "time"]);
+const LEADS_A_COMMAND = new Set(["while", "until", "do", "then", "else", "elif", "if", "!", "{"]);
+// Commands that run the command word after their own options and operands.
+const WRAPPERS = new Set(["command", "builtin", "exec", "nohup", "time", "env", "timeout", "nice", "eval"]);
+const OPTION_TAKING_VALUE = new Set(["-n", "-k", "-s"]); // `nice -n 5`, `timeout -k 5 -s KILL`
+const SHELLS = new Set(["bash", "sh", "zsh", "dash"]);
+const COMMAND_STRING_FLAG = /^-[A-Za-z]*c$/;
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const DURATION = /^\d+(\.\d+)?[smhd]?$/;
+const MAX_SCRIPT_DEPTH = 3; // nested `bash -c` strings scanned; each is a disjoint slice, so work stays linear
 
 export function isPollLoop(command) {
-  const text = String(command);
+  return scanScript(String(command), 0);
+}
+
+// Whether the wrapper consumes `word` as its own operand, leaving the command word still to come.
+function consumesOperand(wrapper, word) {
+  if (wrapper.takesValue) { wrapper.takesValue = false; return true; }
+  if (word.startsWith("-")) { wrapper.takesValue = OPTION_TAKING_VALUE.has(word); return true; }
+  if (wrapper.name === "env") return ASSIGNMENT.test(word);
+  if (wrapper.name === "timeout" && !wrapper.hasDuration && DURATION.test(word)) return (wrapper.hasDuration = true);
+  return false;
+}
+
+function scanScript(text, depth) {
   const length = text.length;
   const loops = []; // one frame per open loop: { polls: until/while, body: past its `do` }
   let pollingBodies = 0; // open until/while frames past their `do`
   let commandStart = true;
+  let wrapper = null; // a wrapper command whose operands are being skipped to reach the command word
+  let shellFlags = null; // a `bash`-like word seen; { script } is set once its -c flag is, so the next word is the script
   let heredocs = []; // delimiters whose bodies start after the current line
   let heredocWantsDelimiter = null; // `<<` seen with its delimiter still to come as the next word
   let i = 0;
@@ -86,8 +110,8 @@ export function isPollLoop(command) {
     const c = text[i];
     if (c === " " || c === "\t") { i += 1; continue; }
     if (c === "\\" && text[i + 1] === "\n") { i += 2; continue; }
-    if (c === "\n") { i += 1; skipHeredocBodies(); commandStart = true; continue; }
-    if (SEPARATORS.has(c)) { i += 1; commandStart = true; continue; }
+    if (c === "\n") { i += 1; skipHeredocBodies(); commandStart = true; wrapper = shellFlags = null; continue; }
+    if (SEPARATORS.has(c)) { i += 1; commandStart = true; wrapper = shellFlags = null; continue; }
     if (c === "#") {
       const end = text.indexOf("\n", i);
       i = end === -1 ? length : end;
@@ -101,6 +125,26 @@ export function isPollLoop(command) {
       continue;
     }
     noteHeredoc(value, bare);
+    if (shellFlags) {
+      if (shellFlags.script) {
+        shellFlags = null;
+        if (depth < MAX_SCRIPT_DEPTH && scanScript(value, depth + 1)) return true;
+        continue;
+      }
+      if (COMMAND_STRING_FLAG.test(value)) { shellFlags.script = true; continue; }
+      if (/^[-+]/.test(value)) continue;
+      shellFlags = null;
+    }
+    if (wrapper) {
+      if (wrapper.name === "eval" && quoted) {
+        wrapper = null;
+        commandStart = false;
+        if (depth < MAX_SCRIPT_DEPTH && scanScript(value, depth + 1)) return true;
+        continue;
+      }
+      if (!quoted && consumesOperand(wrapper, value)) continue;
+      wrapper = null;
+    }
     if (!commandStart || quoted) { commandStart = false; continue; }
 
     if (value === "while" || value === "until") loops.push({ polls: true, body: false });
@@ -114,9 +158,15 @@ export function isPollLoop(command) {
     } else if (value === "done") {
       const loop = loops.pop();
       if (loop?.polls && loop.body) pollingBodies -= 1;
-    } else if (value === "sleep" && pollingBodies > 0) return true;
+    } else {
+      const name = value.slice(value.lastIndexOf("/") + 1);
+      const loop = loops.at(-1);
+      if (name === "sleep" && (pollingBodies > 0 || (loop?.polls && !loop.body))) return true;
+      if (WRAPPERS.has(name)) wrapper = { name, takesValue: false, hasDuration: false };
+      else if (SHELLS.has(name)) shellFlags = { script: false };
+    }
 
-    commandStart = LEADS_A_COMMAND.has(value) || ASSIGNMENT.test(value);
+    commandStart = LEADS_A_COMMAND.has(value) || ASSIGNMENT.test(value) || wrapper !== null;
   }
   return false;
 }

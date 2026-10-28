@@ -36,6 +36,48 @@ test("a sleepless loop followed by a later sleep, or loop words inside text, is 
   ]) assert.equal(isPollLoop(c), false, c);
 });
 
+test("a sleep spelled through a path or a wrapper command is still a sleep", () => {
+  for (const c of [
+    "until [ -f x ]; do /bin/sleep 5; done",
+    "until [ -f x ]; do /usr/bin/sleep 5; done",
+    "until [ -f x ]; do command sleep 5; done",
+    "until [ -f x ]; do env sleep 1; done",
+    "until [ -f x ]; do env FOO=1 sleep 1; done",
+    "until [ -f x ]; do nohup sleep 1; done",
+    "while [ ! -f x ]; do timeout 5 sleep 5; done",
+  ]) assert.equal(isPollLoop(c), true, c);
+});
+
+test("a loop hidden in bash -c, sh -c, zsh -c or eval is still a poll", () => {
+  for (const c of [
+    "bash -c 'until [ -f x ]; do sleep 1; done'",
+    'sh -c "while true; do sleep 1; done"',
+    "zsh -c 'until [ -f x ]; do sleep 1; done'",
+    "bash -lc 'until [ -f x ]; do sleep 1; done'",
+    "eval 'until [ -f x ]; do sleep 1; done'",
+    `bash -c 'sh -c "until [ -f x ]; do sleep 1; done"'`,
+    `bash -c '${"echo a; ".repeat(20_000)}until [ -f x ]; do sleep 1; done'`,
+  ]) assert.equal(isPollLoop(c), true, c.slice(0, 80));
+});
+
+test("a loop whose condition runs sleep is a poll", () => {
+  for (const c of ["while sleep 1; do :; done", "until ! sleep 1; do :; done"]) assert.equal(isPollLoop(c), true, c);
+});
+
+test("wrappers, shells and text around a sleep stay allowed unless a poll loop holds it", () => {
+  for (const c of [
+    "sleep 5",
+    "timeout 10 sleep 1",
+    "for i in 1 2 3; do sleep 1; done",
+    "until [ -f x ]; do echo waiting; done",
+    'echo "until x; do sleep 1; done"',
+    "bash -c 'echo hi'",
+    "bash -c 'sleep 5'",
+    "ls",
+    "",
+  ]) assert.equal(isPollLoop(c), false, c);
+});
+
 function hook(agentType, command, options = {}) {
   const r = spawnSync(process.execPath, [HOOK], { input: JSON.stringify({ agent_type: agentType, cwd: process.cwd(), tool_input: { command } }), encoding: "utf8", ...options });
   assert.equal(r.signal, null, "the hook must answer before the timeout kills it");
