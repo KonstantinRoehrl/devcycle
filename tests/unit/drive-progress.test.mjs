@@ -156,3 +156,12 @@ test("a dispatch that ended without its output shows its role's step until it is
   assert.equal(stepOf([dispatched, dead("reviewer", 0)]).step, "reviewing");
   assert.equal(stepOf([dispatched, dead("implementer", 0), dead("implementer", 1)]).step, "needs-user");
 });
+
+test("a task the heartbeat measured carries its health; the rest are unchanged", () => {
+  const root = makeRoot({ lines: ["task=1 event=dispatched outcome=model x ref=none key=1/dispatched/0/0"] });
+  const health = new Map([["1", { state: "quiet", elapsedMs: 900_000, toolUses: 4, sinceActivityMs: 880_000 }]]);
+  const p = buildProgress({ run: RUN, plan: planProgress({ root, statePath: join(root, ".devcycle/state.md") }), health });
+  const [one, two] = p.waves[0].tasks;
+  assert.deepEqual(one.health, { state: "quiet", elapsedMs: 900_000, toolUses: 4, sinceActivityMs: 880_000 });
+  assert.equal("health" in two, false);
+});

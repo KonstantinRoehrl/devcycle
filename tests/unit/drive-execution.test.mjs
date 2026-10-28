@@ -102,8 +102,10 @@ function startDriver(root, h, flags = []) {
   return { child, result: async () => ({ code: await closed, out }) };
 }
 
-async function drive(root, scenario, { flags = [], env = {} } = {}) {
+// `beforeStart(h)` runs once the harness exists and before the driver starts, to seed files under its HOME.
+async function drive(root, scenario, { flags = [], env = {}, beforeStart = null } = {}) {
   const h = harness(scenario, env);
+  beforeStart?.(h);
   const r = await startDriver(root, h, flags).result();
   return { ...r, calls: calls(h), records: records(h) };
 }
@@ -1335,4 +1337,63 @@ test("--dry-run writes no progress file", () => {
   const r = dryRun(root);
   assert.equal(r.code, 0, r.out);
   assert.equal(existsSync(join(root, ".devcycle", "drive-progress.json")), false);
+});
+
+const HEALTH_FIX = (name) => new URL(`../fixtures/dispatch-health/${name}.jsonl`, import.meta.url).pathname;
+const DISPATCHED_1 = "task=1 event=dispatched outcome=model x ref=.devcycle/briefs/1-implementer.md key=1/dispatched/0/0";
+
+// Session 1's task 1 dispatch and its agent's transcript: `fixture` names the transcript's shape. The
+// fixture's prompt names task 5's brief, rewritten to task 1's.
+function seedDispatch(root, home, fixture) {
+  writeFileSync(join(root, ".devcycle/dispatch/1-implementer-0-0.json"), JSON.stringify({ startedAt: "2026-10-28T08:00:00Z", sessionId: "stub-session-1" }) + "\n");
+  const slug = join(home, ".claude", "projects", root.replace(/[^A-Za-z0-9]/g, "-"));
+  mkdirSync(join(slug, "stub-session-1", "subagents"), { recursive: true });
+  writeFileSync(join(slug, "stub-session-1.jsonl"), "");
+  writeFileSync(join(slug, "stub-session-1", "subagents", "agent-a1.jsonl"),
+    readFileSync(HEALTH_FIX(fixture), "utf8").replaceAll("5-implementer.md", "1-implementer.md"));
+}
+
+test("the watchdog stops a session whose dispatch ended without its report once nothing else is live, and records the death", async () => {
+  const root = makeCycle();
+  mkdirSync(join(root, ".devcycle/dispatch"), { recursive: true });
+  const env = { DEVCYCLE_DRIVE_HEARTBEAT_MS: "50", DEVCYCLE_DRIVE_WATCHDOG_GRACE_MS: "1" };
+  const r = await drive(root, [
+    { ledger: [DISPATCHED_1], toolUseId: "toolu_1", toolResult: true, hangMs: 60_000 },
+    { ledger: [DONE[0], DONE[1]], stage: "branch-review" },
+  ], { env, beforeStart: (h) => seedDispatch(root, h.env.HOME, "interrupted") });
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(r.records.map((x) => x.exitReason), ["dead-dispatch", "handoff"]);
+  const ledger = readFileSync(join(root, ".devcycle/ledger.md"), "utf8");
+  assert.equal(ledger.match(/task=1 event=dispatch-ended outcome=without output \(implementer\)/g).length, 1);
+  assert.match(readFileSync(join(root, ".devcycle/drive.log"), "utf8"), /watchdog: session 1 — task 1 ended without its output or went quiet/);
+});
+
+test("the watchdog never acts while a main-thread tool call is pending", async () => {
+  const root = makeCycle();
+  mkdirSync(join(root, ".devcycle/dispatch"), { recursive: true });
+  const env = { DEVCYCLE_DRIVE_HEARTBEAT_MS: "50", DEVCYCLE_DRIVE_WATCHDOG_GRACE_MS: "1" };
+  const r = await drive(root, [
+    { ledger: [DISPATCHED_1], toolUseId: "toolu_1", hangMs: 1_500 },
+    { ledger: [DONE[0], DONE[1]], stage: "branch-review" },
+  ], { env, beforeStart: (h) => seedDispatch(root, h.env.HOME, "interrupted") });
+  assert.notEqual(r.records[0].exitReason, "dead-dispatch");
+  assert.doesNotMatch(readFileSync(join(root, ".devcycle/ledger.md"), "utf8"), /event=dispatch-ended/);
+});
+
+test("the watchdog never acts while a sibling dispatch is running", async () => {
+  const root = makeCycle();
+  mkdirSync(join(root, ".devcycle/dispatch"), { recursive: true });
+  const env = { DEVCYCLE_DRIVE_HEARTBEAT_MS: "50", DEVCYCLE_DRIVE_WATCHDOG_GRACE_MS: "1" };
+  const sibling = "task=2 event=dispatched outcome=model x ref=.devcycle/briefs/2-implementer.md key=2/dispatched/0/0";
+  const r = await drive(root, [
+    { ledger: [DISPATCHED_1, sibling], toolUseId: "toolu_1", toolResult: true, hangMs: 1_500 },
+    { ledger: [DONE[0], DONE[1]], stage: "branch-review" },
+  ], { env, beforeStart: (h) => {
+    seedDispatch(root, h.env.HOME, "interrupted");
+    writeFileSync(join(root, ".devcycle/dispatch/2-implementer-0-0.json"), JSON.stringify({ startedAt: "2026-10-28T08:00:00Z", sessionId: "stub-session-1" }) + "\n");
+    const slug = join(h.env.HOME, ".claude", "projects", root.replace(/[^A-Za-z0-9]/g, "-"));
+    writeFileSync(join(slug, "stub-session-1", "subagents", "agent-a2.jsonl"),
+      readFileSync(HEALTH_FIX("pending-tool"), "utf8").replaceAll("5-implementer.md", "2-implementer.md"));
+  } });
+  assert.notEqual(r.records[0].exitReason, "dead-dispatch");
 });
