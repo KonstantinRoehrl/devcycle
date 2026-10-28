@@ -97,7 +97,7 @@ attaches or picks up the end.
    (`$CLAUDE_CONFIG_DIR/projects/` when that is set), each request's output counted as no less than
    half the characters it streamed or wrote to its transcript — a subagent's transcript records its
    output count from before the request generated anything.
-4. **The safety valve.** A driven session whose context reaches the hard-stop band — or whose
+4. **The safety valve.** A session whose context reaches the hard-stop band — or whose
    depth probe loses the session for two task scripts in a row — finishes its in-flight tasks, dispatches nothing new, and ends with the handoff label
    `Session ended mid-wave: <k> of <n> tasks done (stage: execution)`; the driver starts the next
    session and the wave resumes where it stopped.
@@ -151,6 +151,11 @@ before effort was recorded is resolved at each start from `CLAUDE_EFFORT` and yo
   minutes: no line beyond a dispatch (an implementer's `dispatched`, a reviewer's `review-round`)
   counts as a stall, and such lines but no report, verdict or commit count as churn.
   `--max-stalls` or `--max-churn` such sessions in a row end the run (exit 5).
+- **A dead dispatch.** On each 30 s heartbeat the driver checks the session's dispatches. Once one
+  has ended without its report or findings file (or gone quiet for 15 minutes), stayed so for 5
+  minutes, and no dispatch is running and no main-thread tool call is pending, it records an ended one's death,
+  logs `watchdog: …` and stops the session (`dead-dispatch`); the next session redispatches. A
+  second death of the same role on a task stops for you (`needs-user`).
 
 Every wait is a wall-clock deadline checked at least once a minute, so a machine that sleeps
 through it starts the next session on waking. A spent `--max-usd` ends the run (exit 6) before any
@@ -195,7 +200,9 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
   turn. Its header names the session, model, effort and elapsed time; a strip shows each wave's
   committed count (`✓` done, `●` current, `○` pending) and the total; one row per task of the
   current wave shows its step — pending, implementing, reviewing, fixing, committing or
-  needs-user, with the review round and any rejections — or `✓ committed`. A wait shows `⏸ <what> — resumes <time>`, a stop for you
+  needs-user, with the review round and any rejections — or `✓ committed`. A running task's row adds its elapsed
+  time and tool count; a quiet one shows `? … silent <m>` and one that ended without its output
+  `↻ … ended before reporting — redispatching`, both in warning. A wait shows `⏸ <what> — resumes <time>`, a stop for you
   `✖ stopped for you — <detail>`, and the end `✓ run complete` or `✖ run ended: <outcome>`, each
   pointing at `/devcycle:continue`; a driver silent for two minutes shows
   `? driver silent since <time>`. The band reads only `.devcycle/drive-progress.json`, which the
