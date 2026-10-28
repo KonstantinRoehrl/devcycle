@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.28.1 — 2026-10-28
+
+- fix(pricing): price claude-haiku-5-5 and count observed inherited-model dispatches (#363, #273, #379)
+
 `claude-haiku-5-5` is now a priced model, so doctor stops reporting its sessions as unpriced and costs them at the Haiku 5.5 rate with its 1M context window (#363, closing the duplicate reports #343, #361 and #378). Only the up-to-100K price tier is carried; sessions with larger prompts are costed at that tier and the gap is recorded in `docs/known-issues.md`.
 
 Doctor's issue filer now checks for an already-open issue before it files one, and comments on that issue instead of opening a duplicate. The inherited-model finding now counts what the hooks module actually observed: dispatches of the agents a model knob governs (`implementerModel`, `taskReviewerModel`, `branchReviewModel`, `walkthroughModel`) that were spawned with no model override. It prints `observed=<a>/<b>`, alongside the self-reported figure when a cohort has both, and flags windows where the two disagree. The denominator covers every governed subagent, so a cohort of mostly overridden dispatches no longer reads as mostly inherited (#300, #312, #327, #362, #379, #273). The routing reference now says that only knob-governed dispatches can inherit a model (#295).
