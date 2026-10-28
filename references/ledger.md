@@ -29,7 +29,7 @@ After any compaction or resume, trust the ledger and `git log` over conversation
 One appended line per event, all four fields REQUIRED, exactly this shape:
 
 ```
-- [<ISO-8601 UTC>] task=<id> event=<dispatched|report-received|review-round|review-verdict|committed|user-decision> outcome=<short> ref=<commit-sha|file|none>
+- [<ISO-8601 UTC>] task=<id> event=<dispatched|report-received|review-round|review-verdict|dispatch-ended|committed|user-decision> outcome=<short> ref=<commit-sha|file|none>
 ```
 
 The leading `[<ISO-8601 UTC>]` bracket is the output of `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`,
@@ -75,7 +75,15 @@ run-record row — and `depthBand`) and exits non-zero only on a usage (2) or en
   `references/model-routing.md` audit shape; `outcome=implementer retry <k>` without the flag)
   or `review-round` (`outcome=round <n>`) with that path as `ref=`, and keeps the dispatch's start
   time, which an implementer's `dispatch` row takes. A reviewer dispatch refuses any round but the
-  task's next, and first moves aside a findings file already at that round's path.
+  task's next, and first moves aside a findings file already at that round's path. The dispatch
+  record also names the session (`sessionId`), and `--capture-cmd "<cmd>"` (implementer only) ends
+  the brief with a `**Capture command:**` line and the `- Narrowing:` line a concurrent wave's capture
+  needs.
+- `node "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch-health.mjs" [--record] [--stopped <task>] [--json]`
+  while dispatches are in flight: one line per in-flight dispatch of this session — state, elapsed
+  time, tool uses, idle time, last tool — and the next action; with `--record`, appends
+  `dispatch-ended` (`outcome=without output (<role>)`, the dead dispatch's record as `ref=`) for a
+  dispatch that ended without its output, a quiet one `--stopped` names, or one that never started.
 - `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-intake.mjs" --run <run-id> --task <id> --report <path> --status complete|blocked --agent-type <type> --model <id> --model-source explicit|inherited [--agent-id <id>] [--compose-review]`
   once the implementer's envelope returns, against the task's latest `dispatched` line:
   `status: blocked` appends `report-received outcome=blocked` (action `needs-user`); a missing report,

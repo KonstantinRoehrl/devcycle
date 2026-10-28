@@ -2,15 +2,16 @@
 // SubagentStop hook — the dispatch depth-sensor. When a subagent finishes during an active cycle it
 // appends one `agent-depth` run-record row: the agent's final context depth, model, tool uses and
 // duration, read from the one transcript the hook input names, marked `warn` above DEPTH_WARN and
-// `breach` above DEPTH_BREACH (a breach also appends a `depth-breach` event). Only a session that
-// joined the run records: a parallel session in the same checkout reads the same state.md but never
-// appended a `session` row. Observe-only: any error, malformed input, or absent/partial cycle =>
-// exit 0 with no stdout. Counts/enums only.
+// `breach` above DEPTH_BREACH (a breach also appends a `depth-breach` event), and marks the stopped
+// agent's dispatch record ended. Only a session that joined the run records: a parallel session in
+// the same checkout reads the same state.md but never appended a `session` row. Observe-only: any
+// error, malformed input, or absent/partial cycle => exit 0 with no stdout. Counts/enums only.
 import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { AGENT_ID_CHARS, AGENT_TYPE_CHARS, MODEL_CHARS, clean, runContext, sessionJoined } from "./lib/run-context.mjs";
 import { transcriptStats } from "../scripts/depth-probe.mjs";
+import { markEnded } from "../scripts/dispatch-health.mjs";
 import { isMain } from "../scripts/is-main.mjs";
 
 const RUN_RECORD = fileURLToPath(new URL("../scripts/run-record.mjs", import.meta.url));
@@ -32,6 +33,11 @@ function main() {
   if (typeof input.session_id !== "string" || !input.session_id) return;
   if (!sessionJoined(context, input.session_id)) return;
   const { run, stage, repoRoot } = context;
+  // The dispatch record learns its agent stopped (scripts/dispatch-health.mjs reads it as ended); a
+  // failure here never costs the depth row.
+  try {
+    markEnded({ root: repoRoot, sessionId: input.session_id, transcriptPath: input.agent_transcript_path, agentId: clean(input.agent_id, AGENT_ID_CHARS, 40) || null });
+  } catch { /* observe-only */ }
   const stats = transcriptStats(input.agent_transcript_path);
   if (!stats) return;
 

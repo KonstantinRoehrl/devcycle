@@ -187,6 +187,7 @@ and takes the generic rows.
 | `report-received outcome=rejected (missing report file)` or `outcome=rejected (intake bounce)` | re-dispatch the implementer — after a bounce, with the lint findings its `ref=` names |
 | `report-received outcome=blocked` | the implementer reported `status: blocked`: a user decision is pending (drive mode: stop `needs-user`) |
 | `review-round` (no verdict after it) | the reviewer's run may have died: re-dispatch it for that round |
+| `dispatch-ended outcome=without output (implementer)` or `(reviewer)` | the dispatch ended without its report or findings file: re-dispatch that role — a reviewer at the same round — within the cap below |
 | `review-verdict outcome=accepted` | run the green gate, commit |
 | `review-verdict outcome=rejected` or `rejected (green gate: …)` | re-dispatch the implementer with the findings or gate evidence — on a sweep-marked task, a fresh dispatch briefed per the rejection bullet, never a sweep re-run; the next review is the next round |
 | `review-verdict outcome=rejected (missing findings file)` | re-dispatch the **reviewer** for that round, not the implementer |
@@ -199,7 +200,14 @@ and takes the generic rows.
 **Retry caps.** An intake bounce, `rejected (missing report file)` and `rejected (missing findings
 file)` each allow two retries per task: the third such line for the task is a pending user decision
 (drive mode: stop `needs-user`), never another dispatch — the task script that writes it returns
-`needs-user`.
+`needs-user`. A `dispatch-ended` line has a cap of its own, counted per role by event and never by
+outcome prefix: one re-dispatch per role per task, across sessions; the second such line for that
+role is a pending user decision (drive mode: stop `needs-user`). `scripts/dispatch-health.mjs` writes
+the line and computes the route.
+
+**Cut-offs.** A usage limit or a context cut-off is a normal cause of the `dispatched` and
+`review-round` rows, and spends no cap. A re-dispatched implementer keeps any uncommitted edits
+already on its file list and reconciles them against its brief (`agents/implementer.md`).
 
 **Exhausted-unresolved** has no ledger form. A task whose review round 3 ends rejected gets
 `.devcycle/findings/task-<id>-review-status.md` (`references/loops.md` § Where the status lives).

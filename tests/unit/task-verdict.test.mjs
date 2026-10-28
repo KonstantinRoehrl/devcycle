@@ -344,3 +344,13 @@ test("an accepted verdict whose commit fails still prints the verdict it recorde
   assert.equal(readFileSync(ledgerPath(f), "utf8").match(/event=review-verdict/g).length, 1);
   assert.equal(rows(f).length, 1);
 });
+
+test("a dispatch-ended line after the round's review-round neither closes the round nor counts as a verdict", () => {
+  const f = fixture();
+  appendFileSync(ledgerPath(f),
+    "- [2026-10-08T10:01:00Z] task=5 event=dispatch-ended outcome=without output (reviewer) ref=.devcycle/dispatch/5-reviewer-1-0.json key=5/dispatch-ended/1/0\n");
+  writeInto(f.repo, ".devcycle/findings/5-round-1.md", ACCEPT);
+  const r = verdict(f);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.out.action, "accepted");
+});

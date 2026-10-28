@@ -371,12 +371,25 @@ function headerLine(p, spin, now) {
   return [{ text: `devcycle drive · ${run} · ${elapsedText(Date.parse(p.updatedAt) - Date.parse(p.startedAt))}` }];
 }
 
+// The heartbeat's per-dispatch health (scripts/dispatch-health.mjs), when it measured one: how long the
+// dispatch has run and how much it has done, or why it looks stuck. A file without it draws as before.
+const minutes = (ms) => (ms < 60_000 ? "<1m" : `${Math.floor(ms / 60_000)}m`);
+
 function taskRow(t, spin) {
   if (t.step === "committed") return [{ text: `✓ task ${t.task}  committed`, color: "success" }];
   if (t.step === "pending") return [{ text: `○ task ${t.task}  pending`, color: "subtle" }];
+  const health = t.health ?? null;
   const round = (t.step === "reviewing" || t.step === "fixing") && t.round > 0 ? ` · round ${t.round}` : "";
+  // A redispatch heals itself, so it stays in warning: error and ✖ are for stops that need the user.
+  if (health?.state === "ended-without-output")
+    return [{ text: `↻ task ${t.task}  ` }, { text: `${t.step}${round} · ended before reporting — redispatching`, color: "warning" }];
+  if (health?.state === "quiet")
+    return [{ text: `? task ${t.task}  ` }, { text: `${t.step}${round} · silent ${minutes(health.sinceActivityMs ?? 0)}`, color: "warning" }];
   const row = [{ text: `${spin} task ${t.task}  ` }, { text: `${t.step}${round}`, color: t.step === "needs-user" ? "warning" : undefined }];
+  // The rejection suffix goes ahead of the activity, so a narrow terminal truncates the count, not the warning.
   if (t.rejections > 0) row.push({ text: ` (${t.rejections} rejection${t.rejections === 1 ? "" : "s"})`, color: "warning" });
+  if (health?.state === "running" || health?.state === "ended-with-output")
+    row.push({ text: ` · ${minutes(health.elapsedMs)} · ${health.toolUses} tool call${health.toolUses === 1 ? "" : "s"}` });
   return row;
 }
 

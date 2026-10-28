@@ -293,7 +293,7 @@
         "ledgerLinesAfter": { "type": "integer", "minimum": 0 },
         "committedBefore": { "type": "integer", "minimum": 0 },
         "committedAfter": { "type": "integer", "minimum": 0 },
-        "exitReason": { "enum": ["handoff", "valve", "stopped", "stalled", "budget", "transient", "environment", "interrupted", "error"] },
+        "exitReason": { "enum": ["handoff", "valve", "stopped", "stalled", "budget", "transient", "environment", "interrupted", "error", "dead-dispatch"] },
         "stallCount": { "type": "integer", "minimum": 0 },
         "stopReason": {
           "enum": [

@@ -23,6 +23,7 @@ import { pendingReviewLoop, reviewLoopId } from "./review-loop.mjs";
 import { driveTokenHash, readLiveDriveLock } from "./drive-lock.mjs";
 import { classifyDrive } from "./drive-result.mjs";
 import { isProtectedBranch } from "./branch-names.mjs";
+import { DISPATCH_ENDED, deathRoute, endedRole } from "./dispatch-health.mjs";
 
 const NONE = new Set(["none", "<tbd>", ""]);
 // A recorded field's value without its annotation (`feat/x (cut from dev at abc1234)`), or null.
@@ -55,6 +56,11 @@ export function taskPosition(lines, { pendingLoop = null, retries = () => 0 } = 
   if (event === "user-decision") return { position: "user-decision", next: "follow-decision" };
   if (event === "dispatched" && outcome.startsWith("sweep")) return { position: "sweep-dispatched", next: "rerun-sweep" };
   if (SWEEP_TOKEN.test(outcome)) return { position: "sweep-decision", next: "needs-user" };
+  if (event === DISPATCH_ENDED) {
+    const role = endedRole(outcome);
+    const next = deathRoute(lines, role);
+    return next === "needs-user" ? { position: "death-cap", next } : { position: `dead-${role}`, next };
+  }
   const capped = CAPPED_OUTCOMES.find((prefix) => outcome.startsWith(prefix));
   if (capped && retries(capped) > RETRY_CAP) return { position: "retry-cap", next: "needs-user" };
   if (capped === "rejected (missing findings file)") return { position: "missing-findings", next: "redispatch-reviewer" };

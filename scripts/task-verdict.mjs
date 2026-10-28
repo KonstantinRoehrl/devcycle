@@ -11,6 +11,7 @@
 // Contract: references/ledger.md § Task scripts.
 import { existsSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import { DISPATCH_ENDED } from "./dispatch-health.mjs";
 import { gitToplevel } from "./git-identity.mjs";
 import { isMain } from "./is-main.mjs";
 import { ROUND_CAP, exhaustReviewLoop } from "./review-loop.mjs";
@@ -158,7 +159,9 @@ export function verdict(argv, cwd = process.cwd()) {
   // Once the coordinator acted on the round's verdict — any later line of the task but this script's
   // own: the green gate's rejection of it, the fix's dispatch — the round is closed, and reading it
   // again would hand what followed it, an unreviewed fix among them, that round's accept.
-  const closing = later.find((e) => !(e.event === "review-verdict" && OWN_OUTCOMES.has(e.outcome)));
+  // A dispatch that ended without its output is no action on the round's verdict: its redispatch
+  // reviews the same round.
+  const closing = later.find((e) => e.event !== DISPATCH_ENDED && !(e.event === "review-verdict" && OWN_OUTCOMES.has(e.outcome)));
   // A commit call re-run once the round's accept committed: the accept stands as the ledger holds it,
   // and task-commit.mjs's own re-run adds only what the commit still lacks.
   const accept = commit && closing?.event === "committed" && later.findLast((e) => e.event === "review-verdict" && e.outcome === "accepted");

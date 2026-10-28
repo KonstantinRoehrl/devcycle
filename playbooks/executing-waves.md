@@ -103,8 +103,12 @@ exit 2 or 3 a stop.
    `task-dispatch.mjs --role implementer --model-decision "<the routing decision>"` (a fix pass adds
    `--round <n>`) on stdin as a quoted heredoc (`<<'EOF'`) — one `node` call, nothing chained to it,
    no `$(…)` in its flags: the one form the git guard reads as data. Dispatch the file at the
-   `briefPath` it prints, gate line appended, never the piped text. The implementer returns the
-   envelope `references/delegation.md` defines — never the report body — and that envelope's
+   `briefPath` it prints, gate line appended, never the piped text. The dispatch prompt names that
+   path verbatim: `dispatch-health.mjs` binds the agent to its dispatch by it. While the wave setup's
+   `dispatchable` list holds another uncommitted task, or another task is in flight, add
+   `--capture-cmd "<testCmd>"` (none when `testCmd` is null): the implementer captures its own tests,
+   and the whole gate runs at commit (`references/evidence.md` § File-backed evidence). The
+   implementer returns the envelope `references/delegation.md` defines — never the report body — and that envelope's
    on-device count is what triggers the checklist below.
 4. **Intake.** `task-intake.mjs`, given the envelope's `report:` path and `status:` and the task
    notification's agent id as `--agent-id`, checks the report against its evidence class and lints
@@ -161,10 +165,23 @@ exit 2 or 3 a stop.
    `unproven-commit` even after a fix or revert on top: the user resets it off the branch by hand,
    then calls `task-commit` again. The `PostToolUse` commit-sensor records `workload` itself.
 
-**Safety valve.** In a driven session (`/devcycle:continue --drive`), read `depthBand` after every
-task script: on `hard-stop`, dispatch no new task, finish the tasks in flight, then end the session
-with a handoff whose first field is `Session ended mid-wave: <k> of <n> tasks done (stage: execution)`.
+**Waiting on dispatches.** While any dispatch is in flight, wait on its completion notification; a
+self-wake (`ScheduleWakeup`, `Monitor`) is at most 5 minutes. On every wake, and before every wait,
+first run `node "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch-health.mjs" --record` and act on each line's
+action, never on a missing report (`references/delegation.md` § Return envelopes): `wait`; `intake` or
+`verdict` (its notification is due); `redispatch-implementer` or `redispatch-reviewer` (the same brief,
+a reviewer at the same round); `needs-user` (driven: a `needs-user` stop with `--task`);
+`stop-agent <agentId>`: stop it with `TaskStop` where the tool exists, then rerun with
+`--stopped <task>`. With no working stop, never redispatch over it — walked, the user decides (stop it
+from the task list, then redispatch, or wait); driven, let running siblings finish, then a
+`needs-user` stop naming the task.
+
+**Safety valve.** Walked or driven, read `depthBand` after every task script: on
+`hard-stop`, dispatch no new task, finish the tasks in flight (no new review or fix round), then end
+the session with a handoff whose first field is `Session ended mid-wave: <k> of <n> tasks done (stage: execution)`.
 Two task scripts in a row reporting `unknown` count as `hard-stop`: the probe has lost the session.
+Every reviewer dispatch and fix pass starts from files — the previous step's ledger line, its brief
+and findings paths — so a cut-off anywhere resumes from them.
 
 **Trigger: this commit closes the wave.** When no task in the current wave remains undispatched, in
 review, or uncommitted, stop here — before forming the next wave — and follow ## Wave boundaries and

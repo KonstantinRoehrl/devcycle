@@ -5,6 +5,45 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-28 — A dispatch that ended without its output is detected from files, redispatched once per role, and the driver may stop a session over it (#385, #330, #380)
+
+**Decision:** `scripts/dispatch-health.mjs` classifies each in-flight dispatch from its record, its
+transcript and its owed file, and is the one writer of a new `dispatch-ended` ledger event, capped at
+one redispatch per role per task across sessions. The driver's heartbeat runs it as a watchdog that
+stops the session once a dead dispatch has outlasted a 5-minute grace with no dispatch running and no
+main-thread tool call pending (session end `dead-dispatch`). In a concurrent wave an implementer
+captures its own test command with a declared `- Narrowing:` line, the whole gate still proven at
+commit. A guarded dispatch may not wait in an `until`/`while` loop that sleeps.
+
+**Why:** #385's implementer ended on a denied tool call without its report; the driven session read
+the missing report as "still implementing" and slept, and the driver's idle limit, counting stream
+events, never tripped. A dead dispatch and a live one must differ in files. The cap counts by role
+because two deaths of one role on one task are systematic; the watchdog waits for nothing live so it
+never kills a sibling's work or the coordinator's own commit proof.
+
+**Budgets:** the waiting rule, the resume row, the `dispatch-health.mjs` bullet, the milestone
+contract and the capture-wait rule grow the runtime surface and every entry point citing
+`references/delegation.md` or `references/evidence.md`.
+
+```text
+budget: surface-budget.json surfaceTotal 6439
+budget: context-budget.json commands/continue.md 68302
+budget: context-budget.json commands/cycle.md 77305
+budget: context-budget.json playbooks/executing-waves.md 111222
+budget: context-budget.json playbooks/learning-from-sessions.md 63135
+budget: context-budget.json playbooks/maintaining-the-repo.md 65086
+budget: context-budget.json playbooks/planning-waves.md 73774
+budget: context-budget.json playbooks/profiling-sessions.md 41217
+budget: context-budget.json playbooks/receiving-review.md 114203
+budget: context-budget.json playbooks/reviewing-code.md 94609
+budget: context-budget.json playbooks/scoping-the-request.md 31015
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 87688
+budget: context-budget.json playbooks/taking-the-fast-path.md 52222
+budget: context-budget.json playbooks/writing-the-findings-document.md 63625
+budget: context-budget.json references/delegation.md 11463
+budget: context-budget.json references/evidence.md 12782
+```
+
 ## 2026-10-27 — Haiku 5.5 is priced, doctor comments on an open issue instead of filing a duplicate, and inherited-model counts what the hooks module saw (#363, #343, #361, #378, #273, #300, #312, #327, #362, #379, #295)
 
 **Decision:** `claude-haiku-5-5` is an exact `scripts/pricing.mjs` row at its up-to-100K list price

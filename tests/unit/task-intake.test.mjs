@@ -232,6 +232,22 @@ test("--compose-review writes the reviewer brief and dispatches the task's next 
   ].join("\n"));
 });
 
+test("the reviewer brief's constraints stop before the tail task-dispatch appends to a brief ending in a constraints section", () => {
+  const f = planned();
+  const cmd = "npm test -- a";
+  writeInto(f.repo, ".devcycle/briefs/5-implementer.md", [
+    "# Implementer brief — Task 5", "", "**Task id:** 5", "", "## Quality Constraints", "", "- QC1 — Reuse the repo's owners.", "",
+    "**Gate command:** `npm test`",
+    `**Capture command:** \`${cmd}\` — pass it as \`capture-evidence.mjs --cmd\` for both the before and the after capture, and copy this line into your report:`,
+    `- Narrowing: ${cmd} — concurrent wave: siblings' uncommitted edits share the checkout; the whole gate runs at commit in an isolated worktree`, "",
+  ].join("\n"));
+  const r = intake(f, ["--compose-review"]);
+  assert.equal(r.status, 0, r.stderr);
+  const brief = readFileSync(join(f.repo, r.out.reviewBriefPath), "utf8");
+  assert.match(brief, /## Quality Constraints\n\n- QC1 — Reuse the repo's owners\.\n/);
+  assert.doesNotMatch(brief, /Capture command|Narrowing|Gate command/);
+});
+
 test("a --compose-review re-run points at the round already dispatched and writes nothing", () => {
   const f = planned();
   const first = intake(f, ["--compose-review"]);

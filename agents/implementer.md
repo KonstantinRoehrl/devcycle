@@ -74,6 +74,10 @@ is already scoped to your own `**Files:**`, so none of them is ever needed here.
 `hooks/block-destructive-git.mjs` now enforces this structurally: an implementer origin's git is
 denied unless it is an inspection command or `git add -N`.
 
+**Uncommitted edits already on your file list when you start** are an earlier dispatch's work on
+this task, cut off before it reported: keep them and reconcile them against your brief, never
+discard them.
+
 ## Evidence files and report
 
 Write every capture with
@@ -81,6 +85,8 @@ Write every capture with
 (`red` takes `--cmd "<the failing subset>"`) and copy the report lines it
 prints; never a hand-written redirect. Never hand-edit, trim, or
 reconstruct those files; they hold what the command actually printed.
+Wait on a long capture the bounded way: foreground with Bash `timeout: 600000`, or background and
+its completion notification. A `sleep` loop polling an evidence file is denied.
 Any prose claim your report makes about source state ("X already existed", "no other caller", "the suite was already green") carries the command that proves it or is labeled an assumption — never stated as bare fact (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims).
 
 When a capture is legitimately narrowed away from the whole gate — e.g. a concurrent-wave whole-suite red from a sibling's uncommitted edit rather than your own task — declare it as `- Narrowing: <selector/scope> — <reason>` per `${CLAUDE_PLUGIN_ROOT}/references/evidence.md`, rather than silently narrowing.
