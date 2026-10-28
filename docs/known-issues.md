@@ -64,14 +64,16 @@ sense, so an interrupted driver there would leave its session running and commit
 documented as a limit rather than ported: a port needs a Windows equivalent of group signalling
 that nothing in devcycle provides.
 
-### `claude-haiku-5-5` is refused on an assumed 200k window (low)
+### Haiku 5.5 is priced at its up-to-100K tier (low)
 
-`scripts/pricing.mjs` has no row for `claude-haiku-5-5`, so `windowFor` in `scripts/depth-bands.mjs`
-takes its window from `claude-haiku-4-5-20251001` (200k). The driver's pre-flight refuses a model
-whose window puts a session start (~55k tokens) in the over-budget band or past it, which that
-assumption does, although Claude Code 2.1.294 reports `contextWindow: 1000000` for the model
-(`docs/platform-notes.md` § (k)); the depth probe bands a fresh session on it `over-budget` for the
-same reason. The fix is a pricing row, filed as its own issue.
+`scripts/pricing.mjs` holds one flat rate per model. `claude-haiku-5-5` is listed at $0.10 input and
+$0.50 output per million tokens for prompts of 100K tokens or fewer and $0.50 / $2.50 beyond that,
+and its row carries the first pair, so doctor under-prices a request whose prompt is longer than
+100K tokens by up to 5x. Pricing it exactly needs a price schema that takes a prompt-length
+threshold, which nothing in devcycle has. The row's arrival also stops every Haiku 4.x id other
+than the exact snapshot `claude-haiku-4-5-20251001` (the undated `claude-haiku-4-5`, say) from
+pricing provisionally as that snapshot: doctor now lists it as unpriced, although `windowFor` still
+resolves a Haiku 4.5 id's 200k window through the snapshot branch.
 
 ### Sweep tasks' ledger lines carry no idempotency key (low)
 

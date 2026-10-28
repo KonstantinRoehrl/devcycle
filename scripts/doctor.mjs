@@ -60,6 +60,43 @@ export const COMPLIANCE_TYPES = [
 ];
 const COMPLIANCE_TYPE_SET = new Set(COMPLIANCE_TYPES);
 
+// The devcycle agents a model knob can govern, so an `inherited` dispatch of one is a gap the plugin
+// could have closed. Left out on purpose: spec-reviewer and history-inspector (no knob names a model
+// for them), forks (cannot take an override) and built-in types (may carry their own default model).
+export const KNOB_GOVERNED_AGENTS = new Set([
+  "devcycle:implementer",     // implementerModel
+  "devcycle:task-reviewer",   // taskReviewerModel
+  "devcycle:on-device-driver", // walkthroughModel
+  "devcycle:red-team-reviewer", // branchReviewModel
+]);
+
+// What the hooks module saw at the Task call, per governed subagent: a null `requestedModel` says no
+// model override was passed. An exposure count, not proof of what the subagent ran on (a configured
+// default subagent model resolves a no-override dispatch on purpose). Null when no governed trace row
+// exists, so the caller falls back to the coordinator's own `modelSource` count.
+export function observedInheritance(traces, dispatches = []) {
+  const first = new Map();
+  for (const t of traces) {
+    if (t.fork || typeof t.agentType !== "string" || !KNOB_GOVERNED_AGENTS.has(t.agentType)) continue;
+    if (!first.has(t.agentId)) first.set(t.agentId, t);
+  }
+  if (first.size === 0) return null;
+  const byModel = {};
+  let inherited = 0;
+  for (const t of first.values()) {
+    if (t.requestedModel !== null) continue;
+    inherited++;
+    const m = t.resolvedModel ?? "(none)";
+    byModel[m] = (byModel[m] ?? 0) + 1;
+  }
+  let selfReportDisagrees = 0;
+  for (const d of dispatches) {
+    const t = d.agentId ? first.get(d.agentId) : undefined;
+    if (t && (d.modelSource === "inherited") !== (t.requestedModel === null)) selfReportDisagrees++;
+  }
+  return { inherited, total: first.size, byModel, selfReportDisagrees };
+}
+
 // Guard every emitted compliance `type` through the shared constant: an unregistered slug throws
 // here instead of flowing downstream as a candidate no router or title map knows about.
 export function complianceType(slug) {
@@ -797,16 +834,28 @@ export function emitComplianceCandidates(turns, record) {
     });
 
   // C2: the rule exists at references/delegation.md:59; this makes the gap measurable.
+  // Observed where the hooks module traced this window's governed subagents, self-reported (the
+  // coordinator's own `dispatch.modelSource`) where it did not. The two are separate figures, never summed.
   const dispatches = record.dispatches ?? [];
-  const inheritedDispatches = dispatches.filter((d) => d.modelSource === "inherited");
-  if (inheritedDispatches.length > 0) {
-    const inheritedByModel = {};
-    for (const d of inheritedDispatches) {
-      const m = d.model ?? "(none)";
-      inheritedByModel[m] = (inheritedByModel[m] ?? 0) + 1;
+  const observed = observedInheritance(record.agentTraces ?? [], dispatches);
+  if (observed) {
+    // Emitted for every observed window, inherited or not: the cohort's observedTotal is the denominator,
+    // so a window with every subagent overridden must still count. complianceCandidatesOf drops a cohort
+    // with nothing to report.
+    out.push({ type: complianceType("inherited-model"), observedInherited: observed.inherited,
+      observedTotal: observed.total, observedByModel: observed.byModel,
+      selfReportDisagrees: observed.selfReportDisagrees, sessions_sampled: 1 });
+  } else {
+    const inheritedDispatches = dispatches.filter((d) => d.modelSource === "inherited");
+    if (inheritedDispatches.length > 0) {
+      const inheritedByModel = {};
+      for (const d of inheritedDispatches) {
+        const m = d.model ?? "(none)";
+        inheritedByModel[m] = (inheritedByModel[m] ?? 0) + 1;
+      }
+      out.push({ type: complianceType("inherited-model"), inherited: inheritedDispatches.length,
+        total: dispatches.length, inheritedByModel, sessions_sampled: 1 });
     }
-    out.push({ type: complianceType("inherited-model"), inherited: inheritedDispatches.length,
-      total: dispatches.length, inheritedByModel, sessions_sampled: 1 });
   }
 
   // C3: Explore's startup floor is 13955 against a 32711 median, ~2.3x per dispatch.
@@ -1505,7 +1554,14 @@ export function complianceCandidatesOf(summaries) {
       out.push({ ...cand, calls: sum("calls"),
         onDevicePath: paths.length ? paths.join(",") : "unrecorded", note: g.members[0].note });
     } else if (g.type === "inherited-model") {
-      out.push({ ...cand, inherited: sum("inherited"), total: sum("total") });
+      const hasObserved = g.members.some((c) => c.observedTotal !== undefined);
+      const hasSelfReported = g.members.some((c) => c.total !== undefined);
+      // An observed-only cohort that inherited nothing and saw no self-report disagree has nothing to flag.
+      if (!hasSelfReported && sum("observedInherited") === 0 && sum("selfReportDisagrees") === 0) continue;
+      out.push({ ...cand,
+        ...(hasSelfReported ? { inherited: sum("inherited"), total: sum("total") } : {}),
+        ...(hasObserved ? { observedInherited: sum("observedInherited"), observedTotal: sum("observedTotal"),
+          selfReportDisagrees: sum("selfReportDisagrees") } : {}) });
     } else if (g.type === "general-purpose-search") {
       out.push({ ...cand, count: sum("count"), total: sum("total") });
     } else if (g.type === "missing-workload") {
@@ -1519,10 +1575,11 @@ export function complianceCandidatesOf(summaries) {
   const inh = out.find((c) => c.type === "inherited-model");
   if (inh) {
     const byModel = {};
+    const field = inh.observedTotal !== undefined ? "observedByModel" : "inheritedByModel";
     for (const s of summaries)
       for (const c of s.complianceCandidates ?? [])
         if (c.type === "inherited-model")
-          for (const [m, n] of Object.entries(c.inheritedByModel ?? {}))
+          for (const [m, n] of Object.entries(c[field] ?? {}))
             byModel[m] = (byModel[m] ?? 0) + n;
     inh.inheritedByModel = byModel;
     const spend = {};
@@ -1548,10 +1605,19 @@ export function formatComplianceCandidate(c) {
       .sort((a, b) => b[1] - a[1] || byName(a[0], b[0]))
       .map(([m, n]) => `${m} ×${n}${c.inheritedModelSpend?.[m] != null ? ` (${usd(c.inheritedModelSpend[m])})` : ""}`)
       .join(", ");
+    const ranLabel = c.observedTotal !== undefined && c.total !== undefined ? "ran on (observed subagents only)" : "ran on";
     const ran = models
-      ? ` — ran on: ${models} (corpus spend on these models; not attributed to inheritance)`
+      ? ` — ${ranLabel}: ${models} (corpus spend on these models; not attributed to inheritance)`
       : "";
-    return `CANDIDATE: inherited-model inherited=${c.inherited}/${c.total} sessions=${c.sessions_sampled}${span}${ran}`;
+    const hasObserved = c.observedTotal !== undefined;
+    const pairs = hasObserved
+      ? `observed=${c.observedInherited}/${c.observedTotal}${c.total !== undefined ? ` self-reported=${c.inherited}/${c.total}` : ""}`
+      : `inherited=${c.inherited}/${c.total}`;
+    const disagree = c.selfReportDisagrees > 0 ? ` selfReportDisagrees=${c.selfReportDisagrees}` : "";
+    const note = hasObserved
+      ? " — observed counts the governed subagents spawned with no model override: an exposure count, not a verdict, and not comparable with the self-reported figures in earlier issues"
+      : "";
+    return `CANDIDATE: inherited-model ${pairs}${disagree} sessions=${c.sessions_sampled}${span}${ran}${note}`;
   }
   if (c.type === "missing-workload")
     return `CANDIDATE: missing-workload commits=${c.commits} requestKind=${c.requestKind} sessions=${c.sessions_sampled}${span} — reached execution and committed but recorded no workload (collection gap — the commit-sensor hook should have written it)`;

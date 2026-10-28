@@ -175,7 +175,20 @@ to draft. For each finding it chose:
 2. Screen it before anyone sees it: write it to a file, then run
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft>`. A draft that fails
    the screen is not shown at all — name the class that failed and stop there.
-3. Record it as drafted now, before either gate — the marker records drafting, not posting, so a
+3. Look for the finding already filed, before recording anything: list the open issues in the repo
+   the draft's `repo:` line named,
+   `gh issue list --repo <repo> --state open --search "<title> in:title" --json number,title`, the
+   title quoted for the shell with its own `"` and `$` escaped, and
+   keep only rows whose `title` equals the draft's `title:` line character for character, since the
+   search is fuzzy. No row: go on to step 4. A row `#N`: skip steps 4–7 for this draft, write no
+   `Drafted:` line — nothing new was drafted, and `doctor --json`'s `outer_loop` counts those lines —
+   and show the user `#N`, offering a comment on it in place of a new issue. The comment carries the
+   draft's body, everything below the blank line under `labels:`, already screened above, written to
+   a file of its own. Ask whether its content is right, then separately whether to post it, never
+   inferring the second answer from the first;
+   only after both, run `gh issue comment <N> --repo <repo> --body-file <comment-file>`. A closed issue
+   never counts: the same title reappearing after one closed is new evidence.
+4. Record it as drafted now, before either gate — the marker records drafting, not posting, so a
    draft declined below still counts: append the draft's title to the persisted report, prefixed
    with `Drafted: `, on a line of its own:
 
@@ -197,11 +210,11 @@ to draft. For each finding it chose:
 
    That marker is the only record of a draft: `doctor --json`'s `outer_loop` counts the issues out of
    the fixed doctor directory (doctorDir(), above), and `scripts/doctor.mjs` parses exactly this form, which this file owns.
-4. Show the screened draft and ask whether it is right. That is the first gate, and it asks about
+5. Show the screened draft and ask whether it is right. That is the first gate, and it asks about
    the draft's content only.
-5. Ask separately whether to post it — the second gate, never inferred from the first. Nothing is
+6. Ask separately whether to post it — the second gate, never inferred from the first. Nothing is
    ever auto-posted, and the script itself still posts nothing.
-6. Only after that second confirmation, file it against the repo the draft's `repo:` line named —
+7. Only after that second confirmation, file it against the repo the draft's `repo:` line named —
    never the repo the run happened in, which is what a bare `gh issue create` resolves to. Carry
    the title and body exactly as `--issue-body` printed them: the title is its `title:` line, the
    body everything below the blank line under `labels:`, written to its own file.

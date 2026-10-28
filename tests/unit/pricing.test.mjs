@@ -327,7 +327,12 @@ test("PRICING: Fable 5.1 lists its cache-read rate; Fable 5 is unlisted and assu
 });
 
 test("PRICING: asOf is the date the claude-api reference was cached", () => {
-  assert.equal(PRICING.asOf, "2026-09-25");
+  assert.equal(PRICING.asOf, "2026-10-06");
+});
+
+test("PRICING: Haiku 5.5 carries its up-to-100K list price and a 1M window", () => {
+  assert.deepEqual(priceFor("claude-haiku-5-5"), { in: 0.1, out: 0.5, window: 1_000_000 });
+  assert.ok(readFixture(FIXTURE).includes("claude-haiku-5-5"), "the observed-ids snapshot lists the id");
 });
 
 test("cacheReadDollars: a listed rate wins, an unlisted row falls back to 0.1x input", () => {
@@ -343,13 +348,13 @@ test("provisionalPriceFor: a model newer than anything priced in its family take
   assert.deepEqual(next.price, priceFor("claude-opus-5-5"));
   assert.equal(provisionalPriceFor("claude-opus-6").basedOn, "claude-opus-5-5");
   assert.equal(provisionalPriceFor("claude-sonnet-5-6").basedOn, "claude-sonnet-5-5");
-  assert.equal(provisionalPriceFor("claude-haiku-4-6").basedOn, "claude-haiku-4-5-20251001");
-  assert.equal(provisionalPriceFor("claude-haiku-4-5-20260101").basedOn, "claude-haiku-4-5-20251001");
+  assert.equal(provisionalPriceFor("claude-haiku-5-6").basedOn, "claude-haiku-5-5");
 });
 
 test("provisionalPriceFor: an exact id needs no provisional price", () => {
   assert.equal(provisionalPriceFor("claude-opus-5-5"), null);
   assert.equal(provisionalPriceFor("claude-haiku-4-5-20251001"), null);
+  assert.equal(provisionalPriceFor("claude-haiku-5-5"), null);
 });
 
 test("provisionalPriceFor: an older or differently-priced model is never guessed at", () => {
@@ -360,6 +365,9 @@ test("provisionalPriceFor: an older or differently-priced model is never guessed
     "claude-opus-4-1-20250805",
     "claude-sonnet-4-5-20250929",
     "claude-opus-4-8-20260101",   // older than the newest priced Opus even with a date stamp
+    "claude-haiku-4-6",           // older than the newest priced Haiku
+    "claude-haiku-4-5-20260101",  // older than Haiku 5.5 even with a date stamp
+    "claude-haiku-4-5",           // the undated id: unpriced now that Haiku 5.5 has a row
   ]) assert.equal(provisionalPriceFor(id), null, id);
 });
 

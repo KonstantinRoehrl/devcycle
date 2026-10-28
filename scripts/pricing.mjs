@@ -4,14 +4,14 @@
 //
 // A row may carry `cacheRead`, the listed cache-read price. A row without it is "unlisted,
 // assumed": it reads at CACHE_READ_DEFAULT_MULTIPLIER x its input price, the rate doctor applied
-// to every model before cache reads were priced per model. `claude-fable-5` and the rows whose
+// to every model before cache reads were priced per model. `claude-fable-5`, `claude-haiku-5-5` and the rows whose
 // reference entry names no cache-read price are in that state until one is listed.
 
 export const CACHE_READ_DEFAULT_MULTIPLIER = 0.1;
 
 export const PRICING = Object.freeze({
   // The date the claude-api reference these prices came from was cached.
-  asOf: "2026-09-25",
+  asOf: "2026-10-06",
   models: Object.freeze({
     "claude-opus-5-5": Object.freeze({ in: 4, out: 20, cacheRead: 0.2, window: 1_000_000 }),
     "claude-opus-5": Object.freeze({ in: 5, out: 25, window: 1_000_000 }),
@@ -22,6 +22,8 @@ export const PRICING = Object.freeze({
     // List price per the claude-api reference as of asOf.
     "claude-sonnet-5": Object.freeze({ in: 2, out: 10, window: 1_000_000 }),
     "claude-haiku-4-5-20251001": Object.freeze({ in: 1, out: 5, window: 200_000 }),
+    // The up-to-100K-token prompt tier ($0.50 / $2.50 beyond it). PRICING is flat-rate, so a longer prompt is under-priced.
+    "claude-haiku-5-5": Object.freeze({ in: 0.1, out: 0.5, window: 1_000_000 }),
   }),
 });
 

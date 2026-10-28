@@ -47,9 +47,9 @@ model id written here, because ids in playbook prose rot as models change:
   excludes a shape that lands on this tier identically with the flag and without it.
   An `auto` or unset knob — every knob's shipped default — is no pool, so the
   implementer default below stays uncovered and closing that case needs a different
-  fix. A pool on `walkthroughModel` or `branchReviewModel` saturates the ladder with
-  no signal having fired, because the saturating `Infinity` the invocation below has
-  them pass is a sentinel rather than a counted signal — its top rung, but no climb.
+  fix. A pool on `walkthroughModel` or `branchReviewModel` saturates the ladder to its top rung
+  with no signal having fired: the saturating `Infinity` the invocation below has
+  them pass is a sentinel, not a counted signal, so nothing climbs.
   That leaves `implementerModel` and `taskReviewerModel` the only knobs that can reach
   the hatch at all. What it does cover is a pool on one of those two that climbed and
   then fell through to this tier for any reason: the climb is the whole test, so an
@@ -131,7 +131,7 @@ lands on the session tier records, naming the orchestrator's own id,
 `outcome=model <id> (escalated, session unreachable: explicit override)`, or
 `outcome=model session (escalated, unreachable and unranked)` when that id cannot be ranked. Both
 forms need an escalation: a pin that falls through instead records
-`outcome=model session (ceiling: <id> unranked)`. What counts as an escalation is the session-tier
+`outcome=model session (ceiling: <id> unranked)`. What counts as an escalation is defined by the session-tier
 caveat above, which also records that no caller passes that flag — so neither form can appear in a
 ledger this version writes. An escalation always names the signal that fired. Research dispatches
 that run before any ledger exists log nothing; where a ledger exists, same shape.
