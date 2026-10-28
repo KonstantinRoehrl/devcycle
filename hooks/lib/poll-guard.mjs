@@ -12,7 +12,8 @@
 // `bash -c` or `eval` runs is scanned as a script of its own, to a fixed depth so the work stays linear.
 // Like the git guard beside it, this is a backstop for cooperative dispatches, not a shell parser:
 // another interpreter's sleep (`python -c time.sleep`, `node -e setTimeout`), a heredoc a shell then
-// runs, a function that hides the loop, or `case` patterns spelling keywords are left alone.
+// runs, a function that hides the loop, `case` patterns spelling keywords, a `sudo` prefix and a
+// value-taking `bash -O opt -c` are left alone.
 
 // Separators end a command, so the next word is in command position again.
 const SEPARATORS = new Set([";", "&", "|", "(", ")", "`", "\n"]);
@@ -20,7 +21,9 @@ const SEPARATORS = new Set([";", "&", "|", "(", ")", "`", "\n"]);
 const LEADS_A_COMMAND = new Set(["while", "until", "do", "then", "else", "elif", "if", "!", "{"]);
 // Commands that run the command word after their own options and operands.
 const WRAPPERS = new Set(["command", "builtin", "exec", "nohup", "time", "env", "timeout", "nice", "eval"]);
-const OPTION_TAKING_VALUE = new Set(["-n", "-k", "-s"]); // `nice -n 5`, `timeout -k 5 -s KILL`
+// Options that take the next word as their value, per wrapper: `nice -n 5`, `timeout -k 5 -s KILL`.
+const OPTION_TAKING_VALUE = { nice: new Set(["-n"]), timeout: new Set(["-k", "-s"]), env: new Set(["-u", "-C"]), exec: new Set(["-a"]) };
+const LOOKUP_OPTIONS = new Set(["-v", "-V"]); // `command -v sleep` names a command and runs nothing
 const SHELLS = new Set(["bash", "sh", "zsh", "dash"]);
 const COMMAND_STRING_FLAG = /^-[A-Za-z]*c$/;
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
@@ -34,7 +37,7 @@ export function isPollLoop(command) {
 // Whether the wrapper consumes `word` as its own operand, leaving the command word still to come.
 function consumesOperand(wrapper, word) {
   if (wrapper.takesValue) { wrapper.takesValue = false; return true; }
-  if (word.startsWith("-")) { wrapper.takesValue = OPTION_TAKING_VALUE.has(word); return true; }
+  if (word.startsWith("-")) { wrapper.takesValue = OPTION_TAKING_VALUE[wrapper.name]?.has(word) ?? false; return true; }
   if (wrapper.name === "env") return ASSIGNMENT.test(word);
   if (wrapper.name === "timeout" && !wrapper.hasDuration && DURATION.test(word)) return (wrapper.hasDuration = true);
   return false;
@@ -140,6 +143,11 @@ function scanScript(text, depth) {
         wrapper = null;
         commandStart = false;
         if (depth < MAX_SCRIPT_DEPTH && scanScript(value, depth + 1)) return true;
+        continue;
+      }
+      if (wrapper.name === "command" && !quoted && LOOKUP_OPTIONS.has(value)) {
+        wrapper = null;
+        commandStart = false;
         continue;
       }
       if (!quoted && consumesOperand(wrapper, value)) continue;

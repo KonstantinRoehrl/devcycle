@@ -48,6 +48,24 @@ test("a sleep spelled through a path or a wrapper command is still a sleep", () 
   ]) assert.equal(isPollLoop(c), true, c);
 });
 
+test("a wrapper's value-taking option does not hide the sleep behind it", () => {
+  for (const c of [
+    "while true; do env -u FOO sleep 1; done",
+    "while true; do env -C /tmp sleep 1; done",
+    "until [ -f x ]; do exec -a name sleep 1; done",
+    "until [ -f x ]; do command -p sleep 5; done",
+    "until [ -f x ]; do nice -n 5 sleep 1; done",
+    "until [ -f x ]; do timeout -k 5 -s KILL 10 sleep 1; done",
+  ]) assert.equal(isPollLoop(c), true, c);
+});
+
+test("command -v and -V only look a name up, so the sleep they name is not run", () => {
+  for (const c of [
+    "while read l; do command -v sleep >/dev/null || echo nosleep; done < f",
+    "while read l; do command -V sleep; done < f",
+  ]) assert.equal(isPollLoop(c), false, c);
+});
+
 test("a loop hidden in bash -c, sh -c, zsh -c or eval is still a poll", () => {
   for (const c of [
     "bash -c 'until [ -f x ]; do sleep 1; done'",
