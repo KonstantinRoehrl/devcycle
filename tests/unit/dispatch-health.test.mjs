@@ -2,12 +2,15 @@
 // of one redispatch per role per task, and the round a reviewer death leaves open.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { copyFileSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { nextReviewRound, parseLedgerLine, taskEntries } from "../../scripts/task-ledger.mjs";
-import { DEATH_CAP, DISPATCH_ENDED, deathRoute, deathsOf, endedOutcome, endedRole, recordDeath } from "../../scripts/dispatch-health.mjs";
-import { writeInto } from "./helpers.mjs";
+import {
+  DEATH_CAP, DISPATCH_ENDED, QUIET_MS, UNBOUND_MS, deathRoute, deathsOf, dispatchHealth, endedOutcome, endedRole, markEnded, recordDeath,
+} from "../../scripts/dispatch-health.mjs";
+import { makeRepo, writeInto } from "./helpers.mjs";
 
 const PREAMBLE = "Plan: `docs/plan.md`\n\n";
 const line = (text) => `- [2026-10-28T08:00:00Z] ${text}\n`;
@@ -51,4 +54,112 @@ test("a reviewer death leaves its round open, so the redispatch reviews the same
     "task=5 event=dispatch-ended outcome=without output (reviewer) ref=.devcycle/dispatch/5-reviewer-2-1.json key=5/dispatch-ended/2/0",
   ].map((l) => parseLedgerLine(line(l).trim()));
   assert.equal(nextReviewRound(entries), 2);
+});
+
+const SID = "sess-abcdef123456";
+const FIX = (name) => new URL(`../fixtures/dispatch-health/${name}.jsonl`, import.meta.url).pathname;
+const T0 = Date.parse("2026-10-28T08:00:00Z");
+const DISPATCHED = "- [2026-10-28T08:00:00Z] task=5 event=dispatched outcome=model x ref=.devcycle/briefs/5-implementer.md key=5/dispatched/0/0\n";
+
+// A repo whose ledger holds task 5's dispatch and its record, and a Claude config dir whose project
+// holds this session's main transcript and the named subagent transcripts (agent id → fixture).
+function world({ agents = { a1: "pending-tool" }, record = { startedAt: "2026-10-28T08:00:00Z", sessionId: SID }, mtime = T0 + 60_000, meta = {} } = {}) {
+  const root = makeRepo();
+  writeInto(root, ".devcycle/ledger.md", PREAMBLE + DISPATCHED);
+  writeInto(root, ".devcycle/dispatch/5-implementer-0-0.json", JSON.stringify(record) + "\n");
+  const config = makeTempDir("dispatch-health-config-");
+  const slug = join(config, "projects", "-repo");
+  mkdirSync(join(slug, SID, "subagents"), { recursive: true });
+  writeFileSync(join(slug, `${SID}.jsonl`), "");
+  for (const [id, fixture] of Object.entries(agents)) {
+    const file = join(slug, SID, "subagents", `agent-${id}.jsonl`);
+    copyFileSync(FIX(fixture), file);
+    utimesSync(file, new Date(mtime), new Date(mtime));
+    if (meta[id]) writeFileSync(join(slug, SID, "subagents", `agent-${id}.meta.json`), JSON.stringify(meta[id]));
+  }
+  return { root, env: { ...process.env, CLAUDE_CONFIG_DIR: config }, ledgerPath: join(root, ".devcycle/ledger.md") };
+}
+const health = (w, opts = {}) => dispatchHealth({ root: w.root, ledgerPath: w.ledgerPath, sessionId: SID, env: w.env, ...opts });
+const stateAt = (w, now) => health(w, { now })[0].state;
+
+test("a pending tool call is running until the tool ceiling, then the transcript's silence decides", () => {
+  const w = world({ mtime: T0 + 60_000 });
+  assert.equal(stateAt(w, T0 + 60_000 + 5 * 60_000), "running");
+  assert.equal(stateAt(w, T0 + 60_000 + QUIET_MS + 1), "quiet");
+});
+
+test("every recognised end reads ended; with no report it is ended-without-output", () => {
+  for (const fixture of ["handback", "interrupted", "final-text", "torn"]) {
+    const w = world({ agents: { a1: fixture } });
+    assert.equal(stateAt(w, T0 + 3 * 60_000), "ended-without-output", fixture);
+  }
+  assert.equal(stateAt(world({ agents: { a1: "thinking-only" } }), T0 + 3 * 60_000), "running", "a mid-stream thinking record is not an end");
+  assert.equal(stateAt(world({ meta: { a1: { finished: true } } }), T0 + 2 * 60_000), "ended-without-output", "meta.json finished");
+});
+
+test("a report written after the dispatch started makes it ended-with-output; one from before does not", () => {
+  const w = world({ agents: { a1: "handback" } });
+  writeInto(w.root, ".devcycle/reports/5.md", "report\n");
+  utimesSync(join(w.root, ".devcycle/reports/5.md"), new Date(T0 + 90_000), new Date(T0 + 90_000));
+  assert.equal(stateAt(w, T0 + 3 * 60_000), "ended-with-output");
+  utimesSync(join(w.root, ".devcycle/reports/5.md"), new Date(T0 - 60_000), new Date(T0 - 60_000));
+  assert.equal(stateAt(w, T0 + 3 * 60_000), "ended-without-output");
+});
+
+test("binding: of two transcripts naming one brief, the one started after the record binds, and its agent id is kept", () => {
+  const w = world({ agents: { a1: "pending-tool", a2: "handback" }, record: { startedAt: "2026-10-28T08:00:02Z", sessionId: SID } });
+  // a1's first record (08:00:01) predates the record: an earlier retry's agent. a2 is rewritten to start after it.
+  const a2 = join(w.env.CLAUDE_CONFIG_DIR, "projects", "-repo", SID, "subagents", "agent-a2.jsonl");
+  writeFileSync(a2, readFileSync(a2, "utf8").replace("2026-10-28T08:00:01.000Z", "2026-10-28T08:00:03.000Z"));
+  const [d] = health(w, { now: T0 + 3 * 60_000 });
+  assert.equal(d.agentId, "a2");
+  assert.equal(JSON.parse(readFileSync(join(w.root, ".devcycle/dispatch/5-implementer-0-0.json"), "utf8")).agentId, "a2");
+});
+
+test("another session's dispatch and a missing transcript: never classified, and unbound until UNBOUND_MS", () => {
+  assert.deepEqual(health(world({ record: { startedAt: "2026-10-28T08:00:00Z", sessionId: "other" } }), { now: T0 }), []);
+  const w = world({ agents: {} });
+  const [early] = health(w, { now: T0 + 60_000, record: true });
+  assert.deepEqual([early.state, early.action, early.recorded], ["unbound", "wait", false]);
+  const [late] = health(w, { now: T0 + UNBOUND_MS + 1, record: true });
+  assert.deepEqual([late.state, late.action, late.recorded], ["unbound", "redispatch-implementer", true]);
+});
+
+test("an unbound dispatch is never recorded while an unaccounted live agent could be it", () => {
+  const w = world({ agents: { a9: "pending-tool" } });
+  const a9 = join(w.env.CLAUDE_CONFIG_DIR, "projects", "-repo", SID, "subagents", "agent-a9.jsonl");
+  writeFileSync(a9, readFileSync(a9, "utf8").replace(".devcycle/briefs/5-implementer.md", "a research task"));
+  const [d] = health(w, { now: T0 + UNBOUND_MS + 1, record: true });
+  assert.deepEqual([d.state, d.liveUnknown, d.action, d.recorded], ["unbound", 1, "wait", false]);
+});
+
+test("--record records a death once and prints the route; quiet asks for a stop, and --stopped records it", () => {
+  const dead = world({ agents: { a1: "interrupted" } });
+  const [d] = health(dead, { now: T0 + 3 * 60_000, record: true });
+  assert.deepEqual([d.action, d.recorded], ["redispatch-implementer", true]);
+  assert.equal(readFileSync(dead.ledgerPath, "utf8").match(/event=dispatch-ended/g).length, 1);
+  const quiet = world({ mtime: T0 + 60_000 });
+  const now = T0 + 60_000 + QUIET_MS + 1;
+  const [q] = health(quiet, { now, record: true });
+  assert.deepEqual([q.state, q.action, q.recorded], ["quiet", "stop-agent a1", false]);
+  const [s] = health(quiet, { now, record: true, stopped: "5" });
+  assert.deepEqual([s.action, s.recorded], ["redispatch-implementer", true]);
+});
+
+test("the CLI prints one compact line per dispatch and never transcript content", () => {
+  const w = world({ agents: { a1: "interrupted" } });
+  const r = spawnSync(process.execPath, [new URL("../../scripts/dispatch-health.mjs", import.meta.url).pathname, "--record"],
+    { cwd: w.root, encoding: "utf8", env: { ...w.env, CLAUDE_CODE_SESSION_ID: SID } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^task 5 implementer round 0 · ended-without-output · \d+m · 2 tools · idle \d+m · last Bash → redispatch-implementer \(recorded\)\n$/);
+  assert.doesNotMatch(r.stdout, /Your brief|interrupted by user/);
+});
+
+test("the sensor's end mark binds by brief and session and records whether the output exists", () => {
+  const w = world({ agents: { a1: "handback" } });
+  const transcriptPath = join(w.env.CLAUDE_CONFIG_DIR, "projects", "-repo", SID, "subagents", "agent-a1.jsonl");
+  assert.equal(markEnded({ root: w.root, sessionId: SID, transcriptPath, agentId: "a1", now: T0 + 2 * 60_000 }), true);
+  const record = JSON.parse(readFileSync(join(w.root, ".devcycle/dispatch/5-implementer-0-0.json"), "utf8"));
+  assert.deepEqual([record.agentId, record.endedAt, record.outputPresent], ["a1", "2026-10-28T08:02:00.000Z", false]);
+  assert.equal(markEnded({ root: w.root, sessionId: "other", transcriptPath, agentId: "a1" }), false);
 });
