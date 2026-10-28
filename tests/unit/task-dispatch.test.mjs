@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo } from "./helpers.mjs";
+import { briefPathFor } from "../../scripts/task-dispatch.mjs";
 
 const SCRIPT = new URL("../../scripts/task-dispatch.mjs", import.meta.url).pathname;
 const RUN = "0123456789abcdef";
@@ -236,4 +237,46 @@ test("an ungated plan task's brief gets its lessons block last; a reviewer brief
   const reviewer = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"], "# Review brief\n**Lessons:**\n");
   assert.equal("lessons" in reviewer.out, false);
   assert.equal(briefAt(repo, ".devcycle/briefs/5-reviewer-round-1.md"), "# Review brief\n**Lessons:**\n");
+});
+
+test("the dispatch record names the dispatching session, and null where none is set", () => {
+  const repo = repoWithLedger();
+  const env = { ...childEnv(), CLAUDE_CODE_SESSION_ID: "sess-dispatch-1" };
+  const r = spawnSync(process.execPath, [SCRIPT, "--run", RUN, "--task", "5", "--role", "implementer"], { cwd: repo, input: "brief\n", encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+  const record = JSON.parse(readFileSync(join(repo, ".devcycle/dispatch/5-implementer-0-0.json"), "utf8"));
+  assert.equal(record.sessionId, "sess-dispatch-1");
+  dispatch(repo, ["--run", RUN, "--task", "6", "--role", "implementer"], "brief\n");
+  assert.equal(JSON.parse(readFileSync(join(repo, ".devcycle/dispatch/6-implementer-0-0.json"), "utf8")).sessionId, null);
+});
+
+test("--capture-cmd ends the brief with the capture command and a ready-made Narrowing line", () => {
+  const repo = gatedRepo();
+  const out = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer", "--capture-cmd", "node --test tests/unit/a.test.mjs"], "brief\n").out;
+  const brief = readFileSync(join(repo, out.briefPath), "utf8");
+  assert.match(brief, /\*\*Gate command:\*\* `[^`]+`\n\*\*Capture command:\*\* `node --test tests\/unit\/a\.test\.mjs` — pass it as `capture-evidence\.mjs --cmd`/);
+  assert.match(brief, /\n- Narrowing: node --test tests\/unit\/a\.test\.mjs — concurrent wave: siblings' uncommitted edits share the checkout; the whole gate runs at commit in an isolated worktree\n$/);
+});
+
+test("--capture-cmd is an implementer's only", () => {
+  const repo = repoWithLedger();
+  const r = spawnSync(process.execPath, [SCRIPT, "--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1", "--capture-cmd", "x"],
+    { cwd: repo, input: "brief\n", encoding: "utf8", env: childEnv() });
+  assert.equal(r.status, 2);
+  assert.match(JSON.parse(r.stdout).error, /implementer dispatch only/);
+});
+
+test("--capture-cmd rejects a blank or multi-line command", () => {
+  const repo = repoWithLedger();
+  for (const cmd of ["  ", "node --test a.test.mjs\nrm -rf x"]) {
+    const r = spawnSync(process.execPath, [SCRIPT, "--run", RUN, "--task", "5", "--role", "implementer", "--capture-cmd", cmd],
+      { cwd: repo, input: "brief\n", encoding: "utf8", env: childEnv() });
+    assert.equal(r.status, 2, JSON.stringify(cmd));
+    assert.match(JSON.parse(r.stdout).error, /takes one line/);
+  }
+});
+
+test("briefPathFor is the path dispatch writes", () => {
+  assert.equal(briefPathFor("5", "implementer", 0), ".devcycle/briefs/5-implementer.md");
+  assert.equal(briefPathFor("5", "reviewer", 2), ".devcycle/briefs/5-reviewer-round-2.md");
 });
