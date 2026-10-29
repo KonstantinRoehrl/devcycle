@@ -2,7 +2,7 @@
 // heading slug that names one.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { slug, sections, sectionText } from "../../scripts/md-sections.mjs";
+import { slug, apostropheSlug, sections, sectionText } from "../../scripts/md-sections.mjs";
 
 const DOC = [
   "# Title",
@@ -93,4 +93,10 @@ test("slug: the GitHub-style heading slug", () => {
 
 test("sectionText: an unknown slug is null", () => {
   assert.equal(sectionText(DOC, "nope"), null);
+});
+
+test("apostropheSlug reads an apostrophe as a word break; slug drops it", () => {
+  assert.equal(apostropheSlug("Resuming a wave's per-task position"), "resuming-a-wave-s-per-task-position");
+  assert.equal(apostropheSlug("A wave’s turn"), "a-wave-s-turn");
+  assert.equal(slug("Resuming a wave's per-task position"), "resuming-a-waves-per-task-position");
 });
