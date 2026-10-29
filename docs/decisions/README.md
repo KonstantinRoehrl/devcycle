@@ -31,30 +31,30 @@ paths (#383, #381) grow `playbooks/verifying-on-device.md`, `playbooks/finishing
 `references/checklist.md` and `playbooks/reviewing-the-branch.md`.
 
 ```text
-budget: surface-budget.json surfaceTotal 6449
+budget: surface-budget.json surfaceTotal 6512
 budget: context-budget.json commands/continue.md 68660
-budget: context-budget.json commands/cycle.md 77471
-budget: context-budget.json commands/learn.md 16949
-budget: context-budget.json commands/maintain.md 18128
-budget: context-budget.json commands/onboard.md 17237
-budget: context-budget.json commands/reconcile.md 24674
-budget: context-budget.json commands/review.md 25304
-budget: context-budget.json commands/verify.md 24402
-budget: context-budget.json playbooks/executing-waves.md 111388
-budget: context-budget.json playbooks/finishing-the-cycle.md 49251
-budget: context-budget.json playbooks/learning-from-sessions.md 63247
-budget: context-budget.json playbooks/maintaining-the-repo.md 65198
-budget: context-budget.json playbooks/onboarding-a-repo.md 30896
-budget: context-budget.json playbooks/planning-waves.md 73940
-budget: context-budget.json playbooks/receiving-review.md 114369
-budget: context-budget.json playbooks/reviewing-code.md 94721
-budget: context-budget.json playbooks/reviewing-the-branch.md 53155
+budget: context-budget.json commands/cycle.md 77530
+budget: context-budget.json commands/learn.md 17008
+budget: context-budget.json commands/maintain.md 18187
+budget: context-budget.json commands/onboard.md 17296
+budget: context-budget.json commands/reconcile.md 24733
+budget: context-budget.json commands/review.md 25363
+budget: context-budget.json commands/verify.md 24461
+budget: context-budget.json playbooks/executing-waves.md 111906
+budget: context-budget.json playbooks/finishing-the-cycle.md 49310
+budget: context-budget.json playbooks/learning-from-sessions.md 63306
+budget: context-budget.json playbooks/maintaining-the-repo.md 65257
+budget: context-budget.json playbooks/onboarding-a-repo.md 30955
+budget: context-budget.json playbooks/planning-waves.md 73999
+budget: context-budget.json playbooks/receiving-review.md 114428
+budget: context-budget.json playbooks/reviewing-code.md 94780
+budget: context-budget.json playbooks/reviewing-the-branch.md 53387
 budget: context-budget.json playbooks/scoping-the-request.md 31069
 budget: context-budget.json playbooks/sweeping-mechanical-changes.md 87742
 budget: context-budget.json playbooks/taking-the-fast-path.md 52276
-budget: context-budget.json playbooks/verifying-on-device.md 53853
+budget: context-budget.json playbooks/verifying-on-device.md 58800
 budget: context-budget.json playbooks/writing-the-findings-document.md 63679
-budget: context-budget.json references/config.md 14423
+budget: context-budget.json references/config.md 14482
 budget: context-budget.json references/handoff.md 11330
 ```
 

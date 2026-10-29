@@ -86,7 +86,7 @@ carry the same keys; without it the copies drift one release at a time.
 | `docTrackingPolicy` | § Doc tracking, below | `standard` |
 | `reviewDepth` | `playbooks/reviewing-the-branch.md` | `auto` — sized per `playbooks/reviewing-code.md` § 3 |
 | `crossModelReview` | `playbooks/reviewing-the-branch.md` | `false` |
-| `onDeviceGate` | `playbooks/verifying-on-device.md` | `auto` — agent first, per `playbooks/verifying-on-device.md` § The gate |
+| `onDeviceGate` | `playbooks/verifying-on-device.md` | `auto` — agent first, per `playbooks/verifying-on-device.md` § The gate, where an in-session delegation overrides it for the cycle |
 | `implementerModel` | `playbooks/executing-waves.md` | `auto` — `references/model-routing.md` derives it per task |
 | `taskReviewerModel` | `playbooks/executing-waves.md` | `auto` — `references/model-routing.md` derives it per task |
 | `branchReviewModel` | `playbooks/reviewing-the-branch.md` | `auto` — the session's own model |

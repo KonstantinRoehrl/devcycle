@@ -107,13 +107,16 @@ words and markers:
 
 ```markdown
 ## On-device results: <feature>
-- <item>: passed (auto: .devcycle/evidence/<file>) — <what the driver read>
-- <item>: passed (confirmed from batch) — <what the agent observed>
-- <item>: passed — <what the user confirmed seeing>
-- <item>: FAILED — <what the user sees instead> — severity: <high|medium|low>
-- <item>: waived — <the reason>
-- <item>: unverified — <why no one could observe it>
+- #<n> <item>: passed (auto: .devcycle/evidence/<file>) — <what the driver read>
+- #<n> <item>: passed (confirmed from batch) — <what the agent observed>
+- #<n> <item>: passed — <what the user confirmed seeing>
+- #<n> <item>: FAILED — <what the user sees instead> — severity: <high|medium|low>
+- #<n> <item>: waived — <the reason>
+- #<n> <item>: unverified — <why no one could observe it>
 ```
+
+`<n>` is the item's 1-based position in the checklist. Write the report to the path
+`references/checklist.md` § Paths pins.
 
 ## The gate
 
@@ -130,6 +133,54 @@ Read `onDeviceGate` from the `knobs:` line per `${CLAUDE_PLUGIN_ROOT}/references
 happened — a human pass, or a close without one and what stayed unverified. It never licenses
 reporting a walkthrough that did not run as done, and never fakes a checkmark.
 
+**A delegated walk.** When the user tells this session to walk the checklist itself ("walk it
+yourself", "you check them", "just run them"), that instruction is the answer: confirm nothing. The
+gate is `auto-ok` for the rest of this cycle, whatever `onDeviceGate` says, `human-required`
+included, and `auto-ok`'s rules apply unchanged: every item without an `(auto)` tick and without an
+observed failure is `unverified`. In-cycle, append one ledger line,
+`task=on-device event=user-decision outcome=delegated-walk (auto-ok) ref=<the checklist path>`; a
+resumed walkthrough and every fix-round re-walk read it as `on-device-routing.mjs`'s `delegated` and
+keep `auto-ok` without asking. A standalone run applies it to that run only and writes no line.
+Step 3's announce line becomes `delegated walk (auto-ok for this cycle): N auto-checked, F observed
+failures for you, U left unverified`. With no driver connected, ask once: **Connect the driver and
+retry** · **Walk it yourself** (the human pass under the knob's gate) · **Close all as unverified**,
+the last reported in the handoff as a walk that did not run, never as done. An Other answer appends
+`user-correction-at-gate` (`references/ledger.md`).
+
+## Failed items
+
+In-cycle, run `node "${CLAUDE_PLUGIN_ROOT}/scripts/on-device-routing.mjs" --state .devcycle/state.md --cap <cap>`
+on entry and again once the results report is written. `<cap>` is the profile's branch-review round
+cap, as `playbooks/reviewing-the-branch.md` § Configuration reads it — a deliberate deviation from
+`references/loops.md`'s "a number, in the loop's own text": one figure bounds both fix loops. On
+entry, `undecided` items go straight to the question below, with no re-walk, and `toFix` items run a
+fix round; with neither, walk as § The walkthrough says.
+
+**The question.** While `undecided` is non-empty, the stage does not hand off to finish. Ask ONE
+AskUserQuestion listing each by `#<n>`, severity and its one-line symptom: **Fix them on this branch
+now** · **Waive them** (with a reason) · **Accept them as known carry-overs**. A per-item split comes
+through Other, which appends `user-correction-at-gate` (`references/ledger.md`). Record one ledger
+line per item, `task=on-device event=user-decision outcome=failed-item #<n> <item text>: fix|waive (<reason>)|accept ref=<the results path>`.
+Any `fix` keeps `stage: on-device` and ends the session with a handoff whose `Carry-overs:` ends
+`Start the fresh session on <model>.`, `<model>` being what `branchReviewModel` resolves to per
+`references/model-routing.md`, the tier branch review used.
+
+**A fix round.** Log `task=on-device event=review-round outcome=round <round + 1> ref=<the spec: path>`
+before any dispatch. Each `toFix` item goes to a fresh `devcycle:implementer` dispatch with task id
+`on-device-fix-<round>-<n>`; its brief carries the item, the observed symptom, the evidence path,
+the spec path and an `**Evidence:**` class line, and never asks it to commit. Commit each fix on
+receipt, then review `<pre-fix HEAD>..<fix commit>` with the engine and depth that
+`.devcycle/reports/branch-review.md`'s `Engine:` and `Depth:` lines record (`single` when the file
+is missing), fixing a blocking finding inside the same round. Relaunch the app (step 1's `stop`,
+`start`, `ready`) and re-walk only the fixed items, under the same gate as the first walk; each keeps
+its report line, now `passed (re-walk, round <n>)` or still `FAILED`.
+
+**Loop exit.** Write `.devcycle/findings/on-device-fix-status.md` in `references/loops.md`'s shape —
+never a resume input: `resolved` once every fixed item re-walked `passed`. With `atCap` and items
+still `FAILED`, ask the question again for those only, offering waive or accept and, only on the
+user's explicit grant, more rounds, recorded as `task=on-device event=user-decision outcome=review-cap extended to <n>`;
+accepting residue writes `exhausted-with-residue` with `carried-to: finish carry-overs + PR body`.
+
 ## Standalone runs
 
 `/devcycle:verify <branch>` is not a pipeline stage and owns no cycle. It **must not create,
@@ -139,14 +190,16 @@ standalone rule establishes. The checklist is scratch at the diff-derived path
 `${CLAUDE_PLUGIN_ROOT}/references/checklist.md` pins, handled as that file states, and its
 path goes in the handoff and nowhere else. Everything else — walkthrough, interview rule,
 gate, results report — is unchanged: a standalone run is a different source for the checklist,
-not a different standard for verifying it.
+not a different standard for verifying it. § Failed items does not apply: a standalone run
+reports its `FAILED` items in the handoff, and a delegated walk covers that run only.
 
 ## Handoff
 
 The two paths differ in one thing, the state file:
 
 - **In-cycle:** end the stage by updating `.devcycle/state.md` — set `stage: finish`, the
-  stage the next session resumes at.
+  stage the next session resumes at, once `on-device-routing.mjs` reports no `undecided` and no
+  `toFix` item; otherwise keep `stage: on-device` (§ Failed items).
 - **Standalone:** write no state file and set no stage; the block names the branch, the
   checklist path, and the results instead.
 
@@ -156,6 +209,6 @@ same contents:
 - `Artifacts:` the checklist path and the results report path — or `none (no rendered
   surface)` when this stage judges itself not applicable. Evidence the driver captured
   (DOM dumps, console output, screenshots) lives under `.devcycle/evidence/`.
-- `Carry-overs:` failed items with severity, unverified residue under `auto-ok`, the skip
-  reason when skipped, or `none`.
+- `Carry-overs:` waived and accepted failed items with severity and the results report path,
+  unverified residue under `auto-ok`, the skip reason when skipped, or `none`.
 - `Compaction hint:` n/a — clears. Failed items already carry via `Carry-overs:`.
