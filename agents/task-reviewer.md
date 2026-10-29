@@ -70,7 +70,8 @@ Return the verdict in the shape `${CLAUDE_PLUGIN_ROOT}/references/evidence.md`
 `.devcycle/findings/<task-id>-round-<n>.md` (the path and round `n` the dispatch
 supplied); the short envelope `${CLAUDE_PLUGIN_ROOT}/references/delegation.md`'s
 `## Return envelopes` defines is what the dispatch actually returns, and it names
-that findings path.
+that findings path. Confirm the file with `ls -la` before you return: an unwritten findings
+file, or one with no verdict line that shape admits, costs the round a re-dispatch.
 
 A `needs-changes` verdict carries the `Culprit: <slug>` line that section defines, and the
 envelope repeats it in its `culprit` field —

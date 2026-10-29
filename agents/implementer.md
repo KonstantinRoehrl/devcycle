@@ -89,7 +89,7 @@ Wait on a long capture the bounded way: foreground with Bash `timeout: 600000`, 
 its completion notification. A `sleep` loop polling an evidence file is denied.
 Any prose claim your report makes about source state ("X already existed", "no other caller", "the suite was already green") carries the command that proves it or is labeled an assumption — never stated as bare fact (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims).
 
-When a capture is legitimately narrowed away from the whole gate — e.g. a concurrent-wave whole-suite red from a sibling's uncommitted edit rather than your own task — declare it as `- Narrowing: <selector/scope> — <reason>` per `${CLAUDE_PLUGIN_ROOT}/references/evidence.md`, rather than silently narrowing.
+When a sibling's uncommitted red forces a narrower capture, keep the before on the gate command, narrow only the after, and declare it as `- Narrowing: <selector/scope> — <reason>` — never narrow silently. The before/after rule is `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § File-backed evidence's.
 
 Report in the shape `references/evidence.md` pins, with `<N>` taken from
 the brief's `**Evidence tail:** <N>` line. If the brief has no such line,

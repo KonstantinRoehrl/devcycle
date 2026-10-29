@@ -5,6 +5,39 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-29 — The checkers stop bouncing valid work: one before/after rule, unparseable verdicts, --help (#382, #390, #391, #275)
+
+**Decision:** A test-class report's before and after captures pass with identical headers or as one
+declared narrowing: the before is the task's gate and the after is the report's cmd:, carrying the
+scope its - Narrowing: line declares; a convention report keeps strict identity. A Karma summary
+counts, read from an escape-stripped capture. A findings file that exists but yields no verdict is
+logged as rejected (unparseable findings file: <reason>), sharing the missing file's route and
+retry cap and never closing a round. Every task script names all missing flags at once and answers
+--help; run-record.mjs lists each kind's fields and says what attributedBy means.
+
+**Why:** Each false bounce cost a dispatch round trip and pushed agents to bend their evidence until
+the checker passed (#382, #390, #391, #275). The narrowing rule had two owners that disagreed; the
+verdict parser logged every parse failure as a missing file.
+
+**Budgets:** the before/after rule, the accepted verdict forms, the unparseable outcome and the
+--help contract grow references/evidence.md, references/ledger.md, references/resume.md, both agents
+and playbooks/executing-waves.md, and every entry point whose closure cites them.
+
+```text
+budget: surface-budget.json surfaceTotal 6541
+budget: context-budget.json commands/continue.md 69039
+budget: context-budget.json commands/cycle.md 78509
+budget: context-budget.json playbooks/executing-waves.md 113479
+budget: context-budget.json playbooks/planning-waves.md 74691
+budget: context-budget.json playbooks/profiling-sessions.md 41698
+budget: context-budget.json playbooks/receiving-review.md 115288
+budget: context-budget.json playbooks/reviewing-code.md 95261
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 88628
+budget: context-budget.json playbooks/taking-the-fast-path.md 52994
+budget: context-budget.json playbooks/writing-the-findings-document.md 64371
+budget: context-budget.json references/evidence.md 13263
+```
+
 ## 2026-10-29 — The unattended knob starts the driver; a recorded row still decides the mode (#384, #383, #381)
 
 **Decision:** With no `drive:` row and `executionMode` set to `unattended`, `scripts/wave-setup.mjs`

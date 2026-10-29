@@ -190,15 +190,16 @@ and takes the generic rows.
 | `dispatch-ended outcome=without output (implementer)` or `(reviewer)` | the dispatch ended without its report or findings file: re-dispatch that role — a reviewer at the same round — within the cap below |
 | `review-verdict outcome=accepted` | run the green gate, commit |
 | `review-verdict outcome=rejected` or `rejected (green gate: …)` | re-dispatch the implementer with the findings or gate evidence — on a sweep-marked task, a fresh dispatch briefed per the rejection bullet, never a sweep re-run; the next review is the next round |
-| `review-verdict outcome=rejected (missing findings file)` | re-dispatch the **reviewer** for that round, not the implementer |
+| `review-verdict outcome=rejected (missing findings file)` or `rejected (unparseable findings file: …)` | re-dispatch the **reviewer** for that round, not the implementer |
 | `review-verdict outcome=deferred (concurrent sibling edits)` | commit again; the proof no longer defers (a record from before the per-commit proof) |
 | `committed` | task done — move to the next task |
 | `user-decision` | carry out the decision its `outcome=` records (`next: "follow-decision"`) |
 | `dispatched outcome=sweep …` | no brief to re-dispatch: re-run the sweep bullets from the clean-targets check |
 | any other sweep-token outcome (`applied-none`, `dirty-targets`, `sweep hard stop: …`) | a decision was pending when the run died: re-present the fallback, never an automatic dispatch. Reasons come from the saved report, or for `dirty-targets` from the files the event names; a hard stop also carries its applied-files disclosure |
 
-**Retry caps.** An intake bounce, `rejected (missing report file)` and `rejected (missing findings
-file)` each allow two retries per task: the third such line for the task is a pending user decision
+**Retry caps.** An intake bounce, `rejected (missing report file)` and a findings file with no
+verdict — `rejected (missing findings file)` and `rejected (unparseable findings file: …)` sharing
+one count — each allow two retries per task: the third such line for the task is a pending user decision
 (drive mode: stop `needs-user`), never another dispatch — the task script that writes it returns
 `needs-user`. A `dispatch-ended` line has a cap of its own, counted per role by event and never by
 outcome prefix: one re-dispatch per role per task, across sessions; the second such line for that
@@ -213,7 +214,7 @@ already on its file list and reconciles them against its brief (`agents/implemen
 `.devcycle/findings/task-<id>-review-status.md` (`references/loops.md` § Where the status lives).
 While that file reads `exhausted-unresolved` and no `user-decision` line of that task (`task=drive`
 and `task=config` lines never count) naming `task-<id>-review` in `outcome=` follows its latest
-round-3-or-later `review-verdict` rejection in this cycle's ledger (a missing findings file is none;
+round-3-or-later `review-verdict` rejection in this cycle's ledger (a missing or unparseable findings file is none;
 with none, the file is an earlier cycle's), the task's position is that pending decision, whatever
 its last ledger event: present it to the user (drive mode: stop `needs-user`).
 
