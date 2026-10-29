@@ -31,6 +31,7 @@ paths (#383, #381) grow `playbooks/verifying-on-device.md`, `playbooks/finishing
 `references/checklist.md` and `playbooks/reviewing-the-branch.md`.
 
 ```text
+budget: surface-budget.json surfaceTotal 6449
 budget: context-budget.json commands/continue.md 68660
 budget: context-budget.json commands/cycle.md 77471
 budget: context-budget.json commands/learn.md 16949
@@ -40,7 +41,7 @@ budget: context-budget.json commands/reconcile.md 24674
 budget: context-budget.json commands/review.md 25304
 budget: context-budget.json commands/verify.md 24402
 budget: context-budget.json playbooks/executing-waves.md 111388
-budget: context-budget.json playbooks/finishing-the-cycle.md 48444
+budget: context-budget.json playbooks/finishing-the-cycle.md 49251
 budget: context-budget.json playbooks/learning-from-sessions.md 63247
 budget: context-budget.json playbooks/maintaining-the-repo.md 65198
 budget: context-budget.json playbooks/onboarding-a-repo.md 30896
