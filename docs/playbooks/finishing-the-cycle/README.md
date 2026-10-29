@@ -14,6 +14,11 @@ resolved default branch). Either signal firing clamps the **effective policy** t
 `local-commits-only` regardless of what was configured — silently, but always narrated in the
 handoff's `Git policy:` line.
 
+Before acting on any policy, finish checks the on-device results: a `FAILED` item that was neither
+re-walked `passed` nor waived or accepted sends the cycle back to on-device. Waived and accepted
+items are listed as carry-overs and, when a PR is opened, under a **Known on-device issues**
+heading in its description.
+
 Acting on the effective policy is the same three-way split as the intent it clamps from:
 `local-commits-only` just hands the branch back with its commits; `push-allowed` pushes it and
 never merges; `open-pr` pushes and opens a PR whose title parses as a Conventional Commit and
@@ -60,11 +65,13 @@ accDescr: Playbook-internal flowchart of the finish stage, from resolving the co
 flowchart TD
     CFG("Resolve the configured gitPolicy — local-commits-only | push-allowed | open-pr"):::stage
     CFG --> FLOOR{"already local-commits-only?"}:::stage
-    FLOOR -->|"yes — no signal checks needed"| ACT
+    FLOOR -->|"yes — no signal checks needed"| GUARD
     FLOOR -->|"no"| SIGNALS{"permission-deny on git push, or is this branch the repo's default branch?"}:::stage
     SIGNALS -->|"either fires"| CLAMP("Effective policy clamps to local-commits-only — narrated, not paused"):::stage
-    SIGNALS -->|"neither fires"| ACT
-    CLAMP --> ACT
+    SIGNALS -->|"neither fires"| GUARD
+    CLAMP --> GUARD
+    GUARD("On-device decisions — any undecided FAILED item returns to on-device"):::stage
+    GUARD --> ACT
     ACT{"Act on the effective policy"}:::stage
     ACT -->|"local-commits-only"| HANDBACK("Hand the branch back — no push"):::stage
     ACT -->|"push-allowed"| PUSH("Push the branch — never merge"):::stage

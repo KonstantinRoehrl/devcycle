@@ -100,7 +100,7 @@ and silently runs every knob at its fallback. [`docs/platform-notes.md`](../plat
 | `learnSessionCap` | How many sessions one `/devcycle:learn` run may mine | integer `1` or more (`0` is refused, not a no-op run) | `100` |
 | `subagentBudget` | What devcycle's hooks module does with a subagent past its context budget | `off` / `warn` / `enforce` | `warn` (from 15% of its window, a note on its next tool result and every fifth after; `enforce` also refuses reads at 20%) |
 | `handoffNotification` | Whether devcycle notifies you when a handoff is safe to clear and when an unattended run stops for you | `off` / `terminal` / `push` / `both` | `off` (`terminal` goes through Claude Code's own notification channel and, like `both`'s terminal half, does nothing on a Claude Code build without `$.ui.notify`; `push` sends a push notification where the session can) |
-| `executionMode` | How `/devcycle:continue` runs the waves at execution start, until the cycle records its choice | `ask` / `manual` / `unattended` | `ask` (asks Start unattended or Walk the waves manually; `manual` walks them in the session; `unattended` asks with Start unattended first, since an unattended run always starts on your answer) |
+| `executionMode` | How `/devcycle:continue` runs the waves at execution start, until the cycle records its choice | `ask` / `manual` / `unattended` | `ask` (asks Start unattended or Walk the waves manually; `manual` walks them in the session; `unattended` starts the driver with no question and resumes it without a confirm; a run that stopped for you still asks) |
 | `driveWatch` | How much of an unattended run the session that started it relays to you; each relayed line costs a model turn | `end` / `wave` / `all` | `end` (only the run's end, while the band above the prompt shows progress; `wave` adds session starts, finished waves, waits and stops; `all` adds every task outcome) |
 | `drivePlugins` | Which plugins an unattended run's sessions load besides devcycle and superpowers; they start with no MCP servers | `none` / `all` / comma-separated plugin names | `none` (`all` gives them every plugin and MCP server your own sessions load) |
 
@@ -151,7 +151,10 @@ first: structural items that hold are ticked `(auto)`, the agent-observable item
 it saw come to you as one batch of proposed verdicts to confirm, and the `needs-eyes` items are
 asked one by one. `human-required` asks you every item, one by one. `auto-ok` lets the agent pass
 close the stage unless it saw a failure, explicitly listing what remains unverified — it skips
-the human, it never fakes the checkmarks. No profile sets this option, so a `lean` run that
+the human, it never fakes the checkmarks. Telling the on-device session to walk the checklist
+itself applies `auto-ok` for the rest of that cycle, whatever this option says. Every `FAILED` item
+then needs your decision — fix it on the branch now, waive it, or accept it as a known carry-over —
+before finish closes the cycle. No profile sets this option, so a `lean` run that
 should close on the agent pass sets `auto-ok` itself. [`references/checklist.md`](../../references/checklist.md)
 owns the tiers and verdicts, [`playbooks/verifying-on-device.md`](../../playbooks/verifying-on-device.md)
 § The gate what each value does. A branch with nothing that renders skips the stage in branch
