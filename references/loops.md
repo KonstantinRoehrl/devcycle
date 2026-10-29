@@ -13,9 +13,9 @@ playbook, command, or agent that runs a loop names this file and does not restat
 
 - `resolved` — the loop's goal was met inside the cap. The only status that may be reported
   as a pass.
-- `exhausted-with-residue` — the cap was reached and the remaining items were **deliberately
-  carried over** to a named destination (an issue, a register row, a follow-up cycle). Not a
-  failure. The report names the destination and the count carried.
+- `exhausted-with-residue` — the cap was reached, or the loop ended early, and the remaining items
+  were **deliberately carried over** to a named destination (an issue, a register row, a follow-up
+  cycle). Not a failure. The report names the destination and the count carried.
 - `exhausted-unresolved` — the cap was reached with nothing carrying the residue. Always
   surfaced to the user as a decision point, never rendered as a pass.
 

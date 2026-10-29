@@ -179,7 +179,9 @@ see `docs/design/`.
    a script cannot truly see — feel, alignment, smoothness, legibility — is walked with you
    one item at a time. The checklist comes from the plan during execution — or, for a branch
    nobody planned in this session, from that branch's diff traced out to the screens it
-   affects.
+   affects. A `FAILED` item stops the hand-off to finish until you fix, waive or accept it; a
+   fix runs in a fresh on-device session on the branch-review model and re-walks only the fixed
+   items.
 9. **Finish** — hands the branch back per your `gitPolicy` (see `docs/configuration/`); first copies the
    cycle's audit trail (ledger, evidence, findings, reports) into
    `.devcycle/archive-<date>-<branch-slug>/`, unconditionally, then offers to delete the
@@ -217,8 +219,8 @@ waves you can hand those stops to a driver instead — next section.
 
 ### Unattended execution
 
-Opt in by answering **Start unattended** when `/devcycle:continue` resumes at execution (the
-`executionMode` setting only puts that answer first), and that session starts
+Opt in by answering **Start unattended** when `/devcycle:continue` resumes at execution, or set
+`executionMode` to `unattended` to start it with no question, and that session starts
 `scripts/drive-execution.mjs`, which takes over the one stop that repeats inside execution:
 the clear between waves. It starts a fresh `claude -p` session per wave — the
 session `/clear` plus `/devcycle:continue` would give you — and ends at the branch-review handoff,
@@ -260,8 +262,8 @@ flowchart TD
 
 `--stop` — or a signal (Ctrl-C, `kill`) — stops the running session, writes its record and the
 run's result, releases the lock and exits 130. The next `/devcycle:continue` asks the start confirm
-(`references/drive.md`) before restarting an interrupted run, and the stopped run's question before
-resuming a stopped one.
+(`references/drive.md`; none under the `unattended` setting) before restarting an interrupted run,
+and the stopped run's question before resuming a stopped one.
 
 If auto mode or another permission check denies the start, the session prints a `!` line for you
 to type, which runs the start as your own command. Once the driver holds its lock the session

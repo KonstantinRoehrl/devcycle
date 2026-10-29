@@ -150,6 +150,9 @@ variants. The depth line says how that engine was picked, worded per
 carry-overs line holds exactly the non-blocking ones. Findings in plain everyday language,
 symptom first; jargon only where it adds precision.
 
+Write the report to `.devcycle/reports/branch-review.md`, replacing any earlier one:
+`playbooks/verifying-on-device.md`'s fix round reads its `Engine:` and `Depth:` lines.
+
 ## Handoff
 
 When the gate passes, decide where the cycle goes next. **Skip on-device only when both signals

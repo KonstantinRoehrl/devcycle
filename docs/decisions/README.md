@@ -5,6 +5,61 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-29 — The unattended knob starts the driver; a recorded row still decides the mode (#384, #383, #381)
+
+**Decision:** With no `drive:` row and `executionMode` set to `unattended`, `scripts/wave-setup.mjs`
+returns `start` with `writeRow: "auto"`: the session writes `- drive: auto … via=knob` and runs the
+start path asking nothing. While the live knob is `unattended`, `drive.confirm` is false, so no
+start-confirm-shaped question is asked: not the `start` confirm, not a settled stop's, and not the
+restart confirm in a session that only attached. An unsettled stop still asks, and so does every
+other knob value. The first driven session's opt-in ledger line records `via=<answer|knob>`.
+
+**Why:** The user set `executionMode=unattended` to stop being asked how execution runs, and was
+asked every cycle (#384). What the 2026-10-16 entry guarded still holds: the opt-in is recorded as
+`via=knob` on the row and in the ledger, a run that stopped for a person always asks, and a start
+that is denied falls back to the `!` line and **Walk the waves manually**.
+
+**Supersedes:** three clauses of the 2026-10-16 entry "An unattended start needs the user's answer
+in the session; handoffs record when they are safe (#357, #355)": "no longer skips the question",
+"No knob path writes an `auto` row", and its **Supersedes** clause ("The opt-in is now the user's
+answer at execution start alone"). Its handoff-row and `handoffNotification` parts stay in force.
+
+**Budgets:** the reworded drive rows, the knob sentence and the handoff opt-in clause grow the
+runtime surface and every entry point citing `references/config.md` or `references/handoff.md`;
+the on-device routing, the fix round, the delegation rule, the finish guard and the pinned report
+paths (#383, #381) grow `playbooks/verifying-on-device.md`, `playbooks/finishing-the-cycle.md`,
+`references/checklist.md` and `playbooks/reviewing-the-branch.md`. The widened `exhausted-with-residue` definition in `references/loops.md`
+(a loop that ends early with its remainder carried over) adds 26 bytes to the five entry points that
+cite it.
+
+```text
+budget: surface-budget.json surfaceTotal 6529
+budget: context-budget.json commands/continue.md 68871
+budget: context-budget.json commands/cycle.md 77741
+budget: context-budget.json commands/learn.md 17008
+budget: context-budget.json commands/maintain.md 18187
+budget: context-budget.json commands/onboard.md 17296
+budget: context-budget.json commands/reconcile.md 24733
+budget: context-budget.json commands/review.md 25363
+budget: context-budget.json commands/verify.md 24461
+budget: context-budget.json playbooks/executing-waves.md 112292
+budget: context-budget.json playbooks/finishing-the-cycle.md 49840
+budget: context-budget.json playbooks/learning-from-sessions.md 63332
+budget: context-budget.json playbooks/maintaining-the-repo.md 65257
+budget: context-budget.json playbooks/onboarding-a-repo.md 30955
+budget: context-budget.json playbooks/planning-waves.md 74210
+budget: context-budget.json playbooks/receiving-review.md 114639
+budget: context-budget.json playbooks/reviewing-code.md 94780
+budget: context-budget.json playbooks/reviewing-the-branch.md 53624
+budget: context-budget.json playbooks/scoping-the-request.md 31280
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 87979
+budget: context-budget.json playbooks/taking-the-fast-path.md 52513
+budget: context-budget.json playbooks/verifying-on-device.md 60211
+budget: context-budget.json playbooks/writing-the-findings-document.md 63890
+budget: context-budget.json references/config.md 14482
+budget: context-budget.json references/handoff.md 11541
+```
+
 ## 2026-10-28 — A dispatch that ended without its output is detected from files, redispatched once per role, and the driver may stop a session over it (#385, #330, #380)
 
 **Decision:** `scripts/dispatch-health.mjs` classifies each in-flight dispatch from its record, its

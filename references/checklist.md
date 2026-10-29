@@ -36,6 +36,9 @@ APIs, CI, tests, docs and internal refactors do not render.
   replaced by `-` (`feat/csv export` → `feat-csv-export`). Scratch for the run: never
   committed. Where else a standalone run may record this path is
   `playbooks/verifying-on-device.md`'s rule, not this file's.
+- **Results report (in-cycle)** — `docs/<feature>/on-device-results.md`, beside the checklist, so
+  it derives from the `checklist:` path and needs no state-file row. `scripts/on-device-routing.mjs`
+  reads it there.
 
 ## Checklist header
 
@@ -157,3 +160,9 @@ The results report records each item's verdict verbatim from this set:
 
 Two markers qualify a verdict: `(auto: <evidence path>)` on a `structural` item the coordinator
 ticked, and `(confirmed from batch)` on a proposed verdict the human confirmed.
+
+Each report line opens with `#<n>`, the item's 1-based position in the checklist, which ledger
+decisions join on. A re-walk after a fix round keeps the line and rewrites its verdict to
+`passed (re-walk, round <n>)`, leaves it `FAILED`, or, for a fixed item with no `(auto)` tick and
+no observed failure under `auto-ok` or a delegated walk, writes `unverified (re-walk, round <n>)`
+with the reason: never `passed`.

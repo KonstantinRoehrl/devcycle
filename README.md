@@ -138,8 +138,8 @@ run `/clear` and then `/devcycle:continue`, so a cycle plays out as several shor
 rather than one long one.
 
 Execution can also walk its waves without you: when `/devcycle:continue` resumes at execution it
-asks whether to run them unattended (the `executionMode` setting only decides which answer comes
-first), then starts a driver that gives each wave a fresh session, watches it, and stops at the
+asks whether to run them unattended, unless the `executionMode` setting already says (`unattended`
+starts the driver with no question, `manual` walks them), then starts a driver that gives each wave a fresh session, watches it, and stops at the
 first thing that needs you — see [running execution unattended](docs/playbooks/executing-waves/unattended.md).
 A band above the prompt shows the run's progress without spending a model turn.
 

@@ -311,9 +311,9 @@ gated by `userConfig.crossModelReview`.
   or `both`. It is read from the cycle's `knobs:` line and is profile-independent, so it takes no `auto`.
 - `executionMode` (added 2026-10-13) is how `/devcycle:continue` runs the waves at execution start
   while the cycle has no `drive:` row: `ask`, the default, asks Start unattended or Walk the waves
-  manually; `manual` walks them in the session; `unattended` asks the same question with **Start
-  unattended** first, since an unattended run starts only on the user's answer in the session
-  (decision log, 2026-10-16). A recorded row outranks it, and it is `live`, so a mid-cycle change is never knob drift. It takes no `auto`.
+  manually; `manual` walks them in the session; `unattended` starts the driver with no question,
+  recorded `via=knob`, and skips the start confirm on later resumes; a run that stopped for a person
+  still asks (decision log, 2026-10-29). A recorded row outranks it for the mode, and it is `live`, so a mid-cycle change is never knob drift. It takes no `auto`.
 - `driveWatch` and `drivePlugins` (added 2026-10-25) shape an unattended run. `driveWatch` is how
   much of it the starting session relays: `end`, the default, only its end, while the hooks
   module's band shows progress; `wave`; or `all`. `drivePlugins` is which plugins its sessions load
