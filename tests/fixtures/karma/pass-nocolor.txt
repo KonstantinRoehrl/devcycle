@@ -1,0 +1,13 @@
+# devcycle-cmd: SPECS=spec/pass.spec.js npx karma start karma.conf.js --no-colors
+29 10 2026 18:31:44.058:INFO [karma-server]: Karma v6.4.4 server started at http://localhost:9876/
+29 10 2026 18:31:44.059:INFO [launcher]: Launching browsers ChromeHeadless with concurrency unlimited
+29 10 2026 18:31:44.062:INFO [launcher]: Starting browser ChromeHeadless
+29 10 2026 18:31:44.455:INFO [Chrome Headless 156.0.0.0 (Mac OS 10.15.7)]: Connected on socket 7oIRp_eJCyZg0xG-AAAA with id 38831095
+Chrome Headless 156.0.0.0 (Mac OS 10.15.7): Executed 0 of 4 SUCCESS (0 secs / 0 secs)
+[1A[2KChrome Headless 156.0.0.0 (Mac OS 10.15.7): Executed 1 of 4 SUCCESS (0 secs / 0.001 secs)
+[1A[2KChrome Headless 156.0.0.0 (Mac OS 10.15.7): Executed 2 of 4 SUCCESS (0 secs / 0.001 secs)
+[1A[2KChrome Headless 156.0.0.0 (Mac OS 10.15.7): Executed 3 of 4 SUCCESS (0 secs / 0.001 secs)
+[1A[2KChrome Headless 156.0.0.0 (Mac OS 10.15.7): Executed 4 of 4 SUCCESS (0 secs / 0.001 secs)
+[1A[2KChrome Headless 156.0.0.0 (Mac OS 10.15.7): Executed 4 of 4 SUCCESS (0.001 secs / 0.001 secs)
+TOTAL: 4 SUCCESS
+# exit 0

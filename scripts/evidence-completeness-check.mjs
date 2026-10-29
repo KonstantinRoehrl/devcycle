@@ -331,6 +331,28 @@ const isConvention = classPhrase.startsWith("convention");
 // `<n> failed` across its line break.
 const RUNNER_SUMMARY_RE =
   /(?:^|[#ℹ\s])(?:pass|fail)\s+\d+|\d+\s+(?:passed|failed)|tests?:.*\b(?:passed|failed)\b|\b(?:Passed|Failed)!\s+-\s+Failed:\s+\d+,\s+Passed:\s+\d+/im;
+// Karma prints SUCCESS / FAILED rather than pass/fail counts, wrapped in colour and cursor escapes
+// even when piped to a file, so the summary test reads an escape-stripped copy of the capture.
+const ANSI_ESCAPE_RE = /\x1b\[[0-?]*[ -\/]*[@-~]/g;
+const KARMA_TOTAL_RE = /^\s*TOTAL:\s+\d+\s+(?:SUCCESS|FAILED)\b/m;
+const KARMA_EXECUTED_RE = /Executed (\d+) of (\d+)(?: \(skipped (\d+)\))?([^\n]*)/g;
+
+// A Karma run's summary: its TOTAL line, or — the dots reporter prints none — its last Executed line
+// once that line is complete or reports a failure. Karma prints `Executed 0 of <m>` before any test
+// runs and one line per spec after it, so an earlier line, or a last one cut off mid-run, is none.
+function hasKarmaSummary(plain) {
+  if (KARMA_TOTAL_RE.test(plain)) return true;
+  const last = [...plain.matchAll(KARMA_EXECUTED_RE)].at(-1);
+  if (!last) return false;
+  const [, ran, total, skipped = "0", rest] = last;
+  return /\bFAILED\b/.test(rest) || (Number(ran) + Number(skipped) === Number(total) && /\bSUCCESS\b/.test(rest));
+}
+
+function hasRunnerSummary(capture) {
+  const plain = capture.replace(ANSI_ESCAPE_RE, "");
+  return RUNNER_SUMMARY_RE.test(plain) || hasKarmaSummary(plain);
+}
+
 const BEFORE_LINE_RE = /^-\s*Before:\s*(.*)$/gm;
 const AFTER_LINE_RE = /^-\s*After:\s*(.*)$/gm;
 
@@ -364,9 +386,33 @@ function captureHeaderOrExit(lineMatch, label) {
   }
   return { path: p, resolved, header: readCmdHeader(resolved) };
 }
-// #75: the before-capture and after-capture must carry the identical `# devcycle-cmd:` header.
-// Returns the shared header plus the resolved after path for the runner-summary check.
-function verifyCaptureHeaders(beforeM, afterM) {
+// #382/#391: a pair whose headers differ passes only as a declared narrowing — the before is the
+// task's gate, the after carries the scope the `- Narrowing:` line declares (references/evidence.md
+// § File-backed evidence); requireHeaderMatchesCmd then holds the after to cmd:. Returns the halves
+// of that relation the pair fails, none when it holds.
+function narrowedPairFailures(beforeHeader, afterHeader) {
+  const decl = narrowingDeclaration(text);
+  return [
+    ...(decl ? [] : ["no - Narrowing: line declared"]),
+    ...(gate ? [] : ["no gate resolves for the task (run with --task <id>)"]),
+    ...(gate && ![gate.cmd, gate.planGate].includes(beforeHeader) ? ["before is not the task's gate"] : []),
+    ...(decl && !afterHeader.includes(decl.scope) ? ["after does not carry the declared scope"] : []),
+  ];
+}
+function refuseUnequalHeaders(before, after, narrowable) {
+  if (before.header === after.header) return;
+  const failures = narrowable ? narrowedPairFailures(before.header, after.header) : ["a convention capture's before and after must be identical"];
+  if (!failures.length) return;
+  console.error(
+    `evidence-completeness-check: before/after captured with non-identical commands — ` +
+      `before: ${before.header} | after: ${after.header} — ${failures.join("; ")}`,
+  );
+  process.exit(1);
+}
+// #75: the before and after headers are identical, or form the declared narrowed pair (test classes
+// only). Returns the after header, the one held to cmd:, plus the resolved after path for the
+// runner-summary check.
+function verifyCaptureHeaders(beforeM, afterM, { narrowable = false } = {}) {
   const before = captureHeaderOrExit(beforeM, "before");
   const after = captureHeaderOrExit(afterM, "after");
   if (before.header === null || after.header === null) {
@@ -377,14 +423,8 @@ function verifyCaptureHeaders(beforeM, afterM) {
     );
     process.exit(1);
   }
-  if (before.header !== after.header) {
-    console.error(
-      `evidence-completeness-check: before/after captured with non-identical commands — ` +
-        `before: ${before.header} | after: ${after.header}`,
-    );
-    process.exit(1);
-  }
-  return { header: before.header, afterPath: after.path, afterResolved: after.resolved };
+  refuseUnequalHeaders(before, after, narrowable);
+  return { header: after.header, afterPath: after.path, afterResolved: after.resolved };
 }
 // #75 (cont.): agreeing with each other is not enough — a header narrower than the report's
 // declared cmd: is a partial-gate capture. references/evidence.md pins the capture's first
@@ -510,7 +550,8 @@ if (isConvention) {
 }
 
 // (a) test-class reports need a Before and an After line, the captures must share an
-//     identical header equal to cmd:, and the After file must carry a test-runner summary.
+//     identical header, or form the declared narrowed pair, with the after header equal to cmd:,
+//     and the After file must carry a test-runner summary.
 if (isTestClass) {
   const beforeM = text.matchAll(BEFORE_LINE_RE).next().value;
   const afterM = text.matchAll(AFTER_LINE_RE).next().value;
@@ -522,9 +563,9 @@ if (isTestClass) {
     console.error(`evidence-completeness-check: ${classPhrase} report has no "- After:" evidence line`);
     process.exit(1);
   }
-  const { header, afterPath, afterResolved } = verifyCaptureHeaders(beforeM, afterM);
+  const { header, afterPath, afterResolved } = verifyCaptureHeaders(beforeM, afterM, { narrowable: true });
   requireHeaderMatchesCmd(header);
-  if (!RUNNER_SUMMARY_RE.test(readFileSync(afterResolved, "utf8"))) {
+  if (!hasRunnerSummary(readFileSync(afterResolved, "utf8"))) {
     console.error(`evidence-completeness-check: after-evidence file ${afterPath} has no test-runner summary line`);
     process.exit(1);
   }

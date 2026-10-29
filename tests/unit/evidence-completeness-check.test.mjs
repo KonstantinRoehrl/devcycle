@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
@@ -846,7 +846,7 @@ test("dotnet build output with no test summary still fails", () => {
 
 // A checkout as the execution stage lays it out: ledger → plan → evidence → report, task 4. The
 // test context removes it once the test ends.
-function gatedCheckout(t, { cmd = "npm run gate", header = cmd, narrowing = null, extra = [], plan = true, gate = "npm run gate",
+function gatedCheckout(t, { cmd = "npm run gate", header = cmd, beforeHeader = header, narrowing = null, extra = [], plan = true, gate = "npm run gate",
   evidence = "red-green", reportClass = evidence.split(" ")[0], git = false } = {}) {
   const dir = makeTempDir("evidence-completeness-gate-");
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -860,7 +860,7 @@ function gatedCheckout(t, { cmd = "npm run gate", header = cmd, narrowing = null
     write("docs/plan.md", ["# P", "", `**Verification gate:** \`${gate}\``, "",
       "### Task 4: T", "**Files:**", "- Modify: a.mjs", `**Evidence:** ${evidence}`, "**Quality constraints:** none", "",
       "## Dispatch Map", "", "- Wave 1: Task 4", ""].join("\n"));
-  write(".devcycle/evidence/4-before.txt", `# devcycle-cmd: ${header}\nnot ok 1 - adds\n`);
+  write(".devcycle/evidence/4-before.txt", `# devcycle-cmd: ${beforeHeader}\nnot ok 1 - adds\n`);
   write(".devcycle/evidence/4-after.txt", `# devcycle-cmd: ${header}\n${NODE_SUMMARY}\n`);
   write(".devcycle/reports/4.md", ["## Task report", `- Evidence: ${reportClass} | cmd: ${cmd}`,
     "- Before: .devcycle/evidence/4-before.txt (exit 1)", "- After: .devcycle/evidence/4-after.txt (exit 0)",
@@ -1061,4 +1061,75 @@ test("a gate mismatch and an unbacked attribution are reported together, in one 
   assert.equal(res.status, 1);
   assert.match(res.stderr, /cmd: is not the task's gate command/);
   assert.match(res.stderr, /with no reproduction artifact/);
+});
+
+// #382: real Karma 6.4.4 captures (progress, dots, a focused run, --no-colors, a failing run).
+const karma = (name) => readFileSync(new URL(`../fixtures/karma/${name}.txt`, import.meta.url), "utf8");
+function karmaReport(capture) {
+  const cmd = capture.split("\n", 1)[0].replace(/^# devcycle-cmd: /, "");
+  const body = `- Evidence: green-green | cmd: ${cmd}\n- Before: before.txt (exit 0)\n- After: after.txt (exit 0)\n`;
+  return makeReportWithEvidence(body, capture.slice(capture.indexOf("\n") + 1));
+}
+
+for (const name of ["pass", "passdots", "focus", "pass-nocolor", "fail"])
+  test(`#382: a Karma ${name} capture carries a test-runner summary`, () => {
+    const { dir, file } = karmaReport(karma(name));
+    try {
+      const res = run(file);
+      assert.equal(res.status, 0, res.stderr);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+test("#382: a Karma capture cut off at its Executed 0 of 4 line, or mid-run, has no summary", () => {
+  const lines = karma("pass").split("\n");
+  for (const marker of ["Executed 0 of 4", "Executed 2 of 4"]) {
+    const cut = lines.slice(0, lines.findIndex((line) => line.includes(marker)) + 1).join("\n") + "\n";
+    const { dir, file } = karmaReport(cut);
+    try {
+      const res = run(file);
+      assert.equal(res.status, 1, marker);
+      assert.match(res.stderr, /has no test-runner summary line/, marker);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+// #382 × #391: the one before/after rule — identical headers, or a whole-gate before and a declared
+// narrowed after (references/evidence.md § File-backed evidence).
+const WHOLE = "node --test tests/unit/*.test.mjs";
+const MINE = "node --test tests/unit/mine.test.mjs";
+const SIBLING_RED = "sibling task 3's uncommitted edit reddens the whole gate";
+
+test("#382: a whole-gate before with a declared narrowed after passes", (t) => {
+  const { dir } = gatedCheckout(t, { gate: WHOLE, cmd: MINE, header: MINE, beforeHeader: WHOLE, narrowing: `${MINE} — ${SIBLING_RED}` });
+  const res = runIn(dir);
+  assert.equal(res.status, 0, res.stderr);
+});
+
+test("#382: every other narrowed pair is still refused, naming the half that failed", (t) => {
+  const pair = { gate: "npm run gate", cmd: "npm run gate:unit", header: "npm run gate:unit", beforeHeader: "npm run gate" };
+  for (const [name, opts, half, args] of [
+    ["no declaration", pair, /no - Narrowing: line declared/],
+    ["the after lacks the scope", { ...pair, narrowing: `npm run gate:other — ${SIBLING_RED}` }, /after does not carry the declared scope/],
+    ["the halves swapped", { gate: "npm run gate", cmd: "npm run gate", header: "npm run gate", beforeHeader: "npm run gate:unit", narrowing: `npm run gate:unit — ${SIBLING_RED}` }, /before is not the task's gate/],
+    ["no resolvable gate", { ...pair, plan: false, narrowing: `npm run gate:unit — ${SIBLING_RED}` }, /no gate resolves for the task/],
+    ["no --task", { ...pair, narrowing: `npm run gate:unit — ${SIBLING_RED}` }, /no gate resolves for the task/, []],
+    ["a convention report", { ...pair, evidence: "convention (`npm run gate`)", narrowing: `npm run gate:unit — ${SIBLING_RED}` }, /a convention capture's before and after must be identical/],
+  ]) {
+    const res = runIn(gatedCheckout(t, opts).dir, args);
+    assert.equal(res.status, 1, name);
+    assert.match(res.stderr, /before\/after captured with non-identical commands — before: .* \| after: .* — /, name);
+    assert.match(res.stderr, half, name);
+  }
+});
+
+test("#382: a declared narrowed after that differs from cmd: is still refused", (t) => {
+  const { dir } = gatedCheckout(t, { gate: "npm run gate", cmd: "npm run gate:unit --x", header: "npm run gate:unit", beforeHeader: "npm run gate",
+    narrowing: `npm run gate:unit — ${SIBLING_RED}` });
+  const res = runIn(dir);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /capture command differs from the declared cmd:/);
 });
