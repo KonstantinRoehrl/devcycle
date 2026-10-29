@@ -835,7 +835,7 @@ test("harvested: task-reviewer/owns-its-findings-file — the reviewer has Write
   assert.match(a, /^tools:.*\bWrite\b/m, "task-reviewer must grant Write to persist its findings file");
   assert.match(a, /\.devcycle\/findings\/<task-id>-round-<n>\.md/);
   const e = read("playbooks/executing-waves.md");
-  assert.match(e, /`missing-findings` → re-dispatch the reviewer for the same round, no verdict\s+acted on/);
+  assert.match(e, /`missing-findings`[^→]*→ re-dispatch the reviewer for the same round[\s\S]{0,200}?no verdict\s+acted on/);
 });
 
 test("harvested: fast-path/mini-cycle — the fast path keeps its evidence files and its one-reviewer floor", () => {

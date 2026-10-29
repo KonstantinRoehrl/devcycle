@@ -27,7 +27,7 @@ and playbooks/executing-waves.md, and every entry point whose closure cites them
 budget: surface-budget.json surfaceTotal 6541
 budget: context-budget.json commands/continue.md 69039
 budget: context-budget.json commands/cycle.md 78509
-budget: context-budget.json playbooks/executing-waves.md 113479
+budget: context-budget.json playbooks/executing-waves.md 113527
 budget: context-budget.json playbooks/planning-waves.md 74691
 budget: context-budget.json playbooks/profiling-sessions.md 41698
 budget: context-budget.json playbooks/receiving-review.md 115288

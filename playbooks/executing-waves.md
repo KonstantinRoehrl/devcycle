@@ -134,8 +134,8 @@ exit 2 or 3 a stop.
    and `gateCmd`.
    `accepted` → step 6. `rejected` → the findings path back to the implementer (step 3), then the
    next round's review. `missing-findings` (an absent or unparseable findings file, named by
-   `reason`) → re-dispatch the reviewer for the same round with that `reason` and the `expected`
-   form, no verdict acted on. `needs-user` → the user decides (driven: a `needs-user` stop).
+   `reason`) → re-dispatch the reviewer for the same round with that `reason` (and `expected`, the
+   verdict form, when `task-verdict.mjs` returned it), no verdict acted on. `needs-user` → the user decides (driven: a `needs-user` stop).
    Cap: 3 rounds per task; one round is one reviewer dispatch plus the implementer's fix pass, and a
    failed green gate rejects its round too. A task that reaches round 3 without a commit exits
    `exhausted-unresolved` — `task-verdict.mjs` or `task-commit.mjs` writes that status — and is
