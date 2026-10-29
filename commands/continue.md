@@ -33,7 +33,7 @@ without that line, skip this section. In drive mode:
   `nothing-to-commit`, `commit-failed` or `unproven-commit` —, a human-required step a `note:` names,
   an upstream escalation at `thorough`), with `--task` when the gate is one task's; any other gate, `needs-user`.
 - In the first driven session, the one whose `drive.optInLogged` is false, append
-  `- [<stamp>] task=drive event=user-decision outcome=unattended (model=<drive.model>) ref=.devcycle/state.md`
+  `- [<stamp>] task=drive event=user-decision outcome=unattended (model=<drive.model>, via=<drive.via>) ref=.devcycle/state.md`
   to the ledger right after executing-waves' pre-flight writes its preamble, before any dispatch.
 - At a wave boundary, or at the stage end (`stage: branch-review`), once the handoff block is
   emitted, end the session and never enter the next stage: in headless mode, ending it is the clear.

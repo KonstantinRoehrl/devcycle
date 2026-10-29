@@ -57,8 +57,9 @@ loads, never in a file a stage opens with Read — so knobs reach stages through
   `subagentBudget`, which the hooks module (`hooks/devcycle-mod.mjs`) takes from the `options`
   Claude Code hands its `register`, never from the `knobs:` line, which still prints it for the
   state file; and `executionMode`, `driveWatch` and `drivePlugins`, which `scripts/wave-setup.mjs`
-  takes from the fresh line its `--knobs` argument carries — `executionMode` only while the state
-  file has no `drive:` row.
+  takes from the fresh line its `--knobs` argument carries — `executionMode` choosing the run's mode
+  only while the state file has no `drive:` row, and whether a start is confirmed throughout
+  (`references/drive.md` § Drive actions).
 - **Drift notice.** Values are global, as `/plugin configure` stores them — there is no per-repo
   value. Where the state file's `configured:` line records a KEY=VALUE list, `/devcycle:cycle`
   and `/devcycle:continue` rerun their final resolver invocation with

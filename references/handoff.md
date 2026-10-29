@@ -144,8 +144,8 @@ are left, and how urgent the run feels are not exceptions; they are the reasons 
 written down rather than left to judgment. `/clear` ends the session by design; state the
 `/devcycle:continue` resume path in the same message you halt on.
 
-**Unattended execution.** On a cycle opted in at execution start by the user's answer there, a
-driver started by a `/devcycle:continue` the user invoked,
+**Unattended execution.** On a cycle opted in at execution start — by the user's answer there, or
+by `executionMode=unattended` (`via=knob`) — a driver started by a `/devcycle:continue` the user invoked,
 including its automatic restart of a resumable end, counts as the user at the wave → wave boundary
 and nowhere else (`docs/decisions/README.md`, 2026-10-13 — Unattended execution: chosen at
 execution start, started by /devcycle:continue): every wave still runs in a fresh session, and a

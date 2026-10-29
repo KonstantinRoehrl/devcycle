@@ -141,7 +141,7 @@
         "manual",
         "unattended"
       ],
-      "description": "How /devcycle:continue runs a cycle's waves at the start of its execution stage, while the cycle has recorded no choice. One of: ask (asks Start unattended or Walk the waves manually), manual (walks the waves in the session, no question), unattended (asks the same question with Start unattended first and recommended: an unattended run always starts on your answer in the session). A cycle's recorded choice outranks a later change. Profile-independent. Default: ask."
+      "description": "How /devcycle:continue runs a cycle's waves at the start of its execution stage. One of: ask (asks Start unattended or Walk the waves manually), manual (walks the waves in the session, no question), unattended (starts the unattended driver, no question, and resumes it without a confirm; a run that stopped for a person still asks). A cycle's recorded choice decides unattended or walked; the live value decides whether a start is confirmed. Profile-independent. Default: ask."
     },
     "driveWatch": {
       "type": "string",

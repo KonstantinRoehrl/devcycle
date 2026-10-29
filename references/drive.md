@@ -18,9 +18,9 @@ action, answer the gates § Execution resume names first, then act on `drive.act
 | `drive.action` | What this session does |
 | --- | --- |
 | `attach` | A driver is running this cycle (`drive.lock` names its pid and log). Run steps 4–6 of the start path, with `--follow` given no `--since`, so it starts at the log's current end. |
-| `ask` | One AskUserQuestion — how execution runs: **Start unattended** · **Walk the waves manually**, with **Start unattended** marked recommended when `drive.recommend` is `unattended`. Write the row from the answer with `via=answer`, then run the start path or act as `manual`. |
-| `start` | The row is `auto`. Unless this session already answered a start question, first ask the start confirm, ONE AskUserQuestion: **Resume unattended** · **Walk the waves manually** · **Leave it stopped**, the last two as § Answering a stopped run says. Then run the start path. |
-| `gate` | The last run stopped for a person: ask the stopped run's question; unless the answer left unattended, write the `auto` row first when the state file has none, then run the start path. |
+| `ask` | One AskUserQuestion — how execution runs: **Start unattended** · **Walk the waves manually**. Write the row from the answer with `via=answer`, then run the start path or act as `manual`. |
+| `start` | When `drive.writeRow` is `auto`, first write the `auto` row with `via=knob`. Then, when `drive.confirm` is true and this session has not already answered a start question, ask the start confirm, ONE AskUserQuestion: **Resume unattended** · **Walk the waves manually** · **Leave it stopped**, the last two as § Answering a stopped run says. Then run the start path. |
+| `gate` | The last run stopped for a person. A settled stop with `drive.confirm` false asks nothing: write the `auto` row with `via=knob` when `drive.writeRow` is `auto`, then run the start path. Otherwise ask the stopped run's question; unless the answer left unattended, write the `auto` row first when the state file has none, then run the start path. |
 | `manual` | Write a `manual` row with `via=knob` when `drive.writeRow` is `manual`, then walk the waves in this session: the rest of § Execution resume, as without a driver. |
 | `none` | A driven session (`--drive`): `commands/continue.md` § Drive mode governs, and nothing here applies. |
 
@@ -38,19 +38,17 @@ load each only when its action needs it.
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/depth-probe.mjs" --json` prints, never self-report. An `effort`
 of `null` stops the start: write no row, and tell the user the `effortProblem` it prints beside it.
 A row without `effort=` stays valid: the driver resolves it at each start and never writes it back.
-`<stamp>` is `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`. `via=answer` records the user's
-answer; `via=knob` appears only on a `manual` row the
-`executionMode` knob wrote through `drive.writeRow`. No knob writes an `auto` row: an unattended run
-starts only on the user's answer in this session (`docs/decisions/README.md`, 2026-10-16 — An
-unattended start needs the user's answer in the session), and an `auto … via=knob` row written
-before then stays valid. Only these write the row: `ask`'s answer; an answer that starts the driver
-on a state file with no `auto` row first writes the `auto` row with `via=answer`
-(**Resume unattended**, **Restart unattended**); the `manual`
-action; and **Walk the waves manually** — at a start confirm, at a stopped run, or when the start's
-sandbox approval is refused, which rewrites an `auto` row to `manual`. Write it by rewriting the
-state file in full with the row added; every other rewrite carries it forward
-(`references/resume.md` § The state file). A row outranks the knob: once it exists, a changed
-`executionMode` no longer decides.
+`<stamp>` is `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`. `via=answer` records the user's answer; `via=knob` records that the `executionMode` knob wrote the
+row through `drive.writeRow`: a `manual` row, or an `auto` row when the knob is `unattended`
+(`docs/decisions/README.md`, 2026-10-29 — The unattended knob starts the driver). Only these write
+the row: `drive.writeRow`; `ask`'s answer; an answer that starts the driver on a state file with no
+`auto` row first writes the `auto` row with `via=answer` (**Resume unattended**, **Restart
+unattended**); and **Walk the waves manually** — at a start confirm, at a stopped run, or when the
+start's sandbox approval is refused, which rewrites an `auto` row to `manual`. Write it by rewriting
+the state file in full with the row added; every other rewrite carries it forward
+(`references/resume.md` § The state file). A row decides whether the waves run unattended: once it
+exists, a changed `executionMode` no longer changes that, but its live value still sets
+`drive.confirm`.
 
 ## Answering a stopped run
 
@@ -62,7 +60,7 @@ left unhandled, so the next `/devcycle:continue` asks again.
 
 | reason | The question, and how its answer is recorded |
 | --- | --- |
-| `drive.gate.settled` true: `knob-drift`, `foreign-state`, `resume-check`, `branch`, `depth-at-start`, `no-driver`, `not-opted-in` | Settled: this session's own gates just answered it, so the question is § Drive actions' start confirm, skipped when this session already answered a start question. Then run the start path. |
+| `drive.gate.settled` true: `knob-drift`, `foreign-state`, `resume-check`, `branch`, `depth-at-start`, `no-driver`, `not-opted-in` | Settled: this session's own gates just answered it, so the question is § Drive actions' start confirm, skipped when this session already answered a start question or `drive.confirm` is false. Then run the start path. |
 | `needs-user` with `drive.gate.pendingDecision` set | The `pendingDecision` question of § Execution resume, asked here, or first in a manual walk; record `task=<n> event=user-decision outcome=task-<n>-review: <answer>`, which `references/resume.md` § Resuming a wave's per-task position reads as settling it. |
 | `needs-user` or `sweep-fallback`, `task` set otherwise — a blocked implementer, a retry cap, a refused commit, a human-required step, a sweep fallback | The stop's `detail` as the question; record `task=<n> event=user-decision outcome=<answer>`. |
 | `needs-user` or `sweep-fallback` with no `task` | The stop's `detail` as the question; record `task=drive event=user-decision outcome=<answer>`. |
@@ -142,8 +140,8 @@ When the `--wait` task returns, stop any follow monitor and act on the `next` it
 - `resume-stage` — the run left execution: emit the handoff into the stage the state file names, then the same command.
 - any other — rerun `wave-setup.mjs` as § Execution resume runs it and act on its new
   `drive.action`. A resumable end restarts through the start path, with no start confirm when this
-  session answered a start question and with one when it only attached. A stop for a person is a
-  `gate`; when `drive.gate.settled` is false, first run
+  session answered a start question or `drive.confirm` is false, and with one otherwise when it
+  only attached. A stop for a person is a `gate`; when `drive.gate.settled` is false, first run
   `node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state .devcycle/state.md --ready --action stopped --reason '<one apostrophe-free line you write from drive.gate.detail>'`
   (omit `--reason` when `drive.gate.detail` is empty), then read
   `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and relay the `notify:` lines as it says. After a
