@@ -140,34 +140,38 @@ const liveKnobs = (knobsLine) => resolveKnobs(knobsLine ? parseRecordedLine(knob
 function driveStatus(root, statePath, stateText, lines, knobsLine) {
   const row = field(stateText, "drive") ?? "";
   const model = row.match(/\bmodel=(\S+)/)?.[1];
+  const via = row.match(/\bvia=(\S+)/)?.[1];
   const live = readLiveDriveLock(root);
   const holder = live && realPath(resolve(root, live.state ?? "")) === realPath(statePath) ? live : null;
   const optInLogged = lines.some((l) => l.task === "drive" && l.event === "user-decision");
   const lock = holder ? { pid: holder.pid, log: holder.log } : null;
   const { executionMode: mode, driveWatch: watch, drivePlugins: plugins } = liveKnobs(knobsLine);
   return {
-    drive: { opted: /^auto\b/.test(row), ...(model ? { model } : {}), lock, optInLogged, row: row.match(/^(auto|manual)\b/)?.[1] ?? null,
+    drive: { opted: /^auto\b/.test(row), ...(model ? { model } : {}), ...(via ? { via } : {}), lock, optInLogged, row: row.match(/^(auto|manual)\b/)?.[1] ?? null,
       mode, watch, plugins },
     tokenHash: holder?.tokenHash ?? null,
   };
 }
 
-// A recorded row is the cycle's record and outranks the knob. With no row, `manual` writes its own row
-// and every other value asks: an unattended start needs the user's answer in this session's transcript
-// (docs/decisions/README.md, 2026-10-16), so the `unattended` knob only puts that answer first, and a
-// driver end that needs an answer is that question. A stop on the task whose review loop is pending is
-// that decision: the gate carries it, so it is asked once.
+// A recorded row decides whether the waves run unattended or are walked; with no row the live knob
+// decides: `manual` writes a `manual` row, `unattended` writes an `auto` row and starts the driver
+// (docs/decisions/README.md, 2026-10-29), `ask` asks. Under the unattended knob a start asks no
+// confirm, and neither does a stop this session's own gates settled; a stop that waits on a person
+// is always asked. A stop on the task whose review loop is pending is that decision: the gate
+// carries it, so it is asked once.
 function driveAction({ row, mode }, driver, pending) {
   const manual = row === "manual" || (row === null && mode === "manual");
-  if (manual) return { action: "manual", writeRow: row === null ? "manual" : null, recommend: null, gate: null };
-  const unattended = row === "auto" || mode === "unattended";
-  if (unattended && driver.next === "answer-gate") {
+  if (manual) return { action: "manual", writeRow: row === null ? "manual" : null, confirm: null, gate: null };
+  const knob = mode === "unattended";
+  if ((row === "auto" || knob) && driver.next === "answer-gate") {
     const { reason, detail, task } = driver;
+    const settled = SETTLED_REASONS.has(reason);
     const pendingDecision = task !== null && task === pending?.task ? pending : null;
-    return { action: "gate", writeRow: null, recommend: null, gate: { reason, detail, task, settled: SETTLED_REASONS.has(reason), pendingDecision } };
+    const writeRow = settled && knob && row === null ? "auto" : null;
+    return { action: "gate", writeRow, confirm: settled ? !knob : null, gate: { reason, detail, task, settled, pendingDecision } };
   }
-  if (row === null) return { action: "ask", writeRow: null, recommend: mode === "unattended" ? "unattended" : null, gate: null };
-  return { action: "start", writeRow: null, recommend: null, gate: null };
+  if (row === null && !knob) return { action: "ask", writeRow: null, confirm: null, gate: null };
+  return { action: "start", writeRow: row === null ? "auto" : null, confirm: !knob, gate: null };
 }
 
 function readPlan(root, plan) {
@@ -312,7 +316,7 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   const map = mapPositions(root, planText, lines, ledger);
   Object.assign(result, { overview: overviewOf(map), ledgerSlot: slot });
   const decided = (decision) => ({ ...result.drive, ...decision, result: driver });
-  if (attach) return { ...result, drive: decided({ lock: { pid: driver.pid, log: driver.log }, action: "attach", writeRow: null, recommend: null, gate: null }) };
+  if (attach) return { ...result, drive: decided({ lock: { pid: driver.pid, log: driver.log }, action: "attach", writeRow: null, confirm: null, gate: null }) };
   if (!checked.ok) return stop("resume-check", checked.errors.join("; "));
   if (state.stage !== "execution") return stop("resume-check", `the state file is at stage ${state.stage}, not execution`);
 
@@ -330,7 +334,7 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   }
 
   // Drive mode: every gate continue would ask about is a stop (spec 4.B.3).
-  result.drive = decided({ action: "none", writeRow: null, recommend: null, gate: null });
+  result.drive = decided({ action: "none", writeRow: null, confirm: null, gate: null });
   if (result.knobDrift.length && !state.knobsDeclined) return stop("knob-drift", result.knobDrift.join("; "));
   if (result.branch.verdict !== "ok")
     return stop("branch", `recorded ${result.branch.recorded ?? "none"}, current ${result.branch.current ?? "unknown"}: ${result.branch.verdict}`);
