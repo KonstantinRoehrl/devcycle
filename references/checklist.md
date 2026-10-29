@@ -163,4 +163,6 @@ ticked, and `(confirmed from batch)` on a proposed verdict the human confirmed.
 
 Each report line opens with `#<n>`, the item's 1-based position in the checklist, which ledger
 decisions join on. A re-walk after a fix round keeps the line and rewrites its verdict to
-`passed (re-walk, round <n>)`, or leaves it `FAILED`.
+`passed (re-walk, round <n>)`, leaves it `FAILED`, or, for a fixed item with no `(auto)` tick and
+no observed failure under `auto-ok` or a delegated walk, writes `unverified (re-walk, round <n>)`
+with the reason: never `passed`.

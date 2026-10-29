@@ -15,8 +15,9 @@ resolved default branch). Either signal firing clamps the **effective policy** t
 handoff's `Git policy:` line.
 
 Before acting on any policy, finish checks the on-device results: a `FAILED` item that was neither
-re-walked `passed` nor waived or accepted sends the cycle back to on-device. Waived and accepted
-items are listed as carry-overs and, when a PR is opened, under a **Known on-device issues**
+re-walked `passed` nor waived or accepted sends the cycle back to on-device, as does a `FAILED` line
+too malformed to carry a `#<n>` (finish asks for it rewritten). Waived and accepted items, with their
+evidence path, and any unverified re-walk are listed as carry-overs and, when a PR is opened, under a **Known on-device issues**
 heading in its description.
 
 Acting on the effective policy is the same three-way split as the intent it clamps from:

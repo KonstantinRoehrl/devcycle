@@ -93,6 +93,8 @@ column takes exactly three values — `Continue`, `Clear + /devcycle:continue`, 
 | fast-path → finish | Clear + `/devcycle:continue` | branch, what changed | the implementation conversation |
 | sweep → finish | Clear + `/devcycle:continue` | branch, sweep report path | per-file sweep output |
 | on-device → finish | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |
+| on-device → on-device (Fix) | Fresh session | n/a — clears | n/a — clears |
+| finish → on-device (the finish guard returns the cycle) | Clear + `/devcycle:continue` | n/a — clears | n/a — clears |
 | receiving-review → (end), in-cycle | Continue | — | — |
 | receiving-review → brainstorm (reopen recommended) | Clear + `/devcycle:continue` | `.devcycle/reopen-request.md` | the triage and reply conversation |
 | finish → (end) | Continue | — | — |

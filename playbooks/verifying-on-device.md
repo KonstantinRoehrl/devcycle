@@ -115,8 +115,11 @@ words and markers:
 - #<n> <item>: unverified — <why no one could observe it>
 ```
 
-`<n>` is the item's 1-based position in the checklist. Write the report to the path
-`references/checklist.md` § Paths pins.
+`<n>` is the item's 1-based position in the checklist. Write every `FAILED` line in exactly that
+shape, the word plain `FAILED` and the symptom ending `(evidence: <path>)` when the driver
+captured one: `on-device-routing.mjs` joins on it. In-cycle, write the report to the path
+`references/checklist.md` § Paths pins; a standalone run writes no results file and reports the
+same lines in its handoff (§ Standalone runs).
 
 ## The gate
 
@@ -165,20 +168,27 @@ Any `fix` keeps `stage: on-device` and ends the session with a handoff whose `Ca
 `Start the fresh session on <model>.`, `<model>` being what `branchReviewModel` resolves to per
 `references/model-routing.md`, the tier branch review used.
 
-**A fix round.** Log `task=on-device event=review-round outcome=round <round + 1> ref=<the spec: path>`
-before any dispatch. Each `toFix` item goes to a fresh `devcycle:implementer` dispatch with task id
-`on-device-fix-<round>-<n>`; its brief carries the item, the observed symptom, the evidence path,
+**A fix round.** `<round>` is the number logged on this round's line, the script's `round` plus one,
+so the first round's ids are `on-device-fix-1-<n>`. Log
+`task=on-device event=review-round outcome=round <round> ref=<the spec: path>` before any dispatch.
+Each `toFix` item goes to a fresh `devcycle:implementer` dispatch with task id
+`on-device-fix-<round>-<n>`, `<n>` being the item's `#<n>`; its brief carries the item, the observed symptom, the evidence path,
 the spec path and an `**Evidence:**` class line, and never asks it to commit. Commit each fix on
-receipt, then review `<pre-fix HEAD>..<fix commit>` with the engine and depth that
+receipt, following `references/commit-convention.md`, then review `<pre-fix HEAD>..<fix commit>` with the engine and depth that
 `.devcycle/reports/branch-review.md`'s `Engine:` and `Depth:` lines record (`single` when the file
 is missing), fixing a blocking finding inside the same round. Relaunch the app (step 1's `stop`,
 `start`, `ready`) and re-walk only the fixed items, under the same gate as the first walk; each keeps
-its report line, now `passed (re-walk, round <n>)` or still `FAILED`.
+its report line, now `passed (re-walk, round <round>)`, still plain `FAILED` (the round lives in
+the ledger, not the line), or, under `auto-ok` or a delegated walk, `unverified (re-walk, round
+<round>) — <why no one could observe it>` for a fixed item with no `(auto)` tick and no observed
+failure. That is no longer `FAILED`, so it leaves finish's guard; it is never `passed`, and a
+`needs-eyes` item is `passed` only on a human verdict.
 
 **Loop exit.** Write `.devcycle/findings/on-device-fix-status.md` in `references/loops.md`'s shape —
-never a resume input: `resolved` once every fixed item re-walked `passed`. With `atCap` and items
+never a resume input: `resolved` once every fixed item re-walked `passed`; an `unverified` re-walk is carried residue, so
+`exhausted-with-residue` with the same `carried-to`. With `atCap` and items
 still `FAILED`, ask the question again for those only, offering waive or accept and, only on the
-user's explicit grant, more rounds, recorded as `task=on-device event=user-decision outcome=review-cap extended to <n>`;
+user's explicit grant, more rounds, recorded as `task=on-device event=user-decision outcome=review-cap extended to <n> ref=<the spec: path>`;
 accepting residue writes `exhausted-with-residue` with `carried-to: finish carry-overs + PR body`.
 
 ## Standalone runs
@@ -210,5 +220,5 @@ same contents:
   surface)` when this stage judges itself not applicable. Evidence the driver captured
   (DOM dumps, console output, screenshots) lives under `.devcycle/evidence/`.
 - `Carry-overs:` waived and accepted failed items with severity and the results report path,
-  unverified residue under `auto-ok`, the skip reason when skipped, or `none`.
+  unverified residue under `auto-ok` (re-walked fixes included), the skip reason when skipped, or `none`.
 - `Compaction hint:` n/a — clears. Failed items already carry via `Carry-overs:`.

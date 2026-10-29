@@ -43,7 +43,9 @@ ticked `(auto)` and every item is yours. The handoff then differs by path only i
 in-cycle, once every `FAILED` item is waived or accepted (or none failed), it sets
 `.devcycle/state.md`'s `stage: finish` field so the run resumes there. Otherwise it asks whether
 to fix, waive or accept each one. A fix ends the session, and the next one — on the branch-review
-model — fixes, reviews and re-walks only those items;
+model — fixes, reviews and re-walks only those items. A re-walk ends `passed`, still `FAILED`, or,
+under `auto-ok` or a delegated walk, `unverified` for a fix no one could observe (carried as residue,
+never `passed`); a `FAILED` line ends with `(evidence: <path>)` when the driver captured one;
 standalone, it writes no state file at all, since an existing one belongs to someone else's
 in-flight cycle.
 

@@ -23,7 +23,7 @@
   },
   "on-device": {
     "entry": "playbooks/verifying-on-device.md",
-    "note": "its walkthrough is a human-required step: the human answers the driver's batch and every needs-eyes item when onDeviceGate is auto, every item when it is human-required, and only observed failures when it is auto-ok or the walk was delegated; FAILED items awaiting a decision or a fix round resume straight into them, with no re-walk"
+    "note": "its walkthrough is a human-required step: the human answers the driver's batch and every needs-eyes item when onDeviceGate is auto, every item when it is human-required, and only observed failures when it is auto-ok or the walk was delegated; FAILED items awaiting a decision (the routing question: fix, waive or accept) or a fix round (a fresh session on the branch-review model) resume straight into them, with no re-walk"
   },
   "fast-path": { "entry": "playbooks/taking-the-fast-path.md", "note": "re-enter through its Resume section" },
   "sweep": { "entry": "playbooks/sweeping-mechanical-changes.md", "note": "re-enter through its Resume section" },

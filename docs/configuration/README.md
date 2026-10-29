@@ -70,7 +70,7 @@ passed) and prints one `knobs:` line; each stage reads its values from that line
 cycle the state file keeps a `- knobs:` copy, and `/devcycle:continue` asks before applying a
 value you changed mid-cycle; a "keep" holds until you change the value again. The exceptions are
 `subagentBudget`, whose global value the hooks module reads; `executionMode`, whose fresh value
-`/devcycle:continue` reads at execution start until the cycle records its choice; and `driveWatch`
+`/devcycle:continue` reads at execution start and whenever it decides whether a start is confirmed; and `driveWatch`
 and `drivePlugins`, whose fresh values it reads each time it starts an unattended run: it asks
 about none of them, and a "keep" cannot hold them. Values are
 global, as `/plugin configure` stores them: a repo's old `configured:` values are shown once as a
@@ -100,7 +100,7 @@ and silently runs every knob at its fallback. [`docs/platform-notes.md`](../plat
 | `learnSessionCap` | How many sessions one `/devcycle:learn` run may mine | integer `1` or more (`0` is refused, not a no-op run) | `100` |
 | `subagentBudget` | What devcycle's hooks module does with a subagent past its context budget | `off` / `warn` / `enforce` | `warn` (from 15% of its window, a note on its next tool result and every fifth after; `enforce` also refuses reads at 20%) |
 | `handoffNotification` | Whether devcycle notifies you when a handoff is safe to clear and when an unattended run stops for you | `off` / `terminal` / `push` / `both` | `off` (`terminal` goes through Claude Code's own notification channel and, like `both`'s terminal half, does nothing on a Claude Code build without `$.ui.notify`; `push` sends a push notification where the session can) |
-| `executionMode` | How `/devcycle:continue` runs the waves at execution start, until the cycle records its choice | `ask` / `manual` / `unattended` | `ask` (asks Start unattended or Walk the waves manually; `manual` walks them in the session; `unattended` starts the driver with no question and resumes it without a confirm; a run that stopped for you still asks) |
+| `executionMode` | How `/devcycle:continue` runs the waves at execution start; once the cycle records its choice, the live value still decides whether a start is confirmed | `ask` / `manual` / `unattended` | `ask` (asks Start unattended or Walk the waves manually; `manual` walks them in the session; `unattended` starts the driver with no question and resumes it without a confirm; a run that stopped for you still asks) |
 | `driveWatch` | How much of an unattended run the session that started it relays to you; each relayed line costs a model turn | `end` / `wave` / `all` | `end` (only the run's end, while the band above the prompt shows progress; `wave` adds session starts, finished waves, waits and stops; `all` adds every task outcome) |
 | `drivePlugins` | Which plugins an unattended run's sessions load besides devcycle and superpowers; they start with no MCP servers | `none` / `all` / comma-separated plugin names | `none` (`all` gives them every plugin and MCP server your own sessions load) |
 
