@@ -9,7 +9,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { parseLedgerLine } from "../../scripts/task-ledger.mjs";
-import { DELEGATED_WALK, failedItems, itemDecisions, resultsPathFor, routing } from "../../scripts/on-device-routing.mjs";
+import { DELEGATED_WALK, failedItems, itemDecisions, malformedLines, resultsPathFor, routing } from "../../scripts/on-device-routing.mjs";
 
 const SPEC = "docs/superpowers/specs/2026-10-29-x-design.md";
 const REPORT = [
@@ -20,21 +20,54 @@ const REPORT = [
   "- #4 Dark mode keeps contrast: FAILED — grey on grey — severity: low",
   "- #5 Totals row aligns: passed (re-walk, round 1) — aligned now",
 ].join("\n");
+const CHECKLIST = "docs/x/on-device-checklist.md";
+const RESULTS = resultsPathFor(CHECKLIST);
 const line = (task, event, outcome, ref = SPEC) => `- [2026-10-29T10:00:00Z] task=${task} event=${event} outcome=${outcome} ref=${ref}`;
 const entries = (...lines) => lines.map(parseLedgerLine);
 
 test("failedItems reads only FAILED lines, with ordinal, symptom and severity", () => {
   assert.deepEqual(failedItems(REPORT).map((i) => [i.n, i.severity, i.symptom]),
     [[2, "medium", "the page is blank"], [3, "high", "the toast says \"error\""], [4, "low", "grey on grey"]]);
-  assert.deepEqual(failedItems("- Export: FAILED — no ordinal — severity: high\nnot a line"), [], "a line without #<n> is ignored, never fatal");
+});
+
+test("failedItems fails closed: near-variants of the FAILED line still parse, so they are asked about", () => {
+  const variants = {
+    "- #6 Retry works: FAILED (re-walk, round 1) — still blank — severity: high": ["high", "(re-walk, round 1) — still blank — severity: high"],
+    "- #7 Save works: FAILED — nothing saved — severity: High": ["high", "— nothing saved — severity: High"],
+    "- #8 Print works: FAILED — cut off — severity: critical": ["critical", "— cut off — severity: critical"],
+    "- #9 Undo works: FAILED - no effect - severity: medium": ["medium", "- no effect - severity: medium"],
+    "- #10 Zoom works: failed — jumps — severity: low": ["low", "— jumps — severity: low"],
+    "- #11 Menu opens: FAILED — never opens": ["unknown", "— never opens"],
+  };
+  for (const [text, [severity, symptom]] of Object.entries(variants)) {
+    const [item, ...rest] = failedItems(text);
+    assert.deepEqual([rest.length, item?.severity, item?.symptom], [0, severity, symptom], text);
+  }
+  assert.deepEqual(failedItems("- #6 Retry works: FAILED (re-walk, round 1) — still blank — severity: high").map((i) => [i.n, i.text]), [[6, "Retry works"]]);
+  const r = routing({ resultsText: Object.keys(variants).join("\n"), checklist: CHECKLIST, specPath: SPEC, cap: 3, entries: [] });
+  assert.deepEqual(r.undecided, [6, 7, 8, 9, 10, 11], "every variant reaches the routing question");
+});
+
+test("failedItems: a passed line that mentions FAILED later in its prose is not a failed item", () => {
+  assert.deepEqual(failedItems("- #3 Toast names the field: passed — it FAILED earlier, now fixed"), []);
+  assert.deepEqual(failedItems("- #3 Toast names the field: passed (re-walk, round 1) — was FAILED: now fixed").length, 0);
+});
+
+test("failedItems: a FAILED line with no ordinal is reported as malformed, never dropped", () => {
+  const text = "- Export: FAILED — no ordinal — severity: high\nnot a line\n- #1 ok: passed — fine\n* Other: failed — nope";
+  assert.deepEqual(malformedLines(text), ["- Export: FAILED — no ordinal — severity: high", "* Other: failed — nope"]);
+  assert.deepEqual(failedItems(text), [], "a line without #<n> has no item to decide on");
+  const r = routing({ resultsText: text, checklist: CHECKLIST, specPath: SPEC, cap: 3, entries: [] });
+  assert.equal(r.malformed.length, 2);
+  assert.deepEqual(routing({ resultsText: REPORT, checklist: CHECKLIST, specPath: SPEC, cap: 3, entries: [] }).malformed, []);
 });
 
 test("itemDecisions keeps the latest decision per item and parses a waive reason", () => {
   const d = itemDecisions(entries(
-    line("on-device", "user-decision", "failed-item #2 Empty state shows a hint: fix"),
-    line("on-device", "user-decision", "failed-item #2 Empty state shows a hint: waive (copy lands in R31: tracked)"),
-    line("on-device", "user-decision", "failed-item #3 Error toast names the field: accept"),
-    line("branch", "user-decision", "failed-item #4 not on-device: accept"),
+    line("on-device", "user-decision", "failed-item #2 Empty state shows a hint: fix", RESULTS),
+    line("on-device", "user-decision", "failed-item #2 Empty state shows a hint: waive (copy lands in R31: tracked)", RESULTS),
+    line("on-device", "user-decision", "failed-item #3 Error toast names the field: accept", RESULTS),
+    line("branch", "user-decision", "failed-item #4 not on-device: accept", RESULTS),
   ));
   assert.deepEqual(d.get(2), { decision: "waive", reason: "copy lands in R31: tracked" });
   assert.deepEqual(d.get(3), { decision: "accept", reason: null });
@@ -42,9 +75,9 @@ test("itemDecisions keeps the latest decision per item and parses a waive reason
 });
 
 test("routing: undecided items block, fix items run a round, waived and accepted ones are carried", () => {
-  const r = routing({ resultsText: REPORT, specPath: SPEC, cap: 3, entries: entries(
-    line("on-device", "user-decision", "failed-item #2 Empty state shows a hint: fix"),
-    line("on-device", "user-decision", "failed-item #3 Error toast names the field: accept"),
+  const r = routing({ resultsText: REPORT, checklist: CHECKLIST, specPath: SPEC, cap: 3, entries: entries(
+    line("on-device", "user-decision", "failed-item #2 Empty state shows a hint: fix", RESULTS),
+    line("on-device", "user-decision", "failed-item #3 Error toast names the field: accept", RESULTS),
   ) });
   assert.deepEqual([r.undecided, r.toFix, r.carried.map((c) => [c.n, c.decision])], [[4], [2], [[3, "accept"]]]);
   assert.deepEqual([r.round, r.cap, r.atCap, r.delegated], [0, 3, false, false]);
@@ -53,19 +86,33 @@ test("routing: undecided items block, fix items run a round, waived and accepted
 test("routing: the round counts this spec's on-device review-round lines; at the cap a fix item is undecided again", () => {
   const rounds = [line("on-device", "review-round", "round 1"), line("on-device", "review-round", "round 2"),
     line("on-device", "review-round", "round 1", "docs/superpowers/specs/other.md"), line("branch", "review-round", "round 1 (single)")];
-  const fix = line("on-device", "user-decision", "failed-item #2 Empty state shows a hint: fix");
-  const atCap = routing({ resultsText: "- #2 Empty state shows a hint: FAILED — blank — severity: medium", specPath: SPEC, cap: 2, entries: entries(fix, ...rounds) });
+  const fix = line("on-device", "user-decision", "failed-item #2 Empty state shows a hint: fix", RESULTS);
+  const atCap = routing({ resultsText: "- #2 Empty state shows a hint: FAILED — blank — severity: medium", checklist: CHECKLIST, specPath: SPEC, cap: 2, entries: entries(fix, ...rounds) });
   assert.deepEqual([atCap.round, atCap.atCap, atCap.undecided, atCap.toFix], [2, true, [2], []]);
-  const extended = routing({ resultsText: "- #2 Empty state shows a hint: FAILED — blank — severity: medium", specPath: SPEC, cap: 2,
+  const extended = routing({ resultsText: "- #2 Empty state shows a hint: FAILED — blank — severity: medium", checklist: CHECKLIST, specPath: SPEC, cap: 2,
     entries: entries(fix, ...rounds, line("on-device", "user-decision", "review-cap extended to 4")) });
   assert.deepEqual([extended.cap, extended.atCap, extended.toFix], [4, false, [2]], "a granted extension raises the cap");
-  const noCap = routing({ resultsText: "- #2 Empty state shows a hint: FAILED — blank — severity: medium", specPath: SPEC, cap: null, entries: entries(fix, ...rounds) });
+  const noCap = routing({ resultsText: "- #2 Empty state shows a hint: FAILED — blank — severity: medium", checklist: CHECKLIST, specPath: SPEC, cap: null, entries: entries(fix, ...rounds) });
   assert.deepEqual([noCap.atCap, noCap.toFix], [false, [2]], "with no cap known a fix item stays a fix item");
 });
 
 test("routing: a delegated walk is read from its ledger line", () => {
-  const r = routing({ resultsText: "", specPath: SPEC, cap: 3, entries: entries(line("on-device", "user-decision", DELEGATED_WALK, "docs/x/on-device-checklist.md")) });
+  const r = routing({ resultsText: "", checklist: CHECKLIST, specPath: SPEC, cap: 3, entries: entries(line("on-device", "user-decision", DELEGATED_WALK, CHECKLIST)) });
   assert.deepEqual([r.delegated, r.failed, r.undecided], [true, [], []]);
+});
+
+test("routing: only this cycle's lines count - decisions by results ref, the delegated flag by checklist ref, a cap extension by spec ref", () => {
+  const foreign = "docs/y/on-device-results.md";
+  const one = (extra, cap = 2) => routing({ resultsText: "- #2 Empty state shows a hint: FAILED — blank — severity: medium", checklist: CHECKLIST, specPath: SPEC, cap, entries: entries(...extra) });
+  const accept = (ref) => line("on-device", "user-decision", "failed-item #2 Empty state shows a hint: accept", ref);
+  assert.deepEqual(one([accept(foreign)]).undecided, [2], "another cycle's decision on item #2 does not decide this cycle's");
+  assert.deepEqual(one([accept(RESULTS)]).undecided, [], "this cycle's decision does");
+  assert.equal(one([line("on-device", "user-decision", DELEGATED_WALK, "docs/y/on-device-checklist.md")]).delegated, false, "another cycle's delegation is not this one's");
+  assert.equal(one([line("on-device", "user-decision", DELEGATED_WALK, CHECKLIST)]).delegated, true);
+  const rounds = [line("on-device", "review-round", "round 1"), line("on-device", "review-round", "round 2")];
+  const extend = (ref) => line("on-device", "user-decision", "review-cap extended to 4", ref);
+  assert.deepEqual([one([...rounds, extend("docs/superpowers/specs/other.md")]).cap, one([...rounds, extend("docs/superpowers/specs/other.md")]).atCap], [2, true], "another spec's extension is ignored");
+  assert.deepEqual([one([...rounds, extend(SPEC)]).cap, one([...rounds, extend(SPEC)]).atCap], [4, false], "this spec's extension is honoured");
 });
 
 test("CLI: reads the state file's checklist, spec and ledger; checklist none or no report reads as nothing failed", () => {
@@ -81,10 +128,14 @@ test("CLI: reads the state file's checklist, spec and ledger; checklist none or 
     };
     state("none");
     assert.deepEqual([run().status, run().out.results, run().out.undecided], [0, null, []]);
+    state("none — on-device not applicable (docs only)");
+    assert.deepEqual([run().status, run().out.results, run().out.undecided], [0, null, []], "a none with a reason is still none, not a path");
+    state("none — trace found a rendered surface (x)");
+    assert.equal(run().out.results, null);
     state("docs/x/on-device-checklist.md");
     assert.deepEqual([run().out.results, run().out.failed], ["docs/x/on-device-results.md", []], "no report yet is nothing failed");
     writeFileSync(join(repo, resultsPathFor("docs/x/on-device-checklist.md")), REPORT);
-    writeFileSync(join(repo, ".devcycle/ledger.md"), line("on-device", "user-decision", "failed-item #2 Empty state shows a hint: fix") + "\n");
+    writeFileSync(join(repo, ".devcycle/ledger.md"), line("on-device", "user-decision", "failed-item #2 Empty state shows a hint: fix", RESULTS) + "\n");
     const r = run("--cap", "3");
     assert.deepEqual([r.status, r.out.ok, r.out.undecided, r.out.toFix, r.out.cap], [0, true, [3, 4], [2], 3]);
     assert.equal(run("--cap", "x").status, 2, "a bad --cap is a usage error");

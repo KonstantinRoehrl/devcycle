@@ -140,7 +140,8 @@ const liveKnobs = (knobsLine) => resolveKnobs(knobsLine ? parseRecordedLine(knob
 function driveStatus(root, statePath, stateText, lines, knobsLine) {
   const row = field(stateText, "drive") ?? "";
   const model = row.match(/\bmodel=(\S+)/)?.[1];
-  const via = row.match(/\bvia=(\S+)/)?.[1];
+  // A row recorded before the knob existed carries no via=, and every such row was an answer.
+  const via = row.match(/\bvia=(\S+)/)?.[1] ?? (row ? "answer" : undefined);
   const live = readLiveDriveLock(root);
   const holder = live && realPath(resolve(root, live.state ?? "")) === realPath(statePath) ? live : null;
   const optInLogged = lines.some((l) => l.task === "drive" && l.event === "user-decision");

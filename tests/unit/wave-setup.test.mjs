@@ -425,7 +425,7 @@ test("drive mode: a resumable cycle reports its opt-in, its model, its driver an
   withLock(c, (lock) => {
     const r = driven(c, { knobsLine: KNOBS });
     assert.equal(r.action, "resume");
-    assert.deepEqual(r.drive, { opted: true, model: "claude-haiku-4-5", lock: { pid: process.pid, log: lock.log }, optInLogged: false,
+    assert.deepEqual(r.drive, { opted: true, model: "claude-haiku-4-5", via: "answer", lock: { pid: process.pid, log: lock.log }, optInLogged: false,
       row: "auto", mode: "ask", watch: "end", plugins: "none", action: "none", writeRow: null, confirm: null, gate: null, result: r.drive.result });
     assert.deepEqual([r.drive.result.running, r.drive.result.pid], [true, process.pid]);
     assert.deepEqual([r.overview.committed, r.overview.nextWave, r.ledgerSlot], [1, 1, "fresh"]);
@@ -512,11 +512,12 @@ test("drive.confirm: the unattended knob skips a settled stop's start confirm, n
     "a settled stop with no row under the unattended knob writes the auto row and asks nothing");
 });
 
-test("drive.via: the row's via= token is exposed, and absent when the row has none", () => {
+test("drive.via: the row's via= token is exposed; a row without one reads as an answer; no row has none", () => {
   const knobRow = "- drive: auto model=claude-haiku-4-5 effort=high opted=2026-10-29T10:00:00Z via=knob";
   assert.equal(setup(cycle({ state: [knobRow] }), { knobsLine: knobsWith("unattended") }).drive.via, "knob");
   assert.equal(setup(cycle({ state: [MANUAL_ROW] }), { knobsLine: KNOBS }).drive.via, "answer");
-  assert.equal(setup(cycle({ state: [DRIVE_ROW] }), { knobsLine: KNOBS }).drive.via, undefined);
+  assert.equal(setup(cycle({ state: [DRIVE_ROW] }), { knobsLine: KNOBS }).drive.via, "answer", "a row written before via= existed was an answer");
+  assert.equal(setup(cycle(), { knobsLine: KNOBS }).drive.via, undefined, "with no row there is no via");
 });
 
 test("drive.action: an auto style starts on no result, a resumable end or a crash, and gates on an end that needs an answer", () => {
