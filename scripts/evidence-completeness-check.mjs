@@ -338,8 +338,9 @@ const KARMA_TOTAL_RE = /^\s*TOTAL:\s+\d+\s+(?:SUCCESS|FAILED)\b/m;
 const KARMA_EXECUTED_RE = /Executed (\d+) of (\d+)(?: \(skipped (\d+)\))?([^\n]*)/g;
 
 // A Karma run's summary: its TOTAL line, or — the dots reporter prints none — its last Executed line
-// once that line is complete or reports a failure. Karma prints `Executed 0 of <m>` before any test
-// runs and one line per spec after it, so an earlier line, or a last one cut off mid-run, is none.
+// when that line reports FAILED wherever the run stopped, or reads SUCCESS once complete. Karma prints
+// `Executed 0 of <m>` before any test runs and one line per spec after it, so an earlier line, or a
+// last one still short of <m> without a FAILED, is none.
 function hasKarmaSummary(plain) {
   if (KARMA_TOTAL_RE.test(plain)) return true;
   const last = [...plain.matchAll(KARMA_EXECUTED_RE)].at(-1);

@@ -380,6 +380,21 @@ test("#390: the heading form takes its word from the very next line only", () =>
   assert.equal(verdict(f).out.reason, "no verdict line");
 });
 
+test("a bare Verdict line outranks a heading- or list-marked recap of the other verdict", () => {
+  for (const [body, action, culprit] of [
+    ["Verdict: accept\n\nRecap:\n- Verdict: needs-changes\n- Culprit: novel:recap\n", "accepted", null],
+    ["Verdict: needs-changes\nCulprit: novel:real\n\n1. [high] x\n\nRecap:\n- Verdict: accept\n- Culprit: novel:recap\n", "rejected", "novel:real"],
+    ["## Verdict: approved\n\n- Verdict: needs-changes\n- Culprit: novel:recap\n", "missing-findings", undefined],
+  ]) {
+    const f = fixture();
+    writeInto(f.repo, FINDINGS, body);
+    const r = verdict(f);
+    assert.equal(r.out.action, action, JSON.stringify(body));
+    if (culprit !== undefined) assert.equal(r.out.culprit, culprit, JSON.stringify(body));
+    else assert.equal(r.out.reason, "conflicting verdicts");
+  }
+});
+
 test("#390: a present file with no usable verdict logs the unparseable outcome naming why", () => {
   for (const [body, reason] of [
     ["no verdict here\n", "no verdict line"],

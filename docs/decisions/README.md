@@ -19,6 +19,11 @@ retry cap and never closing a round. Every task script names all missing flags a
 the checker passed (#382, #390, #391, #275). The narrowing rule had two owners that disagreed; the
 verdict parser logged every parse failure as a missing file.
 
+**Supersedes:** the evidence rule from #281 (929352c) that a report's before and after headers must
+always be identical, and `references/ledger.md`'s rule from caf1bd5 that a missing, empty or
+malformed findings file is one `rejected (missing findings file)` outcome. Neither had an earlier
+entry in this log.
+
 **Budgets:** the before/after rule, the accepted verdict forms, the unparseable outcome and the
 --help contract grow references/evidence.md, references/ledger.md, references/resume.md, both agents
 and playbooks/executing-waves.md, and every entry point whose closure cites them.

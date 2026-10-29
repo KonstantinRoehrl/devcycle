@@ -83,10 +83,9 @@ content cannot. Evidence is never profile-conditional; only `<N>` varies.
   `cmd:` that differs from the gate with no `- Narrowing:` line. A capture blocks until its command exits: run it in the foreground under the
   Bash tool's `timeout: 600000`, or, when it can run longer, in the background and wait for its
   completion notification. Never wait by polling an evidence file or its marker line.
-- The captured command for `-before.txt` and `-after.txt` is the repo's whole
-  verification gate, except in a concurrent wave: a brief carrying a `**Capture command:**` line
-  captures that command for both, with the `- Narrowing:` line the brief supplies.
-  `node "${CLAUDE_PLUGIN_ROOT}/scripts/evidence-completeness-check.mjs" <report>` also mechanizes the narrow-selector subset of this rule — a `cmd:` naming one test file or
+- A concurrent wave's brief carries a `**Capture command:**` line: both captures run that command,
+  with the `- Narrowing:` line the brief supplies (identical headers, which the rule above covers).
+  `node "${CLAUDE_PLUGIN_ROOT}/scripts/evidence-completeness-check.mjs" <report>` also mechanizes the narrow-selector guard — a `cmd:` naming one test file or
   carrying a test-name filter flag. The concurrent-wave case, a whole-suite red from a sibling's
   uncommitted edit, can reach an implementer's capture but not the coordinator's gate, which
   proves each commit in a scratch worktree. The check also requires an `(exit <n>)` status —

@@ -1097,6 +1097,22 @@ test("#382: a Karma capture cut off at its Executed 0 of 4 line, or mid-run, has
   }
 });
 
+test("#382: with no TOTAL line, a last Executed line counts where it reports FAILED, even cut off, and not on an ERROR", () => {
+  for (const [lastLine, summarised] of [
+    ["Chrome Headless: Executed 3 of 4 (1 FAILED) (0 secs / 0.1 secs)", true],
+    ["Chrome Headless: Executed 4 of 4 ERROR (0 secs / 0.1 secs)", false],
+  ]) {
+    const { dir, file } = karmaReport(`# devcycle-cmd: npx karma start\nChrome Headless: Executed 0 of 4\n${lastLine}\n# exit 1\n`);
+    try {
+      const res = run(file);
+      assert.equal(res.status, summarised ? 0 : 1, lastLine);
+      if (!summarised) assert.match(res.stderr, /has no test-runner summary line/, lastLine);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
 // #382 × #391: the one before/after rule — identical headers, or a whole-gate before and a declared
 // narrowed after (references/evidence.md § File-backed evidence).
 const WHOLE = "node --test tests/unit/*.test.mjs";

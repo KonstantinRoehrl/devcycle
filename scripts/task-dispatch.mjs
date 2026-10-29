@@ -34,11 +34,15 @@ export const briefPathFor = (task, role, round) => `.devcycle/briefs/${task}-${r
 // Where the before/after capture rule lives: every gated brief cites it rather than restating it.
 const BEFORE_AFTER_OWNER = "references/evidence.md § File-backed evidence owns the before/after rule";
 
-// A gated brief's tail: both captures run the gate, and a sibling's red that forces a narrower after
-// leaves the before on the gate and is declared.
-const gateLine = (cmd) =>
-  `**Gate command:** \`${cmd}\` — capture both the before and the after with it; if a sibling's uncommitted red forces a narrower after, ` +
-  `keep the before on this command and declare the narrowing with a \`- Narrowing:\` line (${BEFORE_AFTER_OWNER}).\n`;
+// A gated brief's tail: both captures run the gate. A test-class task whose after a sibling's
+// uncommitted red forces narrower keeps the before on the gate and declares the narrowing; a
+// convention report keeps identical headers, so its brief offers no narrowing.
+const gateLine = (cmd, evidenceClass) =>
+  `**Gate command:** \`${cmd}\` — capture both the before and the after with it` +
+  (evidenceClass === "convention"
+    ? `, byte for byte the same command (${BEFORE_AFTER_OWNER}).\n`
+    : `; if a sibling's uncommitted red forces a narrower after, keep the before on this command ` +
+      `and declare the narrowing with a \`- Narrowing:\` line (${BEFORE_AFTER_OWNER}).\n`);
 
 // A concurrent wave's implementer captures its own test command: a sibling's uncommitted red tests
 // share the checkout, and the whole gate still runs at commit in an isolated worktree.
@@ -47,7 +51,7 @@ const captureLines = (cmd) =>
   `- Narrowing: ${cmd} — concurrent wave: siblings' uncommitted edits share the checkout; the whole gate runs at commit in an isolated worktree\n`;
 
 function briefTail(gate, captureCmd) {
-  const gateTail = gate ? (captureCmd ? `**Gate command:** \`${gate.cmd}\`\n` : gateLine(gate.cmd)) : "";
+  const gateTail = gate ? (captureCmd ? `**Gate command:** \`${gate.cmd}\`\n` : gateLine(gate.cmd, gate.evidenceClass)) : "";
   return gateTail || captureCmd ? `\n${gateTail}${captureCmd ? captureLines(captureCmd) : ""}` : "";
 }
 

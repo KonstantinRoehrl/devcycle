@@ -289,6 +289,24 @@ test("a gated implementer brief states the before/after rule by citing evidence.
   assert.match(brief, /references\/evidence\.md § File-backed evidence owns the before\/after rule/);
 });
 
+test("a convention task's brief tail runs the gate unnarrowed; a red-green or green-green one keeps the narrowing route", () => {
+  for (const [evidence, narrowable] of [
+    ["convention (`npm run gate`)", false],
+    ["green-green (behavior-preserving)", true],
+    ["red-green", true],
+  ]) {
+    const repo = gatedRepo();
+    writeFileSync(join(repo, "docs/plan.md"), GATED_PLAN.replace("**Evidence:** red-green", `**Evidence:** ${evidence}`));
+    const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer"], "# Brief for task 5\n");
+    assert.equal(r.status, 0, r.stderr);
+    const tail = briefAt(repo, ".devcycle/briefs/5-implementer.md").split("**Gate command:**")[1];
+    assert.match(tail, /^ `npm run gate` — /, evidence);
+    assert.match(tail, /references\/evidence\.md § File-backed evidence owns the before\/after rule/, evidence);
+    assert.equal(/Narrowing/.test(tail), narrowable, evidence);
+    if (!narrowable) assert.match(tail, /byte for byte/, evidence);
+  }
+});
+
 test("--help answers with stdin left open", async () => {
   const child = spawn(process.execPath, [SCRIPT, "--help"], { stdio: ["pipe", "pipe", "pipe"] });
   let out = "";
