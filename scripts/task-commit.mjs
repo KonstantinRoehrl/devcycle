@@ -23,7 +23,7 @@ import { isMain } from "./is-main.mjs";
 import { INTEGRATION_BRANCHES, defaultBranches } from "./branch-names.mjs";
 import { ROUND_CAP, exhaustReviewLoop, pendingReviewLoop, reviewLoopId } from "./review-loop.mjs";
 import {
-  MISSING_FINDINGS, UsageError, appendLedgerLine, appendRunRecordOnce, checkIds, latestKeyed, ledgerKey, nextRetry,
+  UsageError, appendLedgerLine, appendRunRecordOnce, checkIds, isNoVerdict, latestKeyed, ledgerKey, nextRetry,
   runTaskScript, taskEntries, taskFlags, workTreeRoot,
 } from "./task-ledger.mjs";
 
@@ -221,10 +221,10 @@ function recordGate(ctx, status, evidenceRef, round) {
 
 // The verdict that keeps the task from its commit, or null. What commits is the reviewer's accept with
 // no red gate since — what fixes a red has had no review yet — or the user's decision on the task's
-// review loop after its latest verdict. A deferral or a missing findings file decides nothing.
+// review loop after its latest verdict. A deferral or a findings file with no verdict decides nothing.
 function unaccepted(entries, task) {
   const at = entries.findLastIndex((e) =>
-    e.event === "review-verdict" && e.outcome !== DEFERRED_OUTCOME && !e.outcome.startsWith(MISSING_FINDINGS));
+    e.event === "review-verdict" && e.outcome !== DEFERRED_OUTCOME && !isNoVerdict(e.outcome));
   const verdict = entries[at]?.outcome ?? "none";
   if (verdict.startsWith("accepted")) return null;
   const decided = entries.findLastIndex((e) => e.event === "user-decision" && e.outcome.includes(reviewLoopId(task)));

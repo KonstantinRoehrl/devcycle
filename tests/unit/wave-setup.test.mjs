@@ -46,6 +46,7 @@ const PLAN = [
   "- Wave 1: Task 1, Task 2 (file-disjoint)", "- Wave 2: Task 3 (needs Tasks 1+2 committed)", "",
 ].join("\n");
 
+const UNPARSEABLE = "rejected (unparseable findings file: no verdict line)";
 const entry = (task, event, outcome, ref = "none") => `- [2026-10-08T10:00:00Z] task=${task} event=${event} outcome=${outcome} ref=${ref}`;
 const committed = (task) => entry(task, "committed", "accepted", "abc1234");
 // A line as the task scripts write it, with the idempotency key that carries its round.
@@ -113,7 +114,8 @@ test("every resume-table row maps a task's last ledger event to its next action,
     [[entry(2, "report-received", "rejected (intake bounce)", ".devcycle/findings/2-intake-0-0.md")], "intake-bounce", "fix"],
     [[entry(2, "report-received", "blocked", ".devcycle/reports/2.md")], "blocked", "needs-user"],
     [[entry(2, "review-verdict", "rejected (green gate: 3 failing)")], "rejected", "fix"],
-    [[entry(2, "review-verdict", "rejected (missing findings file)", ".devcycle/findings/2-round-1.md")], "missing-findings", "redispatch-reviewer"],
+    [[entry(2, "review-verdict", "rejected (missing findings file)", ".devcycle/findings/2-round-1.md")], "missing-findings", "redispatch-reviewer", "absent file"],
+    [[entry(2, "review-verdict", UNPARSEABLE, ".devcycle/findings/2-round-1.md")], "missing-findings", "redispatch-reviewer", "no verdict line"],
     [[entry(2, "report-received", "rejected (missing report file)", ".devcycle/reports/2.md")], "missing-report", "redispatch-implementer"],
     [[entry(2, "review-verdict", "deferred (concurrent sibling edits)")], "deferred", "commit"],
     [[committed(2)], "committed", "done"],
@@ -123,13 +125,13 @@ test("every resume-table row maps a task's last ledger event to its next action,
     [[entry(2, "user-decision", "sweep dirty-targets src/b.mjs")], "sweep-decision", "needs-user"],
     [[entry(2, "user-decision", "sweep again once src/b.mjs is clean")], "user-decision", "follow-decision"],
   ];
-  for (const [lines, position, next] of rows)
-    assert.deepEqual(taskPosition(lines.map(parseLedgerLine)), { position, next }, lines.join(" | ") || "no ledger line");
+  for (const [lines, position, next, reason] of rows)
+    assert.deepEqual(taskPosition(lines.map(parseLedgerLine)), { position, next, ...(reason && { reason }) }, lines.join(" | ") || "no ledger line");
 });
 
 test("a third intake bounce, missing report or missing findings is a decision for the user, never another retry", () => {
   for (const [event, outcome] of [["report-received", "rejected (intake bounce)"], ["report-received", "rejected (missing report file)"],
-    ["review-verdict", "rejected (missing findings file)"]]) {
+    ["review-verdict", "rejected (missing findings file)"], ["review-verdict", UNPARSEABLE]]) {
     const lines = [parseLedgerLine(entry(2, event, outcome))];
     assert.notEqual(taskPosition(lines, { retries: () => RETRY_CAP }).next, "needs-user", `${outcome}: retry ${RETRY_CAP} is still allowed`);
     assert.deepEqual(taskPosition(lines, { retries: () => RETRY_CAP + 1 }), { position: "retry-cap", next: "needs-user" }, outcome);
@@ -137,6 +139,15 @@ test("a third intake bounce, missing report or missing findings is a decision fo
   const c = cycle({ ledger: [committed(1), ...[1, 2, 3].map((n) =>
     entry(2, "review-verdict", "rejected (missing findings file)", `.devcycle/findings/2-round-${n}.md`))] });
   assert.deepEqual(positionOf(setup(c).tasks[1]), { task: "2", position: "retry-cap", next: "needs-user" });
+});
+
+test("absent and unparseable findings files share one retry cap", () => {
+  const seen = [];
+  const lines = [entry(2, "review-verdict", "rejected (unparseable findings file: no verdict line)", ".devcycle/findings/2-round-1.md")].map(parseLedgerLine);
+  const position = taskPosition(lines, { retries: (match) => { seen.push(match); return RETRY_CAP + 1; } });
+  assert.deepEqual(position, { position: "retry-cap", next: "needs-user" });
+  assert.equal(typeof seen[0], "function", "the cap counts through the no-verdict predicate");
+  assert.equal(seen[0]("rejected (missing findings file)"), true);
 });
 
 test("an exhausted-unresolved loop is pending until a decision of that task names its loop id; drive and config decisions never clear it", () => {

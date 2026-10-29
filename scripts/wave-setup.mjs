@@ -17,7 +17,9 @@ import { parseHandoff } from "./handoff-mark.mjs";
 import { compareKnobs, parseRecordedLine, resolveKnobs } from "./resolve-knobs.mjs";
 import { resolveDepth } from "./depth-probe.mjs";
 import { TEST_FILE_SUFFIXES, fieldValue, gateCommand, parseDispatchMap, taskBlocks, taskFileMap } from "./task-files.mjs";
-import { ledgerPlan, nextReviewRound, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot } from "./task-ledger.mjs";
+import {
+  isNoVerdict, ledgerPlan, nextReviewRound, noVerdictReason, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot,
+} from "./task-ledger.mjs";
 import { ledgerSlotState } from "./ledger-slot.mjs";
 import { pendingReviewLoop, reviewLoopId } from "./review-loop.mjs";
 import { driveTokenHash, readLiveDriveLock } from "./drive-lock.mjs";
@@ -35,16 +37,27 @@ const known = (raw) => {
 // The loops their own text leaves uncapped get two retries per task (spec 4.A.2); the third such
 // outcome is the user's decision.
 export const RETRY_CAP = 2;
-const CAPPED_OUTCOMES = ["rejected (intake bounce)", "rejected (missing report file)", "rejected (missing findings file)"];
+const CAPPED_OUTCOMES = ["rejected (intake bounce)", "rejected (missing report file)"];
 const SWEEP_TOKEN = /\bsweep\b|\bapplied-none\b|\bdirty-targets\b/;
 const IMPLEMENTER_NEXT = new Set(["dispatch-implementer", "redispatch-implementer", "fix"]);
 // The stops continue's own gates compute and answer on the very call that reads the driver's result,
 // so a driver that stopped on one needs no question of its own.
 const SETTLED_REASONS = new Set(["knob-drift", "foreign-state", "resume-check", "branch", "depth-at-start", "no-driver", "not-opted-in"]);
 
+// The position of an outcome a retry cap bounds, or null for any other outcome.
+function cappedPosition(outcome, retries) {
+  // Both no-verdict outcomes — an absent findings file and an unparseable one — spend one cap.
+  const capped = isNoVerdict(outcome) ? isNoVerdict : CAPPED_OUTCOMES.find((prefix) => outcome.startsWith(prefix));
+  if (!capped) return null;
+  if (retries(capped) > RETRY_CAP) return { position: "retry-cap", next: "needs-user" };
+  if (capped === isNoVerdict) return { position: "missing-findings", next: "redispatch-reviewer", reason: noVerdictReason(outcome) };
+  if (capped === "rejected (missing report file)") return { position: "missing-report", next: "redispatch-implementer" };
+  return { position: "intake-bounce", next: "fix" };
+}
+
 // references/resume.md § Resuming a wave's per-task position, most specific row first. `lines` are
-// one task's parsed ledger lines in file order; `retries(prefix)` counts that task's lines whose
-// outcome starts with prefix.
+// one task's parsed ledger lines in file order; `retries(match)` counts that task's lines whose
+// outcome starts with a prefix or satisfies a predicate.
 export function taskPosition(lines, { pendingLoop = null, retries = () => 0 } = {}) {
   if (pendingLoop) return { position: "exhausted-unresolved", next: "needs-user" };
   const last = lines.at(-1);
@@ -61,11 +74,8 @@ export function taskPosition(lines, { pendingLoop = null, retries = () => 0 } = 
     const next = deathRoute(lines, role);
     return next === "needs-user" ? { position: "death-cap", next } : { position: `dead-${role}`, next };
   }
-  const capped = CAPPED_OUTCOMES.find((prefix) => outcome.startsWith(prefix));
-  if (capped && retries(capped) > RETRY_CAP) return { position: "retry-cap", next: "needs-user" };
-  if (capped === "rejected (missing findings file)") return { position: "missing-findings", next: "redispatch-reviewer" };
-  if (capped === "rejected (missing report file)") return { position: "missing-report", next: "redispatch-implementer" };
-  if (capped === "rejected (intake bounce)") return { position: "intake-bounce", next: "fix" };
+  const cappedAt = cappedPosition(outcome, retries);
+  if (cappedAt) return cappedAt;
   if (event === "report-received" && outcome.startsWith("blocked")) return { position: "blocked", next: "needs-user" };
   // A ledger from before the per-commit proof can end on a deferral. task-commit now proves the commit
   // in its own worktree, where a sibling's edit cannot reach, so the task is simply committed again.
@@ -193,7 +203,7 @@ function mapPositions(root, planText, lines, ledgerPath) {
     for (const num of nums) {
       const task = String(num);
       const own = byTask.get(task) ?? [];
-      positions.set(task, taskPosition(own, { pendingLoop: pendingReviewLoop(root, task, own), retries: (prefix) => retryCount(ledgerPath, task, prefix) }));
+      positions.set(task, taskPosition(own, { pendingLoop: pendingReviewLoop(root, task, own), retries: (match) => retryCount(ledgerPath, task, match) }));
     }
   return { waves, positions };
 }
