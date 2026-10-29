@@ -17,30 +17,36 @@ export const DELEGATED_WALK = "delegated-walk (auto-ok)";
 // The results report sits beside its checklist (references/checklist.md § Paths), so no state row names it.
 export const resultsPathFor = (checklistPath) => join(dirname(checklistPath), "on-device-results.md");
 
-const FAILED_LINE = /^- #(\d+) (.+?): FAILED — (.+) — severity: (high|medium|low)\s*$/;
-// What a person writes when the canonical shape slips (a re-walk note, a hyphen, another case or
-// severity word, no severity). The match anchors on `: FAILED` right after the item text, so a passed
-// line that mentions FAILED later in its prose is not one.
-const TOLERANT_FAILED_LINE = /^- #(\d+) (.+?): FAILED\b(.*)$/i;
-const MENTIONS_FAILED = /: FAILED\b/i;
+// A report line is `- #<n> <item>: <verdict> — …`. The verdict is the first verdict word after an item
+// separator that is followed by punctuation or the end of the line, so `FAILED badge is red` inside an
+// item's text is not one, and a `FAILED` later in a passed line's prose never is. The matcher also reads
+// what a person writes when the canonical shape slips: emphasis around the verdict, no space after the
+// colon, a dash in place of it.
+const REPORT_ITEM = /^- #(\d+) (.+?)(?:\s*:|\s[—–-])\s*[*`_]*(passed|FAILED|waived|unverified)[*`_]*(?=\s*(?:$|[^\w\s]))\s*(.*)$/i;
+const CANONICAL_TAIL = /^— (.+) — severity: (high|medium|low)$/;
+// Any bulleted line, or `: FAILED` anywhere, that says FAILED without parsing as a report item.
+const MENTIONS_FAILED = /: FAILED\b|^\s*[-*]\s.*\bFAILED\b/i;
 const ITEM_DECISION = /^failed-item #(\d+) .*: (fix|accept|waive \((.*)\))$/;
 const CAP_EXTENSION = /^review-cap extended to (\d+)$/;
 
+const linesOf = (text) => String(text).split(/\r?\n/);
+
 // Fail closed: every line that reads as a failed item parses, so the routing question is asked.
 export function failedItems(resultsText) {
-  return String(resultsText).split("\n").flatMap((line) => {
-    const m = FAILED_LINE.exec(line);
-    if (m) return [{ n: Number(m[1]), text: m[2], symptom: m[3], severity: m[4] }];
-    const t = TOLERANT_FAILED_LINE.exec(line);
-    if (!t) return [];
-    const severity = /severity:\s*(\w+)/i.exec(t[3])?.[1].toLowerCase() ?? "unknown";
-    return [{ n: Number(t[1]), text: t[2], symptom: t[3].trim(), severity }];
+  return linesOf(resultsText).flatMap((line) => {
+    const m = REPORT_ITEM.exec(line);
+    if (!m || m[3].toLowerCase() !== "failed") return [];
+    const rest = m[4].trim();
+    const canonical = m[3] === "FAILED" ? CANONICAL_TAIL.exec(rest) : null;
+    if (canonical) return [{ n: Number(m[1]), text: m[2], symptom: canonical[1], severity: canonical[2] }];
+    const severity = /severity:\s*[*`_]*(\w+)/i.exec(rest)?.[1].toLowerCase() ?? "unknown";
+    return [{ n: Number(m[1]), text: m[2], symptom: rest, severity }];
   });
 }
 
-// FAILED lines with no `#<n>` ordinal: there is no item to decide on, so the caller must not close over them.
+// FAILED lines that are not report items: there is no item to decide on, so the caller must not close over them.
 export function malformedLines(resultsText) {
-  return String(resultsText).split("\n").filter((line) => MENTIONS_FAILED.test(line) && !TOLERANT_FAILED_LINE.test(line));
+  return linesOf(resultsText).filter((line) => MENTIONS_FAILED.test(line) && !REPORT_ITEM.test(line));
 }
 
 // Entries are in ledger order, so a later decision on the same item overwrites an earlier one.

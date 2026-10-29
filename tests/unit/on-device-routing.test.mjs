@@ -53,6 +53,76 @@ test("failedItems: a passed line that mentions FAILED later in its prose is not 
   assert.deepEqual(failedItems("- #3 Toast names the field: passed (re-walk, round 1) — was FAILED: now fixed").length, 0);
 });
 
+test("failedItems: the verdict position decides - FAILED in a passed, waived or unverified line's prose is not a failed item", () => {
+  const notFailed = [
+    "- #1 login works: passed — note: FAILED earlier",
+    "- #3 build status: FAILED badge is red: passed — saw red",
+    "- #4 Toast names the field: waived (tracked in R31) — it FAILED in round 1",
+    "- #5 Totals align: unverified (re-walk, round 1) — nobody could observe it; FAILED before: now unknown",
+    "- #6 Menu opens: passed (auto: .devcycle/evidence/od-6.txt) — was FAILED: now fixed",
+  ];
+  for (const text of notFailed) {
+    assert.deepEqual(failedItems(text), [], text);
+    assert.deepEqual(malformedLines(text), [], `${text} is a well-formed non-failed line`);
+  }
+  assert.deepEqual(failedItems(notFailed.join("\n")), []);
+});
+
+test("failedItems: the item text is everything before the verdict, even when it contains a FAILED-looking colon", () => {
+  const [item, ...rest] = failedItems("- #2 login works: passed — note: FAILED earlier\n- #3 build status: FAILED — badge is red — severity: high");
+  assert.deepEqual([rest.length, item.n, item.text, item.severity, item.symptom], [0, 3, "build status", "high", "badge is red"]);
+});
+
+test("failedItems fails closed on emphasis, spacing and dash spellings of the verdict", () => {
+  const spellings = {
+    "- #3 Item: **FAILED** — nothing happens — severity: high": ["Item", "high"],
+    "- #3 Item: `FAILED` — nothing happens — severity: low": ["Item", "low"],
+    "- #3 Item: _FAILED_ — nothing happens": ["Item", "unknown"],
+    "- #3 Item — FAILED — nothing happens — severity: medium": ["Item", "medium"],
+    "- #3 Item – FAILED – nothing happens": ["Item", "unknown"],
+    "- #3 Item - FAILED - nothing happens - severity: low": ["Item", "low"],
+    "- #5 x:FAILED": ["x", "unknown"],
+    "- #5 x:**FAILED**": ["x", "unknown"],
+    "- #5 x : FAILED, nothing happens": ["x", "unknown"],
+    "- #5 x: FAILED (re-walk, round 2) — severity: **high**": ["x", "high"],
+  };
+  for (const [text, [itemText, severity]] of Object.entries(spellings)) {
+    const [item, ...rest] = failedItems(text);
+    assert.deepEqual([rest.length, item?.n, item?.text, item?.severity], [0, Number(/#(\d+)/.exec(text)[1]), itemText, severity], text);
+    assert.deepEqual(malformedLines(text), [], text);
+  }
+});
+
+test("failedItems: the same spellings with a passed, waived or unverified verdict are not failed items", () => {
+  for (const verdict of ["passed", "waived", "unverified", "**passed**", "`unverified`"]) {
+    for (const sep of [": ", ":", " — ", " - "]) {
+      const text = `- #3 Item${sep}${verdict} — the FAILED badge is gone`;
+      assert.deepEqual([failedItems(text), malformedLines(text)], [[], []], text);
+    }
+  }
+});
+
+test("failedItems: a bulleted line that mentions FAILED but has no ordinal stays malformed, whatever its spelling", () => {
+  const lines = ["- Item — FAILED — nothing happens", "- Item: **FAILED** — nothing happens", "- Totals row FAILED to align", "* Item `FAILED`"];
+  assert.deepEqual(malformedLines(lines.join("\n")), lines);
+  assert.deepEqual(failedItems(lines.join("\n")), []);
+  assert.deepEqual(malformedLines("## On-device results: x\nSome prose that failed\n- #1 ok: passed — fine"), []);
+});
+
+test("failedItems: a numbered line whose FAILED is not at the verdict position is malformed, not silently passed", () => {
+  const text = "- #7 Menu opens: FAILED badge is red";
+  assert.deepEqual([failedItems(text), malformedLines(text)], [[], [text]]);
+});
+
+test("a CRLF results file parses the same as an LF one: no canonical line is also malformed", () => {
+  const crlf = REPORT.replaceAll("\n", "\r\n") + "\r\n";
+  assert.deepEqual(failedItems(crlf), failedItems(REPORT));
+  assert.deepEqual(failedItems(crlf).map((i) => i.symptom), ["the page is blank", "the toast says \"error\"", "grey on grey"]);
+  assert.deepEqual(malformedLines(crlf), []);
+  assert.deepEqual(failedItems("- #11 Menu opens: FAILED — never opens\r\n").map((i) => [i.severity, i.symptom]), [["unknown", "— never opens"]]);
+  assert.deepEqual(malformedLines("- Export: FAILED — no ordinal\r\n- #1 ok: passed — fine\r\n"), ["- Export: FAILED — no ordinal"]);
+});
+
 test("failedItems: a FAILED line with no ordinal is reported as malformed, never dropped", () => {
   const text = "- Export: FAILED — no ordinal — severity: high\nnot a line\n- #1 ok: passed — fine\n* Other: failed — nope";
   assert.deepEqual(malformedLines(text), ["- Export: FAILED — no ordinal — severity: high", "* Other: failed — nope"]);

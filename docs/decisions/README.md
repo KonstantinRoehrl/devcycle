@@ -28,7 +28,9 @@ answer at execution start alone"). Its handoff-row and `handoffNotification` par
 runtime surface and every entry point citing `references/config.md` or `references/handoff.md`;
 the on-device routing, the fix round, the delegation rule, the finish guard and the pinned report
 paths (#383, #381) grow `playbooks/verifying-on-device.md`, `playbooks/finishing-the-cycle.md`,
-`references/checklist.md` and `playbooks/reviewing-the-branch.md`.
+`references/checklist.md` and `playbooks/reviewing-the-branch.md`. The widened `exhausted-with-residue` definition in `references/loops.md`
+(a loop that ends early with its remainder carried over) adds 26 bytes to the five entry points that
+cite it.
 
 ```text
 budget: surface-budget.json surfaceTotal 6529
@@ -41,17 +43,17 @@ budget: context-budget.json commands/reconcile.md 24733
 budget: context-budget.json commands/review.md 25363
 budget: context-budget.json commands/verify.md 24461
 budget: context-budget.json playbooks/executing-waves.md 112292
-budget: context-budget.json playbooks/finishing-the-cycle.md 49814
-budget: context-budget.json playbooks/learning-from-sessions.md 63306
+budget: context-budget.json playbooks/finishing-the-cycle.md 49840
+budget: context-budget.json playbooks/learning-from-sessions.md 63332
 budget: context-budget.json playbooks/maintaining-the-repo.md 65257
 budget: context-budget.json playbooks/onboarding-a-repo.md 30955
 budget: context-budget.json playbooks/planning-waves.md 74210
 budget: context-budget.json playbooks/receiving-review.md 114639
 budget: context-budget.json playbooks/reviewing-code.md 94780
-budget: context-budget.json playbooks/reviewing-the-branch.md 53598
+budget: context-budget.json playbooks/reviewing-the-branch.md 53624
 budget: context-budget.json playbooks/scoping-the-request.md 31280
-budget: context-budget.json playbooks/sweeping-mechanical-changes.md 87953
-budget: context-budget.json playbooks/taking-the-fast-path.md 52487
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 87979
+budget: context-budget.json playbooks/taking-the-fast-path.md 52513
 budget: context-budget.json playbooks/verifying-on-device.md 60211
 budget: context-budget.json playbooks/writing-the-findings-document.md 63890
 budget: context-budget.json references/config.md 14482

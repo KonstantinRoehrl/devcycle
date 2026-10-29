@@ -61,7 +61,7 @@ with a handoff naming each by `#<n>`; the resumed on-device session goes straigh
 A non-empty `malformed` refuses the same way: name each line and ask for it rewritten into the
 canonical `- #<n> <item>: FAILED — <symptom> — severity: <high|medium|low>` shape before re-running.
 Otherwise each `carried` item — waived or accepted — is a carry-over: list it in the handoff's
-`Carry-overs:` with its symptom, severity, the evidence path its report line ends with and the
+`Carry-overs:` with its symptom, severity, the evidence path at the end of its symptom and the
 `results` path, and any `unverified` re-walk as unverified residue; under `open-pr` put the same
 list in the PR description under a `## Known on-device issues` heading.
 
