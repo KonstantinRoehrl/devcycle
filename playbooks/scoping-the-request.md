@@ -8,6 +8,8 @@ hunting, design exploration, approach trade-offs, and spec writing stay downstre
 
 Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons scoping`. No store, no output.
 
+Read `${CLAUDE_PLUGIN_ROOT}/references/stage-log.md` now, and log and skip as it says.
+
 ## The target
 
 The stage ends with the most precise description of the desired end state the

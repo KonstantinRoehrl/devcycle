@@ -5,6 +5,25 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-30 — Stages log their progress; audit and diagnosis log, finish does not
+
+**Decision:** `references/stage-log.md` owns which keys each stage writes. Audit logs its confirmed
+criteria and research, through its stage note, because its playbook also serves `/devcycle:review` and
+`/devcycle:maintain`, which own no state file. Diagnosis logs its reproduction and tested hypotheses.
+Finish and receiving-review log nothing new.
+
+**Why:** Finish's steps re-derive from git and repeat safely, so a log would add a second source of
+truth. An audit's criteria are the user's answers and exist nowhere else until its document is written.
+
+**Supersedes:** nothing.
+
+```text
+budget: surface-budget.json surfaceTotal 6601
+budget: context-budget.json commands/cycle.md 82252
+budget: context-budget.json playbooks/planning-waves.md 78297
+budget: context-budget.json playbooks/scoping-the-request.md 34959
+```
+
 ## 2026-10-30 — A stale-lock reclaim never removes a live lock (`scripts/file-lock.mjs`)
 
 **Decision:** A waiter that judges a lock's holder dead takes a sidecar `<lock>.reclaim` guard, reads the
