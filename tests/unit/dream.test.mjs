@@ -2039,6 +2039,35 @@ test("dream --lesson prints the record; unknown id exits 1", () => {
   assert.match(bad.stderr, /no record for novel:nope/);
 });
 
+// A concern line carries no hint of its own, but the id in its brackets still has to resolve (#294).
+function lessonAndFindingRepo() {
+  const root = realpathSync(makeTempDir("dream-lesson-finding-"));
+  mkdirSync(join(root, "docs/devcycle/promotions"), { recursive: true });
+  writeFileSync(join(root, "docs/devcycle/promotions/2026-08-16-guard-thing.md"),
+    "# Guard the thing\n- culprit-id: novel:guard-thing\n- files-touched: scripts/x.mjs\n");
+  recordMaintenanceFinding(root, {
+    findingKind: "maintenance-finding", findingId: "dead-abstraction:beef0001", culpritKind: "dead-abstraction",
+    title: "pass-through wrapper", severity: "high", confidence: "verified",
+    affectedFiles: ["scripts/x.mjs"], firstSeen: "2026-08-10", lastSeen: "2026-08-22", passes: 3,
+  });
+  return root;
+}
+
+test("dream --lesson resolves the id a concern line prints", () => {
+  const root = lessonAndFindingRepo();
+  const ok = run(["--lesson", "dead-abstraction:beef0001"], root);
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /pass-through wrapper/);
+});
+
+test("dream --lesson keeps a promotion's record ahead of a finding, and the exact refusal for neither", () => {
+  const root = lessonAndFindingRepo();
+  assert.match(run(["--lesson", "novel:guard-thing"], root).stdout, /# Guard the thing/);
+  const bad = run(["--lesson", "beef0001"], root);
+  assert.equal(bad.status, 1);
+  assert.equal(bad.stderr, "no record for beef0001\n");
+});
+
 // F1, dream side: --check-recurrence must not execute a committed verify: line either. The
 // engine's default is non-executing, so the flag is the only path to execution.
 test("cli: --check-recurrence does not execute a promotion verify: line without --run-checks", () => {

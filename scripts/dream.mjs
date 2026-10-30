@@ -16,6 +16,7 @@ import { journalEvents, eventsByCulprit } from "./journal.mjs";
 import { readPromotions, recordPromotion, recordLifecycle, consolidatePromotion, suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById } from "./promotions.mjs";
 import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, planLanding, planConsolidation } from "./lessons.mjs";
 import { matchedLessons } from "./lesson-match.mjs";
+import { findMaintenanceFindingById, readMaintenanceFindings } from "./maintenance-findings.mjs";
 import { parseFileList } from "./task-files.mjs";
 import { parseFlags, requireCount } from "./cli-flags.mjs";
 import { verify, installedVersion, defaultRunCheck } from "./verification.mjs";
@@ -1058,7 +1059,8 @@ const HANDLERS = {
     flags: { "--lesson": "value" },
     run(flags, { root }) {
       const id = flags["--lesson"];
-      const rec = findPromotionById(readPromotions(root), id);
+      const rec = findPromotionById(readPromotions(root), id)
+        ?? findMaintenanceFindingById(readMaintenanceFindings(root), id);
       // Unprefixed, unlike every other refusal here: the pull hint a brief carries prints this line
       // as-is, and tests pin it.
       if (!rec) { console.error(`no record for ${id}`); process.exit(1); }
