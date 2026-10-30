@@ -60,6 +60,18 @@ walkthrough takes the fast tier per `references/delegation.md`.
 
 § The gate decides which of steps 2, 4 and 5 run.
 
+**In-cycle, log each verdict as it resolves,** so a stopped walk resumes where it stood.
+Read `${CLAUDE_PLUGIN_ROOT}/references/stage-log.md` for the keys and the `--data` quoting. Each `(auto)` tick, waive and per-item human verdict:
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/stage-log.mjs" log --state .devcycle/state.md --stage on-device --key item-<n> --data '{"line":"<its report line>","round":<round>}'`,
+`<n>` being the item's `#<n>` and `<round>` 0 on the first walk or the fix round's number on a re-walk.
+The batch's answer is one call: `--key batch-answer --data '{"lines":{"<n>":"<its report line>"},"round":<round>}'`.
+
+**Entering a walk,** read them back with `node "${CLAUDE_PLUGIN_ROOT}/scripts/stage-log.mjs" read --state .devcycle/state.md --stage on-device`.
+An item with a line for this walk's round keeps that verdict and is not driven, proposed or asked again:
+it is the user's or the driver's recorded observation. A `batch-answer` for this walk's round is not asked
+again. Step 1 still runs, and the announce line counts only what remains. The results report
+holds the recorded lines and the new ones.
+
 1. **Launch.** Run
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/checklist.md launch-contract`
    and follow it from the checkout this stage runs in, through
@@ -152,7 +164,9 @@ the last reported in the handoff as a walk that did not run, never as done. An O
 
 ## Failed items
 
-In-cycle, run `node "${CLAUDE_PLUGIN_ROOT}/scripts/on-device-routing.mjs" --state .devcycle/state.md --cap <cap>`
+In-cycle, on entry, first rewrite each results-report line from the latest `item-<n>` line or
+`batch-answer` with a `round` above 0, so a re-walk a stop interrupted is not walked again. Then run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/on-device-routing.mjs" --state .devcycle/state.md --cap <cap>`,
 on entry and again once the results report is written. `<cap>` is the profile's branch-review round
 cap, as `playbooks/reviewing-the-branch.md` § Configuration reads it — a deliberate deviation from
 `references/loops.md`'s "a number, in the loop's own text": one figure bounds both fix loops. On
@@ -201,7 +215,8 @@ standalone rule establishes. The checklist is scratch at the diff-derived path
 path goes in the handoff and nowhere else. Everything else — walkthrough, interview rule,
 gate, results report — is unchanged: a standalone run is a different source for the checklist,
 not a different standard for verifying it. § Failed items does not apply: a standalone run
-reports its `FAILED` items in the handoff, and a delegated walk covers that run only.
+reports its `FAILED` items in the handoff, and a delegated walk covers that run only. It logs nothing
+to the stage log, which needs a state file, so a stopped standalone walk starts over.
 
 ## Handoff
 

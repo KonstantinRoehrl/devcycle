@@ -5,6 +5,26 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-30 — A stopped branch review or on-device walk keeps what finished
+
+**Decision:** The review panel takes `resultDir` and writes each lens's result and each refutation
+verdict under `.devcycle/review/round-<d>/` as it resolves, so a rerun runs only what is missing. The
+on-device stage logs each verdict as it resolves and resumes at the first item with none. A round that
+died stays spent: the next round takes the next number and finishes its work. The `single` engine keeps
+no per-lens result, so a stop there re-runs the round.
+
+**Why:** A stopped round threw away every finished lens, and a stopped walk every verdict, which meant
+paying for and answering them twice.
+
+**Supersedes:** the panel's "nothing here mutates files" header, now scoped to tracked files and git.
+
+```text
+budget: surface-budget.json surfaceTotal 6633
+budget: context-budget.json playbooks/reviewing-code.md 95739
+budget: context-budget.json playbooks/reviewing-the-branch.md 58652
+budget: context-budget.json playbooks/verifying-on-device.md 65209
+```
+
 ## 2026-10-30 — Stages log their progress; audit and diagnosis log, finish does not
 
 **Decision:** `references/stage-log.md` owns which keys each stage writes. Audit logs its confirmed
