@@ -25,7 +25,7 @@ const FLAGS = {
 };
 const ROLES = new Set(["implementer", "reviewer"]);
 const LESSONS_LINE_RE = /^\*\*Lessons:\*\*.*$/m;
-const LESSONS_HEADER = "**Lessons:** (pull a full record with its --lesson hint only if you are about to work in the area it names)";
+const LESSONS_HEADER = "**Lessons:** (pull a full record with a line's --lesson hint only if you are about to work in the area it names; a concern line carries none and is self-contained)";
 
 // The brief's path for a dispatch: dispatch-health.mjs binds a subagent's transcript to its dispatch by
 // finding this path in the dispatch prompt.

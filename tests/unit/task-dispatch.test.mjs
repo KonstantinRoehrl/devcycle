@@ -200,7 +200,7 @@ test("a fix-pass brief carries the gate line too; a reviewer brief and an ungate
   assert.equal(briefAt(plain, ".devcycle/briefs/5-implementer.md"), "# Brief for task 5\n");
 });
 
-const LESSON_HEADER = "**Lessons:** (pull a full record with its --lesson hint only if you are about to work in the area it names)";
+const LESSON_HEADER = "**Lessons:** (pull a full record with a line's --lesson hint only if you are about to work in the area it names; a concern line carries none and is self-contained)";
 const GUARD = '- Guard the thing [novel:guard-thing] → node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lesson novel:guard-thing';
 
 // A gated repo whose execution lesson names the task's file, src/a.mjs.

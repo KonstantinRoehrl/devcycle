@@ -25,12 +25,13 @@ screens for anything sensitive, partitions bulk from explicit candidates, and ch
 (`standard`/`thorough`) against prior promotions. The result is written as one dated candidate
 JSON and rendered into a proposal document that surfaces the run's graduation, reinforcement, and
 consolidation candidates alongside retirement — now graduation-gated, so a culprit retires only
-once it is `held` at r3 and a win only once it is consolidated — advancing the corpus checkpoint;
+once its script check ran green at r3, never on a journal-scored `held`, and a win only once it is
+consolidated — advancing the corpus checkpoint;
 `--preview` stops here, landing nothing.
 
 A default run instead carries that proposal into **Confirm**: bulk candidates get one reviewed
 decision for the whole partition, explicit candidates (sensitive-flagged, and every
-contradiction) each need their own `AskUserQuestion`; every candidate is routed by fault
+contradiction) and every retirement candidate each need their own `AskUserQuestion`; every candidate is routed by fault
 (`repo` vs. `pipeline`, the latter never landing locally) and, for repo-fault candidates, by
 scope (`repo-devs` vs. `just-me`); every landing's placement is resolved against the target
 section's cap before it can land, with an eviction shown and approved rather than silently

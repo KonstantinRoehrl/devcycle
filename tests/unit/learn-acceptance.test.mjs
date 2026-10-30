@@ -38,6 +38,10 @@ function world({ journal = true } = {}) {
 const cli = (root, env, args) =>
   spawnSync(process.execPath, [SCRIPT, ...args], { cwd: root, encoding: "utf8", env: { ...process.env, ...env } });
 
+// --render-report prints the path it wrote; the report is the file behind it.
+const renderedReport = (root, env, args) =>
+  readFileSync(join(root, cli(root, env, ["--render-report", ...args]).stdout.trim()), "utf8");
+
 // Reads the `# ` heading out of the legacy fixture record — the one promotion with no culprit-id.
 function readFixtureLegacyTitle() {
   const text = readFileSync(join(FIXTURES, "promotions", "legacy.md"), "utf8");
@@ -80,7 +84,7 @@ test("criterion 4: the legacy record hints and never suppresses", () => {
 
 test("criterion 6: a full section's landing carries an eviction the report renders", () => {
   const { root, env } = world();
-  const out = cli(root, env, ["--render-report", join(FIXTURES, "candidates.json")]).stdout;
+  const out = renderedReport(root, env, [join(FIXTURES, "candidates.json")]);
   assert.match(out, /landing evicts `[a-z0-9:-]+` from `[a-z-]+` \(cap\)/);
 });
 
@@ -100,8 +104,8 @@ test("criterion 7: the Confirm partition is golden — nothing moves into the bu
 
 test("criterion 8: proposal and outcome differ only in their proposal/outcome headings", () => {
   const { root, env } = world();
-  const p = cli(root, env, ["--render-report", join(FIXTURES, "candidates.json")]).stdout;
-  const o = cli(root, env, ["--render-report", join(FIXTURES, "candidates.json"), "--outcome"]).stdout;
+  const p = renderedReport(root, env, [join(FIXTURES, "candidates.json")]);
+  const o = renderedReport(root, env, [join(FIXTURES, "candidates.json"), "--outcome"]);
   const structure = (s) => s.replace(/^# Learn Report \((proposal|outcome)\)/m, "# Learn Report");
   assert.equal(structure(p).split("\n").filter((l) => l.startsWith("#")).join("\n"),
                structure(o).split("\n").filter((l) => l.startsWith("#")).join("\n"));
@@ -109,7 +113,7 @@ test("criterion 8: proposal and outcome differ only in their proposal/outcome he
 
 test("criterion 9: the all-time rollup is computed from the fixture promotions directory", () => {
   const { root, env } = world();
-  const out = cli(root, env, ["--render-report", join(FIXTURES, "candidates.json")]).stdout;
+  const out = renderedReport(root, env, [join(FIXTURES, "candidates.json")]);
   assert.match(out, /Sourced all-time: \d+ from memory · \d+ from journal\/transcript mining/);
   assert.match(out, /1 record predates `rung:` and does not bucket/);
 });
