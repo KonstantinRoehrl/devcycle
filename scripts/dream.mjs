@@ -1099,7 +1099,7 @@ const HANDLERS = {
       // learn-report.mjs falls back to empty arrays and the candidate sections render
       // "(none this run)" for candidates the engine did compute. No runner is passed on purpose:
       // the report renders before Confirm, where running a record's check needs the user's consent,
-      // so this path can never surface a culprit retirement. That only a script check can raise.
+      // so this path can never surface a culprit retirement, which only a script check can raise.
       const verification = verify(
         promotions,
         journalEvents({ toplevel: root }).events,

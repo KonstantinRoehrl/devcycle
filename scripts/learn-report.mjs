@@ -233,14 +233,18 @@ const tableCell = (text) => String(text).replace(/\|/g, "\\|").replace(/\s*\n\s*
 // A side is a plain string or { quote, session, culpritId }; both exist in real candidates files. The
 // side's own id is shown only when it adds something to the row's.
 function contradictionSide(side, rowCulpritId) {
-  if (side === null || typeof side !== "object") return String(side);
+  if (side === undefined || side === null) return "(missing)";
+  if (typeof side !== "object") return String(side);
   if (typeof side.quote !== "string") return JSON.stringify(side);
   const notes = [side.session, side.culpritId !== rowCulpritId ? side.culpritId : null].filter(Boolean);
   return notes.length ? `${side.quote} (${notes.join(", ")})` : side.quote;
 }
 
+const contradictionChosen = (chosen) =>
+  chosen === undefined || chosen === null ? "unresolved" : typeof chosen === "string" ? chosen : JSON.stringify(chosen);
+
 const contradictionRow = (c) =>
-  `| ${[c.culpritId, contradictionSide(c.sideA, c.culpritId), contradictionSide(c.sideB, c.culpritId), c.chosen ?? "unresolved"]
+  `| ${[c.culpritId, contradictionSide(c.sideA, c.culpritId), contradictionSide(c.sideB, c.culpritId), contradictionChosen(c.chosen)]
     .map(tableCell).join(" | ")} |`;
 
 export function renderLearnReport({ candidates, promotions, outcome = false, verification = null, budget = null, ledger = null, routingAdvisories = null }) {

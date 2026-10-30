@@ -221,18 +221,8 @@ nothing, deleting no memory, starting no cycle, emitting no handoff block.
    nothing else is one: a journal-scored `held` never retires, because it rests on the absence of
    events. **Every retirement candidate gets a per-item decision**, like the explicit set.
 
-   **Ask before running the checks.** The Recurrence step's output names the checks that did not run:
-   scoreboard rows whose `detail` reads `<verify> (not run: pass --run-checks)`. When there are any,
-   ask one `AskUserQuestion` listing each `verify:` command verbatim, how many there are, and the
-   120-second bound on each; the consent holds for this run and is never remembered. **Yes** runs
-   `--check-recurrence --run-checks --profile <resolved profile>`: its `candidates.retirement` joins
-   these proposals, and a `broken` or `errored` row is reported as what it is and retires nothing.
-   **No** runs nothing, and this step says culprit retirement was skipped this run, and why. No such
-   row, or `lean` (which skipped Recurrence): no ask.
-
-   A win folds
-   into a playbook's default flow or a scaffold once it has proven out; record that consolidation
-   with `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --consolidate <culpritId>`, which is what
+   A win folds into a playbook's default flow or a scaffold once it has proven out; record that
+   consolidation with `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --consolidate <culpritId>`, which is what
    makes the win eligible to retire. A retirement candidate proposes deleting the line and writing a
    **retirement** lifecycle record. A **revert** candidate, read from "revert-candidates.json" in
    the fixed doctor directory (playbooks/profiling-sessions.md owns its resolution), proposes the
@@ -246,6 +236,15 @@ nothing, deleting no memory, starting no cycle, emitting no handoff block.
    --record-lifecycle "$(cat <scratch-file>)"`. `--record-promotion` would write a promotion-shaped
    record instead, so a retirement or revert recorded through it never suppresses re-proposal and
    never reaches the report's retirement counts.
+
+   **Ask before running the checks.** The Recurrence step's output names the checks that did not run:
+   scoreboard rows whose `detail` reads `<verify> (not run: pass --run-checks)`. When there are any,
+   ask one `AskUserQuestion` listing each `verify:` command verbatim, how many there are, and the
+   120-second bound on each; the consent holds for this run and is never remembered. **Yes** runs
+   `--check-recurrence --run-checks --profile <resolved profile>`: its `candidates.retirement` joins
+   these proposals, and a `broken` or `errored` row is reported as what it is and retires nothing.
+   **No** runs nothing, and this step says culprit retirement was skipped this run, and why. No such
+   row, or `lean` (which skipped Recurrence): no ask.
 
    The rendered report's summary carries an `Always-loaded budget: <n> bytes (within budget)` line —
    the net bytes this run adds to the always-loaded surfaces — which reads `over budget — a same-run

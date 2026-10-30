@@ -158,6 +158,11 @@ test("an object side with no quote prints as JSON, never [object Object]", () =>
   assert.match(line, /"session":"abc123"/);
 });
 
+test("a missing side prints (missing) and an object chosen prints as JSON, never undefined or [object Object]", () => {
+  const line = contradictionLine({ culpritId: "contradiction:x", sideB: "never pin", chosen: { side: "A" } });
+  assert.equal(line, '| contradiction:x | (missing) | never pin | {"side":"A"} |');
+});
+
 test("a null or missing chosen renders unresolved", () => {
   assert.match(contradictionLine({ culpritId: "contradiction:x", sideA: "a", sideB: "b", chosen: null }), /\| unresolved \|$/);
   assert.match(contradictionLine({ culpritId: "contradiction:x", sideA: "a", sideB: "b" }), /\| unresolved \|$/);

@@ -5,6 +5,20 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-30 — A stale-lock reclaim never removes a live lock (`scripts/file-lock.mjs`)
+
+**Decision:** A waiter that judges a lock's holder dead takes a sidecar `<lock>.reclaim` guard, reads the
+lock again under it, and removes the lock only if its text is unchanged; one reclaimer runs at a time.
+A holder is judged live when `ps` cannot be spawned, and when its pid is alive but it recorded no
+start time. A crash inside the guard leaves it behind; an old guard is cleared on the next wait, and
+that case is accepted.
+
+**Why:** The reclaim read the lock, judged it stale and unlinked by path, so a second process that took
+the lock in between had its live lock removed and two processes entered the critical section. Found
+while fixing the learn tooling, where `dream.mjs` shares this lock.
+
+**Supersedes:** nothing; it tightens the stale-holder rule `file-lock.mjs` already had.
+
 ## 2026-10-30 — Learn's scripts say what its playbooks say: a dated report file, `unobserved`, retirement behind a green check (#245, #246, #294, #277)
 
 **Decision:** `dream.mjs --render-report` writes `.devcycle/dreaming/<date>-dream.md` (or
