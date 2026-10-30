@@ -5,6 +5,141 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-30 — A stale-lock reclaim never removes a live lock (`scripts/file-lock.mjs`)
+
+**Decision:** A waiter that judges a lock's holder dead takes a sidecar `<lock>.reclaim` guard, reads the
+lock again under it, and removes the lock only if its text is unchanged; one reclaimer runs at a time.
+A holder is judged live when `ps` cannot be spawned, and when its pid is alive but it recorded no
+start time. A crash inside the guard leaves it behind; an old guard is cleared on the next wait, and
+that case is accepted.
+
+**Why:** The reclaim read the lock, judged it stale and unlinked by path, so a second process that took
+the lock in between had its live lock removed and two processes entered the critical section. Found
+while fixing the learn tooling, where `dream.mjs` shares this lock.
+
+**Supersedes:** nothing; it tightens the stale-holder rule `file-lock.mjs` already had.
+
+## 2026-10-30 — Learn's scripts say what its playbooks say: a dated report file, `unobserved`, retirement behind a green check (#245, #246, #294, #277)
+
+**Decision:** `dream.mjs --render-report` writes `.devcycle/dreaming/<date>-dream.md` (or
+`-dream-outcome.md` under `--outcome`) and prints that path, and stdout no longer carries the report.
+The journal-scored culprit path gains the verdict `unobserved` for an id no journal event has ever
+carried at any date, so `held` now means the id has reached the journal and not since landing. A
+culprit retires only on a script check that ran green at r3, and `/devcycle:learn` asks per run before
+running the records' checks. Every retirement candidate gets a per-item decision. `--lesson` also
+resolves a maintenance finding's id; concern lines still carry no tail.
+
+**Why:** A report nobody wrote, a `[object Object]` table cell, a pull hint answering `no record` and
+a `held` nothing measured each lost work or made a lesson look proven. Of the 15 `held` rows on the
+live store, 14 had an id that never reached the journal.
+
+**Supersedes:** the retirement rule from the learning overhaul that a culprit `held` at r3 is eligible
+whatever produced the verdict.
+
+The growth below is the verdict definition, the Confirm ask and the corrected hint sentences:
+
+```text
+budget: surface-budget.json playbookMax 327
+budget: surface-budget.json surfaceTotal 6559
+budget: context-budget.json playbooks/learning-from-sessions.md 64734
+budget: context-budget.json playbooks/profiling-sessions.md 41756
+budget: context-budget.json playbooks/reviewing-code.md 95292
+budget: context-budget.json playbooks/reviewing-the-branch.md 53720
+```
+
+## 2026-10-29 — The checkers stop bouncing valid work: one before/after rule, unparseable verdicts, --help (#382, #390, #391, #275)
+
+**Decision:** A test-class report's before and after captures pass with identical headers or as one
+declared narrowing: the before is the task's gate and the after is the report's cmd:, carrying the
+scope its - Narrowing: line declares; a convention report keeps strict identity. A Karma summary
+counts, read from an escape-stripped capture. A findings file that exists but yields no verdict is
+logged as rejected (unparseable findings file: <reason>), sharing the missing file's route and
+retry cap and never closing a round. Every task script names all missing flags at once and answers
+--help; run-record.mjs lists each kind's fields and says what attributedBy means.
+
+**Why:** Each false bounce cost a dispatch round trip and pushed agents to bend their evidence until
+the checker passed (#382, #390, #391, #275). The narrowing rule had two owners that disagreed; the
+verdict parser logged every parse failure as a missing file.
+
+**Supersedes:** the evidence rule from #75 and #282 (929352c) that a report's before and after
+headers must always be identical, and `references/ledger.md`'s rule from caf1bd5 that a missing,
+empty or malformed findings file is one `rejected (missing findings file)` outcome. Neither had an
+earlier entry in this log.
+
+**Budgets:** the before/after rule, the accepted verdict forms, the unparseable outcome and the
+--help contract grow references/evidence.md, references/ledger.md, references/resume.md, both agents
+and playbooks/executing-waves.md, and every entry point whose closure cites them.
+
+```text
+budget: surface-budget.json surfaceTotal 6541
+budget: context-budget.json commands/continue.md 69039
+budget: context-budget.json commands/cycle.md 78509
+budget: context-budget.json playbooks/executing-waves.md 113527
+budget: context-budget.json playbooks/planning-waves.md 74691
+budget: context-budget.json playbooks/profiling-sessions.md 41698
+budget: context-budget.json playbooks/receiving-review.md 115288
+budget: context-budget.json playbooks/reviewing-code.md 95261
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 88628
+budget: context-budget.json playbooks/taking-the-fast-path.md 52994
+budget: context-budget.json playbooks/writing-the-findings-document.md 64371
+budget: context-budget.json references/evidence.md 13263
+```
+
+## 2026-10-29 — The unattended knob starts the driver; a recorded row still decides the mode (#384, #383, #381)
+
+**Decision:** With no `drive:` row and `executionMode` set to `unattended`, `scripts/wave-setup.mjs`
+returns `start` with `writeRow: "auto"`: the session writes `- drive: auto … via=knob` and runs the
+start path asking nothing. While the live knob is `unattended`, `drive.confirm` is false, so no
+start-confirm-shaped question is asked: not the `start` confirm, not a settled stop's, and not the
+restart confirm in a session that only attached. An unsettled stop still asks, and so does every
+other knob value. The first driven session's opt-in ledger line records `via=<answer|knob>`.
+
+**Why:** The user set `executionMode=unattended` to stop being asked how execution runs, and was
+asked every cycle (#384). What the 2026-10-16 entry guarded still holds: the opt-in is recorded as
+`via=knob` on the row and in the ledger, a run that stopped for a person always asks, and a start
+that is denied falls back to the `!` line and **Walk the waves manually**.
+
+**Supersedes:** three clauses of the 2026-10-16 entry "An unattended start needs the user's answer
+in the session; handoffs record when they are safe (#357, #355)": "no longer skips the question",
+"No knob path writes an `auto` row", and its **Supersedes** clause ("The opt-in is now the user's
+answer at execution start alone"). Its handoff-row and `handoffNotification` parts stay in force.
+
+**Budgets:** the reworded drive rows, the knob sentence and the handoff opt-in clause grow the
+runtime surface and every entry point citing `references/config.md` or `references/handoff.md`;
+the on-device routing, the fix round, the delegation rule, the finish guard and the pinned report
+paths (#383, #381) grow `playbooks/verifying-on-device.md`, `playbooks/finishing-the-cycle.md`,
+`references/checklist.md` and `playbooks/reviewing-the-branch.md`. The widened `exhausted-with-residue` definition in `references/loops.md`
+(a loop that ends early with its remainder carried over) adds 26 bytes to the five entry points that
+cite it.
+
+```text
+budget: surface-budget.json surfaceTotal 6529
+budget: context-budget.json commands/continue.md 68871
+budget: context-budget.json commands/cycle.md 77741
+budget: context-budget.json commands/learn.md 17008
+budget: context-budget.json commands/maintain.md 18187
+budget: context-budget.json commands/onboard.md 17296
+budget: context-budget.json commands/reconcile.md 24733
+budget: context-budget.json commands/review.md 25363
+budget: context-budget.json commands/verify.md 24461
+budget: context-budget.json playbooks/executing-waves.md 112292
+budget: context-budget.json playbooks/finishing-the-cycle.md 49840
+budget: context-budget.json playbooks/learning-from-sessions.md 63332
+budget: context-budget.json playbooks/maintaining-the-repo.md 65257
+budget: context-budget.json playbooks/onboarding-a-repo.md 30955
+budget: context-budget.json playbooks/planning-waves.md 74210
+budget: context-budget.json playbooks/receiving-review.md 114639
+budget: context-budget.json playbooks/reviewing-code.md 94780
+budget: context-budget.json playbooks/reviewing-the-branch.md 53624
+budget: context-budget.json playbooks/scoping-the-request.md 31280
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 87979
+budget: context-budget.json playbooks/taking-the-fast-path.md 52513
+budget: context-budget.json playbooks/verifying-on-device.md 60211
+budget: context-budget.json playbooks/writing-the-findings-document.md 63890
+budget: context-budget.json references/config.md 14482
+budget: context-budget.json references/handoff.md 11541
+```
+
 ## 2026-10-28 — A dispatch that ended without its output is detected from files, redispatched once per role, and the driver may stop a session over it (#385, #330, #380)
 
 **Decision:** `scripts/dispatch-health.mjs` classifies each in-flight dispatch from its record, its

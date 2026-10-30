@@ -6,7 +6,7 @@
 // copy: journal.mjs (run records), promotions.mjs (landed lessons), lessons.mjs (the three
 // capped stores), learn-report.mjs (the report).
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { findTranscriptFiles, owningSession, inWindow, summarizeSession, readRecords, readRunRecords } from "./doctor.mjs";
@@ -16,6 +16,7 @@ import { journalEvents, eventsByCulprit } from "./journal.mjs";
 import { readPromotions, recordPromotion, recordLifecycle, consolidatePromotion, suppressedByCulpritId, legacySimilar, novelSlugs, findPromotionById } from "./promotions.mjs";
 import { repoStorePath, userRepoStorePath, userGlobalStorePath, readSection, renderLessons, STAGES, budgetStatus, ALWAYS_LOADED_CEILING, lessonId, planLanding, planConsolidation } from "./lessons.mjs";
 import { matchedLessons } from "./lesson-match.mjs";
+import { findMaintenanceFindingById, readMaintenanceFindings } from "./maintenance-findings.mjs";
 import { parseFileList } from "./task-files.mjs";
 import { parseFlags, requireCount } from "./cli-flags.mjs";
 import { verify, installedVersion, defaultRunCheck } from "./verification.mjs";
@@ -237,6 +238,11 @@ export function writeCheckpoint(repoRoot, { lastDreamedThrough, lastArtifact }) 
       `- last-artifact: ${lastArtifact ?? "none"}\n`,
   );
 }
+
+// A report takes its candidates file's date, so a proposal and an outcome re-rendered past midnight
+// still pair up; an undated candidates file falls back to today.
+const reportDate = (candidatesPath) =>
+  basename(candidatesPath).match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? new Date().toISOString().slice(0, 10);
 
 const DATED_ARTIFACT_RE = /^\d{4}-\d{2}-\d{2}-dream\.md$/;
 
@@ -1053,7 +1059,8 @@ const HANDLERS = {
     flags: { "--lesson": "value" },
     run(flags, { root }) {
       const id = flags["--lesson"];
-      const rec = findPromotionById(readPromotions(root), id);
+      const rec = findPromotionById(readPromotions(root), id)
+        ?? findMaintenanceFindingById(readMaintenanceFindings(root), id);
       // Unprefixed, unlike every other refusal here: the pull hint a brief carries prints this line
       // as-is, and tests pin it.
       if (!rec) { console.error(`no record for ${id}`); process.exit(1); }
@@ -1090,10 +1097,9 @@ const HANDLERS = {
       const costByKey = culpritCostByKey(baseline, vocab);
       // The verification engine's own candidates, not a default: without this argument
       // learn-report.mjs falls back to empty arrays and the candidate sections render
-      // "(none this run)" for candidates the engine did compute. No --run-checks mode is
-      // plumbed here on purpose — verification.mjs skips every r3 row with a runnable check before
-      // the escalation/reinforcement/retirement pushes, so a run check cannot change one byte of
-      // this report.
+      // "(none this run)" for candidates the engine did compute. No runner is passed on purpose:
+      // the report renders before Confirm, where running a record's check needs the user's consent,
+      // so this path can never surface a culprit retirement, which only a script check can raise.
       const verification = verify(
         promotions,
         journalEvents({ toplevel: root }).events,
@@ -1111,10 +1117,16 @@ const HANDLERS = {
         baselineSessions: windows.baseline.sessions,
       });
       const advisories = advisoriesFor(root, resolveProjectsRoot(), readPolicy());
-      process.stdout.write(renderLearnReport({
-        candidates, promotions, outcome: flags["--outcome"] === true,
+      const outcome = flags["--outcome"] === true;
+      const report = renderLearnReport({
+        candidates, promotions, outcome,
         verification, budget, ledger, routingAdvisories: advisories,
-      }));
+      });
+      // The last act, so a refusal or failure above writes nothing and no partial file reads as fresh.
+      const file = join(dreamDir(root), `${reportDate(flags["--render-report"])}-dream${outcome ? "-outcome" : ""}.md`);
+      mkdirSync(dreamDir(root), { recursive: true });
+      atomicWrite(file, report);
+      process.stdout.write(`${relative(root, file)}\n`);
     },
   },
 

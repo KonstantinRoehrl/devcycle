@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, readdirSync, writeFileSync, existsSync, realpathSync, mkdirSync, copyFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, readdirSync, writeFileSync, existsSync, realpathSync, mkdirSync, copyFileSync, rmSync, cpSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { createHash } from "node:crypto";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo } from "./helpers.mjs";
@@ -939,7 +939,7 @@ test("an unknown subcommand prints the usage line, including names inherited fro
   for (const sub of ["bogus", "constructor", "toString", "hasOwnProperty"]) {
     const r = run([sub], runs);
     assert.equal(r.status, 1, sub);
-    assert.equal(r.stderr, "run-record: usage: run-record.mjs <new|append|workload> [flags]\n", sub);
+    assert.match(r.stderr, /^run-record: usage: run-record\.mjs <new\|append\|workload> \[flags\]/, sub);
   }
 });
 
@@ -963,4 +963,43 @@ test("a cycle-start mint with one --knob per knob still records every knob", () 
   assert.equal(r.status, 0, r.stderr);
   const row = JSON.parse(readFileSync(recordPath("/tmp/demo-flags9", r.stdout.trim()), "utf8"));
   assert.deepEqual(row.knobs, knobs);
+});
+
+const RR = new URL("../../scripts/run-record.mjs", import.meta.url).pathname;
+const rr = (args, env = {}) => spawnSync(process.execPath, [RR, ...args],
+  { encoding: "utf8", env: { ...process.env, DEVCYCLE_RUNS_DIR: makeTempDir("run-record-help-"), ...env } });
+
+test("#275: --help and append --help answer on stdout with exit 0", () => {
+  const top = rr(["--help"]);
+  assert.equal(top.status, 0, top.stderr);
+  assert.match(top.stdout, /^usage: run-record\.mjs <new\|append\|workload>/);
+  const dispatch = rr(["append", "--help", "--kind", "dispatch"]);
+  assert.equal(dispatch.status, 0, dispatch.stderr);
+  assert.match(dispatch.stdout, /^append --kind dispatch\n  required: .*--taskId\b.*\n  optional: /);
+  assert.doesNotMatch(dispatch.stdout, /append --kind session/);
+  assert.match(rr(["append", "--help", "--kind=session"]).stdout, /^append --kind session\n  required: --sessionId\n  optional: none$/m);
+  assert.match(rr(["append", "--help"]).stdout, /append --kind event\n/);
+  const unknown = rr(["append", "--help", "--kind", "nope"]);
+  assert.equal(unknown.status, 1);
+  assert.match(unknown.stderr, /unknown kind "nope"/);
+});
+
+test("#275: attributedBy user still fails, saying what the field means", () => {
+  const r = rr(["append", "--run", "0123456789abcdef", "--kind", "event", "--event", "user-correction-at-gate", "--stage", "execution",
+    "--culprit", "novel:x", "--attributedBy", "user", "--repo", makeTempDir("run-record-repo-")]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /"attributedBy" value "user" is not one of coordinator \| distillation — who chose the culprit slug: a user's gate correction is recorded as coordinator/);
+});
+
+test("run-record finds its schema under a plugin root whose path holds a space", (t) => {
+  const root = join(makeTempDir("run-record-space-"), "plugin root");
+  t.after(() => rmSync(dirname(root), { recursive: true, force: true }));
+  cpSync(new URL("../../scripts", import.meta.url), join(root, "scripts"), { recursive: true });
+  mkdirSync(join(root, "tests/fixtures"), { recursive: true });
+  mkdirSync(join(root, "references"), { recursive: true });
+  copyFileSync(new URL("../fixtures/run-record.schema.json", import.meta.url), join(root, "tests/fixtures/run-record.schema.json"));
+  copyFileSync(new URL("../../references/culprits.json", import.meta.url), join(root, "references/culprits.json"));
+  const r = spawnSync(process.execPath, [join(root, "scripts/run-record.mjs"), "append", "--run", "0123456789abcdef", "--kind", "session",
+    "--sessionId", "s", "--repo", makeTempDir("run-record-repo-")], { encoding: "utf8", env: { ...process.env, DEVCYCLE_RUNS_DIR: makeTempDir("run-record-space-runs-") } });
+  assert.equal(r.status, 0, r.stderr);
 });

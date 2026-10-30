@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawn, spawnSync } from "node:child_process";
+import childProcess, { spawn, spawnSync } from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { LockTimeoutError, processStartTime, isLiveHolder, withFileLock } from "../../scripts/file-lock.mjs";
 
@@ -104,4 +105,61 @@ test("withFileLock: concurrent read-modify-write cycles in separate processes lo
   const lines = readFileSync(target, "utf8").trim().split("\n");
   assert.equal(lines.length, 100);
   assert.equal(new Set(lines).size, 100);
+});
+
+// A holder that releases and exits leaves a waiter's reading of it out of date: the next holder's
+// lock is already at the path by the time `ps` says the old one is gone.
+test("withFileLock: a lock taken over while its old holder is judged dead is not removed", () => {
+  const target = join(makeTempDir("file-lock-"), "ledger.md");
+  const lock = `${target}.lock`;
+  const dead = deadPid();
+  const next = JSON.stringify({ pid: process.pid, startTime: processStartTime(process.pid), hostname: "h" });
+  writeFileSync(lock, JSON.stringify({ pid: dead, startTime: "Mon Jan  1 00:00:00 1990", hostname: "h" }));
+  const realSpawnSync = childProcess.spawnSync;
+  childProcess.spawnSync = (cmd, args, opts) => {
+    if (args.includes(String(dead))) writeFileSync(lock, next);
+    return realSpawnSync(cmd, args, opts);
+  };
+  syncBuiltinESMExports();
+  try {
+    assert.throws(() => withFileLock(target, () => "ran", { timeoutMs: 150, pollMs: 10 }), LockTimeoutError);
+  } finally {
+    childProcess.spawnSync = realSpawnSync;
+    syncBuiltinESMExports();
+  }
+  assert.equal(readFileSync(lock, "utf8"), next);
+  assert.equal(existsSync(`${lock}.reclaim`), false);
+});
+
+test("withFileLock: a reclaim guard left by a crash stops blocking once it is older than the timeout", () => {
+  const target = join(makeTempDir("file-lock-"), "ledger.md");
+  const lock = `${target}.lock`;
+  writeFileSync(lock, JSON.stringify({ pid: deadPid(), startTime: "Mon Jan  1 00:00:00 1990", hostname: "h" }));
+  writeFileSync(`${lock}.reclaim`, "");
+  const old = new Date(Date.now() - 60000);
+  utimesSync(`${lock}.reclaim`, old, old);
+  assert.equal(withFileLock(target, () => "ran", { timeoutMs: 500, pollMs: 10 }), "ran");
+  assert.equal(existsSync(`${lock}.reclaim`), false);
+});
+
+test("withFileLock: a fresh reclaim guard leaves a stale lock alone until the wait times out", () => {
+  const target = join(makeTempDir("file-lock-"), "ledger.md");
+  const lock = `${target}.lock`;
+  writeFileSync(lock, JSON.stringify({ pid: deadPid(), startTime: "Mon Jan  1 00:00:00 1990", hostname: "h" }));
+  writeFileSync(`${lock}.reclaim`, "");
+  assert.throws(() => withFileLock(target, () => "ran", { timeoutMs: 100, pollMs: 10 }), LockTimeoutError);
+  assert.equal(existsSync(lock), true);
+});
+
+test("isLiveHolder: a holder is not called dead when ps cannot run or its own start time went unrecorded", () => {
+  const dead = { pid: deadPid(), startTime: "Mon Jan  1 00:00:00 1990" };
+  assert.equal(isLiveHolder({ pid: process.pid, startTime: null }), true);
+  assert.equal(isLiveHolder({ ...dead, startTime: null }), false);
+  const path = process.env.PATH;
+  process.env.PATH = "";
+  try {
+    assert.equal(isLiveHolder(dead), true);
+  } finally {
+    process.env.PATH = path;
+  }
 });

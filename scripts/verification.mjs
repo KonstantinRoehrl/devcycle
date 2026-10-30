@@ -105,6 +105,8 @@ function measureWindow(after) {
   return { runs, reason };
 }
 
+const UNOBSERVED_DETAIL = "id never journaled at any date, so the journal says nothing either way";
+
 // Pure propose-gate decision. Culprit (journal-recurrence/recurred at r1|r2) escalates on ANY of
 // severity, the recurrence floor, or the stuck-too-long safety net; a win (journal-reinforcement/held
 // at r1|r2) reinforces only at/above the strictly-higher win bar. Missing cost is never read as $0.
@@ -128,18 +130,20 @@ export function classifyCandidate({ verify, verdict, rung, recurrences, runsObse
 }
 
 // A win retires when it is consolidated (folded into a playbook's default flow / a scaffold) —
-// structural enforcement, verdict-independent. A culprit retires only when it is HELD and
-// graduated to r3 (a mechanical check now guards it; a red check must not retire). An ungraduated
-// lesson is ineligible with a stated reason. Sibling of classifyCandidate (QC5).
-export function retirementEligibility({ kind, rung, consolidated, verdict }) {
+// structural enforcement, verdict-independent. A culprit retires only when a script check that ran
+// green made it HELD at r3: a red check must not retire, and a journal-scored `held` rests on the
+// absence of events, which measures nothing a retirement could stand on (#277). An ineligible
+// lesson gets a stated reason. Sibling of classifyCandidate (QC5).
+export function retirementEligibility({ kind, rung, consolidated, verdict, scriptChecked = false }) {
   if (kind === "win")
     return consolidated
       ? { eligible: true, reason: "consolidated win" }
       : { eligible: false, reason: "not consolidated" };
   if (verdict !== "held") return { eligible: false, reason: `verdict is ${verdict}, not held` };
-  return rung === "r3"
+  if (rung !== "r3") return { eligible: false, reason: `held but not graduated to r3 (at ${rung})` };
+  return scriptChecked
     ? { eligible: true, reason: "graduated to r3, held" }
-    : { eligible: false, reason: `held but not graduated to r3 (at ${rung})` };
+    : { eligible: false, reason: "held at r3 on the journal alone, no script check ran" };
 }
 
 export function verify(promotions, journalEvents, installed, opts = {}) {
@@ -173,17 +177,22 @@ export function verify(promotions, journalEvents, installed, opts = {}) {
       // in the report; a held/broken row carries the bare path. See #54 and audit F1/F48.
       const detail = reason ? `${p.verify} (${reason})` : p.verify;
       scoreboard.push({ culpritId: p.culpritId, rung: p.rung, verdict, runsObserved: 0, recurrences: 0, detail });
-      const elig = retirementEligibility({ kind: lessonKind(p), rung: p.rung, consolidated: isConsolidated(p), verdict });
+      const elig = retirementEligibility({ kind: lessonKind(p), rung: p.rung, consolidated: isConsolidated(p), verdict, scriptChecked: true });
       if (elig.eligible) retirement.push({ culpritId: p.culpritId, rung: p.rung, reason: elig.reason });
       continue;
     }
     const after = eventsAfter(journalEvents, p.landed);
-    const { runs, reason: detail } = measureWindow(after);
+    const { runs, reason: windowGap } = measureWindow(after);
     const recurrences = after.filter((e) => e.culprit && ids.has(e.culprit)).length;
     const reinforcement = p.verify === "journal-reinforcement";
-    const verdict = detail !== null ? "unmeasurable"
+    // Over every event, whatever its date or ts: one sighting proves this id can reach the journal,
+    // which is what lets its later absence read as `held` rather than as silence.
+    const everSeen = journalEvents.some((e) => e.culprit && ids.has(e.culprit));
+    const verdict = windowGap !== null ? "unmeasurable"
       : reinforcement ? (recurrences > 0 ? "held" : "not-adopted")
-      : (recurrences > 0 ? "recurred" : "held");
+      : recurrences > 0 ? "recurred"
+      : everSeen ? "held" : "unobserved";
+    const detail = verdict === "unobserved" ? UNOBSERVED_DETAIL : windowGap;
     scoreboard.push({ culpritId: p.culpritId, rung: p.rung, verdict, runsObserved: runs, recurrences, detail });
     // Per-promotion cost under the same bare/novel: normalization the ids Set already applies;
     // a key the corpus never priced stays null (never coerced to $0) and falls back to the bar.

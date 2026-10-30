@@ -36,9 +36,16 @@ default, runs the agent pass and asks you only the batch and the `needs-eyes` it
 `human-required` skips the agent pass and asks you every item, one by one; the driver may still
 observe an item to help you. `auto-ok` lets the agent pass close the stage unless it observed a
 failure, listing every item without an `(auto)` tick as unverified residue in the handoff — a
-relaxed closing condition, never a relaxed reporting one. Without claude-in-chrome nothing is
+relaxed closing condition, never a relaxed reporting one. Telling the session to walk the checklist
+itself applies `auto-ok` for the rest of the cycle; it is recorded in the ledger, so a resumed
+session and every re-walk keep it. Without claude-in-chrome nothing is
 ticked `(auto)` and every item is yours. The handoff then differs by path only in its state:
-in-cycle, it sets `.devcycle/state.md`'s `stage: finish` field so the run resumes there;
+in-cycle, once every `FAILED` item is waived or accepted (or none failed), it sets
+`.devcycle/state.md`'s `stage: finish` field so the run resumes there. Otherwise it asks whether
+to fix, waive or accept each one. A fix ends the session, and the next one — on the branch-review
+model — fixes, reviews and re-walks only those items. A re-walk ends `passed`, still `FAILED`, or,
+under `auto-ok` or a delegated walk, `unverified` for a fix no one could observe (carried as residue,
+never `passed`); a `FAILED` line's symptom ends with `(evidence: <path>)` when the driver captured one;
 standalone, it writes no state file at all, since an existing one belongs to someone else's
 in-flight cycle.
 
@@ -77,7 +84,7 @@ flowchart TD
     EVERY --> RESULTS
     RESULTS[("results report — passed · FAILED · waived · unverified, symptom first")]:::structural
     RESULTS --> TEARDOWN("Teardown — stop everything the stage launched"):::stage
-    TEARDOWN --> HANDOFF("Handoff — in-cycle sets stage: finish; standalone writes no state file"):::stage
+    TEARDOWN --> HANDOFF("Handoff — in-cycle sets stage: finish once no FAILED item is undecided; standalone writes no state file"):::stage
 
     classDef stage fill:#EEEDFE,stroke:#534AB7,color:#3C3489;
     classDef tool fill:#E1F5EE,stroke:#0F6E56,color:#085041,stroke-dasharray:5 5;

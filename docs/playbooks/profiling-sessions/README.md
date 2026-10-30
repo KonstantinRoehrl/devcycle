@@ -17,7 +17,7 @@ Interpretation, not transcription, is the playbook's real job: it leads from the
 workload-adjusted, matched-cohort `## At a glance` figures as the headline, treats the full
 historical corpus as supporting evidence, and assigns severity and dollar-impact rank to the
 script's unranked candidate lines using the shared findings vocabulary. It also renders the
-`## Previously promoted — did it hold` section's verdicts (`held`/`recurred`/`errored`/
+`## Previously promoted — did it hold` section's verdicts (`held`/`recurred`/`unobserved`/`errored`/
 `unmeasurable`/`broken`) straight from the run-record journal via the verification engine, never
 by re-running the mining loop, and every run with at least one finding persists to
 "YYYY-MM-DD-report.md" in the fixed doctor directory — resolved via "node -e \"import('${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs').then(m=>console.log(m.doctorDir()))\"" (DEVCYCLE_DOCTOR_DIR if set, else "~/.claude/devcycle/doctor"). An optional, fully skippable actionability step can draft

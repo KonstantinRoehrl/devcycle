@@ -57,8 +57,9 @@ loads, never in a file a stage opens with Read — so knobs reach stages through
   `subagentBudget`, which the hooks module (`hooks/devcycle-mod.mjs`) takes from the `options`
   Claude Code hands its `register`, never from the `knobs:` line, which still prints it for the
   state file; and `executionMode`, `driveWatch` and `drivePlugins`, which `scripts/wave-setup.mjs`
-  takes from the fresh line its `--knobs` argument carries — `executionMode` only while the state
-  file has no `drive:` row.
+  takes from the fresh line its `--knobs` argument carries — `executionMode` choosing the run's mode
+  only while the state file has no `drive:` row, and whether a start is confirmed throughout
+  (`references/drive.md` § Drive actions).
 - **Drift notice.** Values are global, as `/plugin configure` stores them — there is no per-repo
   value. Where the state file's `configured:` line records a KEY=VALUE list, `/devcycle:cycle`
   and `/devcycle:continue` rerun their final resolver invocation with
@@ -85,7 +86,7 @@ carry the same keys; without it the copies drift one release at a time.
 | `docTrackingPolicy` | § Doc tracking, below | `standard` |
 | `reviewDepth` | `playbooks/reviewing-the-branch.md` | `auto` — sized per `playbooks/reviewing-code.md` § 3 |
 | `crossModelReview` | `playbooks/reviewing-the-branch.md` | `false` |
-| `onDeviceGate` | `playbooks/verifying-on-device.md` | `auto` — agent first, per `playbooks/verifying-on-device.md` § The gate |
+| `onDeviceGate` | `playbooks/verifying-on-device.md` | `auto` — agent first, per `playbooks/verifying-on-device.md` § The gate, where an in-session delegation overrides it for the cycle |
 | `implementerModel` | `playbooks/executing-waves.md` | `auto` — `references/model-routing.md` derives it per task |
 | `taskReviewerModel` | `playbooks/executing-waves.md` | `auto` — `references/model-routing.md` derives it per task |
 | `branchReviewModel` | `playbooks/reviewing-the-branch.md` | `auto` — the session's own model |

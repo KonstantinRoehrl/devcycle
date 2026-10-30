@@ -70,8 +70,15 @@ function constraintsOf(briefText) {
 // A report's `- Before:`/`- After:` value is "<path> (exit <n>)" (references/evidence.md § Task report).
 const evidenceFile = (report, key) => field(report, key)?.split(/\s+/)[0].replaceAll("`", "") || null;
 
+// The reviewer's instruction to write its verdict, and to confirm the file exists before it returns.
+const verdictParagraph = (code, findingsAbs) =>
+  `Write your verdict block to ${code(findingsAbs)} in the shape \`"$(devcycle-root)/references/evidence.md"\` ` +
+  "§ Reviewer verdicts defines. The file is required: an unwritten one, or one with no verdict line that shape admits, " +
+  `costs this round a re-dispatch. Run \`ls -la ${findingsAbs}\` before you return, and return only the task-reviewer envelope.`;
+
 // The reviewer brief playbooks/executing-waves.md step 5 prescribes, from the ledger, the plan and
-// the two files the implementer left: no coordinator slicing between intake and the review.
+// the two files the implementer left: no coordinator slicing between intake and the review, naming
+// the findings file by absolute path, which the reviewer must confirm it wrote.
 function reviewerBrief({ root, ledger, task, round, reportRel, report, findingsPath, dispatched }) {
   const first = latestKeyed(ledger, task, "dispatched", { round: 0 }) ?? dispatched;
   const firstAbs = join(root, first.ref);
@@ -81,6 +88,7 @@ function reviewerBrief({ root, ledger, task, round, reportRel, report, findingsP
   const rejected = round > 1 ? latestKeyed(ledger, task, "review-verdict", { round: round - 1 }) : null;
   const evidence = ["Before", "After"].map((key) => evidenceFile(report, key)).filter(Boolean);
   const code = (path) => `\`${path}\``;
+  const findingsAbs = join(root, findingsPath);
   return [
     `# Task-reviewer brief — Task ${task}, round ${round}`,
     "",
@@ -102,8 +110,7 @@ function reviewerBrief({ root, ledger, task, round, reportRel, report, findingsP
       "invisible to diff, then `git diff -U10 HEAD -- <the files above>`. Other tasks may be in flight in this working " +
       "tree; judge only these files.",
     "",
-    `Write your verdict block to ${code(findingsPath)} in the shape \`"$(devcycle-root)/references/evidence.md"\` ` +
-      "§ Reviewer verdicts defines, and return only the task-reviewer envelope.",
+    verdictParagraph(code, findingsAbs),
     "",
     constraints || "**Constraints:** none extracted — read the implementer brief for constraints",
     "",

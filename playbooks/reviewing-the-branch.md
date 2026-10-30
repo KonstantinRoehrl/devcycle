@@ -38,9 +38,10 @@ Before that invocation, the coordinator matches this branch's lessons to what it
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --match --stage branch-review --files "<the base..branch diff's changed files>"` —
 and splices the matched lesson lines it prints (those lines alone, never a whole stage
 section) into the reviewer's dispatch as an explicit known-lesson check: *does this diff
-re-introduce any matched lesson's mistake?* Each spliced line ends in its own `--lesson <id>`
+re-introduce any matched lesson's mistake?* A lesson line ends in its own `--lesson <id>`
 pull hint, so the reviewer fetches the full record on demand instead of being handed it up
-front. A match that comes back empty adds no such block.
+front; a concern line carries none and is self-contained, though `--lesson` also accepts its
+bracketed id. A match that comes back empty adds no such block.
 
 Invoke it with `scope: {ref: "<base>..<branch>"}`, the spec path as `specPath`, and this
 stage's criteria — what the spec requires and forbids, plus the default criteria set — and
@@ -149,6 +150,9 @@ variants. The depth line says how that engine was picked, worded per
 `playbooks/reviewing-code.md` § 4. `[severity]` is one of the four values `references/findings.md` defines; the
 carry-overs line holds exactly the non-blocking ones. Findings in plain everyday language,
 symptom first; jargon only where it adds precision.
+
+Write the report to `.devcycle/reports/branch-review.md`, replacing any earlier one:
+`playbooks/verifying-on-device.md`'s fix round reads its `Engine:` and `Depth:` lines.
 
 ## Handoff
 

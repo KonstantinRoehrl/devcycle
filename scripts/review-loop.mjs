@@ -5,7 +5,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWrite } from "./atomic-write.mjs";
-import { MISSING_FINDINGS } from "./task-ledger.mjs";
+import { isNoVerdict } from "./task-ledger.mjs";
 
 export const ROUND_CAP = 3;
 
@@ -21,10 +21,10 @@ export function exhaustReviewLoop(root, task, round, residue) {
   return loopId;
 }
 
-// A rejection — the reviewer's or the green gate's, never a missing findings file — at or past the
+// A rejection — the reviewer's or the green gate's, never a findings file with no verdict — at or past the
 // round cap: the line each exhaustion of the loop writes right after its status file.
 const exhausts = (e) => e.event === "review-verdict" && e.outcome.startsWith("rejected") &&
-  !e.outcome.startsWith(MISSING_FINDINGS) && Number(e.key?.split("/")[2]) >= ROUND_CAP;
+  !isNoVerdict(e.outcome) && Number(e.key?.split("/")[2]) >= ROUND_CAP;
 
 // references/resume.md § Exhausted-unresolved: the loop id while the task's review loop waits on the
 // user, else null. `entries` are the task's ledger lines of this cycle, in file order. The status file

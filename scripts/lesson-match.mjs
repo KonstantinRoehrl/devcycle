@@ -1,5 +1,5 @@
-// The lessons and persisting maintenance findings a task's files name, one line each with its pull
-// hint: what `dream.mjs --match` prints and what task-dispatch.mjs fills an implementer brief's
+// The lessons and persisting maintenance findings a task's files name, one line each, a lesson's with
+// its pull hint and a finding's self-contained: what `dream.mjs --match` prints and what task-dispatch.mjs fills an implementer brief's
 // `**Lessons:**` line with. Lessons come from the stage's three stores joined to their promotion
 // records; maintenance findings match by file only, whatever the stage.
 import { MATCH_CAP, matchLessons, readSection, renderMatch, repoStorePath, userGlobalStorePath, userRepoStorePath } from "./lessons.mjs";

@@ -51,3 +51,14 @@ test("CLI: a wrong argument count prints the usage and exits 1", () => {
   assert.equal(r.status, 1);
   assert.match(r.stderr, /^read-section: usage: read-section\.mjs references\/<file>\.md <section-slug>/);
 });
+
+test("a citation that turned the heading's apostrophe into a hyphen still resolves", () => {
+  const text = readSection("references/resume.md", "resuming-a-wave-s-per-task-position");
+  assert.match(text, /^## Resuming a wave's per-task position/);
+  assert.equal(text, readSection("references/resume.md", "resuming-a-waves-per-task-position"));
+});
+
+test("an unknown slug's error lists the file's section slugs", () => {
+  assert.throws(() => readSection("references/resume.md", "no-such-section"),
+    /no section "no-such-section" in references\/resume\.md — its sections: .*resuming-a-waves-per-task-position/);
+});

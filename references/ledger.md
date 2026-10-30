@@ -66,7 +66,8 @@ run-record row only while holding a `<file>.lock` next to its target — a lock 
 gone or reused is reclaimed — and skips a line whose key, or a row whose identifying fields, already
 exist, so a re-run after a crash adds nothing twice while the next round or retry still appends.
 Each prints one JSON object (`ok`, `action`, `appended` — the keys it wrote and `rr:<kind>` per
-run-record row — and `depthBand`) and exits non-zero only on a usage (2) or environment (3) error.
+run-record row — and `depthBand`) and exits non-zero only on a usage (2) or environment (3) error. A usage error names every missing required
+flag at once; `--help` answers `action: "usage"` with the script's `required` and `optional` flags, exit 0.
 
 - `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-dispatch.mjs" --run <run-id> --task <id> --role implementer|reviewer [--round <n>] [--model-decision "<decision>"]`,
   the brief on stdin, immediately before each dispatch: writes it to
@@ -75,10 +76,11 @@ run-record row — and `depthBand`) and exits non-zero only on a usage (2) or en
   `references/model-routing.md` audit shape; `outcome=implementer retry <k>` without the flag)
   or `review-round` (`outcome=round <n>`) with that path as `ref=`, and keeps the dispatch's start
   time, which an implementer's `dispatch` row takes. A reviewer dispatch refuses any round but the
-  task's next, and first moves aside a findings file already at that round's path. The dispatch
-  record also names the session (`sessionId`), and `--capture-cmd "<cmd>"` (implementer only) ends
-  the brief with a `**Capture command:**` line and the `- Narrowing:` line a concurrent wave's capture
-  needs.
+  task's next, and first moves aside a findings file already at that round's path. An implementer
+  brief whose task resolves a gate ends with its `**Gate command:**` line, which cites
+  `references/evidence.md` § File-backed evidence for the before/after rule. The dispatch record also
+  names the session (`sessionId`), and `--capture-cmd "<cmd>"` (implementer only) ends the brief with
+  a `**Capture command:**` line and the `- Narrowing:` line a concurrent wave's capture needs.
 - `node "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch-health.mjs" [--record] [--stopped <task>] [--json]`
   while dispatches are in flight: one line per in-flight dispatch of this session — state, elapsed
   time, tool uses, idle time, last tool — and the next action; with `--record`, appends
@@ -96,10 +98,13 @@ run-record row — and `depthBand`) and exits non-zero only on a usage (2) or en
   round already after the latest `report-received` makes it write nothing and print those paths.
 - `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-verdict.mjs" --run <run-id> --task <id> --round <n> --findings <path> --evidence-class red-green|green-green|convention [--plan <path> --test-cmd "<cmd>" --subject "<subject>" [--trailers "<lines>"] [--culprit <slug>]]`
   once the reviewer's envelope returns, against that round's `review-round` line (exit 2 once a later
-  task line it did not write acted on it): a findings file missing, empty or malformed (no `Verdict:`
-  outside a fenced quote — a whole-file fence is none — or two that disagree, `needs-changes` lacking
-  a valid `Culprit:`, `accept` with a critical or high finding) appends
-  `review-verdict outcome=rejected (missing findings file)` (`missing-findings`); else `outcome=accepted`
+  task line it did not write acted on it): an absent findings file appends
+  `review-verdict outcome=rejected (missing findings file)`, and one that yields no verdict (no
+  `Verdict:` outside a fenced quote — a whole-file fence is none — two that disagree, `needs-changes`
+  lacking a valid `Culprit:`, `accept` with a critical or high finding)
+  `outcome=rejected (unparseable findings file: <reason>)`, `<reason>` one of `no verdict line`,
+  `conflicting verdicts`, `needs-changes without a valid culprit`, `accept lists a blocking finding`;
+  both answer `missing-findings` with that `reason` and the `expected` verdict form; else `outcome=accepted`
   or `rejected`, the `verdict` row and, on `needs-changes`, the `review-reject` event row (`accepted` /
   `rejected`). A rejected round 3 writes the exhausted-unresolved status `references/resume.md` reads;
   either script returns `needs-user` at a retry cap. Given the task commit's `--plan`, `--test-cmd`

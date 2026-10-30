@@ -7,6 +7,7 @@ import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import {
   ledgerKey, parseLedgerLine, appendLedgerLine, nextRetry, retryCount, latestKeyed, appendRunRecordOnce, depthBandNow,
   checkTaskId, ledgerPlan, taskFiles, taskGate, UsageError,
+  HelpRequest, taskFlags, usageLine, unparseableFindings, isNoVerdict, noVerdictReason, nextReviewRound, MISSING_FINDINGS,
 } from "../../scripts/task-ledger.mjs";
 
 const LEDGER_MODULE = new URL("../../scripts/task-ledger.mjs", import.meta.url).href;
@@ -223,4 +224,46 @@ test("taskFiles reads a task's **Files:** set through the ledger's plan; null wi
 test("checkTaskId refuses a task id the task scripts would refuse", () => {
   assert.doesNotThrow(() => checkTaskId("3"));
   assert.throws(() => checkTaskId("../x"), (err) => err instanceof UsageError && /--task must be a plan task id, got "\.\.\/x"/.test(err.message));
+});
+
+test("taskFlags names every missing required flag in one error", () => {
+  const known = { "--run": "value", "--a": "value", "--b": "value", "--c": "value" };
+  assert.throws(() => taskFlags(["--run", "x"], known, ["--run", "--a", "--b", "--c"]),
+    (err) => err instanceof UsageError && err.message === "--a, --b, --c are required");
+  assert.throws(() => taskFlags(["--run", "x", "--a", "1", "--b", "2"], known, ["--run", "--a", "--b", "--c"]),
+    (err) => err instanceof UsageError && err.message === "--c is required");
+});
+
+test("taskFlags answers --help with the flag names, required first, before any other check", () => {
+  const known = { "--run": "value", "--task": "value", "--ledger": "value" };
+  assert.throws(() => taskFlags(["--help", "--bogus"], known, ["--run", "--task"]), (err) =>
+    err instanceof HelpRequest && !(err instanceof UsageError) &&
+    JSON.stringify(err.usage) === JSON.stringify({ required: ["--run", "--task"], optional: ["--ledger"] }));
+  assert.equal(usageLine("task-x", { required: ["--run"], optional: ["--ledger"] }), "usage: task-x.mjs --run [--ledger]");
+});
+
+test("the no-verdict predicate covers an absent and an unparseable findings file, and nothing else", () => {
+  const unparseable = unparseableFindings("no verdict line");
+  assert.equal(unparseable, "rejected (unparseable findings file: no verdict line)");
+  assert.equal(parseLedgerLine(`- [2026-10-29T10:00:00Z] task=5 event=review-verdict outcome=${unparseable} ref=.devcycle/findings/5-round-1.md key=5/review-verdict/1/0`).outcome, unparseable);
+  assert.deepEqual([MISSING_FINDINGS, unparseable, "rejected", "accepted", "rejected (green gate: exit 1)"].map(isNoVerdict), [true, true, false, false, false]);
+  assert.deepEqual([MISSING_FINDINGS, unparseable].map(noVerdictReason), ["absent file", "no verdict line"]);
+});
+
+test("retryCount takes a predicate as well as a prefix", () => {
+  const path = ledger([
+    `- [2026-10-29T10:00:00Z] task=5 event=review-verdict outcome=${MISSING_FINDINGS} ref=none key=5/review-verdict/1/0`,
+    `- [2026-10-29T10:01:00Z] task=5 event=review-verdict outcome=${unparseableFindings("conflicting verdicts")} ref=none key=5/review-verdict/1/1`,
+    "",
+  ].join("\n"));
+  assert.equal(retryCount(path, "5", MISSING_FINDINGS), 1);
+  assert.equal(retryCount(path, "5", isNoVerdict), 2);
+});
+
+test("nextReviewRound keeps a round open across an unparseable findings file", () => {
+  const entries = [
+    "- [2026-10-29T10:00:00Z] task=5 event=review-round outcome=round 1 ref=none key=5/review-round/1/0",
+    `- [2026-10-29T10:01:00Z] task=5 event=review-verdict outcome=${unparseableFindings("no verdict line")} ref=none key=5/review-verdict/1/0`,
+  ].map(parseLedgerLine);
+  assert.equal(nextReviewRound(entries), 1);
 });

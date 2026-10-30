@@ -103,8 +103,9 @@ reference — rather than only patching each finding individually.
 shared verification engine directly from the run-record journal, never from a dream artifact and
 never by re-running the mining loop — so this playbook stays runnable standalone and pays none of
 the mining cost. The engine scores each promotion and the section carries one line per scored
-promotion — `<culprit-id> (<rung>): <verdict>` — with its verdict one of: `held` (runs observed,
-no recurrence), `recurred` (the pattern came back), `errored` (the check itself failed to run to
+promotion — `<culprit-id> (<rung>): <verdict>` — with its verdict one of: `held` (the id has reached
+the journal, and not since landing), `recurred` (the pattern came back), `unobserved` (runs observed,
+but the id has never reached the journal at any date; never read as `held`), `errored` (the check itself failed to run to
 completion — a timeout, an output overflow, or a spawn failure; a broken harness, never a verdict
 on the lesson), `unmeasurable` (zero runs observed, or runs observed but none attributed — never
 read as `held`), or `broken` (an r3 check that now fails). Each `recurred` hit is its own finding,

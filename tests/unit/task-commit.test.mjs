@@ -34,6 +34,8 @@ const PLAN = [
   "",
 ].join("\n");
 
+const UNPARSEABLE = "rejected (unparseable findings file: no verdict line)";
+
 function fixture({ acceptedRound = true } = {}) {
   const dir = makeRepo();
   sh("git", ["config", "user.name", "devcycle-test"], { cwd: dir });
@@ -564,6 +566,20 @@ test("an old deferred ledger line neither blocks the commit nor gets a retired g
     const { out } = commitTask(fx);
     assert.equal(out.action, "committed", JSON.stringify(out));
     assert.deepEqual(events(fx), ["gate-pass-clean"]);
+  } finally {
+    cleanup(fx);
+  }
+});
+
+// A findings file with no verdict closes no round, so the accept before it still stands.
+test("an unparseable findings file after an accept neither blocks the commit nor reads as a rejection", () => {
+  const fx = fixture();
+  try {
+    appendFileSync(join(fx.dir, ".devcycle/ledger.md"),
+      `- [2026-01-01T00:02:00Z] task=1 event=review-verdict outcome=${UNPARSEABLE} ref=.devcycle/findings/1-round-1.md key=1/review-verdict/1/1\n`);
+    writeInto(fx.dir, "src/a.txt", "a1\n");
+    const { out } = commitTask(fx);
+    assert.equal(out.action, "committed", JSON.stringify(out));
   } finally {
     cleanup(fx);
   }

@@ -803,21 +803,26 @@ test("compiled knowledge groups landed lessons by version and rung, excluding re
 
 // A real fixture promotions set + journal, run through the shared verification engine so the
 // "Previously promoted" section renders engine output rather than a mock. r2 recurred (escalates),
-// r1 held, r2 unmeasurable (no run after it landed), r3 broken (a verify command that exits
-// non-zero) — one of each of the four verdict words the section renders. recurred-one is a
+// r1 held, r1 unobserved (no event has ever carried its id), r2 unmeasurable (no run after it landed),
+// r3 broken (a verify command that exits non-zero) — one of each verdict word the section renders. recurred-one is a
 // journal-recurrence culprit, the only shape the engine escalates.
 const PROMOTED_PROMOTIONS = [
   { culpritId: "friction:recurred-one", rung: "r2", landed: "2026-07-01", verify: "journal-recurrence", lifecycle: null, aliases: [] },
   { culpritId: "friction:held-one", rung: "r1", landed: "2026-07-01", lifecycle: null, aliases: [] },
+  { culpritId: "friction:silent-one", rung: "r1", landed: "2026-07-01", lifecycle: null, aliases: [] },
   { culpritId: "friction:unmeasured-one", rung: "r2", landed: "2026-08-20", lifecycle: null, aliases: [] },
   { culpritId: "friction:broken-one", rung: "r3", verify: "false", landed: "2026-07-01", lifecycle: null, aliases: [] },
 ];
 // recurred-one recurs enough times to clear the culprit recurrence bar, so it escalates on the
 // recurrence floor alone — the count is read from the policy, never hardcoded, so it tracks the bar.
-const PROMOTED_JOURNAL = Array.from({ length: readPolicy().culpritRecurrenceBar }, (_, i) => ({
-  event: "gate-fail", culprit: "recurred-one",
-  ts: `2026-07-${String(15 + i).padStart(2, "0")}T10:00:00.000Z`, runId: `run-${i + 1}`,
-}));
+const PROMOTED_JOURNAL = [
+  ...Array.from({ length: readPolicy().culpritRecurrenceBar }, (_, i) => ({
+    event: "gate-fail", culprit: "recurred-one",
+    ts: `2026-07-${String(15 + i).padStart(2, "0")}T10:00:00.000Z`, runId: `run-${i + 1}`,
+  })),
+  // Before held-one landed: proves its id can reach the journal, which is what makes it held.
+  { event: "gate-fail", culprit: "held-one", ts: "2026-06-15T10:00:00.000Z", runId: "run-0" },
+];
 const PROMOTED_VERIFICATION = verify(PROMOTED_PROMOTIONS, PROMOTED_JOURNAL, "0.14.0", { runCheck: defaultRunCheck });
 
 const ctx = (over = {}) => ({
@@ -1881,8 +1886,10 @@ const promotedSection = (out) =>
 
 test("the previously-promoted section renders every verdict word from the engine scoreboard", () => {
   const section = promotedSection(renderReport([sum()], ctx()));
-  for (const verdict of ["held", "recurred", "unmeasurable", "broken"])
-    assert.match(section, new RegExp(`\\b${verdict}\\b`), `verdict "${verdict}" is not rendered`);
+  // Against the line shape: a bare \\bheld\\b would keep passing on the culprit id friction:held-one.
+  for (const verdict of ["held", "unobserved", "recurred", "unmeasurable", "broken"])
+    assert.match(section, new RegExp(`\\(r\\d\\): ${verdict}\\b`), `verdict "${verdict}" is not rendered`);
+  assert.match(section, /friction:silent-one \(r1\): unobserved over \d+ runs? — id never journaled/);
   assert.match(section, /friction:recurred-one/);
 });
 

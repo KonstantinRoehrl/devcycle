@@ -6,7 +6,7 @@ import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWrite } from "./atomic-write.mjs";
 import { now } from "./stamp.mjs";
-import { MISSING_FINDINGS, nextReviewRound } from "./task-ledger.mjs";
+import { isNoVerdict, nextReviewRound } from "./task-ledger.mjs";
 
 export const PROGRESS_REL = ".devcycle/drive-progress.json";
 const INTAKE_BOUNCE = "rejected (intake bounce)";
@@ -31,7 +31,7 @@ function roundOf(entries) {
 }
 
 const rejectionsOf = (entries) => entries.filter((e) =>
-  (e.event === "review-verdict" && e.outcome.startsWith("rejected") && !e.outcome.startsWith(MISSING_FINDINGS)) ||
+  (e.event === "review-verdict" && e.outcome.startsWith("rejected") && !isNoVerdict(e.outcome)) ||
   e.outcome.startsWith(INTAKE_BOUNCE)).length;
 
 export function buildProgress({ run, plan, health = null }) {

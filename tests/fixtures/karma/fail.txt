@@ -1,0 +1,16 @@
+# devcycle-cmd: SPECS=spec/fail.spec.js REPORTER=progress npx karma start karma.conf.js
+[32m29 10 2026 18:31:22.379:INFO [karma-server]: [39mKarma v6.4.4 server started at http://localhost:9876/
+[32m29 10 2026 18:31:22.380:INFO [launcher]: [39mLaunching browsers ChromeHeadless with concurrency unlimited
+[32m29 10 2026 18:31:22.382:INFO [launcher]: [39mStarting browser ChromeHeadless
+[32m29 10 2026 18:31:22.776:INFO [Chrome Headless 156.0.0.0 (Mac OS 10.15.7)]: [39mConnected on socket m19nTt0WnWDUlhdmAAAA with id 14761604
+Chrome Headless 156.0.0.0 (Mac OS 10.15.7): Executed 0 of 2[32m SUCCESS[39m (0 secs / 0 secs)
+[1A[2K[31mChrome Headless 156.0.0.0 (Mac OS 10.15.7) math bad FAILED[39m
+	Expected 1 to be 2.
+	    at <Jasmine>
+	    at UserContext.<anonymous> (spec/fail.spec.js:1:87)
+	    at <Jasmine>
+Chrome Headless 156.0.0.0 (Mac OS 10.15.7): Executed 1 of 2[31m (1 FAILED)[39m (0 secs / 0.001 secs)
+[1A[2KChrome Headless 156.0.0.0 (Mac OS 10.15.7): Executed 2 of 2[31m (1 FAILED)[39m (0 secs / 0.001 secs)
+[1A[2KChrome Headless 156.0.0.0 (Mac OS 10.15.7): Executed 2 of 2[31m (1 FAILED)[39m (0.002 secs / 0.001 secs)
+[31mTOTAL: 1 FAILED, 1 SUCCESS[39m
+# exit 1

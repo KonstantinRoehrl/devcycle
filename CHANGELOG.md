@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.28.3 — 2026-10-30
+
+- fix: stop the task checkers bouncing valid work, route on-device FAILED items and fix four learn-tooling bugs (#384, #383, #381, #382, #390, #391, #275, #245, #246, #294, #277)
+
+A driven run no longer waits on a question it has no one to ask, and the task checkers stop rejecting work that was valid.
+
+**Unattended start and on-device routing (#384, #383, #381).** `executionMode=unattended` now starts the driver on its own, with no in-session question. A FAILED on-device item routes through a decision (a fix round or a waiver) before the cycle can finish: the finish guard fails closed on unparsed FAILED lines, keys on the verdict position, reads CRLF reports and scopes ledger decisions to the cycle. A delegated walkthrough counts as auto-ok for the on-device stage, and an unverified re-walk has a defined verdict.
+
+**Checkers that bounced valid work (#382, #390, #391, #275).** `evidence-completeness-check` counts Karma runner summaries (colored, uncolored, dotted, focused, failed) and accepts a declared narrowed before/after pair. `task-verdict` reads `## Verdict:` headings and list markers, and an unparseable or missing findings file is logged as "no verdict" rather than a crash. `task-intake`, `task-commit`, `task-dispatch` and the other task scripts name every missing flag at once and answer `--help`. `run-record append` prints usage per kind, explains `attributedBy` and resolves the schema path from the running plugin. `read-section` resolves the apostrophe-hyphen slug and lists the sections on a miss.
+
+**Learn tooling (#245, #246, #294, #277).** `dream.mjs --render-report` writes the report to its own dated file and prints only the path. The contradictions table renders both side shapes instead of `[object Object]`. `--lesson` resolves concern ids from `--match` output, and the `reviewing-the-branch.md` hint no longer overpromises. `--check-recurrence` gains an `unobserved` verdict, so "no journal event yet" is no longer read as "pattern stopped", and a culprit retires only behind a green check, never on `held`. A stale-lock reclaim in `file-lock` no longer removes a live lock.
+
 ## 0.28.2 — 2026-10-28
 
 - fix(dispatch): detect a dead dispatch and bound the waits on it (#385, #330, #380)

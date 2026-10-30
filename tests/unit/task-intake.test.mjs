@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
@@ -196,7 +196,11 @@ test("--compose-review writes the reviewer brief and dispatches the task's next 
   );
   assert.deepEqual(r.out.appended, ["5/report-received/0/0", "rr:dispatch", "5/review-round/1/0"]);
   assert.match(ledgerTail(f), / task=5 event=review-round outcome=round 1 ref=\.devcycle\/briefs\/5-reviewer-round-1\.md key=5\/review-round\/1\/0$/);
-  assert.equal(readFileSync(join(f.repo, r.out.reviewBriefPath), "utf8"), [
+  // The scripts resolve the root through the git toplevel, which resolves symlinks.
+  const findingsAbs = join(realpathSync(f.repo), ".devcycle/findings/5-round-1.md");
+  const brief = readFileSync(join(f.repo, r.out.reviewBriefPath), "utf8");
+  assert.match(brief, /The file is required: an unwritten one, or one with no verdict line that shape admits, costs this round a re-dispatch\. Run `ls -la [^`]+5-round-1\.md` before you return/);
+  assert.equal(brief, [
     "# Task-reviewer brief — Task 5, round 1",
     "",
     "**Task id:** 5",
@@ -216,8 +220,9 @@ test("--compose-review writes the reviewer brief and dispatches the task's next 
       "invisible to diff, then `git diff -U10 HEAD -- <the files above>`. Other tasks may be in flight in this working " +
       "tree; judge only these files.",
     "",
-    "Write your verdict block to `.devcycle/findings/5-round-1.md` in the shape `\"$(devcycle-root)/references/evidence.md\"` " +
-      "§ Reviewer verdicts defines, and return only the task-reviewer envelope.",
+    `Write your verdict block to \`${findingsAbs}\` in the shape \`"$(devcycle-root)/references/evidence.md"\` ` +
+      "§ Reviewer verdicts defines. The file is required: an unwritten one, or one with no verdict line that shape admits, " +
+      `costs this round a re-dispatch. Run \`ls -la ${findingsAbs}\` before you return, and return only the task-reviewer envelope.`,
     "",
     "## Global Constraints",
     "",
@@ -238,7 +243,7 @@ test("the reviewer brief's constraints stop before the tail task-dispatch append
   writeInto(f.repo, ".devcycle/briefs/5-implementer.md", [
     "# Implementer brief — Task 5", "", "**Task id:** 5", "", "## Quality Constraints", "", "- QC1 — Reuse the repo's owners.", "",
     "**Gate command:** `npm test`",
-    `**Capture command:** \`${cmd}\` — pass it as \`capture-evidence.mjs --cmd\` for both the before and the after capture, and copy this line into your report:`,
+    `**Capture command:** \`${cmd}\` — pass it as \`capture-evidence.mjs --cmd\` for both the before and the after capture (references/evidence.md § File-backed evidence owns the before/after rule), and copy this line into your report:`,
     `- Narrowing: ${cmd} — concurrent wave: siblings' uncommitted edits share the checkout; the whole gate runs at commit in an isolated worktree`, "",
   ].join("\n"));
   const r = intake(f, ["--compose-review"]);
@@ -285,7 +290,8 @@ test("a later round's brief names the fix-pass brief and the rejection, and keep
   assert.match(brief, /^- The implementer brief \(task steps, pinned interfaces, constraints\): `\.devcycle\/briefs\/5-implementer\.md`$/m);
   assert.match(brief, /^- The latest fix-pass brief: `\.devcycle\/briefs\/5-implementer-round-1\.md`$/m);
   assert.match(brief, /^- Round 1 was rejected by `\.devcycle\/findings\/5-round-1\.md`: confirm each blocking finding there is resolved$/m);
-  assert.match(brief, /^Write your verdict block to `\.devcycle\/findings\/5-round-2\.md` /m);
+  assert.match(brief, /^Write your verdict block to `[^`]+\/\.devcycle\/findings\/5-round-2\.md` /m);
+  assert.ok(brief.includes(`\`${join(realpathSync(f.repo), ".devcycle/findings/5-round-2.md")}\``));
   assert.match(brief, /^- QC1 — Reuse the repo's owners\.$/m);
 });
 

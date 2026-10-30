@@ -666,6 +666,15 @@ test("harvested: doctor/severity-ranking-and-actionability — severity ranks, d
   assert.match(t, /writes "YYYY-MM-DD-report\.md" to the fixed doctor directory/);
 });
 
+test("learn asks per run before running the records' checks, and decides each retirement per item", () => {
+  const t = read("playbooks/learning-from-sessions.md");
+  const step6 = t.slice(t.indexOf("6. **Surface any retirement or revert candidates**"), t.indexOf("## Land, ladder-first"));
+  assert.match(step6, /`--check-recurrence --run-checks --profile <resolved profile>`/);
+  assert.match(step6, /the consent holds for this run and is never remembered/);
+  assert.match(step6, /\*\*Every retirement candidate gets a per-item decision\*\*/);
+  assert.match(step6, /a journal-scored `held` never retires/);
+});
+
 test("harvested: dreaming-across-sessions/contradiction-not-auto-resolved — recency never settles a contradiction", () => {
   const t = read("playbooks/learning-from-sessions.md");
   assert.match(t, /\*\*Contradictions are never resolved by recency\*\*/);
@@ -835,7 +844,7 @@ test("harvested: task-reviewer/owns-its-findings-file — the reviewer has Write
   assert.match(a, /^tools:.*\bWrite\b/m, "task-reviewer must grant Write to persist its findings file");
   assert.match(a, /\.devcycle\/findings\/<task-id>-round-<n>\.md/);
   const e = read("playbooks/executing-waves.md");
-  assert.match(e, /`missing-findings` → re-dispatch the reviewer for the same round, no verdict\s+acted on/);
+  assert.match(e, /`missing-findings`[^→]*→ re-dispatch the reviewer for the same round(?:(?!\.\s)[\s\S]){0,200}?no verdict\s+acted on/);
 });
 
 test("harvested: fast-path/mini-cycle — the fast path keeps its evidence files and its one-reviewer floor", () => {
@@ -2565,22 +2574,23 @@ test("handoff.md marks the handoff ready last at every boundary, forbids naming 
   assert.ok(awaitSection.includes('scripts/handoff-mark.mjs" --state .devcycle/state.md --pending'), "proceeding past a boundary no longer re-marks pending");
 });
 
-test("an unattended start needs the user's answer in the session; a denied start prints a ! line; no surface lets the knob start the driver", () => {
+test("the unattended knob starts the driver with no question; a denied start prints a ! line; every other value still asks", () => {
   const drive = read("references/drive.md");
   const actions = sectionText(drive, "drive-actions");
-  assert.ok(actions.includes("`drive.recommend`"), "the ask row no longer reads drive.recommend");
+  assert.ok(!actions.includes("`drive.recommend`"), "the ask row still reads drive.recommend, which wave-setup no longer prints");
   assert.ok(!actions.includes("asking nothing"), "a drive action still starts the driver asking nothing");
   assert.ok(actions.includes("**Resume unattended** · **Walk the waves manually** · **Leave it stopped**"), "the start confirm is gone");
-  assert.ok(actions.includes("No knob writes an `auto` row"), "the drive: row prose still lets a knob write an auto row");
+  assert.ok(!actions.includes("No knob writes an `auto` row"), "drive.md still says no knob writes an auto row");
+  assert.ok(actions.includes("an `auto` row when the knob is `unattended`"), "drive.md no longer says the unattended knob writes the auto row");
+  assert.ok(actions.includes("`drive.confirm`"), "the start confirm no longer reads drive.confirm");
   const start = sectionText(drive, "the-start-path");
   assert.ok(start.includes('! node "<absolute plugin root>/scripts/drive-execution.mjs" --state "<absolute state path>" --detach'),
     "a denied start no longer prints the ! line");
   assert.ok(start.includes('scripts/handoff-mark.mjs" --state .devcycle/state.md --ready --action started'), "the starting session no longer marks the handoff ready");
   assert.ok(sectionText(drive, "when-the-run-ends").includes("--ready --action stopped --reason"), "a stop for the user no longer notifies");
   const manifest = JSON.parse(read(".claude-plugin/plugin.json"));
-  assert.ok(!manifest.userConfig.executionMode.description.includes("starts the unattended driver, no question"),
-    "plugin.json still says the unattended knob starts the driver with no question");
-  assert.ok(!read("references/handoff.md").includes("`executionMode` knob they set"), "handoff.md still lets the knob opt a cycle in");
+  assert.ok(manifest.userConfig.executionMode.description.includes("starts the unattended driver, no question"), "plugin.json no longer says the unattended knob starts the driver with no question");
+  assert.ok(read("references/handoff.md").includes("`via=knob`"), "handoff.md no longer names the knob opt-in");
 });
 
 test("the stopped-run call in drive.md works with an empty detail and reads the push rule before relaying", () => {

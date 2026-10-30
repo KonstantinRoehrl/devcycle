@@ -19,12 +19,13 @@ Planning always ends with `Clear + /devcycle:continue`. When that `/devcycle:con
 - **Walk the waves manually** — it records `- drive: manual chosen=<stamp> via=answer` and walks
   the waves in that session, as before.
 
-The `executionMode` setting orders the question: `ask` (the default) asks, `unattended` asks with
-**Start unattended** first, and `manual` walks every cycle without asking, recorded with
-`via=knob`. An unattended run starts only on your answer in that session, so auto mode can see
-your consent; a new session resuming a run you already chose asks you to confirm it once. Once a
-cycle has its `drive:` row, the row decides and a changed setting does not. Only your answer opts
-a cycle in; no agent opts in, answers a gate for you, or starts a driver outside
+The `executionMode` setting decides whether you are asked: `ask` (the default) asks; `unattended`
+starts the driver with no question, recorded `via=knob` on the row and in the ledger's opt-in line;
+`manual` walks every cycle without asking, recorded with `via=knob`. Under `unattended` a later
+session resuming the run asks no confirm either; a run that stopped for you still asks its question.
+Once a cycle has its `drive:` row, the row decides whether it runs unattended, and a changed setting
+only decides whether a start is confirmed. Only your answer or the `unattended` setting opts a cycle
+in; no agent opts in, answers a gate for you, or starts a driver outside
 `/devcycle:continue`.
 
 ## What /devcycle:continue does
@@ -47,8 +48,8 @@ With a cycle opted in, every `/devcycle:continue` at execution start does one of
 - **Attach.** Run `/devcycle:continue` while a driver is running and it attaches: overview and
   watch, nothing else — no other gate is acted on beside a running driver.
 - **Restart.** A run that ended resumably — interrupted, crashed, a driver error, transient
-  failures past `--max-backoff` — is restarted after the one start confirm, which
-  `references/drive.md` owns. Two such ends in a row with no
+  failures past `--max-backoff` — is restarted after the one start confirm (none under the `unattended`
+  setting), which `references/drive.md` owns. Two such ends in a row with no
   progress become a question instead, so a run that fails the same way never loops.
 - **Ask.** A run that stopped for you — a gate, a stall, an environment failure, the dollar cap, or
   your own `--stop` — becomes one question, its first option the matching restart

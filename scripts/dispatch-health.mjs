@@ -12,7 +12,7 @@ import { claudeProjectsDir } from "./depth-probe.mjs";
 import { isMain } from "./is-main.mjs";
 import { eachRecord } from "./jsonl.mjs";
 import { briefPathFor, roundFindingsPath } from "./task-dispatch.mjs";
-import { UsageError, appendLedgerLine, nextRetry, parseLedgerLine, taskEntries, taskFlags, workTreeRoot } from "./task-ledger.mjs";
+import { HelpRequest, UsageError, appendLedgerLine, nextRetry, parseLedgerLine, taskEntries, taskFlags, usageLine, workTreeRoot } from "./task-ledger.mjs";
 
 export const DISPATCH_ENDED = "dispatch-ended";
 // One redispatch per role per task, counted across sessions: a second death of the same role on the
@@ -329,9 +329,9 @@ export function markEnded({ root, sessionId, transcriptPath, agentId = null, now
 
 const FLAGS = { "--record": "none", "--stopped": "value", "--json": "none", "--ledger": "value" };
 
-if (isMain(import.meta.url, process.argv[1])) {
+function healthMain(argv) {
   try {
-    const flags = taskFlags(process.argv.slice(2), FLAGS, []);
+    const flags = taskFlags(argv, FLAGS, []);
     const sessionId = process.env.CLAUDE_CODE_SESSION_ID;
     if (!sessionId) throw new Error("CLAUDE_CODE_SESSION_ID is unset: cannot tell this session's dispatches from another's");
     const root = workTreeRoot(process.cwd());
@@ -339,7 +339,13 @@ if (isMain(import.meta.url, process.argv[1])) {
     if (flags["--json"]) console.log(JSON.stringify({ ok: true, sessionId, dispatches }));
     else console.log(dispatches.length ? dispatches.map(formatDispatch).join("\n") : "no dispatch in flight");
   } catch (err) {
+    if (err instanceof HelpRequest) {
+      console.log(usageLine("dispatch-health", err.usage));
+      return;
+    }
     console.error(`dispatch-health: ${err.message}`);
     process.exit(err instanceof UsageError ? 2 : 1);
   }
 }
+
+if (isMain(import.meta.url, process.argv[1])) healthMain(process.argv.slice(2));

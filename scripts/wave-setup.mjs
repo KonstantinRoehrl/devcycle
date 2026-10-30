@@ -17,7 +17,9 @@ import { parseHandoff } from "./handoff-mark.mjs";
 import { compareKnobs, parseRecordedLine, resolveKnobs } from "./resolve-knobs.mjs";
 import { resolveDepth } from "./depth-probe.mjs";
 import { TEST_FILE_SUFFIXES, fieldValue, gateCommand, parseDispatchMap, taskBlocks, taskFileMap } from "./task-files.mjs";
-import { ledgerPlan, nextReviewRound, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot } from "./task-ledger.mjs";
+import {
+  isNoVerdict, ledgerPlan, nextReviewRound, noVerdictReason, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot,
+} from "./task-ledger.mjs";
 import { ledgerSlotState } from "./ledger-slot.mjs";
 import { pendingReviewLoop, reviewLoopId } from "./review-loop.mjs";
 import { driveTokenHash, readLiveDriveLock } from "./drive-lock.mjs";
@@ -35,16 +37,27 @@ const known = (raw) => {
 // The loops their own text leaves uncapped get two retries per task (spec 4.A.2); the third such
 // outcome is the user's decision.
 export const RETRY_CAP = 2;
-const CAPPED_OUTCOMES = ["rejected (intake bounce)", "rejected (missing report file)", "rejected (missing findings file)"];
+const CAPPED_OUTCOMES = ["rejected (intake bounce)", "rejected (missing report file)"];
 const SWEEP_TOKEN = /\bsweep\b|\bapplied-none\b|\bdirty-targets\b/;
 const IMPLEMENTER_NEXT = new Set(["dispatch-implementer", "redispatch-implementer", "fix"]);
 // The stops continue's own gates compute and answer on the very call that reads the driver's result,
 // so a driver that stopped on one needs no question of its own.
 const SETTLED_REASONS = new Set(["knob-drift", "foreign-state", "resume-check", "branch", "depth-at-start", "no-driver", "not-opted-in"]);
 
+// The position of an outcome a retry cap bounds, or null for any other outcome.
+function cappedPosition(outcome, retries) {
+  // Both no-verdict outcomes — an absent findings file and an unparseable one — spend one cap.
+  const capped = isNoVerdict(outcome) ? isNoVerdict : CAPPED_OUTCOMES.find((prefix) => outcome.startsWith(prefix));
+  if (!capped) return null;
+  if (retries(capped) > RETRY_CAP) return { position: "retry-cap", next: "needs-user" };
+  if (capped === isNoVerdict) return { position: "missing-findings", next: "redispatch-reviewer", reason: noVerdictReason(outcome) };
+  if (capped === "rejected (missing report file)") return { position: "missing-report", next: "redispatch-implementer" };
+  return { position: "intake-bounce", next: "fix" };
+}
+
 // references/resume.md § Resuming a wave's per-task position, most specific row first. `lines` are
-// one task's parsed ledger lines in file order; `retries(prefix)` counts that task's lines whose
-// outcome starts with prefix.
+// one task's parsed ledger lines in file order; `retries(match)` counts that task's lines whose
+// outcome starts with a prefix or satisfies a predicate.
 export function taskPosition(lines, { pendingLoop = null, retries = () => 0 } = {}) {
   if (pendingLoop) return { position: "exhausted-unresolved", next: "needs-user" };
   const last = lines.at(-1);
@@ -61,11 +74,8 @@ export function taskPosition(lines, { pendingLoop = null, retries = () => 0 } = 
     const next = deathRoute(lines, role);
     return next === "needs-user" ? { position: "death-cap", next } : { position: `dead-${role}`, next };
   }
-  const capped = CAPPED_OUTCOMES.find((prefix) => outcome.startsWith(prefix));
-  if (capped && retries(capped) > RETRY_CAP) return { position: "retry-cap", next: "needs-user" };
-  if (capped === "rejected (missing findings file)") return { position: "missing-findings", next: "redispatch-reviewer" };
-  if (capped === "rejected (missing report file)") return { position: "missing-report", next: "redispatch-implementer" };
-  if (capped === "rejected (intake bounce)") return { position: "intake-bounce", next: "fix" };
+  const cappedAt = cappedPosition(outcome, retries);
+  if (cappedAt) return cappedAt;
   if (event === "report-received" && outcome.startsWith("blocked")) return { position: "blocked", next: "needs-user" };
   // A ledger from before the per-commit proof can end on a deferral. task-commit now proves the commit
   // in its own worktree, where a sibling's edit cannot reach, so the task is simply committed again.
@@ -140,34 +150,39 @@ const liveKnobs = (knobsLine) => resolveKnobs(knobsLine ? parseRecordedLine(knob
 function driveStatus(root, statePath, stateText, lines, knobsLine) {
   const row = field(stateText, "drive") ?? "";
   const model = row.match(/\bmodel=(\S+)/)?.[1];
+  // A row recorded before the knob existed carries no via=, and every such row was an answer.
+  const via = row.match(/\bvia=(\S+)/)?.[1] ?? (row ? "answer" : undefined);
   const live = readLiveDriveLock(root);
   const holder = live && realPath(resolve(root, live.state ?? "")) === realPath(statePath) ? live : null;
   const optInLogged = lines.some((l) => l.task === "drive" && l.event === "user-decision");
   const lock = holder ? { pid: holder.pid, log: holder.log } : null;
   const { executionMode: mode, driveWatch: watch, drivePlugins: plugins } = liveKnobs(knobsLine);
   return {
-    drive: { opted: /^auto\b/.test(row), ...(model ? { model } : {}), lock, optInLogged, row: row.match(/^(auto|manual)\b/)?.[1] ?? null,
+    drive: { opted: /^auto\b/.test(row), ...(model ? { model } : {}), ...(via ? { via } : {}), lock, optInLogged, row: row.match(/^(auto|manual)\b/)?.[1] ?? null,
       mode, watch, plugins },
     tokenHash: holder?.tokenHash ?? null,
   };
 }
 
-// A recorded row is the cycle's record and outranks the knob. With no row, `manual` writes its own row
-// and every other value asks: an unattended start needs the user's answer in this session's transcript
-// (docs/decisions/README.md, 2026-10-16), so the `unattended` knob only puts that answer first, and a
-// driver end that needs an answer is that question. A stop on the task whose review loop is pending is
-// that decision: the gate carries it, so it is asked once.
+// A recorded row decides whether the waves run unattended or are walked; with no row the live knob
+// decides: `manual` writes a `manual` row, `unattended` writes an `auto` row and starts the driver
+// (docs/decisions/README.md, 2026-10-29), `ask` asks. Under the unattended knob a start asks no
+// confirm, and neither does a stop this session's own gates settled; a stop that waits on a person
+// is always asked. A stop on the task whose review loop is pending is that decision: the gate
+// carries it, so it is asked once.
 function driveAction({ row, mode }, driver, pending) {
   const manual = row === "manual" || (row === null && mode === "manual");
-  if (manual) return { action: "manual", writeRow: row === null ? "manual" : null, recommend: null, gate: null };
-  const unattended = row === "auto" || mode === "unattended";
-  if (unattended && driver.next === "answer-gate") {
+  if (manual) return { action: "manual", writeRow: row === null ? "manual" : null, confirm: null, gate: null };
+  const knob = mode === "unattended";
+  if ((row === "auto" || knob) && driver.next === "answer-gate") {
     const { reason, detail, task } = driver;
+    const settled = SETTLED_REASONS.has(reason);
     const pendingDecision = task !== null && task === pending?.task ? pending : null;
-    return { action: "gate", writeRow: null, recommend: null, gate: { reason, detail, task, settled: SETTLED_REASONS.has(reason), pendingDecision } };
+    const writeRow = settled && knob && row === null ? "auto" : null;
+    return { action: "gate", writeRow, confirm: settled ? !knob : null, gate: { reason, detail, task, settled, pendingDecision } };
   }
-  if (row === null) return { action: "ask", writeRow: null, recommend: mode === "unattended" ? "unattended" : null, gate: null };
-  return { action: "start", writeRow: null, recommend: null, gate: null };
+  if (row === null && !knob) return { action: "ask", writeRow: null, confirm: null, gate: null };
+  return { action: "start", writeRow: row === null ? "auto" : null, confirm: !knob, gate: null };
 }
 
 function readPlan(root, plan) {
@@ -188,7 +203,7 @@ function mapPositions(root, planText, lines, ledgerPath) {
     for (const num of nums) {
       const task = String(num);
       const own = byTask.get(task) ?? [];
-      positions.set(task, taskPosition(own, { pendingLoop: pendingReviewLoop(root, task, own), retries: (prefix) => retryCount(ledgerPath, task, prefix) }));
+      positions.set(task, taskPosition(own, { pendingLoop: pendingReviewLoop(root, task, own), retries: (match) => retryCount(ledgerPath, task, match) }));
     }
   return { waves, positions };
 }
@@ -312,7 +327,7 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   const map = mapPositions(root, planText, lines, ledger);
   Object.assign(result, { overview: overviewOf(map), ledgerSlot: slot });
   const decided = (decision) => ({ ...result.drive, ...decision, result: driver });
-  if (attach) return { ...result, drive: decided({ lock: { pid: driver.pid, log: driver.log }, action: "attach", writeRow: null, recommend: null, gate: null }) };
+  if (attach) return { ...result, drive: decided({ lock: { pid: driver.pid, log: driver.log }, action: "attach", writeRow: null, confirm: null, gate: null }) };
   if (!checked.ok) return stop("resume-check", checked.errors.join("; "));
   if (state.stage !== "execution") return stop("resume-check", `the state file is at stage ${state.stage}, not execution`);
 
@@ -330,7 +345,7 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   }
 
   // Drive mode: every gate continue would ask about is a stop (spec 4.B.3).
-  result.drive = decided({ action: "none", writeRow: null, recommend: null, gate: null });
+  result.drive = decided({ action: "none", writeRow: null, confirm: null, gate: null });
   if (result.knobDrift.length && !state.knobsDeclined) return stop("knob-drift", result.knobDrift.join("; "));
   if (result.branch.verdict !== "ok")
     return stop("branch", `recorded ${result.branch.recorded ?? "none"}, current ${result.branch.current ?? "unknown"}: ${result.branch.verdict}`);

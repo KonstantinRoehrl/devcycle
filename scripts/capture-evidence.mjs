@@ -5,7 +5,7 @@
 import { join, resolve } from "node:path";
 import { isMain } from "./is-main.mjs";
 import { runShell, writeCapture } from "./evidence-capture.mjs";
-import { UsageError, checkTaskId, taskFlags, taskGate, workTreeRoot } from "./task-ledger.mjs";
+import { HelpRequest, UsageError, checkTaskId, taskFlags, taskGate, usageLine, workTreeRoot } from "./task-ledger.mjs";
 
 const FLAGS = { "--task": "value", "--phase": "value", "--cmd": "value", "--ledger": "value" };
 const PHASES = ["before", "after", "red"];
@@ -33,11 +33,14 @@ export function captureEvidence(argv, cwd = process.cwd()) {
   return [...(phase === "red" ? [] : [`- Evidence: ${evidenceClass} | cmd: ${cmd}`]), `- ${label}: ${rel} (exit ${run.status})`];
 }
 
-if (isMain(import.meta.url, process.argv[1])) {
+function captureMain(argv) {
   try {
-    for (const line of captureEvidence(process.argv.slice(2))) console.log(line);
+    for (const line of captureEvidence(argv)) console.log(line);
   } catch (err) {
+    if (err instanceof HelpRequest) return console.log(usageLine("capture-evidence", err.usage));
     console.error(`capture-evidence: ${err.message}`);
     process.exit(1);
   }
 }
+
+if (isMain(import.meta.url, process.argv[1])) captureMain(process.argv.slice(2));
