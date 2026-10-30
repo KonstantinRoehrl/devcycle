@@ -121,6 +121,49 @@ test("an empty retirement block says culprit retirement is decided at Confirm", 
   assert.doesNotMatch(block, /none this run/);
 });
 
+const contradictionLine = (contradiction) =>
+  renderLearnReport({ candidates: { ...CANDIDATES, contradictions: [contradiction] }, promotions: PROMOTIONS })
+    .split("\n").find((l) => l.startsWith(`| ${contradiction.culpritId} |`));
+
+test("an object side renders its quote, session and a differing culprit id", () => {
+  assert.equal(contradictionLine({
+    culpritId: "contradiction:x",
+    sideA: { quote: "always pin", session: "abc123", culpritId: "novel:pin" },
+    sideB: { quote: "never pin", session: "def456" },
+    chosen: "sideB",
+  }), "| contradiction:x | always pin (abc123, novel:pin) | never pin (def456) | sideB |");
+});
+
+test("an object side does not repeat the row's own culprit id", () => {
+  assert.equal(contradictionLine({
+    culpritId: "contradiction:x",
+    sideA: { quote: "always pin", culpritId: "contradiction:x" },
+    sideB: "never pin",
+    chosen: "sideA",
+  }), "| contradiction:x | always pin | never pin | sideA |");
+});
+
+test("a quote holding a pipe and a newline stays on one table row", () => {
+  assert.equal(contradictionLine({
+    culpritId: "contradiction:x",
+    sideA: { quote: "a | b\nc" },
+    sideB: "d\ne",
+    chosen: "sideA",
+  }), "| contradiction:x | a \\| b c | d e | sideA |");
+});
+
+test("an object side with no quote prints as JSON, never [object Object]", () => {
+  const line = contradictionLine({ culpritId: "contradiction:x", sideA: { session: "abc123" }, sideB: "never pin", chosen: "sideA" });
+  assert.doesNotMatch(line, /object Object/);
+  assert.match(line, /"session":"abc123"/);
+});
+
+test("a null or missing chosen renders unresolved", () => {
+  assert.match(contradictionLine({ culpritId: "contradiction:x", sideA: "a", sideB: "b", chosen: null }), /\| unresolved \|$/);
+  assert.match(contradictionLine({ culpritId: "contradiction:x", sideA: "a", sideB: "b" }), /\| unresolved \|$/);
+});
+
+
 test("the all-time rollup buckets by rung and counts what cannot bucket", () => {
   const r = allTimeRollup(PROMOTIONS);
   assert.equal(r.byRung.r2.landed, 2);
