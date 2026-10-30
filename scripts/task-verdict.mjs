@@ -81,27 +81,21 @@ const EXPECTED_VERDICT = "Verdict: accept, or Verdict: needs-changes with a Culp
 
 // The verdict block's two header lines, tolerating the emphasis, code spans and heading or list
 // markers a markdown author wraps them in, either case, and the `approve` / `approved` / `accepted` a
-// reviewer writes for accept; a `Verdict` heading may carry its word alone on the next line. A bare
-// line outranks a marked one, so a bulleted recap of an earlier verdict is no second verdict: marked
-// lines count only when no bare one exists. A file with no usable verdict returns `{ reason }`, one
-// of a fixed set the ledger outcome names.
+// reviewer writes for accept; a `Verdict` heading may carry its word alone on the next line. A file
+// with no usable verdict returns `{ reason }`, one of a fixed set the ledger outcome names.
 function parseVerdict(text) {
   const lines = unfencedLines(unwrapWholeFence(text));
   const plain = lines.map((line) => line.replace(/[*`]/g, ""));
-  const preferBare = (found) => (found.some((f) => f.bare) ? found.filter((f) => f.bare) : found);
-  const verdicts = new Set(preferBare(plain.flatMap((line, i) => {
+  const verdicts = new Set(plain.flatMap((line, i) => {
     const word = unmarked(line).match(VERDICT_RE)?.[1] ?? (VERDICT_HEADING_RE.test(line) ? plain[i + 1]?.match(WORD_RE)?.[1] : undefined);
-    return word ? [{ verdict: word.toLowerCase() === "needs-changes" ? "needs-changes" : "accept", bare: unmarked(line) === line }] : [];
-  })).map((f) => f.verdict));
+    return word ? [word.toLowerCase() === "needs-changes" ? "needs-changes" : "accept"] : [];
+  }));
   if (!verdicts.size) return { reason: "no verdict line" };
   if (verdicts.size > 1) return { reason: "conflicting verdicts" };
   const [verdict] = verdicts;
   const blocking = lines.filter((line) => BLOCKING_RE.test(line)).length;
   if (verdict === "accept") return blocking ? { reason: "accept lists a blocking finding" } : { verdict, culprit: null, blocking };
-  const culprit = preferBare(plain.flatMap((line) => {
-    const slug = unmarked(line).match(CULPRIT_RE)?.[1];
-    return slug ? [{ slug, bare: unmarked(line) === line }] : [];
-  }))[0]?.slug;
+  const culprit = plain.map((line) => unmarked(line).match(CULPRIT_RE)?.[1]).find(Boolean);
   if (!culprit || validateCulprit(culprit).length) return { reason: "needs-changes without a valid culprit" };
   return { verdict, culprit, blocking };
 }

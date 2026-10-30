@@ -380,18 +380,18 @@ test("#390: the heading form takes its word from the very next line only", () =>
   assert.equal(verdict(f).out.reason, "no verdict line");
 });
 
-test("a bare Verdict line outranks a heading- or list-marked recap of the other verdict", () => {
-  for (const [body, action, culprit] of [
-    ["Verdict: accept\n\nRecap:\n- Verdict: needs-changes\n- Culprit: novel:recap\n", "accepted", null],
-    ["Verdict: needs-changes\nCulprit: novel:real\n\n1. [high] x\n\nRecap:\n- Verdict: accept\n- Culprit: novel:recap\n", "rejected", "novel:real"],
-    ["## Verdict: approved\n\n- Verdict: needs-changes\n- Culprit: novel:recap\n", "missing-findings", undefined],
+test("a bare Verdict line and a differing heading- or list-marked one conflict, so the reviewer re-dispatches", () => {
+  for (const body of [
+    "Verdict: accept\n\nRecap:\n- Verdict: needs-changes\n- Culprit: novel:recap\n",
+    "Verdict: needs-changes\nCulprit: novel:real\n\n1. [high] x\n\nRecap:\n- Verdict: accept\n- Culprit: novel:recap\n",
+    "## Verdict: approved\n\n- Verdict: needs-changes\n- Culprit: novel:recap\n",
+    "- Verdict: needs-changes\n- Culprit: novel:x\n\nThe earlier round said:\nVerdict: accept\n\n1. [medium] bug\n",
   ]) {
     const f = fixture();
     writeInto(f.repo, FINDINGS, body);
     const r = verdict(f);
-    assert.equal(r.out.action, action, JSON.stringify(body));
-    if (culprit !== undefined) assert.equal(r.out.culprit, culprit, JSON.stringify(body));
-    else assert.equal(r.out.reason, "conflicting verdicts");
+    assert.equal(r.out.action, "missing-findings", JSON.stringify(body));
+    assert.equal(r.out.reason, "conflicting verdicts", JSON.stringify(body));
   }
 });
 
