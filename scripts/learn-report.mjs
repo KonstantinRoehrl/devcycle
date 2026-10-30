@@ -317,7 +317,7 @@ export function renderLearnReport({ candidates, promotions, outcome = false, ver
     "",
     vcands.retirement.length
       ? vcands.retirement.map((c) => `- \`${c.culpritId}\` (${c.rung}) — ${c.reason}`).join("\n")
-      : "(none this run)",
+      : "(no win retires this run; culprit retirement is decided at Confirm, once the checks have run)",
     "",
     "## Previously promoted — did it hold",
     "",

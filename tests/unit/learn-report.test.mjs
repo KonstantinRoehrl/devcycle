@@ -114,6 +114,13 @@ test("contradictions render as their own table with both sides preserved", () =>
   assert.match(out, /\| contradiction:x \| always pin \| never pin \| sideA \|/);
 });
 
+test("an empty retirement block says culprit retirement is decided at Confirm", () => {
+  const out = renderLearnReport({ candidates: CANDIDATES, promotions: PROMOTIONS });
+  const block = out.slice(out.indexOf("### Retirement"), out.indexOf("## Previously promoted"));
+  assert.match(block, /culprit retirement is decided at Confirm, once the checks have run/);
+  assert.doesNotMatch(block, /none this run/);
+});
+
 test("the all-time rollup buckets by rung and counts what cannot bucket", () => {
   const r = allTimeRollup(PROMOTIONS);
   assert.equal(r.byRung.r2.landed, 2);

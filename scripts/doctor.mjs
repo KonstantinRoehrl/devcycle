@@ -3337,7 +3337,7 @@ export function renderReport(summaries, ctx) {
 
   section("## Previously promoted — did it hold", "promoted");
   // The verification engine computes every verdict; this only renders it. One line per scoreboard
-  // entry (held / recurred / unmeasurable / broken / errored), then the
+  // entry (held / recurred / unobserved / unmeasurable / broken / errored), then the
   // Actionability menu — each recurred lesson the engine flagged for escalation becomes a
   // `/devcycle:cycle` entry point the reader can run (playbooks/profiling-sessions.md).
   const v = verification ?? { scoreboard: [], candidates: { escalation: [], retirement: [], reinforcement: [] }, resolvedIn: [] };

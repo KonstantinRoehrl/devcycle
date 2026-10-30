@@ -57,9 +57,39 @@ test("r0-r2: the detail says why — zero runs, or runs with nothing attributed 
   assert.equal(verify(p, [], "0.14.0", { now: Date.parse("2026-08-20") }).scoreboard[0].detail, "0 runs");
   const one = verify(p, [ev(null, "2026-08-05T00:00:00Z", "r1")], "0.14.0", { now: Date.parse("2026-08-20") });
   assert.equal(one.scoreboard[0].detail, "1 run, 0 attributed");
-  const held = verify(p, [ev("other-slug", "2026-08-05T00:00:00Z", "r1")], "0.14.0", { now: Date.parse("2026-08-20") });
+  const held = verify(p, [ev("a", "2026-07-01T00:00:00Z", "r0"), ev("other-slug", "2026-08-05T00:00:00Z", "r1")], "0.14.0", { now: Date.parse("2026-08-20") });
   assert.equal(held.scoreboard[0].verdict, "held");
   assert.equal(held.scoreboard[0].detail, null);
+});
+
+test("journal-recurrence: an id the journal has never carried is unobserved, with the reason in detail", () => {
+  const p = [promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })];
+  const out = verify(p, [ev("other-slug", "2026-08-05T00:00:00Z", "r1")], "0.14.0");
+  assert.equal(out.scoreboard[0].verdict, "unobserved");
+  assert.match(out.scoreboard[0].detail, /never journaled/);
+  assert.equal(out.scoreboard[0].recurrences, 0);
+  assert.equal(out.scoreboard[0].runsObserved, 1);
+});
+
+test("journal-recurrence: an id seen before landing, under an alias, or on a ts:null event is held", () => {
+  const window = ev("other-slug", "2026-08-05T00:00:00Z", "r1");
+  const p = promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" });
+  const verdict = (promotion, sighting) => verify([promotion], [sighting, window], "0.14.0").scoreboard[0].verdict;
+  assert.equal(verdict(p, ev("a", "2026-07-01T00:00:00Z", "r0")), "held", "seen only before landing");
+  assert.equal(verdict(p, ev("novel:a", "2026-07-01T00:00:00Z", "r0")), "held", "seen in its novel: form");
+  assert.equal(verdict({ ...p, aliases: ["friction:old-a"] }, ev("old-a", "2026-07-01T00:00:00Z", "r0")), "held", "seen only under an alias");
+  assert.equal(verdict(p, ev("a", null, "r0")), "held", "seen only on an event with no date");
+});
+
+test("journal-recurrence: the window gate and a post-landing recurrence both outrank the sighting test", () => {
+  const p = [promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })];
+  assert.equal(verify(p, [ev("a", "2026-07-01T00:00:00Z", "r0")], "0.14.0").scoreboard[0].verdict, "unmeasurable");
+  assert.equal(verify(p, [ev("a", "2026-08-05T00:00:00Z", "r1")], "0.14.0").scoreboard[0].verdict, "recurred");
+});
+
+test("journal-reinforcement keeps not-adopted: unobserved is a culprit-path word only", () => {
+  const p = [promo({ culpritId: "win:x", rung: "r2", landed: "2026-08-01", verify: "journal-reinforcement" })];
+  assert.equal(verify(p, [ev("other-slug", "2026-08-05T00:00:00Z", "r1")], "0.14.0").scoreboard[0].verdict, "not-adopted");
 });
 
 test("journal-reinforcement: runs with no attributed event are unmeasurable, never not-adopted", () => {
@@ -91,10 +121,24 @@ test("journal-reinforcement: zero runs is unmeasurable, never not-adopted", () =
 });
 
 test("a held r1/r2 culprit is NOT retired (needs r3)", () => {
-  const runs = Array.from({ length: 11 }, (_, i) => ev("other-slug", `2026-08-${String(i + 2).padStart(2, "0")}T00:00:00Z`, `r${i}`));
+  const runs = [ev("a", "2026-07-01T00:00:00Z", "r0"),
+    ...Array.from({ length: 11 }, (_, i) => ev("other-slug", `2026-08-${String(i + 2).padStart(2, "0")}T00:00:00Z`, `r${i}`))];
   const out = verify([promo({ culpritId: "friction:a", rung: "r2", landed: "2026-08-01" })], runs, "0.14.0");
   assert.equal(out.scoreboard[0].verdict, "held");
   assert.deepEqual(out.candidates.retirement, []);
+});
+
+test("an r3 culprit with no script check never retires, journaled or not", () => {
+  const window = ev("other-slug", "2026-08-05T00:00:00Z", "r1");
+  for (const verifyValue of [null, "journal-recurrence"]) {
+    const p = [promo({ culpritId: "friction:a", rung: "r3", landed: "2026-08-01", verify: verifyValue })];
+    const never = verify(p, [window], "0.14.0");
+    assert.equal(never.scoreboard[0].verdict, "unobserved");
+    assert.deepEqual(never.candidates.retirement, []);
+    const seen = verify(p, [ev("a", "2026-07-01T00:00:00Z", "r0"), window], "0.14.0");
+    assert.equal(seen.scoreboard[0].verdict, "held");
+    assert.deepEqual(seen.candidates.retirement, []);
+  }
 });
 
 test("a held r3 culprit (green check, --run-checks) IS retired", () => {
@@ -108,13 +152,17 @@ test("a held r3 culprit (green check, --run-checks) IS retired", () => {
   ]);
 });
 
-test("retirementEligibility: four-row truth table", () => {
+test("retirementEligibility: five-row truth table", () => {
   assert.deepEqual(retirementEligibility({ kind: "win", rung: "r2", consolidated: true, verdict: "held" }),
     { eligible: true, reason: "consolidated win" });
   assert.deepEqual(retirementEligibility({ kind: "win", rung: "r2", consolidated: false, verdict: "held" }),
     { eligible: false, reason: "not consolidated" });
-  assert.deepEqual(retirementEligibility({ kind: "culprit", rung: "r3", consolidated: false, verdict: "held" }),
+  assert.deepEqual(retirementEligibility({ kind: "culprit", rung: "r3", consolidated: false, verdict: "held", scriptChecked: true }),
     { eligible: true, reason: "graduated to r3, held" });
+  assert.deepEqual(retirementEligibility({ kind: "culprit", rung: "r3", consolidated: false, verdict: "held", scriptChecked: false }),
+    { eligible: false, reason: "held at r3 on the journal alone, no script check ran" });
+  assert.equal(retirementEligibility({ kind: "culprit", rung: "r3", consolidated: false, verdict: "held" }).eligible, false,
+    "an absent input never reads as a script check");
   assert.deepEqual(retirementEligibility({ kind: "culprit", rung: "r2", consolidated: false, verdict: "held" }),
     { eligible: false, reason: "held but not graduated to r3 (at r2)" });
 });

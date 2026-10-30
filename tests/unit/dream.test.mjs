@@ -1615,6 +1615,7 @@ test("--check-recurrence reports held with its run count, and recurred when the 
   const { root, runsDir } = corpusWithJournal({
     promotions: [{ culpritId: "friction:x", rung: "r2", landed: "2026-01-01", verify: "journal-recurrence" }],
     events: [
+      { culprit: "x", ts: "2025-12-01T00:00:00Z", runId: "c".repeat(16) },
       { culprit: "y", ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) },
       { culprit: "y", ts: "2026-03-01T00:00:00Z", runId: "b".repeat(16) },
     ],
@@ -1630,6 +1631,14 @@ test("--check-recurrence reports held with its run count, and recurred when the 
   const recurred = JSON.parse(run(["--check-recurrence"], r2, { DEVCYCLE_RUNS_DIR: d2 }).stdout).scoreboard[0];
   assert.equal(recurred.verdict, "recurred");
   assert.equal(recurred.recurrences, 1);
+
+  const { root: r3, runsDir: d3 } = corpusWithJournal({
+    promotions: [{ culpritId: "friction:x", rung: "r2", landed: "2026-01-01", verify: "journal-recurrence" }],
+    events: [{ culprit: "y", ts: "2026-02-01T00:00:00Z", runId: "a".repeat(16) }],
+  });
+  const unobserved = JSON.parse(run(["--check-recurrence"], r3, { DEVCYCLE_RUNS_DIR: d3 }).stdout).scoreboard[0];
+  assert.equal(unobserved.verdict, "unobserved");
+  assert.equal(unobserved.runsObserved, 1);
 });
 
 test("criterion 11: --record-promotion rejects an r3 verify that does not resolve", () => {

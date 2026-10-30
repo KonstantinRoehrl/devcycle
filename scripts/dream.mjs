@@ -1090,10 +1090,9 @@ const HANDLERS = {
       const costByKey = culpritCostByKey(baseline, vocab);
       // The verification engine's own candidates, not a default: without this argument
       // learn-report.mjs falls back to empty arrays and the candidate sections render
-      // "(none this run)" for candidates the engine did compute. No --run-checks mode is
-      // plumbed here on purpose — verification.mjs skips every r3 row with a runnable check before
-      // the escalation/reinforcement/retirement pushes, so a run check cannot change one byte of
-      // this report.
+      // "(none this run)" for candidates the engine did compute. No runner is passed on purpose:
+      // the report renders before Confirm, where running a record's check needs the user's consent,
+      // so this path can never surface a culprit retirement. That only a script check can raise.
       const verification = verify(
         promotions,
         journalEvents({ toplevel: root }).events,
