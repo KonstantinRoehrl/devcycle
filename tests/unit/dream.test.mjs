@@ -44,6 +44,10 @@ const REPO_ROOT = new URL("../../", import.meta.url).pathname;
 
 const repo = () => makeTempDir("dream-repo-");
 
+// --render-report writes the report and prints its path. A render's cwd is always a temp root: at the
+// real repo it would replace a real same-day artifact and change what latestArtifactFile returns.
+const reportAt = (res, root) => readFileSync(join(root, res.stdout.trim()), "utf8");
+
 // Places session fixtures under repoRoot's own escaped-cwd project directory (the
 // convention fix 1 scopes planCorpus to), not an arbitrary slug.
 function projects(repoRoot, sessions) {
@@ -1677,8 +1681,9 @@ test("--lessons prints three labelled subsections and rejects an unknown stage",
 
 test("criterion 8: --render-report and --render-report --outcome agree on structure", () => {
   const path = writeCandidateFixture();
-  const a = run(["--render-report", path], REPO_ROOT).stdout;
-  const b = run(["--render-report", path, "--outcome"], REPO_ROOT).stdout;
+  const root = repo();
+  const a = reportAt(run(["--render-report", path], root), root);
+  const b = reportAt(run(["--render-report", path, "--outcome"], root), root);
   const heads = (s) => (s.match(/^#{2,3} .*$/gm) ?? []);
   assert.deepEqual(heads(a), heads(b));
   assert.match(a, /^# Learn Report \(proposal\)/m);
@@ -1686,9 +1691,49 @@ test("criterion 8: --render-report and --render-report --outcome agree on struct
 });
 
 test("--render-report on an unreadable file exits nonzero rather than printing an empty report", () => {
-  const res = run(["--render-report", join(tmpdir(), "no-such-candidates.json")], REPO_ROOT);
+  const res = run(["--render-report", join(tmpdir(), "no-such-candidates.json")], repo());
   assert.notEqual(res.status, 0);
   assert.match(res.stderr, /dream: /);
+});
+
+const TODAY = () => new Date().toISOString().slice(0, 10);
+
+test("--render-report writes the proposal and the outcome side by side and prints only the path", () => {
+  const path = writeCandidateFixture();
+  const root = repo();
+  const proposal = run(["--render-report", path], root);
+  assert.equal(proposal.status, 0, proposal.stderr);
+  assert.equal(proposal.stdout, `.devcycle/dreaming/${TODAY()}-dream.md\n`);
+  const outcome = run(["--render-report", path, "--outcome"], root);
+  assert.equal(outcome.stdout, `.devcycle/dreaming/${TODAY()}-dream-outcome.md\n`);
+  assert.match(reportAt(proposal, root), /^# Learn Report \(proposal\)/m);
+  assert.match(reportAt(outcome, root), /^# Learn Report \(outcome\)/m);
+});
+
+test("--render-report dates the report from a dated candidates file, even on another day", () => {
+  const dated = join(makeTempDir("dream-dated-"), "2026-08-14-candidates.json");
+  copyFileSync(writeCandidateFixture(), dated);
+  const root = repo();
+  assert.equal(run(["--render-report", dated], root).stdout, ".devcycle/dreaming/2026-08-14-dream.md\n");
+});
+
+test("--render-report replaces a same-dated report rather than appending to it", () => {
+  const path = writeCandidateFixture();
+  const root = repo();
+  const first = run(["--render-report", path], root);
+  writeFileSync(join(root, first.stdout.trim()), "stale\n");
+  assert.doesNotMatch(reportAt(run(["--render-report", path], root), root), /^stale$/m);
+});
+
+test("--render-report refused over budget creates no file and leaves an existing one untouched", () => {
+  const root = repo();
+  assert.notEqual(run(["--render-report", writeBudgetFixture({ evict: false })], root).status, 0);
+  assert.equal(existsSync(join(root, ".devcycle", "dreaming")), false, "a refusal creates nothing");
+  const existing = join(root, ".devcycle", "dreaming", `${TODAY()}-dream.md`);
+  mkdirSync(join(root, ".devcycle", "dreaming"), { recursive: true });
+  writeFileSync(existing, "the earlier proposal\n");
+  assert.notEqual(run(["--render-report", writeBudgetFixture({ evict: false })], root).status, 0);
+  assert.equal(readFileSync(existing, "utf8"), "the earlier proposal\n");
 });
 
 test("every new subcommand refuses to be combined with another", () => {
@@ -1870,19 +1915,21 @@ function writeBudgetFixture({ evict }) {
 }
 
 test("--render-report refuses always-loaded growth past the ceiling without a same-run retirement", () => {
-  const res = run(["--render-report", writeBudgetFixture({ evict: false })], REPO_ROOT);
+  const res = run(["--render-report", writeBudgetFixture({ evict: false })], repo());
   assert.notEqual(res.status, 0, "an over-ceiling run with no eviction is refused");
   assert.match(res.stderr, /dream: /);
   assert.match(res.stderr, /1200/, "the refusal names the ceiling");
 });
 
 test("--render-report passes the same growth when it is paired with an eviction, and renders the net-byte line", () => {
-  const res = run(["--render-report", writeBudgetFixture({ evict: true })], REPO_ROOT);
+  const root = repo();
+  const res = run(["--render-report", writeBudgetFixture({ evict: true })], root);
   assert.equal(res.status, 0, res.stderr);
-  const m = res.stdout.match(/^Always-loaded budget: (\d+) bytes \(within budget\)/m);
+  const report = reportAt(res, root);
+  const m = report.match(/^Always-loaded budget: (\d+) bytes \(within budget\)/m);
   assert.ok(m, "the net-byte line is rendered");
   assert.ok(Number(m[1]) > 1200, "the reported growth is real (>1200 bytes), not a vacuous zero");
-  assert.match(res.stdout, /^# Learn Report \(proposal\)/m, "the report body still renders");
+  assert.match(report, /^# Learn Report \(proposal\)/m, "the report body still renders");
 });
 
 // #70: just-me-scoped candidates land only in the user's personal store, never in the committed
@@ -2040,7 +2087,7 @@ test("--render-report renders the escalation candidates the engine computed", ()
   });
   const res = run(["--render-report", writeCandidateFixture()], root, { DEVCYCLE_RUNS_DIR: runsDir });
   assert.equal(res.status, 0);
-  const graduation = res.stdout.split("### Graduation")[1] ?? "";
+  const graduation = reportAt(res, root).split("### Graduation")[1] ?? "";
   assert.match(graduation, /friction:x/, "the computed candidate reaches the report");
   assert.doesNotMatch(
     graduation.split("###")[0],
@@ -2053,7 +2100,7 @@ test("--render-report still renders (none this run) when the engine computed not
   const { root, runsDir } = corpusWithJournal({ promotions: [], events: [] });
   const res = run(["--render-report", writeCandidateFixture()], root, { DEVCYCLE_RUNS_DIR: runsDir });
   assert.equal(res.status, 0);
-  assert.match(res.stdout, /\(none this run\)/, "an empty candidate list is still reported as empty");
+  assert.match(reportAt(res, root), /\(none this run\)/, "an empty candidate list is still reported as empty");
 });
 
 // F36: the eviction tie-break shipped twice — as this code and as prose in
@@ -3035,7 +3082,7 @@ function renderReport(fixture) {
     CLAUDE_DREAM_CULPRITS: fixture.vocab,
   });
   assert.equal(res.status, 0, res.stderr);
-  return res.stdout;
+  return reportAt(res, fixture.root);
 }
 
 // A session recorded after the corpus window's end (`until` = candidates.corpus.to) postdates the

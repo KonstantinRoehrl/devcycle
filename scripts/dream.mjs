@@ -6,7 +6,7 @@
 // copy: journal.mjs (run records), promotions.mjs (landed lessons), lessons.mjs (the three
 // capped stores), learn-report.mjs (the report).
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { createHash } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { findTranscriptFiles, owningSession, inWindow, summarizeSession, readRecords, readRunRecords } from "./doctor.mjs";
@@ -237,6 +237,11 @@ export function writeCheckpoint(repoRoot, { lastDreamedThrough, lastArtifact }) 
       `- last-artifact: ${lastArtifact ?? "none"}\n`,
   );
 }
+
+// A report takes its candidates file's date, so a proposal and an outcome re-rendered past midnight
+// still pair up; an undated candidates file falls back to today.
+const reportDate = (candidatesPath) =>
+  basename(candidatesPath).match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? new Date().toISOString().slice(0, 10);
 
 const DATED_ARTIFACT_RE = /^\d{4}-\d{2}-\d{2}-dream\.md$/;
 
@@ -1110,10 +1115,16 @@ const HANDLERS = {
         baselineSessions: windows.baseline.sessions,
       });
       const advisories = advisoriesFor(root, resolveProjectsRoot(), readPolicy());
-      process.stdout.write(renderLearnReport({
-        candidates, promotions, outcome: flags["--outcome"] === true,
+      const outcome = flags["--outcome"] === true;
+      const report = renderLearnReport({
+        candidates, promotions, outcome,
         verification, budget, ledger, routingAdvisories: advisories,
-      }));
+      });
+      // The last act, so a refusal or failure above writes nothing and no partial file reads as fresh.
+      const file = join(dreamDir(root), `${reportDate(flags["--render-report"])}-dream${outcome ? "-outcome" : ""}.md`);
+      mkdirSync(dreamDir(root), { recursive: true });
+      atomicWrite(file, report);
+      process.stdout.write(`${relative(root, file)}\n`);
     },
   },
 
