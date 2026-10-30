@@ -56,7 +56,7 @@ const HEARTBEAT_MS = Number(process.env.DEVCYCLE_DRIVE_HEARTBEAT_MS) || 30_000;
 const WATCHDOG_GRACE_MS = Number(process.env.DEVCYCLE_DRIVE_WATCHDOG_GRACE_MS) || 5 * 60_000;
 const DEAD_STATES = new Set(["ended-without-output", "quiet"]);
 const DEFAULT_BACKOFF_MS = 5 * 60_000;
-const SIGNAL_GRACE_MS = 10_000;
+export const SIGNAL_GRACE_MS = 10_000;
 const DETACH_POLL_MS = 50;
 const USAGE_LIMIT_TEXT = /usage limit|rate limit|hit your limit/i;
 // Every wait is a wall-clock deadline checked in slices, so a machine that sleeps through a deadline
@@ -1044,14 +1044,15 @@ async function detach(opts, argv) {
 }
 
 // The way to stop a driver on purpose: the request on disk is what makes its 130 read as stopped,
-// which /devcycle:continue never restarts unasked.
-export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, signal) } = {}) {
+// which /devcycle:continue never restarts unasked. out and say take what it says, for a caller whose
+// own stdout is one JSON object (scripts/stop-cycle.mjs).
+export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, signal), out = console.log, say = console.error } = {}) {
   const statePath = resolve(state);
   const root = dirname(dirname(statePath));
   const request = join(root, STOP_REQUEST_REL);
   const notRunning = () => {
     rmSync(request, { force: true });
-    console.error(`drive-execution: no driver is running for ${state}`);
+    say(`drive-execution: no driver is running for ${state}`);
     return 3;
   };
   const requestStays = `the stop request stays in ${STOP_REQUEST_REL}, so the driver stops before its next session or within a minute of a wait`;
@@ -1062,7 +1063,7 @@ export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, si
   atomicWrite(request, `${now()}\n`);
   // A pid ps cannot vouch for may be a later process that reused a dead driver's pid: never signal it.
   if (liveness === "unverified") {
-    console.error(`drive-execution: cannot confirm pid ${holder.pid} is still the driver, because ps does not run here, so it was not signalled — ` +
+    say(`drive-execution: cannot confirm pid ${holder.pid} is still the driver, because ps does not run here, so it was not signalled — ` +
       `${requestStays}; to stop it now, run kill ${holder.pid} from a shell where ps shows that pid is the driver`);
     return 1;
   }
@@ -1070,11 +1071,11 @@ export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, si
     kill(holder.pid, "SIGTERM");
   } catch (err) {
     if (err.code === "ESRCH") return notRunning();
-    console.error(`drive-execution: could not signal the driver (pid ${holder.pid}: ${err.code ?? err.message}) — ` +
+    say(`drive-execution: could not signal the driver (pid ${holder.pid}: ${err.code ?? err.message}) — ` +
       `${requestStays}; to stop it now, run kill ${holder.pid} from a shell allowed to signal it`);
     return 1;
   }
-  console.log(JSON.stringify({ stopped: true, pid: holder.pid }));
+  out(JSON.stringify({ stopped: true, pid: holder.pid }));
   return 0;
 }
 
