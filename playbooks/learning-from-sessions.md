@@ -136,13 +136,17 @@ proprietary snippet, and flag it for human attention. Then partition candidates 
 **bulk** (ordinary `doc-edit`, `skill-edit`, `enforcement-gap`) and **explicit** (every
 sensitive-flagged candidate and every `contradiction-resolution`). The partition is **written here,
 not chosen by the reader**: no candidate moves into the bulk to avoid a per-item decision.
+Retirement candidates come from the engine, not this partition; step 6 of Confirm decides each per item.
 
 **Recurrence** is skipped at `lean`. At `standard` or `thorough`, run `--check-recurrence --profile <resolved profile>`: each
 promotion carrying `verify: journal-recurrence` is checked by counting journal events with its
-culprit-id dated after it landed. Four verdicts, and the last two are load-bearing — `held` (N runs
-observed, no recurrence), `recurred`, `errored` (the check could not run to completion), and
-`unmeasurable` (zero runs observed, or runs observed with no culprit-bearing event among them — the
-scoreboard's detail says which). **Never report `unmeasurable` or `errored` as `held`**: a
+culprit-id dated after it landed. Five verdicts, and the last three are load-bearing — `held` (the
+id has reached the journal at some date and not since landing; it still cannot prove the pattern
+stopped where nothing journals it), `recurred`, `unobserved` (runs observed, but the id has never
+reached the journal at any date, so the journal says nothing either way), `errored` (the check could
+not run to completion), and `unmeasurable` (zero runs observed, or runs observed with no
+culprit-bearing event among them — the scoreboard's detail says which). **Never report `unobserved`,
+`unmeasurable` or `errored` as `held`**: a
 matcher that could not fire is not a clean bill of health, and a harness that broke is not a
 measurement. `--check-recurrence` runs an r3 `verify:` check only when passed `--run-checks`.
 
@@ -165,14 +169,15 @@ recurrence check and the promotion writer all read it, and a second shape breaks
 `disposition` ∈ `landed | declined | deferred`; `partition` ∈ `bulk | explicit`; `rung` ∈
 `r0 | r1 | r2 | r3`; `fault` ∈ `repo | pipeline`; `scope` ∈ `repo-devs | just-me | null` — null
 whenever `fault` is `pipeline`, which never lands locally. `whyNotHigher` is **required** on every
-landed candidate: it is what makes ladder-first checkable rather than claimed.
+landed candidate: it is what makes ladder-first checkable rather than claimed. A contradiction's
+`sideA`/`sideB` is a plain string or `{ quote, session, culpritId }`; `chosen` is null until decided.
 
 Then render the proposal:
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --render-report .devcycle/dreaming/<date>-candidates.json --profile <resolved profile>`,
-writing it to `.devcycle/dreaming/<YYYY-MM-DD>-dream.md`. Advance the corpus
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --render-report .devcycle/dreaming/<date>-candidates.json --profile <resolved profile>`.
+It writes `.devcycle/dreaming/<date>-dream.md`, replacing a same-dated file, and prints that path. Advance the corpus
 checkpoint with `--commit-checkpoint <now, ISO-8601 UTC>`.
 
-**`--preview` stops here**, the loop's other exit: report the artifact path and stop, promoting
+**`--preview` stops here**, the loop's other exit: report the printed path and stop, promoting
 nothing, deleting no memory, starting no cycle, emitting no handoff block.
 
 ## Confirm
@@ -211,9 +216,21 @@ nothing, deleting no memory, starting no cycle, emitting no handoff block.
    fresh candidates — this runs live. The rendered report's `## Verification candidates` section
    likewise surfaces this run's **graduation** (the `escalation` push) and **reinforcement**
    candidates, gated by the severity thresholds `references/reinforcement-policy.md` owns.
-   Retirement is graduation-gated: a **culprit** retirement candidate is a `held` **r3** lesson (a
-   mechanical check now guards it), a **win** retirement candidate is a **consolidated** win, and an
-   ungraduated held lesson is reported ineligible with the reason it has not graduated. A win folds
+   Retirement is graduation-gated: a **culprit** retirement candidate is an **r3** lesson whose
+   script check ran green this run, a **win** retirement candidate is a **consolidated** win, and
+   nothing else is one: a journal-scored `held` never retires, because it rests on the absence of
+   events. **Every retirement candidate gets a per-item decision**, like the explicit set.
+
+   **Ask before running the checks.** The Recurrence step's output names the checks that did not run:
+   scoreboard rows whose `detail` reads `<verify> (not run: pass --run-checks)`. When there are any,
+   ask one `AskUserQuestion` listing each `verify:` command verbatim, how many there are, and the
+   120-second bound on each; the consent holds for this run and is never remembered. **Yes** runs
+   `--check-recurrence --run-checks --profile <resolved profile>`: its `candidates.retirement` joins
+   these proposals, and a `broken` or `errored` row is reported as what it is and retires nothing.
+   **No** runs nothing, and this step says culprit retirement was skipped this run, and why. No such
+   row, or `lean` (which skipped Recurrence): no ask.
+
+   A win folds
    into a playbook's default flow or a scaffold once it has proven out; record that consolidation
    with `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --consolidate <culpritId>`, which is what
    makes the win eligible to retire. A retirement candidate proposes deleting the line and writing a
@@ -301,8 +318,8 @@ thing that beats the profile. The file is per-repo and is never plugin content.
    or the user declines stays written but uncommitted.
 4. **Delete the source memory once its promotion lands, and only if it has one.**
 
-Finally re-render the report in outcome mode — `--render-report <candidates.json> --outcome` — so
-the proposal and the outcome are diffable, and rewrite the checkpoint's two lines: `last-run:` to
+Finally re-render the report in outcome mode — `--render-report <candidates.json> --outcome` — which
+writes `<date>-dream-outcome.md` beside the proposal, so the two are diffable, and rewrite the checkpoint's two lines: `last-run:` to
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`, the version to the installed one.
 
 ## Entry points

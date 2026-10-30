@@ -88,7 +88,8 @@ the lenses are grouped: the coordinator runs
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --match --stage audit --files "<the stabilized audit scope files>"`
 and folds the printed lesson lines (only the lines, not the stage section they came from) into
 the lens charters as known risks the reviewers must weigh the scope against. The `--lesson
-<id>` tail on each line lets a reviewer pull that record when a lens needs it. Nothing is
+<id>` tail on a lesson line lets a reviewer pull that record when a lens needs it; a concern line
+carries none and is self-contained, though `--lesson` also accepts its bracketed id. Nothing is
 folded in when the match returns empty. **The branch-review stage** does not run this call at all:
 it matches its own stage's lessons before invoking this engine, per
 `playbooks/reviewing-the-branch.md`.

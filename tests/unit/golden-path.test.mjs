@@ -666,6 +666,15 @@ test("harvested: doctor/severity-ranking-and-actionability — severity ranks, d
   assert.match(t, /writes "YYYY-MM-DD-report\.md" to the fixed doctor directory/);
 });
 
+test("learn asks per run before running the records' checks, and decides each retirement per item", () => {
+  const t = read("playbooks/learning-from-sessions.md");
+  const step6 = t.slice(t.indexOf("6. **Surface any retirement or revert candidates**"), t.indexOf("## Land, ladder-first"));
+  assert.match(step6, /`--check-recurrence --run-checks --profile <resolved profile>`/);
+  assert.match(step6, /the consent holds for this run and is never remembered/);
+  assert.match(step6, /\*\*Every retirement candidate gets a per-item decision\*\*/);
+  assert.match(step6, /a journal-scored `held` never retires/);
+});
+
 test("harvested: dreaming-across-sessions/contradiction-not-auto-resolved — recency never settles a contradiction", () => {
   const t = read("playbooks/learning-from-sessions.md");
   assert.match(t, /\*\*Contradictions are never resolved by recency\*\*/);

@@ -5,6 +5,34 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-30 — Learn's scripts say what its playbooks say: a dated report file, `unobserved`, retirement behind a green check (#245, #246, #294, #277)
+
+**Decision:** `dream.mjs --render-report` writes `.devcycle/dreaming/<date>-dream.md` (or
+`-dream-outcome.md` under `--outcome`) and prints that path, and stdout no longer carries the report.
+The journal-scored culprit path gains the verdict `unobserved` for an id no journal event has ever
+carried at any date, so `held` now means the id has reached the journal and not since landing. A
+culprit retires only on a script check that ran green at r3, and `/devcycle:learn` asks per run before
+running the records' checks. Every retirement candidate gets a per-item decision. `--lesson` also
+resolves a maintenance finding's id; concern lines still carry no tail.
+
+**Why:** A report nobody wrote, a `[object Object]` table cell, a pull hint answering `no record` and
+a `held` nothing measured each lost work or made a lesson look proven. Of the 15 `held` rows on the
+live store, 14 had an id that never reached the journal.
+
+**Supersedes:** the retirement rule from the learning overhaul that a culprit `held` at r3 is eligible
+whatever produced the verdict.
+
+The growth below is the verdict definition, the Confirm ask and the corrected hint sentences:
+
+```text
+budget: surface-budget.json playbookMax 327
+budget: surface-budget.json surfaceTotal 6559
+budget: context-budget.json playbooks/learning-from-sessions.md 64734
+budget: context-budget.json playbooks/profiling-sessions.md 41756
+budget: context-budget.json playbooks/reviewing-code.md 95292
+budget: context-budget.json playbooks/reviewing-the-branch.md 53720
+```
+
 ## 2026-10-29 — The checkers stop bouncing valid work: one before/after rule, unparseable verdicts, --help (#382, #390, #391, #275)
 
 **Decision:** A test-class report's before and after captures pass with identical headers or as one
