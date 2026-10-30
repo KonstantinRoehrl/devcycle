@@ -1,0 +1,10 @@
+# devcycle-cmd: SPECS=spec/focus.spec.js REPORTER=progress npx karma start karma.conf.js
+[32m29 10 2026 18:31:23.170:INFO [karma-server]: [39mKarma v6.4.4 server started at http://localhost:9876/
+[32m29 10 2026 18:31:23.170:INFO [launcher]: [39mLaunching browsers ChromeHeadless with concurrency unlimited
+[32m29 10 2026 18:31:23.173:INFO [launcher]: [39mStarting browser ChromeHeadless
+[32m29 10 2026 18:31:23.555:INFO [Chrome Headless 156.0.0.0 (Mac OS 10.15.7)]: [39mConnected on socket el7n7oP84K-w9Mi4AAAA with id 86832568
+Chrome Headless 156.0.0.0 (Mac OS 10.15.7): Executed 0 of 3[32m SUCCESS[39m (0 secs / 0 secs)
+[1A[2KChrome Headless 156.0.0.0 (Mac OS 10.15.7): Executed 1 of 3[32m SUCCESS[39m (0 secs / 0.001 secs)
+[1A[2KChrome Headless 156.0.0.0 (Mac OS 10.15.7): Executed 1 of 3 (skipped 2)[32m SUCCESS[39m (0.001 secs / 0.001 secs)
+[32mTOTAL: 1 SUCCESS[39m
+# exit 0

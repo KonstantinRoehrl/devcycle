@@ -177,18 +177,22 @@ function gatedRepo() {
   return repo;
 }
 const briefAt = (repo, rel) => readFileSync(join(repo, rel), "utf8");
+// A gated implementer brief's tail with no --capture-cmd: the gate and the before/after rule's owner.
+const gateLine = (cmd) =>
+  `**Gate command:** \`${cmd}\` — capture both the before and the after with it; if a sibling's uncommitted red forces a narrower after, ` +
+  `keep the before on this command and declare the narrowing with a \`- Narrowing:\` line (references/evidence.md § File-backed evidence owns the before/after rule).\n`;
 
 test("an implementer brief ends with the task's resolved gate command", () => {
   const repo = gatedRepo();
   const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer"], "# Brief for task 5\n");
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer.md"), "# Brief for task 5\n\n**Lessons:** none\n\n**Gate command:** `npm run gate`\n");
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer.md"), `# Brief for task 5\n\n**Lessons:** none\n\n${gateLine("npm run gate")}`);
 });
 
 test("a fix-pass brief carries the gate line too; a reviewer brief and an ungated task get none", () => {
   const repo = gatedRepo();
   dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer", "--round", "1"], "# Fix pass");
-  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer-round-1.md"), "# Fix pass\n\n**Lessons:** none\n\n**Gate command:** `npm run gate`\n");
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer-round-1.md"), `# Fix pass\n\n**Lessons:** none\n\n${gateLine("npm run gate")}`);
   dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"], "# Review brief\n");
   assert.equal(briefAt(repo, ".devcycle/briefs/5-reviewer-round-1.md"), "# Review brief\n");
   const plain = repoWithLedger();
@@ -215,14 +219,14 @@ test("an implementer brief's **Lessons:** line is filled in place with the lesso
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.out.lessons, 1);
   assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer.md"),
-    `# Brief for task 5\n${LESSON_HEADER}\n${GUARD}\n\n- [ ] Step 1\n\n**Gate command:** \`npm run gate\`\n`);
+    `# Brief for task 5\n${LESSON_HEADER}\n${GUARD}\n\n- [ ] Step 1\n\n${gateLine("npm run gate")}`);
 });
 
 test("a filled **Lessons:** line with nothing matched reads none; with no plan to read the brief is left as composed", () => {
   const repo = gatedRepo();
   const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer"], "# Brief for task 5\n**Lessons:**\n- [ ] Step 1\n");
   assert.equal(r.out.lessons, 0);
-  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer.md"), "# Brief for task 5\n**Lessons:** none\n- [ ] Step 1\n\n**Gate command:** `npm run gate`\n");
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer.md"), `# Brief for task 5\n**Lessons:** none\n- [ ] Step 1\n\n${gateLine("npm run gate")}`);
   const plain = repoWithLedger();
   const unplanned = dispatch(plain, ["--run", RUN, "--task", "5", "--role", "implementer"], "# Brief for task 5\n**Lessons:**\n");
   assert.equal(unplanned.out.lessons, null);
@@ -254,7 +258,7 @@ test("--capture-cmd ends the brief with the capture command and a ready-made Nar
   const repo = gatedRepo();
   const out = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer", "--capture-cmd", "node --test tests/unit/a.test.mjs"], "brief\n").out;
   const brief = readFileSync(join(repo, out.briefPath), "utf8");
-  assert.match(brief, /\*\*Gate command:\*\* `[^`]+`\n\*\*Capture command:\*\* `node --test tests\/unit\/a\.test\.mjs` — pass it as `capture-evidence\.mjs --cmd`/);
+  assert.match(brief, /\*\*Gate command:\*\* `[^`]+`\n\*\*Capture command:\*\* `node --test tests\/unit\/a\.test\.mjs` — pass it as `capture-evidence\.mjs --cmd` for both the before and the after capture \(references\/evidence\.md § File-backed evidence owns the before\/after rule\), and copy this line into your report:\n/);
   assert.match(brief, /\n- Narrowing: node --test tests\/unit\/a\.test\.mjs — concurrent wave: siblings' uncommitted edits share the checkout; the whole gate runs at commit in an isolated worktree\n$/);
 });
 
@@ -274,6 +278,45 @@ test("--capture-cmd rejects a blank or multi-line command", () => {
     assert.equal(r.status, 2, JSON.stringify(cmd));
     assert.match(JSON.parse(r.stdout).error, /takes one line/);
   }
+});
+
+test("a gated implementer brief states the before/after rule by citing evidence.md", () => {
+  const repo = gatedRepo();
+  const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer"], "# Brief for task 5\n");
+  assert.equal(r.status, 0, r.stderr);
+  const brief = briefAt(repo, ".devcycle/briefs/5-implementer.md");
+  assert.match(brief, /\*\*Gate command:\*\* `npm run gate` — capture both the before and the after with it;/);
+  assert.match(brief, /references\/evidence\.md § File-backed evidence owns the before\/after rule/);
+});
+
+test("a convention task's brief tail runs the gate unnarrowed; a red-green or green-green one keeps the narrowing route", () => {
+  for (const [evidence, narrowable] of [
+    ["convention (`npm run gate`)", false],
+    ["green-green (behavior-preserving)", true],
+    ["red-green", true],
+  ]) {
+    const repo = gatedRepo();
+    writeFileSync(join(repo, "docs/plan.md"), GATED_PLAN.replace("**Evidence:** red-green", `**Evidence:** ${evidence}`));
+    const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer"], "# Brief for task 5\n");
+    assert.equal(r.status, 0, r.stderr);
+    const tail = briefAt(repo, ".devcycle/briefs/5-implementer.md").split("**Gate command:**")[1];
+    assert.match(tail, /^ `npm run gate` — /, evidence);
+    assert.match(tail, /references\/evidence\.md § File-backed evidence owns the before\/after rule/, evidence);
+    assert.equal(/Narrowing/.test(tail), narrowable, evidence);
+    if (!narrowable) assert.match(tail, /byte for byte/, evidence);
+  }
+});
+
+test("--help answers with stdin left open", async () => {
+  const child = spawn(process.execPath, [SCRIPT, "--help"], { stdio: ["pipe", "pipe", "pipe"] });
+  let out = "";
+  child.stdout.on("data", (chunk) => (out += chunk));
+  const code = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { child.kill(); reject(new Error("task-dispatch --help waited on stdin")); }, 5000);
+    child.on("exit", (status) => { clearTimeout(timer); resolve(status); });
+  });
+  assert.equal(code, 0);
+  assert.equal(JSON.parse(out).action, "usage");
 });
 
 test("briefPathFor is the path dispatch writes", () => {

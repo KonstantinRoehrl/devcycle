@@ -189,7 +189,7 @@ test("an accept that lists a blocking finding contradicts itself: refused as no 
   writeInto(f.repo, ".devcycle/findings/5-round-1.md", "Verdict: accept\n\n1. [high] the empty ledger is not handled\n");
   const r = verdict(f);
   assert.equal(r.out.action, "missing-findings");
-  assert.match(ledgerTail(f), / outcome=rejected \(missing findings file\) /);
+  assert.match(ledgerTail(f), / outcome=rejected \(unparseable findings file: accept lists a blocking finding\) /);
   assert.deepEqual(rows(f), []);
 });
 
@@ -353,4 +353,97 @@ test("a dispatch-ended line after the round's review-round neither closes the ro
   const r = verdict(f);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.out.action, "accepted");
+});
+
+const FINDINGS = ".devcycle/findings/5-round-1.md";
+
+test("#390: heading, list and approve verdict lines parse; * stays accepted", () => {
+  for (const [body, action] of [
+    ["## Verdict: approved\n", "accepted"],
+    ["- Verdict: accept\n", "accepted"],
+    ["+ Verdict: accept\n", "accepted"],
+    ["Verdict: approve\n", "accepted"],
+    ["* Verdict: accept\n", "accepted"],
+    ["## Verdict\naccept\n", "accepted"],
+    ["- Verdict: needs-changes\n- Culprit: novel:missing-edge-case\n\n1. [high] the empty ledger is not handled\n", "rejected"],
+    ["### Verdict: needs-changes\nCulprit: novel:missing-edge-case\n\n1. [high] the empty ledger is not handled\n", "rejected"],
+  ]) {
+    const f = fixture();
+    writeInto(f.repo, FINDINGS, body);
+    assert.equal(verdict(f).out.action, action, JSON.stringify(body));
+  }
+});
+
+test("#390: the heading form takes its word from the very next line only", () => {
+  const f = fixture();
+  writeInto(f.repo, FINDINGS, "## Verdict\n\naccept\n");
+  assert.equal(verdict(f).out.reason, "no verdict line");
+});
+
+test("a bare Verdict line and a differing heading- or list-marked one conflict, so the reviewer re-dispatches", () => {
+  for (const body of [
+    "Verdict: accept\n\nRecap:\n- Verdict: needs-changes\n- Culprit: novel:recap\n",
+    "Verdict: needs-changes\nCulprit: novel:real\n\n1. [high] x\n\nRecap:\n- Verdict: accept\n- Culprit: novel:recap\n",
+    "## Verdict: approved\n\n- Verdict: needs-changes\n- Culprit: novel:recap\n",
+    "- Verdict: needs-changes\n- Culprit: novel:x\n\nThe earlier round said:\nVerdict: accept\n\n1. [medium] bug\n",
+  ]) {
+    const f = fixture();
+    writeInto(f.repo, FINDINGS, body);
+    const r = verdict(f);
+    assert.equal(r.out.action, "missing-findings", JSON.stringify(body));
+    assert.equal(r.out.reason, "conflicting verdicts", JSON.stringify(body));
+  }
+});
+
+test("#390: a present file with no usable verdict logs the unparseable outcome naming why", () => {
+  for (const [body, reason] of [
+    ["no verdict here\n", "no verdict line"],
+    ["", "no verdict line"],
+    ["Verdict: accept\nVerdict: needs-changes\nCulprit: novel:x\n", "conflicting verdicts"],
+    ["Verdict: needs-changes\n\n1. [high] no culprit line\n", "needs-changes without a valid culprit"],
+    ["Verdict: accept\n\n1. [high] the empty ledger is not handled\n", "accept lists a blocking finding"],
+  ]) {
+    const f = fixture();
+    writeInto(f.repo, FINDINGS, body);
+    const r = verdict(f);
+    assert.equal(r.out.action, "missing-findings", reason);
+    assert.equal(r.out.reason, reason);
+    assert.match(r.out.expected, /^Verdict: accept, or Verdict: needs-changes with a Culprit: <slug> line/);
+    assert.ok(ledgerTail(f).includes(` outcome=rejected (unparseable findings file: ${reason}) ref=${FINDINGS} `), ledgerTail(f));
+    assert.deepEqual(rows(f), []);
+  }
+});
+
+test("#390: an absent findings file keeps the missing outcome, with reason absent file", () => {
+  const f = fixture();
+  const r = verdict(f);
+  assert.equal(r.out.action, "missing-findings");
+  assert.equal(r.out.reason, "absent file");
+  assert.match(ledgerTail(f), / outcome=rejected \(missing findings file\) ref=/);
+});
+
+test("#390: a crash re-run on an unchanged unparseable file appends nothing; a fixed file re-read accepts", () => {
+  const f = fixture();
+  writeInto(f.repo, FINDINGS, "no verdict here\n");
+  verdict(f);
+  const before = readFileSync(ledgerPath(f), "utf8");
+  const again = verdict(f);
+  assert.equal(again.status, 0, JSON.stringify(again.out));
+  assert.deepEqual(again.out.appended, []);
+  assert.equal(readFileSync(ledgerPath(f), "utf8"), before);
+  writeInto(f.repo, FINDINGS, ACCEPT);
+  assert.equal(verdict(f).out.action, "accepted");
+  assert.match(ledgerTail(f), / outcome=accepted /);
+});
+
+test("#390: absent and unparseable findings files share one retry cap", () => {
+  const f = fixture();
+  const actions = [[0, null], [1, "no verdict here\n"], [2, null]].map(([retry, body]) => {
+    if (retry) appendFileSync(ledgerPath(f), reviewRoundLine(1, retry));
+    if (body === null) rmSync(join(f.repo, FINDINGS), { force: true });
+    else writeInto(f.repo, FINDINGS, body);
+    return verdict(f).out;
+  });
+  assert.deepEqual(actions.map((out) => out.action), ["missing-findings", "missing-findings", "needs-user"]);
+  assert.equal(actions[2].reason, "retry cap: a third findings file with no verdict (absent file)");
 });

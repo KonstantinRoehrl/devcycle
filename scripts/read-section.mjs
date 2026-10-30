@@ -6,7 +6,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isMain } from "./is-main.mjs";
-import { sectionText } from "./md-sections.mjs";
+import { apostropheSlug, sections } from "./md-sections.mjs";
 
 const PLUGIN_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const REFERENCE = /^references\/[A-Za-z0-9._-]+\.md$/;
@@ -15,9 +15,10 @@ export function readSection(file, wanted, root = PLUGIN_ROOT) {
   if (!REFERENCE.test(file)) throw new Error(`${file} is not a plugin reference path (references/<name>.md)`);
   const abs = join(root, file);
   if (!existsSync(abs)) throw new Error(`no such file ${file}`);
-  const text = sectionText(readFileSync(abs, "utf8"), wanted);
-  if (text === null) throw new Error(`no section "${wanted}" in ${file}`);
-  return text;
+  const all = sections(readFileSync(abs, "utf8"));
+  const hit = all.find((s) => s.slug === wanted) ?? all.find((s) => apostropheSlug(s.heading) === wanted);
+  if (!hit) throw new Error(`no section "${wanted}" in ${file} — its sections: ${all.map((s) => s.slug).join(", ")}`);
+  return hit.text;
 }
 
 if (isMain(import.meta.url, process.argv[1])) {

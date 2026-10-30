@@ -15,6 +15,7 @@ const RUN = { state: "running", session: 4, model: "claude-opus-5-5", effort: "h
   waitUntil: null, waitWhat: null, stopDetail: null, outcome: null };
 const entry = (task, event, outcome, key = "") =>
   parseLedgerLine(`- [2026-10-25T08:00:00Z] task=${task} event=${event} outcome=${outcome} ref=none${key ? ` key=${key}` : ""}`);
+const UNPARSEABLE = "rejected (unparseable findings file: no verdict line)";
 const PLAN = [
   "# Fixture plan", "",
   "### Task 1: first", "", "**Files:**", "- Modify: src/a.txt", "",
@@ -52,27 +53,29 @@ test("each wave-setup position reads as its band step, and every other position 
   assert.deepEqual(progress.waves.flatMap((w) => w.tasks.map((t) => t.step)), Object.values(steps));
 });
 
-test("a task's round is its latest review round, and its rejections count reviewer and gate rejections and intake bounces, never a missing findings file", () => {
-  const seven = [
-    entry(7, "dispatched", "model sonnet"), entry(7, "report-received", "complete"),
-    entry(7, "review-round", "round 1", "7/review-round/1/0"), entry(7, "review-verdict", "rejected", "7/review-verdict/1/0"),
-    entry(7, "report-received", "rejected (intake bounce)", "7/report-received/2/0"),
-    entry(7, "review-round", "round 2", "7/review-round/2/0"), entry(7, "review-verdict", "rejected (missing findings file)", "7/review-verdict/2/0"),
-    entry(7, "review-round", "round 2", "7/review-round/2/1"), entry(7, "review-verdict", "rejected (green gate: exit 1)", "7/review-verdict/2/1"),
-  ];
-  const plan = {
-    overview: { waves: 2, tasks: 3, committed: 1, nextWave: 2,
-      perWave: [{ wave: 1, tasks: ["6"], committed: 1 }, { wave: 2, tasks: ["7", "8"], committed: 0 }] },
-    positions: new Map([["6", { position: "committed", next: "done" }], ["7", { position: "rejected", next: "fix" }],
-      ["8", { position: "not-dispatched", next: "dispatch-implementer" }]]),
-    entries: new Map([["6", [entry(6, "committed", "green gate passed")]], ["7", seven], ["8", []]]),
-  };
-  const { updatedAt, ...progress } = buildProgress({ run: RUN, plan });
-  assert.deepEqual(progress, { v: 1, ...RUN, currentWave: 2, committed: 1, total: 3, waves: [
-    { wave: 1, committed: 1, tasks: [{ task: "6", step: "committed", round: 0, rejections: 0 }] },
-    { wave: 2, committed: 0, tasks: [{ task: "7", step: "fixing", round: 2, rejections: 3 }, { task: "8", step: "pending", round: 0, rejections: 0 }] },
-  ] });
-  assert.match(updatedAt, ISO);
+test("a task's round is its latest review round, and its rejections count reviewer and gate rejections and intake bounces, never a findings file with no verdict", () => {
+  for (const noVerdict of ["rejected (missing findings file)", UNPARSEABLE]) {
+    const seven = [
+      entry(7, "dispatched", "model sonnet"), entry(7, "report-received", "complete"),
+      entry(7, "review-round", "round 1", "7/review-round/1/0"), entry(7, "review-verdict", "rejected", "7/review-verdict/1/0"),
+      entry(7, "report-received", "rejected (intake bounce)", "7/report-received/2/0"),
+      entry(7, "review-round", "round 2", "7/review-round/2/0"), entry(7, "review-verdict", noVerdict, "7/review-verdict/2/0"),
+      entry(7, "review-round", "round 2", "7/review-round/2/1"), entry(7, "review-verdict", "rejected (green gate: exit 1)", "7/review-verdict/2/1"),
+    ];
+    const plan = {
+      overview: { waves: 2, tasks: 3, committed: 1, nextWave: 2,
+        perWave: [{ wave: 1, tasks: ["6"], committed: 1 }, { wave: 2, tasks: ["7", "8"], committed: 0 }] },
+      positions: new Map([["6", { position: "committed", next: "done" }], ["7", { position: "rejected", next: "fix" }],
+        ["8", { position: "not-dispatched", next: "dispatch-implementer" }]]),
+      entries: new Map([["6", [entry(6, "committed", "green gate passed")]], ["7", seven], ["8", []]]),
+    };
+    const { updatedAt, ...progress } = buildProgress({ run: RUN, plan });
+    assert.deepEqual(progress, { v: 1, ...RUN, currentWave: 2, committed: 1, total: 3, waves: [
+      { wave: 1, committed: 1, tasks: [{ task: "6", step: "committed", round: 0, rejections: 0 }] },
+      { wave: 2, committed: 0, tasks: [{ task: "7", step: "fixing", round: 2, rejections: 3 }, { task: "8", step: "pending", round: 0, rejections: 0 }] },
+    ] }, noVerdict);
+    assert.match(updatedAt, ISO);
+  }
 });
 
 // The step buildProgress reports for one task whose ledger lines are `entries`, positioned as wave-setup positions them.

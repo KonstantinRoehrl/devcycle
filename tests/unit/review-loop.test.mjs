@@ -13,6 +13,7 @@ const STATUS = "status: exhausted-unresolved rounds: 3/3 residue: 2 carried-to: 
 const entry = (event, outcome, key) =>
   parseLedgerLine(`- [2026-10-25T10:00:00Z] task=4 event=${event} outcome=${outcome} ref=none key=${key}`);
 const rejectedRound3 = entry("review-verdict", "rejected", "4/review-verdict/3/0");
+const UNPARSEABLE = "rejected (unparseable findings file: no verdict line)";
 
 test("the review loop's id and round cap", () => {
   assert.equal(ROUND_CAP, 3);
@@ -38,6 +39,8 @@ test("pendingReviewLoop holds the task only for an exhaustion this ledger holds 
     assert.equal(pendingReviewLoop(root, "4", []), null, "an earlier cycle's status file with no exhaustion in this ledger");
     assert.equal(pendingReviewLoop(root, "4", [entry("review-verdict", "rejected (missing findings file)", "4/review-verdict/3/0")]), null,
       "a missing findings file exhausts nothing");
+    assert.equal(pendingReviewLoop(root, "4", [entry("review-verdict", UNPARSEABLE, "4/review-verdict/3/0")]), null,
+      "an unparseable findings file exhausts nothing");
     assert.equal(pendingReviewLoop(root, "4", [entry("review-verdict", "rejected (green gate: exit 1)", "4/review-verdict/3/1")]), "task-4-review",
       "the green gate's rejection at the cap exhausts the loop");
     assert.equal(pendingReviewLoop(root, "4", [rejectedRound3, entry("user-decision", "continue task-4-review", "4/user-decision/0/0")]), null,

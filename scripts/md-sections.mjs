@@ -10,6 +10,10 @@ const HEADING = /^(#{1,6})\s+(.*?)\s*$/;
 // GitHub-style heading slug: lowercase, drop non-word (keep spaces/hyphens), spaces -> hyphens.
 export const slug = (heading) => heading.toLowerCase().replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-");
 
+// The slug a hand-made citation gives a heading whose apostrophe it turned into a hyphen
+// ("wave's" → `wave-s`), where slug() drops the apostrophe (`waves`).
+export const apostropheSlug = (heading) => slug(heading.replace(/['’]/g, " "));
+
 export function sections(text) {
   const out = [];
   let fence = null; // the open fence's opening run, or null outside one

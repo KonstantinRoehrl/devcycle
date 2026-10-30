@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Called once the reviewer's envelope returns: confirms the findings file exists and parses its
-// verdict block (references/evidence.md § Reviewer verdicts), then writes the `review-verdict`
+// Called once the reviewer's envelope returns: reads the findings file's verdict block, telling an
+// absent file from one with no usable verdict (references/evidence.md § Reviewer verdicts), then writes the `review-verdict`
 // ledger line, the `verdict` run-record row and, on needs-changes, the `review-reject` event row —
 // all against the round's `review-round` line, so a re-run after a crash adds nothing twice.
 // A rejected round 3 is the review loop's exhaustion: its status file is written per
@@ -18,8 +18,8 @@ import { ROUND_CAP, exhaustReviewLoop } from "./review-loop.mjs";
 import { validateCulprit } from "./run-record.mjs";
 import { commitArgs, taskCommit } from "./task-commit.mjs";
 import {
-  MISSING_FINDINGS, UsageError, appendLedgerLine, appendRunRecordOnce, checkIds, countFlag, latestKeyed, ledgerKey,
-  nextRetry, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot,
+  MISSING_FINDINGS, UsageError, appendLedgerLine, appendRunRecordOnce, checkIds, countFlag, isNoVerdict, latestKeyed,
+  ledgerKey, nextRetry, parseLedgerLine, retryCount, runTaskScript, taskFlags, unparseableFindings, workTreeRoot,
 } from "./task-ledger.mjs";
 
 const FLAGS = {
@@ -32,8 +32,9 @@ const COMMIT_FLAGS = ["--plan", "--test-cmd", "--subject", "--trailers", "--culp
 const COMMIT_REQUIRED = ["--plan", "--test-cmd", "--subject"];
 const EVIDENCE_CLASSES = new Set(["red-green", "green-green", "convention"]);
 const RETRY_CAP = 2;
-// The review-verdict outcomes this script writes; task-commit.mjs's green-gate lines share the event.
-const OWN_OUTCOMES = new Set(["accepted", "rejected", MISSING_FINDINGS]);
+// The verdict outcomes this script writes, beside its no-verdict ones (isNoVerdict); task-commit.mjs's
+// green-gate lines share the event.
+const OWN_OUTCOMES = new Set(["accepted", "rejected"]);
 // Blocking-ness is derived from severity (references/findings.md § Severity): critical and high block.
 const BLOCKING_RE = /^\s*\d+\.\s*\[(critical|high)\]/i;
 
@@ -67,24 +68,54 @@ function unwrapWholeFence(text) {
   return whole ? inner.join("\n") : text;
 }
 
-// The verdict block's two header lines, tolerating the emphasis and code spans a markdown author
-// wraps them in, either case, and the `approved` / `accepted` a reviewer writes for accept; null when
-// the file carries no usable verdict — none, two that disagree, a needs-changes without a valid
-// culprit, or an accept that lists a blocking finding.
+const VERDICT_WORD = "accept|accepted|approve|approved|needs-changes";
+const VERDICT_RE = new RegExp(`^\\s*Verdict:\\s*(${VERDICT_WORD})\\s*$`, "i");
+const VERDICT_HEADING_RE = /^\s*#{1,6}\s+Verdict:?\s*$/i;
+const WORD_RE = new RegExp(`^\\s*(${VERDICT_WORD})\\s*$`, "i");
+const CULPRIT_RE = /^\s*Culprit:\s*(\S+)\s*$/i;
+// A heading (`#`…`######`) or list (`-`, `+`) marker before a verdict block line is markup; `*` is
+// already gone with the emphasis.
+const unmarked = (line) => line.replace(/^\s*(?:#{1,6}\s+|[-+]\s+)/, "");
+
+const EXPECTED_VERDICT = "Verdict: accept, or Verdict: needs-changes with a Culprit: <slug> line under it (references/evidence.md § Reviewer verdicts)";
+
+// The verdict block's two header lines, tolerating the emphasis, code spans and heading or list
+// markers a markdown author wraps them in, either case, and the `approve` / `approved` / `accepted` a
+// reviewer writes for accept; a `Verdict` heading may carry its word alone on the next line. A file
+// with no usable verdict returns `{ reason }`, one of a fixed set the ledger outcome names.
 function parseVerdict(text) {
   const lines = unfencedLines(unwrapWholeFence(text));
   const plain = lines.map((line) => line.replace(/[*`]/g, ""));
-  const verdicts = new Set(plain.flatMap((line) => {
-    const word = line.match(/^\s*Verdict:\s*(accept|accepted|approved|needs-changes)\s*$/i)?.[1].toLowerCase();
-    return word ? [word === "needs-changes" ? word : "accept"] : [];
+  const verdicts = new Set(plain.flatMap((line, i) => {
+    const word = unmarked(line).match(VERDICT_RE)?.[1] ?? (VERDICT_HEADING_RE.test(line) ? plain[i + 1]?.match(WORD_RE)?.[1] : undefined);
+    return word ? [word.toLowerCase() === "needs-changes" ? "needs-changes" : "accept"] : [];
   }));
-  if (verdicts.size !== 1) return null;
+  if (!verdicts.size) return { reason: "no verdict line" };
+  if (verdicts.size > 1) return { reason: "conflicting verdicts" };
   const [verdict] = verdicts;
   const blocking = lines.filter((line) => BLOCKING_RE.test(line)).length;
-  if (verdict === "accept") return blocking ? null : { verdict, culprit: null, blocking };
-  const culprit = plain.map((line) => line.match(/^\s*Culprit:\s*(\S+)\s*$/i)?.[1]).find(Boolean);
-  if (!culprit || validateCulprit(culprit).length) return null;
+  if (verdict === "accept") return blocking ? { reason: "accept lists a blocking finding" } : { verdict, culprit: null, blocking };
+  const culprit = plain.map((line) => unmarked(line).match(CULPRIT_RE)?.[1]).find(Boolean);
+  if (!culprit || validateCulprit(culprit).length) return { reason: "needs-changes without a valid culprit" };
   return { verdict, culprit, blocking };
+}
+
+function readVerdict(findingsAbs) {
+  return existsSync(findingsAbs) ? parseVerdict(readFileSync(findingsAbs, "utf8")) : { reason: "absent file", absent: true };
+}
+
+function verdictOutcome(parsed) {
+  if (!parsed.verdict) return parsed.absent ? MISSING_FINDINGS : unparseableFindings(parsed.reason);
+  return parsed.verdict === "accept" ? "accepted" : "rejected";
+}
+
+// A round with no verdict re-dispatches its reviewer, saying what the file lacked and what it should
+// hold; absent and unparseable files spend one retry cap between them.
+function noVerdictResult(ledger, task, base, parsed, appended) {
+  const result = { ...base, reason: parsed.reason, expected: EXPECTED_VERDICT, verdict: null, culprit: null, blocking: null, appended };
+  return retryCount(ledger, task, isNoVerdict) > RETRY_CAP
+    ? { ...result, action: "needs-user", reason: `retry cap: a third findings file with no verdict (${parsed.reason})` }
+    : { ...result, action: "missing-findings" };
 }
 
 // The task's ledger lines after the round's review-round line, in file order.
@@ -161,7 +192,7 @@ export function verdict(argv, cwd = process.cwd()) {
   // again would hand what followed it, an unreviewed fix among them, that round's accept.
   // A dispatch that ended without its output is no action on the round's verdict: its redispatch
   // reviews the same round.
-  const closing = later.find((e) => e.event !== DISPATCH_ENDED && !(e.event === "review-verdict" && OWN_OUTCOMES.has(e.outcome)));
+  const closing = later.find((e) => e.event !== DISPATCH_ENDED && !(e.event === "review-verdict" && (OWN_OUTCOMES.has(e.outcome) || isNoVerdict(e.outcome))));
   // A commit call re-run once the round's accept committed: the accept stands as the ledger holds it,
   // and task-commit.mjs's own re-run adds only what the commit still lacks.
   const accept = commit && closing?.event === "committed" && later.findLast((e) => e.event === "review-verdict" && e.outcome === "accepted");
@@ -172,9 +203,9 @@ export function verdict(argv, cwd = process.cwd()) {
     throw new UsageError(`round ${round} of task ${task} is closed: its verdict was acted on (${closing.event} ${closing.outcome})`);
   const findingsRel = relative(root, resolve(cwd, flags["--findings"]));
   const findingsAbs = join(root, findingsRel);
-  const parsed = existsSync(findingsAbs) ? parseVerdict(readFileSync(findingsAbs, "utf8")) : null;
-  const accepted = parsed?.verdict === "accept";
-  const outcome = !parsed ? MISSING_FINDINGS : accepted ? "accepted" : "rejected";
+  const parsed = readVerdict(findingsAbs);
+  const accepted = parsed.verdict === "accept";
+  const outcome = verdictOutcome(parsed);
   const retry = verdictRetry(ledger, task, later, outcome);
 
   const appended = [];
@@ -185,11 +216,9 @@ export function verdict(argv, cwd = process.cwd()) {
   };
   const base = { task, round, retry, findingsPath: findingsRel };
 
-  if (!parsed) {
+  if (!parsed.verdict) {
     ledgerLine();
-    return retryCount(ledger, task, MISSING_FINDINGS) > RETRY_CAP
-      ? { ...base, action: "needs-user", reason: "retry cap: a third missing findings file", verdict: null, culprit: null, blocking: null, appended }
-      : { ...base, action: "missing-findings", verdict: null, culprit: null, blocking: null, appended };
+    return noVerdictResult(ledger, task, base, parsed, appended);
   }
 
   // The status goes first, so a rejected round 3 never stands in the ledger without it — a line that

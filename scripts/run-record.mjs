@@ -6,7 +6,7 @@
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { homedir } from "node:os";
-import { pathToFileURL } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 import { createHash, randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { now } from "./stamp.mjs";
@@ -15,8 +15,8 @@ import { parseFlags } from "./cli-flags.mjs";
 
 export { gitToplevel };
 
-const SCHEMA_PATH = new URL("../tests/fixtures/run-record.schema.json", import.meta.url).pathname;
-const CULPRITS_PATH = new URL("../references/culprits.json", import.meta.url).pathname;
+const SCHEMA_PATH = fileURLToPath(new URL("../tests/fixtures/run-record.schema.json", import.meta.url));
+const CULPRITS_PATH = fileURLToPath(new URL("../references/culprits.json", import.meta.url));
 const NOVEL_RE = /^novel:[a-z0-9]+(-[a-z0-9]+){0,5}$/;
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 
@@ -70,6 +70,11 @@ const typesOf = (prop) => [prop.type ?? []].flat();
 // Explicit null is a value only where the schema says so: a nullable type, or null in the enum.
 export const admitsNull = (prop) => typesOf(prop).includes("null") || (prop.enum ?? []).includes(null);
 
+// What a field means where its enum alone does not say, appended to that field's enum refusal.
+const FIELD_MEANINGS = {
+  attributedBy: "who chose the culprit slug: a user's gate correction is recorded as coordinator, which picks the slug (references/ledger.md, the event row)",
+};
+
 // Validates at write time so a malformed line never reaches the file. CI's check 13 guards the
 // declared shape; this guards every real append.
 export function validate(obj, sub) {
@@ -84,7 +89,7 @@ export function validate(obj, sub) {
     }
     if (value === null && admitsNull(prop)) continue;
     if (prop.enum && !prop.enum.includes(value))
-      errors.push(`"${key}" value "${value}" is not one of ${prop.enum.join(" | ")}`);
+      errors.push(`"${key}" value "${value}" is not one of ${prop.enum.join(" | ")}${FIELD_MEANINGS[key] ? ` — ${FIELD_MEANINGS[key]}` : ""}`);
     if (prop.const !== undefined && value !== prop.const)
       errors.push(`"${key}" must be ${JSON.stringify(prop.const)}`);
     if (prop.pattern && !new RegExp(prop.pattern).test(String(value)))
@@ -194,12 +199,36 @@ export function diffStats(base, cwd = process.cwd()) {
   return { filesChanged, filesCreated, filesDeleted, insertions, deletions };
 }
 
+const USAGE = "usage: run-record.mjs <new|append|workload> [flags] — append --help [--kind <kind>] lists a kind's fields";
+
+// append's fields per kind, from the schema it validates against, as the flags that set them: runId
+// and kind come from --run and --kind, and a session's sessionHash from --sessionId.
+function appendUsage(kind) {
+  const kinds = JSON.parse(readFileSync(SCHEMA_PATH, "utf8")).oneOf.filter((s) => !kind || s.properties?.kind?.const === kind);
+  if (!kinds.length) die(`unknown kind "${kind}"`);
+  const flagOf = (field) => (field === "sessionHash" ? "--sessionId" : `--${field}`);
+  const list = (fields) => fields.map(flagOf).join(" ") || "none";
+  return kinds.map((s) => {
+    const fields = Object.keys(s.properties ?? {}).filter((field) => field !== "kind" && field !== "runId");
+    const required = fields.filter((field) => s.required?.includes(field));
+    return `append --kind ${s.properties.kind.const}\n  required: ${list(required)}\n  optional: ${list(fields.filter((field) => !required.includes(field)))}`;
+  }).join("\n");
+}
+
+// The --kind an `append --help` names, in either flag form, or null.
+function helpKind(rest) {
+  const at = rest.indexOf("--kind");
+  return at >= 0 ? (rest[at + 1] ?? null) : (rest.find((arg) => arg.startsWith("--kind="))?.slice("--kind=".length) ?? null);
+}
+
 function main() {
   const [sub, ...rest] = process.argv.slice(2);
+  if (sub === "--help") return void process.stdout.write(`${USAGE}\n`);
+  if (sub === "append" && rest.includes("--help")) return void process.stdout.write(`${appendUsage(helpKind(rest))}\n`);
   // Own keys only: a bare `{...}[sub]` resolves "constructor" to Object's function, which would
   // reach parseFlags as a flag map. A getter keeps append's schema read off the other subcommands.
   const flagMaps = { new: () => NEW_FLAGS, append: appendFlags, workload: () => WORKLOAD_FLAGS };
-  if (!Object.hasOwn(flagMaps, sub)) die("usage: run-record.mjs <new|append|workload> [flags]");
+  if (!Object.hasOwn(flagMaps, sub)) die(USAGE);
   const knownFlags = flagMaps[sub]();
   const { flags, knobs, objects } = parseArgs(rest, knownFlags);
   const toplevel = flags.repo ?? gitToplevel(process.cwd());
@@ -256,7 +285,7 @@ function main() {
     };
     writeLine(toplevel, runId, obj);
   } else {
-    die("usage: run-record.mjs <new|append|workload> [flags]");
+    die(USAGE);
   }
 }
 

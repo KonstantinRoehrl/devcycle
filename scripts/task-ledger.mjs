@@ -18,6 +18,17 @@ const LEDGER_LINE_RE = /^- \[([^\]]+)\] task=(\S+) event=(\S+) outcome=(.*?) ref
 
 export class UsageError extends Error {}
 
+// A `--help` on a task script: answered with its flag names instead of running the call.
+export class HelpRequest extends Error {
+  constructor(required, optional) {
+    super("help requested");
+    this.usage = { required, optional };
+  }
+}
+
+export const usageLine = (name, { required, optional }) =>
+  `usage: ${name}.mjs ${[...required, ...optional.map((flag) => `[${flag}]`)].join(" ")}`;
+
 export function ledgerKey({ task, event, round = 0, retry = 0 }) {
   return `${task}/${event}/${round}/${retry}`;
 }
@@ -65,10 +76,22 @@ export function taskFiles(ledgerPath, task) {
 }
 
 export const MISSING_FINDINGS = "rejected (missing findings file)";
+const UNPARSEABLE_FINDINGS = "rejected (unparseable findings file: ";
+
+// A findings file that exists but yields no usable verdict. `reason` is one of task-verdict.mjs's
+// fixed parse reasons, none of which holds the ledger grammar's ` ref=` separator.
+export const unparseableFindings = (reason) => `${UNPARSEABLE_FINDINGS}${reason})`;
+
+// A review-verdict outcome that carries no verdict — the findings file absent or unparseable: the
+// round stays open, its reviewer is dispatched again, and both kinds spend one retry cap.
+export const isNoVerdict = (outcome) => outcome.startsWith(MISSING_FINDINGS) || outcome.startsWith(UNPARSEABLE_FINDINGS);
+
+export const noVerdictReason = (outcome) =>
+  outcome.startsWith(UNPARSEABLE_FINDINGS) ? outcome.slice(UNPARSEABLE_FINDINGS.length, -1) : "absent file";
 
 // The round a task's next reviewer dispatch takes, from its ledger lines in file order. A verdict —
 // the reviewer's, or the green gate's after an accept — closes its round, so the review after it is
-// the next round, on a findings path no earlier reviewer wrote; a missing findings file closes
+// the next round, on a findings path no earlier reviewer wrote; a no-verdict line closes
 // nothing, and the same round is dispatched again. A line written before keys existed reads its
 // round from its `round <n>` outcome.
 export function nextReviewRound(entries) {
@@ -78,7 +101,7 @@ export function nextReviewRound(entries) {
     if (e.event === "review-round") {
       round = Number(e.key?.split("/")[2] ?? e.outcome.match(/^round (\d+)/)?.[1] ?? round + 1);
       open = true;
-    } else if (e.event === "review-verdict" && !e.outcome.startsWith(MISSING_FINDINGS)) open = false;
+    } else if (e.event === "review-verdict" && !isNoVerdict(e.outcome)) open = false;
   }
   return open ? round : round + 1;
 }
@@ -92,8 +115,10 @@ export function nextRetry(ledgerPath, task, event) {
   return lines.length ? Math.max(...lines.map(retryOf)) + 1 : 0;
 }
 
-export function retryCount(ledgerPath, task, outcomePrefix) {
-  return ledgerEntries(ledgerPath).filter((e) => e.task === task && e.outcome.startsWith(outcomePrefix)).length;
+// `match` is an outcome prefix, or a predicate over the outcome (isNoVerdict for the shared cap).
+export function retryCount(ledgerPath, task, match) {
+  const hit = typeof match === "function" ? match : (outcome) => outcome.startsWith(match);
+  return ledgerEntries(ledgerPath).filter((e) => e.task === task && hit(e.outcome)).length;
 }
 
 // The newest keyed line of a task for one event, with its round and retry read back out of the key.
@@ -165,17 +190,18 @@ export function workTreeRoot(cwd = process.cwd()) {
   return top.stdout.trim();
 }
 
-// Flags per the task-script contract: parseFlags' refusals and a missing required flag are usage
-// errors (exit 2), never environment errors.
+// Flags per the task-script contract: parseFlags' refusals and missing required flags are usage
+// errors (exit 2), never environment errors; every missing flag is named at once.
 export function taskFlags(argv, known, required) {
+  if (argv.includes("--help")) throw new HelpRequest([...required], Object.keys(known).filter((name) => !required.includes(name)));
   let flags;
   try {
     ({ flags } = parseFlags(argv, known));
   } catch (err) {
     throw new UsageError(err.message);
   }
-  for (const name of required)
-    if (flags[name] === undefined || String(flags[name]).trim() === "") throw new UsageError(`${name} is required`);
+  const missing = required.filter((name) => flags[name] === undefined || String(flags[name]).trim() === "");
+  if (missing.length) throw new UsageError(`${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} required`);
   return flags;
 }
 
@@ -201,15 +227,19 @@ export function checkIds({ run, task }) {
 }
 
 // The task-script CLI contract: exactly one JSON object on stdout; exit 0 for every normal outcome,
-// 2 for a usage error, 3 for an environment error (no repo, no ledger, an unwritable file).
+// 2 for a usage error, 3 for an environment error (no repo, no ledger, an unwritable file); `--help`
+// prints the usage object, exit 0.
 export function runTaskScript(name, body) {
   let result;
   try {
     result = { ok: true, appended: [], ...body() };
   } catch (err) {
-    const usage = err instanceof UsageError;
-    process.exitCode = usage ? 2 : 3;
-    result = { ok: false, action: usage ? "usage-error" : "environment-error", error: `${name}: ${err.message}`, appended: [] };
+    if (err instanceof HelpRequest) result = { ok: true, action: "usage", ...err.usage };
+    else {
+      const usage = err instanceof UsageError;
+      process.exitCode = usage ? 2 : 3;
+      result = { ok: false, action: usage ? "usage-error" : "environment-error", error: `${name}: ${err.message}`, appended: [] };
+    }
   }
   process.stdout.write(JSON.stringify({ ...result, depthBand: depthBandNow() }) + "\n");
 }

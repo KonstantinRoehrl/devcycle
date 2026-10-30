@@ -75,28 +75,29 @@ content cannot. Evidence is never profile-conditional; only `<N>` varies.
   report lines to copy; `cmd:` is its printed string, byte for byte. Without `--cmd` it runs the
   task's gate command: a convention task's parenthetical, any other task's plan-header
   `**Verification gate:**`. `--cmd` is required for `red` and for a task no plan names (`fast`,
-  `sweep`). A before/after capture whose `--cmd` is not the gate needs a `- Narrowing:` line.
-  `evidence-completeness-check.mjs <report> --task <task-id>` rejects before and after headers
-  that differ, a header that differs from `cmd:`, and a `cmd:` that differs from the gate with no
-  `- Narrowing:` line. A capture blocks until its command exits: run it in the foreground under the
+  `sweep`). A before/after capture whose `--cmd` is not the gate needs a `- Narrowing:` line. **Before and after:**
+  the two headers are identical, or — `red-green`/`green-green` only — the before is the task's gate
+  and the after is the report's `cmd:`, carrying the scope a `- Narrowing:` line declares (a sibling's
+  uncommitted red forced a narrower after). `evidence-completeness-check.mjs <report> --task <task-id>`
+  rejects any other pair, naming the half that failed, an after header that differs from `cmd:`, and a
+  `cmd:` that differs from the gate with no `- Narrowing:` line. A capture blocks until its command exits: run it in the foreground under the
   Bash tool's `timeout: 600000`, or, when it can run longer, in the background and wait for its
   completion notification. Never wait by polling an evidence file or its marker line.
-- The captured command for `-before.txt` and `-after.txt` is the repo's whole
-  verification gate, except in a concurrent wave: a brief carrying a `**Capture command:**` line
-  captures that command for both, with the `- Narrowing:` line the brief supplies.
-  `node "${CLAUDE_PLUGIN_ROOT}/scripts/evidence-completeness-check.mjs" <report>` also mechanizes the narrow-selector subset of this rule — a `cmd:` naming one test file or
+- A concurrent wave's brief carries a `**Capture command:**` line: both captures run that command,
+  with the `- Narrowing:` line the brief supplies (identical headers, which the rule above covers).
+  `node "${CLAUDE_PLUGIN_ROOT}/scripts/evidence-completeness-check.mjs" <report>` also mechanizes the narrow-selector guard — a `cmd:` naming one test file or
   carrying a test-name filter flag. The concurrent-wave case, a whole-suite red from a sibling's
   uncommitted edit, can reach an implementer's capture but not the coordinator's gate, which
   proves each commit in a scratch worktree. The check also requires an `(exit <n>)` status —
   read from the report line, not file contents — on any present `- Before:`/`- After:` line of
   any class; a `red-green`/`green-green` report additionally needs its `- After:` file to carry a
-  test-runner summary line. The normal `red-green` case is a task whose own new tests fail that
+  test-runner summary line (read with colour and cursor escapes stripped; Karma's `TOTAL:` line, or
+  its last `Executed <n> of <m>` line once complete or failed, counts). The normal `red-green` case is a task whose own new tests fail that
   whole gate, so `-before.txt` exits non-zero honestly. When a task's red is instead a subset
   inside an otherwise-green suite, the whole-gate `-before.txt` legitimately exits 0; capture the
   honest subset red as `.devcycle/evidence/<task-id>-red.txt` before any implementation code is
   written.
-- A capture legitimately narrowed away from the whole gate — e.g. the concurrent-wave case
-  above — declares that narrowing with a `- Narrowing: <selector/scope> — <reason>` report line. A valid declaration
+- A narrowing is declared as `- Narrowing: <selector/scope> — <reason>`. A valid declaration
   clears `evidence-completeness-check.mjs`'s narrow-selector guard (its reason is echoed on
   stdout); the reviewer then judges whether the reason is legitimate (§ Reviewer verdicts). A
   declaration with no `— <reason>` (the em-dash before the reason) is a hard error —
@@ -180,7 +181,9 @@ report. Reject when:
 A reviewer returns its verdict in this shape. A `needs-changes` verdict carries a mandatory
 `Culprit: <slug>` line directly under `Verdict:` — a `references/culprits.json` slug or
 `novel:<kebab-slug>`, the two shapes `scripts/run-record.mjs`'s `validateCulprit` admits — and an
-`accept` verdict carries none:
+`accept` verdict carries none. Either line may carry a heading or list marker, and `approve`,
+`approved` and `accepted` read as `accept`; a `Verdict` heading may carry its word alone on the
+next line.
 
 ```markdown
 Verdict: accept | needs-changes
