@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.28.3 — 2026-10-30
+
+- fix: stop the task checkers bouncing valid work, route on-device FAILED items and fix four learn-tooling bugs (#384, #383, #381, #382, #390, #391, #275, #245, #246, #294, #277)
+
 A driven run no longer waits on a question it has no one to ask, and the task checkers stop rejecting work that was valid.
 
 **Unattended start and on-device routing (#384, #383, #381).** `executionMode=unattended` now starts the driver on its own, with no in-session question. A FAILED on-device item routes through a decision (a fix round or a waiver) before the cycle can finish: the finish guard fails closed on unparsed FAILED lines, keys on the verdict position, reads CRLF reports and scopes ledger decisions to the cycle. A delegated walkthrough counts as auto-ok for the on-device stage, and an unverified re-walk has a defined verdict.
