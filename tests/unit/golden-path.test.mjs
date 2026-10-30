@@ -2358,6 +2358,19 @@ test("the stop guard is registered on PreToolUse over every tool", () => {
   assert.equal(entry.hooks[0].timeout, 5);
 });
 
+test("the process sensor is registered wherever a background task's id or end appears", () => {
+  const PROCESS_SENSOR_SRC = "hooks/process-sensor.mjs";
+  const hooks = JSON.parse(read("hooks/hooks.json")).hooks;
+  const entryOf = (event) => (hooks?.[event] ?? []).find((e) =>
+    (e.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(PROCESS_SENSOR_SRC))
+  );
+  for (const tool of ["Agent", "Bash", "Monitor", "TaskStop"])
+    assert.ok(matches(entryOf("PostToolUse")?.matcher ?? "^$", tool), `${PROCESS_SENSOR_SRC} must see ${tool} on PostToolUse`);
+  // The loader and scripts/validate.mjs both pass an unknown event name, so this spelling is the check.
+  for (const event of ["Stop", "SubagentStop"])
+    assert.equal(entryOf(event)?.matcher, "*", `${PROCESS_SENSOR_SRC} must be registered on ${event}`);
+});
+
 test("DESIGN.md §10 no longer rejects the hooks that ship", () => {
   assert.doesNotMatch(
     read(DESIGN_DOC),
