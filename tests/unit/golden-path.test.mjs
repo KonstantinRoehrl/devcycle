@@ -1915,6 +1915,7 @@ test("C3 leg 2: every module-only script has a non-test importer", () => {
   const consumers = [
     ...scriptFiles().map((f) => `scripts/${f}`),
     ...readdirSync(join(root, "workflows")).filter((f) => f.endsWith(".js")).map((f) => `workflows/${f}`),
+    ...readdirSync(join(root, "hooks")).filter((f) => f.endsWith(".mjs")).map((f) => `hooks/${f}`),
   ];
   const orphans = modules.filter((mod) =>
     !consumers.some((c) => c !== `scripts/${mod}` && read(c).includes(`/${mod}"`)),
@@ -2345,6 +2346,16 @@ test("the git guard is registered on PreToolUse over Bash", () => {
   );
   assert.ok(entry, `hooks/hooks.json must register ${GIT_GUARD_SRC} on PreToolUse`);
   assert.equal(entry.matcher, "Bash", `${GIT_GUARD_SRC} must match Bash, got "${entry.matcher}"`);
+});
+
+test("the stop guard is registered on PreToolUse over every tool", () => {
+  const STOP_GUARD_SRC = "hooks/stop-guard.mjs";
+  const entry = (JSON.parse(read("hooks/hooks.json")).hooks?.PreToolUse ?? []).find((e) =>
+    (e.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(STOP_GUARD_SRC))
+  );
+  assert.ok(entry, `hooks/hooks.json must register ${STOP_GUARD_SRC} on PreToolUse`);
+  assert.equal(entry.matcher, "*", `${STOP_GUARD_SRC} must match every tool, got "${entry.matcher}"`);
+  assert.equal(entry.hooks[0].timeout, 5);
 });
 
 test("DESIGN.md §10 no longer rejects the hooks that ship", () => {
