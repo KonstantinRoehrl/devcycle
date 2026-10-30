@@ -5,6 +5,30 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-30 — Command ceiling raised 9→10 for /devcycle:stop
+
+**Decision:** `COMMAND_CEILING` in `scripts/validate.mjs` is raised from **9** to **10** to admit
+`commands/stop.md`, the deliberate tenth command. `stop` halts a cycle at any stage and records its
+position, through `scripts/stop-cycle.mjs`, `hooks/stop-guard.mjs` and `hooks/process-sensor.mjs`. It
+is `side-effectful` and carries `disable-model-invocation`, so only the user starts it. It acts at once
+once the cycle is chosen: a confirmation would delay the one thing it is for. The raise, the command
+file and this entry land in the same change.
+
+**Why:** the ceiling is a regression guard so an added verb is a deliberate surface decision. `stop`
+earns its own verb because it cannot be an argument on `continue` or `cycle`: those read and resume a
+cycle, where this ends one that is running, often from another terminal, and the call site names that
+intent. The only stop before it was the driver-only `drive-execution.mjs --stop`, which leaves an
+interactive cycle at `handoff: pending` with no position.
+
+**Supersedes:** the ceiling of **9** recorded when `reconcile` landed as the ninth command.
+
+The growth below is the new command file and its routing row:
+
+```text
+budget: surface-budget.json surfaceTotal 6699
+budget: context-budget.json commands/stop.md 4170
+```
+
 ## 2026-10-30 — A stopped branch review or on-device walk keeps what finished
 
 **Decision:** The review panel takes `resultDir` and writes each lens's result and each refutation

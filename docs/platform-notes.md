@@ -508,3 +508,38 @@ text, counts the result's `permission_denials` as guard denials, and learns that
 needs the user only from `.devcycle/drive-stop.json` — never from a missing tool or from prose.
 While a driver's lock is live the guard also denies branch-moving git on the main thread
 (`docs/decisions/README.md`, 2026-10-08).
+
+## (l) What a stop can reach: `Stop`, `background_tasks`, `TaskStop` and a deny
+
+**What was tried.** Headless `claude -p` probes on 2026-10-30 against Claude Code 2.1.314, each with a
+capture hook on every event and a plugin holding a deny-all `PreToolUse` guard, under
+`--allowedTools` and with no bypass flag.
+
+**Exact result.**
+
+- A plugin `Stop` hook fires, and the matcher `"*"` matched `ToolSearch`, `TaskStop`, `Agent`, `Monitor`,
+  `Bash` and an MCP tool. `AskUserQuestion` is not in the `-p` tool list, so that match is unverified.
+  `claude plugin validate` also passed a hook event renamed to a name that does not exist, so only a
+  real firing proves an event name.
+- `Stop` and `SubagentStop` carry `background_tasks`, listing shells and subagents with `id`, `type`
+  and `status` and no pid. A Monitor is never listed: `Stop` reported `[]` with one running. `Stop`
+  fires once per wake-up under `-p`, and `SubagentStop`'s array lists the stopping subagent as running.
+- Ids come from `PostToolUse`: `tool_response.agentId` for `Agent` (with `status: "async_launched"`
+  for a background launch), `backgroundTaskId` for `Bash`, `taskId` for `Monitor`. `TaskStop` with
+  `{"task_id": "<id>"}` stopped a background subagent and a background shell; on a Monitor it was not run.
+- `SubagentStop` does not fire for a subagent ended by `TaskStop`.
+- A subagent's hook input carries the parent's `session_id` plus `agent_id` and `agent_type`, and that
+  id equals `$CLAUDE_CODE_SESSION_ID` in both the main thread and the subagent. This settles what
+  § (i) left unverified. `--resume` keeps the id; `/clear` could not be tried headless.
+- A denied subagent ended within one model turn, and the parent saw a normal `completed` carrying its
+  prose. A deny gates only the next call: one inside a long tool call runs until that call returns.
+- `TaskStop` is deferred, yet a direct call with no `ToolSearch` worked. A deny-all guard blocks
+  that `ToolSearch` unless it is exempted; whether an interactive session with many MCP tools behaves
+  the same is unverified.
+- The hooks module's `$.agent` has no stop. `$.turn.abort` and `$.tool.call` exist and were not run.
+
+**Consequence.** `hooks/stop-guard.mjs` exempts `TaskStop`, the exact `select:TaskStop` search and a plain
+`scripts/stop-cycle.mjs` run, and `commands/stop.md` states the literal `TaskStop` input.
+`hooks/process-sensor.mjs` takes ids from `PostToolUse` and treats `Stop`'s array as complete for
+shells and subagents only. `scripts/stop-cycle.mjs` stamps a `TaskStop`-ed subagent's dispatch itself,
+since no `SubagentStop` will, and reports a Monitor's stop as unconfirmed.

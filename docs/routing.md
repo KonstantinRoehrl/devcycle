@@ -33,6 +33,7 @@ any consequence.
 | --- | --- | --- | --- |
 | build a feature, fix a bug, refactor | `cycle` | confirm-first | yes |
 | resume an interrupted cycle | `continue` | resume | no |
+| stop a cycle now, at any stage, so it can resume later | `stop` | side-effectful | no |
 | review a branch, a repo, or a file set | `review` | read-only | yes |
 | assess a repo's longitudinal health over time | `maintain` | read-only | yes |
 | check a branch's behaviour on the device | `verify` | read-only | yes |

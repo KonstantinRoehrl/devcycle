@@ -1426,6 +1426,8 @@ const gatingSections = (text) =>
 // — an entry naming a section that no longer exists, or no longer matches the vocabulary, fails
 // rather than sitting stale.
 const DESCRIBES_NOT_GATES = [
+  // Its one question picks which cycle to stop: no decision of the run, and nothing to record.
+  "commands/stop.md § # /devcycle:stop",
   // Describes what the brainstorm stage does with AskUserQuestion; cycle.md's own gate is in
   // `## Triage the input`, which cites correctly.
   "commands/cycle.md § ## Stage walk",
@@ -2463,7 +2465,7 @@ test("C6: plugin.json, the configuration hub, references/config.md, DESIGN §7 a
   assert.deepEqual(resolver, config, "scripts/resolve-knobs.mjs prints knobs: in references/config.md's roster order");
 });
 
-test("every entry command except doctor resolves knobs through the identical full-roster invocation", () => {
+test("every entry command except doctor and stop resolves knobs through the identical full-roster invocation", () => {
   const INVOCATION =
     "```\n" +
     'node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \\\n' +
@@ -2471,8 +2473,8 @@ test("every entry command except doctor resolves knobs through the identical ful
     "\n```";
   for (const f of readdirSync(join(root, "commands")).filter((n) => n.endsWith(".md"))) {
     const text = read(`commands/${f}`);
-    if (f === "doctor.md") {
-      assert.ok(!text.includes("user_config."), "commands/doctor.md consumes no knob and must carry no placeholder");
+    if (f === "doctor.md" || f === "stop.md") {
+      assert.ok(!text.includes("user_config."), `commands/${f} consumes no knob and must carry no placeholder`);
       continue;
     }
     assert.ok(text.includes(`\n\n${INVOCATION}\n\n`), `commands/${f} must carry the resolver invocation verbatim, as its own paragraph (references/config.md § Knob channel)`);
@@ -2657,4 +2659,22 @@ test("the handoff row: cycle and continue mark the stage pending, continue asks 
   assert.ok(resume.includes("**Resume anyway** · **Stop**"), "resume.md no longer holds the not-ready question");
   assert.ok(resume.includes("Four optional rows sit outside the template"), "resume.md's optional-row count is stale");
   assert.match(read("references/delegation.md"), /a stage never pauses mid-flight/, "the stage budget no longer says the boundary waits for in-flight work");
+});
+
+// --- /devcycle:stop: what its text must keep, because a stop that hesitates or cannot load TaskStop fails ---
+
+test("commands/stop.md acts at once, states the literal TaskStop input, and runs only stop-cycle.mjs", () => {
+  assert.ok(existsSync(join(root, "commands/stop.md")), "commands/stop.md must exist");
+  const text = read("commands/stop.md");
+  assert.match(text, /^disable-model-invocation: true$/m);
+  assert.match(text, /act\s+immediately/);
+  assert.match(text, /Ask nothing and confirm nothing/);
+  assert.ok(text.includes('`{"task_id": "<id>"}`'), "the literal TaskStop input is what survives a denied ToolSearch");
+  assert.ok(text.includes("`select:TaskStop`"), "the one search the guard allows");
+  const commands = [...text.matchAll(/^\s*node .*$/gm)].map((m) => m[0].trim());
+  assert.deepEqual(commands, [
+    'node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-cycle.mjs" list',
+    'node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-cycle.mjs" request --state "<state>"',
+    'node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-cycle.mjs" finalize --state "<state>"',
+  ]);
 });

@@ -61,7 +61,7 @@ from its path and enforceable per-directory rather than by convention:
 
 | layer | directory | holds | rules |
 | --- | --- | --- | --- |
-| L0 | `commands/` | the nine entry points | the only surface listed to a user; names are verbs; per-file line budget owned by tests/fixtures/surface-budget.json |
+| L0 | `commands/` | the ten entry points | the only surface listed to a user; names are verbs; per-file line budget owned by tests/fixtures/surface-budget.json |
 | L1 | `playbooks/` | orchestration prose | loaded by path, in no roster, no frontmatter; names are gerunds; per-file line budget owned by tests/fixtures/surface-budget.json |
 | L2 | `agents/` | typed workers | separately dispatched contexts; names are role nouns; no `model:` in frontmatter |
 | L3 | `references/` | shared concepts | exactly one owner, at least one consumer; loaded on demand (§15.1) |
@@ -341,8 +341,9 @@ gated by `userConfig.crossModelReview`.
   recorded exception, justified by `brew doctor` / `flutter doctor` / `npm doctor` — a noun
   every developer already reads as "diagnose this".
 - Commands (the whole user-facing surface, seven from 2026-08-06, eight since 2026-08-22,
-  nine since 2026-08-26):
-  `/devcycle:cycle`, `/devcycle:continue`, `/devcycle:review`, `/devcycle:verify`,
+  nine since 2026-08-26, ten since 2026-10-30):
+  `/devcycle:cycle`, `/devcycle:continue`, `/devcycle:stop` (halts a cycle at any stage and records
+  where it was), `/devcycle:review`, `/devcycle:verify`,
   `/devcycle:learn`, `/devcycle:doctor`, `/devcycle:maintain` (read-only longitudinal
   repo-health assessment; starts no cycle), `/devcycle:onboard`, `/devcycle:reconcile`
   (triage a PR's review comments into fixes and consented replies; re-enters the branch's
@@ -355,11 +356,11 @@ gated by `userConfig.crossModelReview`.
   `devcycle:spec-reviewer`. The plugin id is not decoration:
   the harness passes `<plugin>:<name>` as a subagent's `agent_type`, which is the spelling the
   browser guard's allowlist must carry (`docs/platform-notes.md` § (e)).
-- Hooks: four settings hooks and one hooks module — two guards, `block-main-thread-browser` and `block-destructive-git`, named for
+- Hooks: six settings hooks and one hooks module — three guards, `block-main-thread-browser`, `block-destructive-git` and `stop-guard`, named for
   what they deny rather than whom they guard (the git guard was `block-reviewer-git-write` until it
-  grew past reviewers, #235); and two sensors, `workload-sensor` and `dispatch-sensor`, named for
+  grew past reviewers, #235); and three sensors, `workload-sensor`, `dispatch-sensor` and `process-sensor`, named for
   what they watch rather than for the record they write. They are the only surface components not
-  loaded by a command: each fires on a matched tool call, or when a subagent stops, instead
+  loaded by a command: each fires on a matched tool call, or when a subagent or a turn stops, instead
   (`docs/README.md` § Hooks). The hooks module, `devcycle-mod`, is named for the plugin it serves
   rather than one behaviour, since it observes, bounds and displays; its Node side is `mod-sink`.
 
