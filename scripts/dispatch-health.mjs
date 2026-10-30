@@ -166,7 +166,8 @@ function outputPresent(root, rec) {
 
 // This session's in-flight task dispatches: a task whose last ledger line is its dispatch, keyed, with
 // a record this session wrote. An earlier session's are orphans of a cut-off, which the resume path
-// redispatches uncapped (references/resume.md § Resuming a wave's per-task position).
+// redispatches uncapped (references/resume.md § Resuming a wave's per-task position). A record stamped
+// `stopped` was ended by /devcycle:stop: neither in flight nor dead, so it spends no cap.
 function inFlightRecords(root, ledgerPath, sessionId) {
   const last = new Map();
   const text = existsSync(ledgerPath) ? readFileSync(ledgerPath, "utf8") : "";
@@ -177,7 +178,7 @@ function inFlightRecords(root, ledgerPath, sessionId) {
     const [, , round, retry] = e.key.split("/").map(Number);
     const recordPath = `.devcycle/dispatch/${e.task}-${role}-${round}-${retry}.json`;
     const record = readJson(join(root, recordPath));
-    return record?.sessionId === sessionId ? [{ task: e.task, role, round, retry, recordPath, record }] : [];
+    return record?.sessionId === sessionId && !record.stopped ? [{ task: e.task, role, round, retry, recordPath, record }] : [];
   });
 }
 
@@ -298,32 +299,67 @@ export function formatDispatch(d) {
   return `${parts.join(" · ")} → ${d.action}${d.recorded ? " (recorded)" : ""}`;
 }
 
-// The SubagentStop sensor's merge (hooks/dispatch-sensor.mjs): the stopped agent's record, found by the
-// brief its prompt names and this session, the latest one started at or before the agent.
-export function markEnded({ root, sessionId, transcriptPath, agentId = null, now = Date.now() }) {
+const dispatchFiles = (dir) => {
+  try {
+    return readdirSync(dir).filter((f) => f.endsWith(".json"));
+  } catch {
+    return [];
+  }
+};
+
+// The record an agent's transcript dispatched: found by the brief its prompt names and this session,
+// the latest one started at or before the agent.
+function recordOfTranscript(root, sessionId, transcriptPath) {
   const first = firstMessage(transcriptPath);
   const match = first && textOf(first.message?.content).match(BRIEF_IN_PROMPT);
-  if (!match) return false;
+  if (!match) return null;
   const [, task, role, roundText = "0"] = match;
   const round = Number(roundText);
   const firstMs = Date.parse(first.timestamp);
   const dir = join(root, ".devcycle/dispatch");
-  let files;
-  try {
-    files = readdirSync(dir);
-  } catch {
-    return false;
-  }
-  const hit = files
-    .filter((f) => f.startsWith(`${task}-${role}-${round}-`) && f.endsWith(".json"))
+  const hit = dispatchFiles(dir)
+    .filter((f) => f.startsWith(`${task}-${role}-${round}-`))
     .map((f) => ({ f, record: readJson(join(dir, f)) }))
     .filter((x) => x.record?.sessionId === sessionId && Date.parse(x.record.startedAt) <= firstMs)
     .sort((a, b) => Date.parse(b.record.startedAt) - Date.parse(a.record.startedAt))[0];
+  return hit ? { path: join(dir, hit.f), rec: { task, role, round, record: hit.record } } : null;
+}
+
+const stampEnd = (root, { path, rec }, agentId, now, extra = {}) => atomicWrite(path, JSON.stringify({
+  ...rec.record, agentId: rec.record.agentId ?? agentId, endedAt: new Date(now).toISOString(), outputPresent: outputPresent(root, rec), ...extra,
+}) + "\n");
+
+// The SubagentStop sensor's merge (hooks/dispatch-sensor.mjs).
+export function markEnded({ root, sessionId, transcriptPath, agentId = null, now = Date.now() }) {
+  const hit = recordOfTranscript(root, sessionId, transcriptPath);
   if (!hit) return false;
-  const rec = { task, role, round, record: hit.record };
-  atomicWrite(join(dir, hit.f), JSON.stringify({
-    ...hit.record, agentId: hit.record.agentId ?? agentId, endedAt: new Date(now).toISOString(), outputPresent: outputPresent(root, rec),
-  }) + "\n");
+  stampEnd(root, hit, agentId, now);
+  return true;
+}
+
+const DISPATCH_FILE = /^(.+)-(implementer|reviewer)-(\d+)-\d+\.json$/;
+
+// A record already bound to the agent, for one the coordinator's health check has read.
+function recordOfAgent(root, sessionId, agentId) {
+  const dir = join(root, ".devcycle/dispatch");
+  for (const f of dispatchFiles(dir)) {
+    const name = f.match(DISPATCH_FILE);
+    const record = name && readJson(join(dir, f));
+    if (record?.sessionId === sessionId && record.agentId === agentId)
+      return { path: join(dir, f), rec: { task: name[1], role: name[2], round: Number(name[3]), record } };
+  }
+  return null;
+}
+
+// An end the stop caused. A subagent ended by TaskStop gets no SubagentStop, so /devcycle:stop's
+// finalize calls this with only its id and the record binds through the session's transcripts; the
+// sensor passes the transcript the hook input names.
+export function markStopped({ root, sessionId, agentId, transcriptPath = null, env = process.env, now = Date.now() }) {
+  const slugDir = transcriptPath ? null : sessionSlugDir(sessionId, env);
+  const transcript = transcriptPath ?? (slugDir && join(slugDir, sessionId, "subagents", `agent-${agentId}.jsonl`));
+  const hit = recordOfAgent(root, sessionId, agentId) ?? (transcript && recordOfTranscript(root, sessionId, transcript));
+  if (!hit) return false;
+  stampEnd(root, hit, agentId, now, { stopped: new Date(now).toISOString() });
   return true;
 }
 

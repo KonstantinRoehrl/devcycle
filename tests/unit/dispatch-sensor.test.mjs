@@ -163,6 +163,30 @@ test("a stopped dispatch's record is marked ended with whether its owed output e
   assert.equal(rows(fx.repo, fx.runsDir).filter((r) => r.kind === "agent-depth").length, 1, "the depth row still lands");
 });
 
+function endedDispatch(fx) {
+  writeInto(fx.repo, ".devcycle/dispatch/5-implementer-0-0.json", JSON.stringify({ startedAt: "2026-10-07T07:18:00Z", sessionId: SESSION }) + "\n");
+  writeFileSync(fx.transcript, [
+    { type: "user", timestamp: "2026-10-07T07:18:05.680Z", message: { content: "Your brief is at .devcycle/briefs/5-implementer.md" } },
+    { type: "assistant", timestamp: "2026-10-07T07:18:12.261Z", message: { model: "claude-haiku-4-5-20251001", usage: usage(100, 0, 0, 5), content: [{ type: "text", text: "done" }], stop_reason: "end_turn" } },
+  ].map((r) => JSON.stringify(r)).join("\n") + "\n");
+  assert.equal(callHook(fx).status, 0);
+  return JSON.parse(readFileSync(join(fx.repo, ".devcycle/dispatch/5-implementer-0-0.json"), "utf8"));
+}
+
+test("under a live stop request or a stopped row the record is stamped stopped; otherwise it is plainly ended", () => {
+  const underRequest = fixture({ stage: "execution" });
+  writeInto(underRequest.repo, ".devcycle/stop-request", JSON.stringify({ requestedAt: new Date().toISOString(), sessions: [] }));
+  assert.match(endedDispatch(underRequest).stopped ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  const underRow = fixture({ stage: "execution" });
+  writeInto(underRow.repo, ".devcycle/state.md", `# devcycle state\n- stage: execution\n- run: ${RUN}\n- stopped: 2026-10-07T07:19:00Z .devcycle/stop.json\n`);
+  assert.match(endedDispatch(underRow).stopped ?? "", /^\d{4}-\d{2}-\d{2}T/);
+  const expired = fixture({ stage: "execution" });
+  writeInto(expired.repo, ".devcycle/stop-request", JSON.stringify({ requestedAt: "2026-01-01T00:00:00Z", sessions: [] }));
+  const plain = endedDispatch(expired);
+  assert.equal(plain.stopped, undefined);
+  assert.match(plain.endedAt, /^\d{4}-\d{2}-\d{2}T/);
+});
+
 test("a broken dispatch record never stops the depth row", () => {
   const fx = fixture({ stage: "execution" });
   writeInto(fx.repo, ".devcycle/dispatch/5-implementer-0-0.json", "{not json");

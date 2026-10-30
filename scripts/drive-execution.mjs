@@ -22,6 +22,7 @@ import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, readDriveLockHolder, 
 import { buildProgress, removeProgress, writeProgress } from "./drive-progress.mjs";
 import { holderLiveness, LOG_REL, lockNamesState, markResultHandled, noProgressEndsAfter, RESULT_REL, STOP_REQUEST_REL, writeCrashedResult, writeDriveResult } from "./drive-result.mjs";
 import { readPluginList, surfaceArgs } from "./drive-surface.mjs";
+import { stopWindowOpen } from "./stop-files.mjs";
 import { follow, statusReport, WATCH_LEVELS, waitForEnd } from "./drive-watch.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
 import { isMain } from "./is-main.mjs";
@@ -815,8 +816,8 @@ function makeLog(root) {
 // One heartbeat's look at the live session's dispatches (scripts/dispatch-health.mjs): the band's
 // per-task health and, once a dispatch has been dead past the grace with no dispatch running and no
 // main-thread tool call pending, the session stopped so a fresh one redispatches. A dispatch that ended
-// without its output is recorded first, spending its cap; a quiet one dies with the session and is
-// redispatched uncapped by the resume path.
+// without its output is recorded first, spending its cap, unless /devcycle:stop ended it; a quiet one
+// dies with the session and is redispatched uncapped by the resume path.
 function watchdogBeat(ctx, log) {
   const live = ctx.live;
   if (!live?.s.sessionId || live.s.deadDispatch) return null;
@@ -829,7 +830,8 @@ function watchdogBeat(ctx, log) {
   }
   live.deadSince ??= clockNow();
   if (clockNow() - live.deadSince < WATCHDOG_GRACE_MS) return health;
-  for (const d of dead.filter((x) => x.state === "ended-without-output"))
+  const stopping = stopWindowOpen(dirname(ctx.statePath), readFileSync(ctx.statePath, "utf8"), clockNow());
+  for (const d of stopping ? [] : dead.filter((x) => x.state === "ended-without-output"))
     recordDeath({ ledgerPath: join(ctx.root, LEDGER_REL), task: d.task, role: d.role, round: d.round, recordPath: d.recordPath });
   live.s.deadDispatch = dead.map((d) => d.task);
   log(`watchdog: session ${live.n} — task ${live.s.deadDispatch.join(", ")} ended without its output or went quiet, and nothing else is live; stopping the session for a fresh one`);
