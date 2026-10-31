@@ -63,25 +63,48 @@ export function listCandidates({ state = null, cwd = process.cwd() } = {}) {
   };
 }
 
-function joinedSessions(root, run) {
+const runRows = (root, run) => {
   if (!run) return [];
   const text = orElse(() => readFileSync(recordPath(gitToplevel(root), run), "utf8"), "");
-  const rows = text.split("\n").map((line) => orElse(() => JSON.parse(line), null));
-  return [...new Set(rows.filter((row) => row?.kind === "session" && row.sessionHash).map((row) => row.sessionHash))];
+  return text.split("\n").map((line) => orElse(() => JSON.parse(line), null)).filter(Boolean);
+};
+const sessionHashes = (rows, kind) => [...new Set(rows.filter((row) => row.kind === kind && row.sessionHash).map((row) => row.sessionHash))];
+const joinedSessions = (root, run) => sessionHashes(runRows(root, run), "session");
+
+const planOf = (stateText) => {
+  const plan = field(stateText, "plan")?.split(/\s+/)[0];
+  return !plan || ["none", "<tbd>"].includes(plan) ? null : plan;
+};
+
+// This cycle's own open dispatch records: not those a ledger of another plan slot holds, and not those
+// started before the run did.
+function ownDispatches(root, stateText, run) {
+  const plan = planOf(stateText);
+  if (plan && ledgerSlotState({ root, plan, run }) === "stale") return [];
+  const runStart = Date.parse(runRows(root, run).find((row) => row.kind === "run")?.startedAt);
+  return orElse(() => cycleDispatches(root), []).filter(({ record }) => !(Date.parse(record.startedAt) < runStart));
 }
+
+const driverEnded = (root, driver) => driver?.exit === 0 && !holderRunning(root, readDriveLockHolder(root));
 
 // The foreground subagents the cycle's dispatch records name as running. The registry is fed only by async
 // launches and Stop's task list, so a normal implementer or reviewer dispatch is in it only when its id
-// matches an entry, and that entry reports it.
-function foregroundSubagents(devcycleDir, root) {
+// matches an entry, and that entry reports it. `ended` holds the ones a stopped driver took with it:
+// its `claude -p` process group is gone, so a record of a session the run record's drive rows name is not
+// running work. A record not tied to such a session stays listed.
+function foregroundSubagents(devcycleDir, root, stateText, run, driver) {
   const registered = new Set(readProcesses(devcycleDir).map((p) => p.id));
-  return orElse(() => cycleDispatches(root), [])
-    .filter(({ record }) => !record.endedAt && !registered.has(record.agentId))
-    .map(({ task, role, record }) => ({
+  const driven = new Set(driverEnded(root, driver) ? sessionHashes(runRows(root, run), "drive") : []);
+  const open = ownDispatches(root, stateText, run).filter(({ record }) => !record.endedAt && !registered.has(record.agentId));
+  const isDriven = ({ record }) => record.sessionId && driven.has(hashSession(record.sessionId));
+  return {
+    ended: open.filter(isDriven),
+    listed: open.filter((dispatch) => !isDriven(dispatch)).map(({ task, role, record }) => ({
       id: `task ${task} ${role}${record.agentId ? ` (agent ${record.agentId})` : ""}`,
       kind: "subagent",
       session: record.sessionId ? hashSession(record.sessionId) : null,
-    }));
+    })),
+  };
 }
 
 async function stopTheDriver(statePath, root, { kill, sleep, now }) {
@@ -161,7 +184,10 @@ export async function requestStop({ state, env = process.env, kill, sleep = defa
   const onDevice = await stopTheApp(root);
   const actions = mergedActions(live ? earlier.actions : null, driver, onDevice);
   atomicWrite(paths.request, `${JSON.stringify({ ...request, actions })}\n`);
-  const open = [...(run ? openProcesses(devcycleDir, { run, now: now() }) : []), ...foregroundSubagents(devcycleDir, root)];
+  const open = [
+    ...(run ? openProcesses(devcycleDir, { run, now: now() }) : []),
+    ...foregroundSubagents(devcycleDir, root, readFileSync(statePath, "utf8"), run, actions.driver).listed,
+  ];
   return {
     requested: true,
     ...actions,
@@ -211,13 +237,18 @@ const latestEvents = (ledgerText) => {
 };
 const latestLedgerEvents = (devcycleDir) => latestEvents(readFileSync(join(devcycleDir, "ledger.md"), "utf8"));
 
+// references/handoff.md § Never name the clear while work is in flight owns this rule: a stop's report
+// names /devcycle:continue only once no subagent or background task is left.
+const RUNNING_KINDS = new Set(["subagent", "shell", "monitor", "workflow"]);
+const resumeVerdict = (left) => (left.some(({ kind }) => RUNNING_KINDS.has(kind)) ? "hold" : "name");
+
 const NEXT_LISTED = 5;
 
 // Done and next in the plan's own terms: only its numbered tasks count, and only from a ledger of the
 // state's current plan slot, so the branch and drive pseudo-tasks and a previous cycle's lines never do.
 function executionSummary(root, devcycleDir, stateText, run) {
-  const plan = field(stateText, "plan")?.split(/\s+/)[0];
-  if (!plan || ["none", "<tbd>"].includes(plan)) return null;
+  const plan = planOf(stateText);
+  if (!plan) return null;
   const ledgerPath = join(devcycleDir, "ledger.md");
   const current = ledgerSlotState({ root, plan, run }) !== "stale" && existsSync(ledgerPath);
   const latest = latestEvents(current ? readFileSync(ledgerPath, "utf8") : "");
@@ -280,8 +311,8 @@ export async function finalizeStop({ state, env = process.env, sleep = defaultSl
   const stored = readStopRecord(devcycleDir);
   if (!request)
     return stored
-      ? { record: stored, path: RECORD_REL, stopped: stored.stopped, left: stored.left }
-      : { record: null, path: null, stopped: [], left: [], reason: "no stop was requested for this cycle" };
+      ? { record: stored, path: RECORD_REL, stopped: stored.stopped, left: stored.left, resume: resumeVerdict(stored.left) }
+      : { record: null, path: null, stopped: [], left: [], resume: resumeVerdict([]), reason: "no stop was requested for this cycle" };
   await waitForQuiet(devcycleDir, request.requestedAt, { sleep, now });
 
   const caller = callerHash(env);
@@ -300,7 +331,12 @@ export async function finalizeStop({ state, env = process.env, sleep = defaultSl
       mark({ root, sessionId: env.CLAUDE_CODE_SESSION_ID, agentId: id, now: now() });
 
   const { driver = null, onDevice = null } = request.actions ?? {};
-  const stage = field(readFileSync(statePath, "utf8"), "stage")?.split(/\s+/)[0] ?? null;
+  const stateText = readFileSync(statePath, "utf8");
+  const stage = field(stateText, "stage")?.split(/\s+/)[0] ?? null;
+  // The ending of a dispatch the driver's own stop caused: no SubagentStop will come, so it is stamped here.
+  const subagents = foregroundSubagents(devcycleDir, root, stateText, run, driver);
+  for (const { record } of subagents.ended)
+    if (record.agentId) mark({ root, sessionId: record.sessionId, agentId: record.agentId, now: now() });
   const stopped = uniqueBy([
     ...(prior?.stopped ?? []),
     ...(driver?.exit === 0 ? [{ id: "driver", kind: "driver", how: driver.detail }] : []),
@@ -315,11 +351,10 @@ export async function finalizeStop({ state, env = process.env, sleep = defaultSl
       reason: reason === "mismatch" ? "it is not the process the launch started, so it was left alone" : "could not confirm it is the process the launch started, so it was left alone",
     })),
     ...(onDevice?.error ? [{ id: "on-device app", kind: "app", reason: onDevice.error }] : []),
-    ...[...(run ? openProcesses(devcycleDir, { run, now: now() }) : []), ...foregroundSubagents(devcycleDir, root)]
+    ...[...(run ? openProcesses(devcycleDir, { run, now: now() }) : []), ...subagents.listed]
       .map((p) => ({ id: p.id, kind: p.kind, reason: leftReason(p, caller) })),
     ...(stage === "on-device" ? [{ id: "browser tabs", kind: "tabs", reason: "tabs the on-device driver opened may remain, and devcycle keeps no record of them: close them yourself" }] : []),
   ]);
-  const stateText = readFileSync(statePath, "utf8");
   const ledger = stage === "execution" ? orElse(() => latestLedgerEvents(devcycleDir), {}) : {};
   const record = {
     stage,
@@ -338,7 +373,7 @@ export async function finalizeStop({ state, env = process.env, sleep = defaultSl
   markHandoff({ statePath, state: "ready", action: "continue", env });
   // Last, so the guard stays live until the record exists.
   rmSync(paths.request, { force: true });
-  return { record, path: RECORD_REL, stopped, left };
+  return { record, path: RECORD_REL, stopped, left, resume: resumeVerdict(left) };
 }
 
 export function resumeStopped({ state }) {

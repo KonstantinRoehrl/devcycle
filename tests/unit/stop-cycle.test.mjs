@@ -131,6 +131,111 @@ test("finalize reports an in-flight foreground subagent in left by task, role an
   assert.deepEqual(record.left, left);
 });
 
+const driveRow = (root, ...sessions) => {
+  const path = recordPath(gitToplevel(root), RUN);
+  mkdirSync(join(path, ".."), { recursive: true });
+  for (const id of sessions) appendFileSync(path, `${JSON.stringify({ kind: "drive", sessionHash: hashSession(id) })}\n`);
+};
+const DRIVEN = "session-driven";
+// A kill that ends the driver the way a real one does: its lock goes.
+const killDriver = (root) => () => execFileSync("rm", [join(root, ".devcycle/drive.lock")]);
+
+test("a stop that ended the driver stamps the driven session's open dispatches stopped instead of listing them, and keeps another session's listed", async () => {
+  const { root, state, dir } = cycle({ stage: "execution" });
+  joinRun(root, ME, OTHER);
+  driveRow(root, DRIVEN);
+  writeLock(root, { pid: process.pid, startTime: processStartTime(process.pid) });
+  dispatched(dir, "3", { session: DRIVEN, agentId: "adriven" });
+  dispatched(dir, "4", { agentId: "afg" });
+  const requested = await requestStop({ state, env: ENV, kill: killDriver(root), ...fakeTime() });
+  assert.equal(requested.driver.exit, 0);
+  assert.deepEqual(requested.otherSessions.map(({ id }) => id), ["task 4 implementer (agent afg)"]);
+
+  const marked = [];
+  const { left } = await finalizeStop({ state, env: ENV, mark: (args) => marked.push(args), ...fakeTime() });
+  assert.deepEqual(left.map(({ id }) => id), ["task 4 implementer (agent afg)"]);
+  assert.deepEqual(marked.map(({ agentId, sessionId }) => [agentId, sessionId]), [["adriven", DRIVEN]]);
+});
+
+test("a driven session's dispatch stays listed when no driver was stopped, or the driver's drive row does not name its session", async () => {
+  const { root, state, dir } = cycle({ stage: "execution" });
+  joinRun(root, ME);
+  driveRow(root, DRIVEN);
+  dispatched(dir, "3", { session: DRIVEN, agentId: "adriven" });
+  await requestStop({ state, env: ENV, ...fakeTime() });
+  const noDriver = await finalizeStop({ state, env: ENV, mark: () => assert.fail("no driver was stopped"), ...fakeTime() });
+  assert.deepEqual(noDriver.left.map(({ id }) => id), ["task 3 implementer (agent adriven)"]);
+
+  const unmatched = cycle({ stage: "execution" });
+  joinRun(unmatched.root, ME);
+  driveRow(unmatched.root, "session-some-other-driven");
+  writeLock(unmatched.root, { pid: process.pid, startTime: processStartTime(process.pid) });
+  dispatched(unmatched.dir, "3", { session: DRIVEN, agentId: "adriven" });
+  await requestStop({ state: unmatched.state, env: ENV, kill: killDriver(unmatched.root), ...fakeTime() });
+  const result = await finalizeStop({ state: unmatched.state, env: ENV, mark: () => assert.fail("the record is not tied to the driver"), ...fakeTime() });
+  assert.deepEqual(result.left.map(({ id }) => id), ["task 3 implementer (agent adriven)"]);
+});
+
+test("dispatch records read against another plan's ledger slot are not this cycle's running work", async () => {
+  const { root, state, dir } = cycle({ stage: "execution" });
+  mkdirSync(join(root, "docs"));
+  writeFileSync(join(root, "docs/plan.md"), "### Task 3: a\n");
+  appendFileSync(state, "- plan: docs/plan.md\n");
+  writeFileSync(join(dir, "ledger.md"), "# ledger\nPlan: `docs/older-plan.md`\n");
+  dispatched(dir, "3", { agentId: "afg" });
+  await requestStop({ state, env: ENV, ...fakeTime() });
+  assert.deepEqual((await finalizeStop({ state, env: ENV, ...fakeTime() })).left, []);
+
+  const fresh = cycle({ stage: "execution" });
+  mkdirSync(join(fresh.root, "docs"));
+  writeFileSync(join(fresh.root, "docs/plan.md"), "### Task 3: a\n");
+  appendFileSync(fresh.state, "- plan: docs/plan.md\n");
+  writeFileSync(join(fresh.dir, "ledger.md"), "# ledger\nPlan: `docs/plan.md`\n");
+  dispatched(fresh.dir, "3", { agentId: "afg" });
+  await requestStop({ state: fresh.state, env: ENV, ...fakeTime() });
+  const result = await finalizeStop({ state: fresh.state, env: ENV, ...fakeTime() });
+  assert.deepEqual(result.left.map(({ id }) => id), ["task 3 implementer (agent afg)"]);
+});
+
+test("a dispatch record that started before the run did is not listed", async () => {
+  const { root, state, dir } = cycle({ stage: "execution" });
+  joinRun(root, ME);
+  appendFileSync(recordPath(gitToplevel(root), RUN), `${JSON.stringify({ kind: "run", startedAt: "2026-10-30T10:00:00Z" })}\n`);
+  dispatched(dir, "3", { agentId: "abefore" });
+  dispatched(dir, "4", { agentId: "aduring", startedAt: "2026-10-30T10:30:00Z" });
+  await requestStop({ state, env: ENV, ...fakeTime() });
+  const { left } = await finalizeStop({ state, env: ENV, ...fakeTime() });
+  assert.deepEqual(left.map(({ id }) => id), ["task 4 implementer (agent aduring)"]);
+});
+
+test("finalize carries resume: hold while a subagent, shell, monitor or workflow is left, name otherwise, and the stored record keeps it", async () => {
+  const empty = cycle();
+  await requestStop({ state: empty.state, env: ENV, ...fakeTime() });
+  const none = await finalizeStop({ state: empty.state, env: ENV, ...fakeTime() });
+  assert.deepEqual(none.left, []);
+  assert.equal(none.resume, "name");
+  assert.equal((await finalizeStop({ state: empty.state, env: ENV, ...fakeTime() })).resume, "name");
+
+  for (const kind of ["subagent", "shell", "monitor", "workflow"]) {
+    const { state, dir } = cycle();
+    open(dir, "astuck", kind);
+    await requestStop({ state, env: ENV, ...fakeTime() });
+    const held = await finalizeStop({ state, env: ENV, ...fakeTime() });
+    assert.deepEqual(held.left.map((e) => e.kind), [kind]);
+    assert.equal(held.resume, "hold", `a left ${kind} did not hold the resume`);
+    assert.equal((await finalizeStop({ state, env: ENV, ...fakeTime() })).resume, "hold", "the stored record lost the verdict");
+  }
+
+  const { root, state, dir } = cycle({ stage: "on-device" });
+  writeFileSync(join(dir, "on-device-launch.json"), "{}");
+  writeLock(root, { pid: process.pid, startTime: processStartTime(process.pid) });
+  const refuse = () => { throw Object.assign(new Error("no"), { code: "EPERM" }); };
+  await requestStop({ state, env: ENV, kill: refuse, ...fakeTime() });
+  const named = await finalizeStop({ state, env: ENV, ...fakeTime() });
+  assert.deepEqual(named.left.map(({ kind }) => kind).sort(), ["app", "driver", "tabs"]);
+  assert.equal(named.resume, "name");
+});
+
 test("request signals a live driver and waits for its lock to clear before it returns", async () => {
   const { root, state } = cycle();
   writeLock(root, { pid: process.pid, startTime: processStartTime(process.pid) });

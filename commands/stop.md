@@ -58,8 +58,9 @@ cycle every other tool call, so use no other tool for reading or checking, this 
      running among the cycle's dispatch records and the background work it tracks.
    - That edits stay on disk, with the paths in `record.uncommitted`. A stop deletes, commits and
      resets nothing.
-   - The stop record's `path`, and how to resume only as `references/handoff.md` § Never name the
-     clear while work is in flight allows a stop to.
+   - The stop record's `path`, and how to resume: name `/devcycle:continue` only when `resume` is
+     `name`; when it is `hold`, say what `left` says and name neither it nor `/clear`
+     (`references/handoff.md` § Never name the clear while work is in flight owns that rule).
 
    Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 

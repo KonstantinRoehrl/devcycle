@@ -10,14 +10,15 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 **Decision:** `.devcycle/state.md` gains the optional `stopped:` row. `/devcycle:continue` announces
 it, skips the not-ready question over it, and closes it through `stop-cycle.mjs resume` once every
 gate that can end the session has passed. `commands/continue.md` paid for this by shortening its
-discovery step, so `commandMax` stays 183.
+discovery step, so `commandMax` stays 183. `surfaceTotal` later moved to 6710 because `stop-cycle.mjs` now
+sorts out a driven run's dead dispatches and carries the `resume` verdict that `commands/stop.md` relays.
 
 **Why:** A stop is deliberate, and `handoff: pending` could only read as "still running, or dead".
 
 **Supersedes:** nothing.
 
 ```text
-budget: surface-budget.json surfaceTotal 6709
+budget: surface-budget.json surfaceTotal 6710
 budget: context-budget.json commands/continue.md 70312
 budget: context-budget.json commands/cycle.md 83259
 budget: context-budget.json playbooks/executing-waves.md 113743
@@ -50,11 +51,12 @@ interactive cycle at `handoff: pending` with no position.
 
 **Supersedes:** the ceiling of **9** recorded when `reconcile` landed as the ninth command.
 
-The growth below is the new command file and its routing row:
+The growth below is the new command file and its routing row; `commands/stop.md` later grew to 4312 bytes when
+its resume sentence began relaying `finalize`'s `resume` field in place of a citation it never opened:
 
 ```text
 budget: surface-budget.json surfaceTotal 6699
-budget: context-budget.json commands/stop.md 4185
+budget: context-budget.json commands/stop.md 4312
 ```
 
 ## 2026-10-30 — A stopped branch review or on-device walk keeps what finished
