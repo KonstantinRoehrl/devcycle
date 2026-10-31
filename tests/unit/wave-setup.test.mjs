@@ -9,7 +9,8 @@ import { hostname } from "node:os";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, sh, writeInto } from "./helpers.mjs";
-import { RETRY_CAP, taskPosition, waveSetup } from "../../scripts/wave-setup.mjs";
+import { RETRY_CAP, pluginUpdateDetail, taskPosition, waveSetup } from "../../scripts/wave-setup.mjs";
+import { installedVersion } from "../../scripts/verification.mjs";
 import { DRIVE_LOCK_REL, acquireDriveLock, driveTokenHash, releaseDriveLock } from "../../scripts/drive-lock.mjs";
 import { RESULT_REL } from "../../scripts/drive-result.mjs";
 import { parseLedgerLine } from "../../scripts/task-ledger.mjs";
@@ -69,7 +70,7 @@ function cycle({ ledger = null, state = [], branch = "feat/x", root = null, plan
 }
 const setup = (c, opts = {}) => waveSetup({ statePath: c.statePath, cwd: c.repo, env: {}, ...opts });
 // A driven session: --drive, with the token the lock's driver handed it.
-const driven = (c, opts = {}) => setup(c, { drive: true, ...opts, env: { DEVCYCLE_DRIVE_TOKEN: TOKEN, ...opts.env } });
+const driven = (c, opts = {}) => setup(c, { drive: true, ...opts, env: { DEVCYCLE_DRIVE_TOKEN: TOKEN, DEVCYCLE_DRIVER_PLUGIN_VERSION: installedVersion(), ...opts.env } });
 function withLock(c, fn, statePath = c.statePath) {
   const { lock } = acquireDriveLock(c.repo, { statePath, logPath: join(c.repo, ".devcycle", "drive.log"), tokenHash: driveTokenHash(TOKEN) });
   try {
@@ -767,4 +768,56 @@ test("a stopped row is reported on state, with the record's position and left li
   assert.deepEqual(r.state.stopped.left, [{ id: "m1", kind: "monitor", reason: "may remain" }]);
   assert.equal(r.handoff.ask, false, "a recorded stop is deliberate: the not-ready question is not asked");
   assert.equal(setup(cycle()).state.stopped, null);
+});
+
+function drivenWithLock(env, opts = {}) {
+  const c = cycle({ state: [DRIVE_ROW, "- format: 1"], ledger: [] });
+  const before = readFileSync(c.statePath, "utf8");
+  let r;
+  withLock(c, () => { r = setup(c, { drive: true, env: { DEVCYCLE_DRIVE_TOKEN: TOKEN, ...env }, ...opts }); });
+  return { r, changed: readFileSync(c.statePath, "utf8") !== before };
+}
+
+test("driver version: equal carries on", () => {
+  const { r } = drivenWithLock({ DEVCYCLE_DRIVER_PLUGIN_VERSION: "1.2.3" }, { pluginVersion: "1.2.3" });
+  assert.equal(r.action, "resume");
+});
+
+test("driver version: a different one stops plugin-updated, naming both and the restart", () => {
+  const { r, changed } = drivenWithLock({ DEVCYCLE_DRIVER_PLUGIN_VERSION: "1.2.3" }, { pluginVersion: "1.3.0" });
+  assert.deepEqual([r.action, r.stopReason], ["stop", "plugin-updated"]);
+  assert.equal(r.stopDetail, pluginUpdateDetail("1.2.3", "1.3.0"));
+  assert.match(r.stopDetail, /from 1\.2\.3 to 1\.3\.0/);
+  assert.match(r.stopDetail, /Restart Claude Code/);
+  assert.equal(changed, false);
+});
+
+test("driver version: an older file never migrates in a mismatched session", () => {
+  const c = cycle({ state: [DRIVE_ROW], ledger: [] });
+  withLock(c, () => {
+    const r = setup(c, { drive: true, pluginVersion: "1.3.0", env: { DEVCYCLE_DRIVE_TOKEN: TOKEN, DEVCYCLE_DRIVER_PLUGIN_VERSION: "1.2.3" } });
+    assert.equal(r.stopReason, "plugin-updated");
+    assert.doesNotMatch(readFileSync(c.statePath, "utf8"), /^- format:/m);
+  });
+});
+
+test("driver version: absent means a driver from before this change, and only needs-user reaches it", () => {
+  const { r } = drivenWithLock({}, { pluginVersion: "1.3.0" });
+  assert.deepEqual([r.action, r.stopReason], ["stop", "needs-user"]);
+  assert.match(r.stopDetail, /to 1\.3\.0/);
+});
+
+test("driver version: an unreadable installed version never blocks", () => {
+  const { r } = drivenWithLock({ DEVCYCLE_DRIVER_PLUGIN_VERSION: "1.2.3" }, { pluginVersion: null });
+  assert.equal(r.action, "resume");
+});
+
+test("driver version: an interactive resume is never asked about it", () => {
+  assert.notEqual(setup(cycle({ ledger: [] }), { pluginVersion: "1.3.0" }).stopReason, "plugin-updated");
+});
+
+test("plugin-updated and cycle-format stay out of the reasons that restart on their own", () => {
+  const source = readFileSync(SCRIPT, "utf8");
+  const settled = source.match(/const SETTLED_REASONS = new Set\(\[([^\]]*)\]\)/)[1];
+  assert.doesNotMatch(settled, /plugin-updated|cycle-format/);
 });

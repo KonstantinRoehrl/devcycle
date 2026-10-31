@@ -10,6 +10,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { isMain } from "./is-main.mjs";
+import { installedVersion } from "./verification.mjs";
 import { field } from "./md-field.mjs";
 import { describe } from "./find-state-files.mjs";
 import { checkState } from "./resume-check.mjs";
@@ -278,7 +279,10 @@ function wavePosition(root, planText, { waves, positions }, lines) {
   return { wave, tasks, dispatchable, pendingDecision: pending ? { task: pending.task, loopId: reviewLoopId(pending.task) } : null };
 }
 
-function readSetup({ statePath, drive = false, knobsLine = null, ledgerPath = null, env = process.env, cwd = process.cwd() }) {
+export const pluginUpdateDetail = (from, to) =>
+  `The devcycle plugin updated from ${from} to ${to} while the driver was running, so this session did no work. Restart Claude Code, then run /devcycle:continue to carry on with ${to}.`;
+
+function readSetup({ statePath, drive = false, knobsLine = null, ledgerPath = null, env = process.env, cwd = process.cwd(), pluginVersion = installedVersion() }) {
   const abs = resolve(cwd, statePath);
   let stateText;
   try {
@@ -321,6 +325,14 @@ function readSetup({ statePath, drive = false, knobsLine = null, ledgerPath = nu
   if (drive && !(result.drive.lock && token && status.tokenHash === driveTokenHash(token)))
     return stop("no-driver", `no live driver lock names ${abs} with this session's drive token`);
   if (drive && !result.drive.opted) return stop("not-opted-in", "the state file carries no drive: auto row");
+  // A driver from before this variable existed rejects any reason its own schema lacks, and would end
+  // `failed` and restart, so needs-user is the one route that reaches it as a stop for a person. An
+  // installed version that cannot be read confirms nothing and blocks nothing.
+  if (drive && pluginVersion) {
+    const started = env.DEVCYCLE_DRIVER_PLUGIN_VERSION;
+    if (started === undefined) return stop("needs-user", pluginUpdateDetail("an earlier version", pluginVersion));
+    if (started !== pluginVersion) return stop("plugin-updated", pluginUpdateDetail(started, pluginVersion));
+  }
   const checked = checkState(abs);
   state.stopped = checked.stopped ?? null;
   if (checked.kind === "foreign") return stop("foreign-state", `its root: ${checked.recordedRoot} is not this checkout (${checked.actualRoot})`);

@@ -42,6 +42,13 @@ test("cycle-format is a reason a driven session can signal", () => {
   assert.equal(stopFile(dir).reason, "cycle-format");
 });
 
+test("plugin-updated is a reason a driven session can signal", () => {
+  const { dir, statePath } = devcycleDir();
+  const r = signal(["plugin-updated", "--detail", "updated", "--state", statePath]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(stopFile(dir).reason, "plugin-updated");
+});
+
 test("the detail is one line, capped; without a session id the hash is null; a later signal replaces an earlier one", () => {
   const { dir, statePath } = devcycleDir();
   assert.equal(signal(["needs-user", "--detail", "Which plan?\nA or B?", "--state", statePath]).status, 0);
