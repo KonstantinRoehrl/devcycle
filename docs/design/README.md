@@ -120,7 +120,7 @@ devcycle/                (public GitHub repo)
 │   ├── block-main-thread-browser.mjs  # denies browser calls from any origin but on-device-driver
 │   ├── stop-guard.mjs                 # while a /devcycle:stop request stands, denies a listed session's tool calls but the ones that finish the stop
 │   ├── process-sensor.mjs             # PostToolUse/SubagentStop/Stop: keeps .devcycle/processes.jsonl, the registry of background work /devcycle:stop reads
-│   ├── block-destructive-git.mjs      # denies destructive git from a guarded dispatch, and git stash on the main thread mid-cycle (#165, #235); also denies a guarded dispatch an until/while loop that sleeps
+│   ├── block-destructive-git.mjs      # denies destructive git from a guarded dispatch, and git stash on the main thread mid-cycle (#165, #235); also denies a guarded dispatch an until/while loop that sleeps; also denies a live $(jobs -p) (#395)
 │   ├── lib/find-state-file.mjs        # the bounded .devcycle/state.md walk the git guard and both sensors key off
 │   ├── lib/poll-guard.mjs             # the until/while-loop-that-sleeps check the git guard applies to a guarded dispatch (#385)
 │   ├── lib/run-scope.mjs              # which state file names an active run — node-free, shared by the depth-sensor and the hooks module
