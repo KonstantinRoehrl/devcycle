@@ -8,8 +8,8 @@ import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { isMain } from "./is-main.mjs";
 
 const LABEL = "canary";
-const SUSPECT_STEPS = { validate_marketplace: "the marketplace validator", validate_manifest: "the manifest validator", hooks_tests: "the hooks module's tests", load_check: "the real plugin install and load" };
-const INFRASTRUCTURE_STEPS = ["install", "plugin_install"];
+const SUSPECT_STEPS = { validate_marketplace: "the marketplace validator", validate_manifest: "the manifest validator", hooks_tests: "the hooks module's tests", plugin_install: "the real plugin install", load_check: "the installed plugin's load" };
+const INFRASTRUCTURE_STEPS = ["install", "marketplace_add"];
 
 export function currentPin(workflowText) {
   const matrix = workflowText.match(/cli:\s*\[([^\]]+)\]/);

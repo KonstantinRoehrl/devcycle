@@ -57,8 +57,8 @@ jobs:
         if: steps.install.outcome == 'success'
         continue-on-error: true
         run: claude plugin test . < /dev/null
-      - name: Install the plugin in a clean config on latest
-        id: plugin_install
+      - name: Add the marketplaces in a clean config on latest
+        id: marketplace_add
         if: steps.install.outcome == 'success'
         continue-on-error: true
         env:
@@ -67,8 +67,19 @@ jobs:
           for attempt in 1 2 3; do
             claude plugin marketplace add ./ < /dev/null \
               && claude plugin marketplace add anthropics/claude-plugins-official < /dev/null \
-              && claude plugin install devcycle@devcycle < /dev/null \
               && exit 0
+            sleep 30
+          done
+          exit 1
+      - name: Install the plugin in a clean config on latest
+        id: plugin_install
+        if: steps.marketplace_add.outcome == 'success'
+        continue-on-error: true
+        env:
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/canary-config
+        run: |
+          for attempt in 1 2 3; do
+            claude plugin install devcycle@devcycle < /dev/null && exit 0
             sleep 30
           done
           exit 1
@@ -89,35 +100,51 @@ jobs:
         id: pin
         if: >-
           steps.validate_marketplace.outcome == 'failure' || steps.validate_manifest.outcome == 'failure' ||
-          steps.hooks_tests.outcome == 'failure' || steps.load_check.outcome == 'failure'
+          steps.hooks_tests.outcome == 'failure' || steps.plugin_install.outcome == 'failure' ||
+          steps.load_check.outcome == 'failure'
         continue-on-error: true
         env:
           VALIDATE_MARKETPLACE: ${{ steps.validate_marketplace.outcome }}
           VALIDATE_MANIFEST: ${{ steps.validate_manifest.outcome }}
           HOOKS_TESTS: ${{ steps.hooks_tests.outcome }}
+          PLUGIN_INSTALL: ${{ steps.plugin_install.outcome }}
           LOAD_CHECK: ${{ steps.load_check.outcome }}
           CLAUDE_CONFIG_DIR: ${{ runner.temp }}/pin-config
         run: |
+          retry() {
+            for attempt in 1 2 3; do
+              "$@" && return 0
+              sleep 30
+            done
+            return 1
+          }
           pin="$(node scripts/canary-report.mjs pin)"
-          if ! npm install --prefix "$RUNNER_TEMP/pin" "@anthropic-ai/claude-code@$pin"; then
+          if ! retry npm install --prefix "$RUNNER_TEMP/pin" "@anthropic-ai/claude-code@$pin"; then
             echo "install=failure" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "install=success" >> "$GITHUB_OUTPUT"
           export PATH="$RUNNER_TEMP/pin/node_modules/.bin:$PATH"
+          # The re-run command's own output belongs in the step log; only the verdict line is an output.
           record() {
-            if "${@:2}"; then echo "$1=success"; else echo "$1=failure"; fi >> "$GITHUB_OUTPUT"
+            local result=failure
+            if "${@:2}"; then result=success; fi
+            echo "$1=$result" >> "$GITHUB_OUTPUT"
+          }
+          plugin_install_on_pin() {
+            retry claude plugin marketplace add ./ < /dev/null \
+              && retry claude plugin marketplace add anthropics/claude-plugins-official < /dev/null \
+              && retry claude plugin install devcycle@devcycle < /dev/null
           }
           load_check_on_pin() {
-            claude plugin marketplace add ./ < /dev/null \
-              && claude plugin marketplace add anthropics/claude-plugins-official < /dev/null \
-              && claude plugin install devcycle@devcycle < /dev/null \
+            plugin_install_on_pin \
               && claude plugin list --json < /dev/null > "$RUNNER_TEMP/pin-plugin-list.json" \
               && node scripts/canary-load-check.mjs "$RUNNER_TEMP/pin-plugin-list.json"
           }
           if [ "$VALIDATE_MARKETPLACE" = failure ]; then record validate_marketplace claude plugin validate . --strict < /dev/null; fi
           if [ "$VALIDATE_MANIFEST" = failure ]; then record validate_manifest claude plugin validate .claude-plugin/plugin.json --strict < /dev/null; fi
           if [ "$HOOKS_TESTS" = failure ]; then record hooks_tests claude plugin test . < /dev/null; fi
+          if [ "$PLUGIN_INSTALL" = failure ]; then record plugin_install plugin_install_on_pin; fi
           if [ "$LOAD_CHECK" = failure ]; then record load_check load_check_on_pin; fi
       - name: Decide what the failures mean
         id: verdict
@@ -128,8 +155,8 @@ jobs:
         if: >-
           steps.install.outcome == 'failure' || steps.validate_marketplace.outcome == 'failure' ||
           steps.validate_manifest.outcome == 'failure' || steps.hooks_tests.outcome == 'failure' ||
-          steps.plugin_install.outcome == 'failure' || steps.load_check.outcome == 'failure' ||
-          steps.golden_path.outcome == 'failure'
+          steps.marketplace_add.outcome == 'failure' || steps.plugin_install.outcome == 'failure' ||
+          steps.load_check.outcome == 'failure' || steps.golden_path.outcome == 'failure'
         run: exit 1
   report:
     name: Update the rolling canary issue

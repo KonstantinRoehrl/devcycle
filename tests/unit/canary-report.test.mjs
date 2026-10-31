@@ -7,7 +7,7 @@ import { computeVerdict, currentPin, decideAction, report } from "../../scripts/
 const OK = { outcome: "success" };
 const FAIL = { outcome: "failure" };
 const SKIP = { outcome: "skipped" };
-const green = { install: OK, validate_marketplace: OK, validate_manifest: OK, hooks_tests: OK, plugin_install: OK, load_check: OK, golden_path: OK, pin: SKIP };
+const green = { install: OK, validate_marketplace: OK, validate_manifest: OK, hooks_tests: OK, marketplace_add: OK, plugin_install: OK, load_check: OK, golden_path: OK, pin: SKIP };
 const pinWith = (outputs) => ({ outcome: "success", outputs: { install: "success", ...outputs } });
 
 test("the pin is the last of validate.yml's matrix", () => {
@@ -31,8 +31,16 @@ test("latest and the pin both fail: repo-side", () => {
 
 test("a failed npm or marketplace step is infrastructure, whatever else failed", () => {
   assert.equal(computeVerdict({ ...green, install: FAIL, validate_marketplace: SKIP, validate_manifest: SKIP, hooks_tests: SKIP, plugin_install: SKIP, load_check: SKIP, golden_path: OK }).verdict, "infrastructure");
-  assert.equal(computeVerdict({ ...green, plugin_install: FAIL, load_check: SKIP }).verdict, "infrastructure");
+  assert.equal(computeVerdict({ ...green, marketplace_add: FAIL, plugin_install: SKIP, load_check: SKIP }).verdict, "infrastructure");
   assert.equal(computeVerdict({ ...green, hooks_tests: FAIL, pin: { outcome: "success", outputs: { install: "failure" } } }).verdict, "infrastructure");
+});
+
+test("a failing plugin install is judged by the pin like any other Claude Code step", () => {
+  const installFails = { ...green, plugin_install: FAIL, load_check: SKIP };
+  assert.deepEqual(computeVerdict({ ...installFails, pin: pinWith({ plugin_install: "success" }) }), { verdict: "break", step: "plugin_install" });
+  assert.deepEqual(computeVerdict({ ...installFails, pin: pinWith({ plugin_install: "failure" }) }), { verdict: "repo-side", step: "plugin_install" });
+  assert.equal(computeVerdict({ ...installFails, pin: { outcome: "success", outputs: { install: "failure" } } }).verdict, "infrastructure");
+  assert.equal(computeVerdict({ ...installFails, pin: SKIP }).verdict, "infrastructure", "no pin re-run means no break is called");
 });
 
 test("golden-path failing alone is repo-side for the run, but counts as a pass for Claude Code", () => {
@@ -107,4 +115,15 @@ test("the workflow is scheduled, least-privilege, and pins every action by SHA",
   assert.ok(text.indexOf("issues: write") > text.indexOf("\n  report:"), "issues: write sits outside the report job");
   assert.match(text, /default_branch/);
   assert.doesNotMatch(text, /ANTHROPIC_API_KEY/);
+});
+
+test("the pin step re-runs a failed plugin install, and the run still fails when only the marketplace step does", () => {
+  const text = workflow();
+  const pinIf = text.match(/id: pin\n\s+if: >-\n((?:\s+.*\n)+?)\s+continue-on-error/)[1];
+  assert.match(pinIf, /steps\.plugin_install\.outcome == 'failure'/);
+  assert.match(text, /PLUGIN_INSTALL: \$\{\{ steps\.plugin_install\.outcome \}\}/);
+  const failRun = text.match(/- name: Fail the run when any check failed\n\s+if: >-\n((?:\s+.*\n)+?)\s+run:/)[1];
+  for (const id of ["install", "validate_marketplace", "validate_manifest", "hooks_tests", "marketplace_add", "plugin_install", "load_check", "golden_path"]) {
+    assert.match(failRun, new RegExp(`steps\\.${id}\\.outcome == 'failure'`), `${id} missing from the final failure gate`);
+  }
 });
