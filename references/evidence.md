@@ -198,7 +198,7 @@ Culprit: <slug>
 ## Background processes
 
 Prefer no background helper during verification; when one must outlive the call, use the Bash tool's
-`run_in_background`. Anything started with `&` is gone when the command returns, on every exit path, in
+`run_in_background`. Anything started with `&` is gone when the command returns, on exit or error, in
 this form, one command per helper:
 
 `set --; work & set -- "$@" $!; trap 'kill "$@" 2>/dev/null' EXIT`

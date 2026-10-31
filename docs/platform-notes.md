@@ -571,7 +571,7 @@ Measured on Claude Code 2.1.316 under a zsh login shell on macOS, 2026-10-31 (#3
 | Does an array? | A syntax error under dash (exit 2). |
 | Does `trap 'kill 0' EXIT`? | It kills the helpers, signals the shell too (status -15 from a parent), and reaches anything sharing the group. |
 | Is `timeout` available? | Not on a stock macOS PATH. |
-| Does `set --; work & set -- "$@" $!; trap 'kill "$@" 2>/dev/null' EXIT` clean up? | Yes, exit 0 and nothing alive, under zsh, bash, dash and sh, when `work` is one command. A `( a; b )` group or a loop leaves its running child alive until that child ends. |
+| Does `set --; work & set -- "$@" $!; trap 'kill "$@" 2>/dev/null' EXIT` clean up? | Yes on exit or error: exit 0 and nothing alive, under zsh, bash, dash and sh, when `work` is one command. A `( a; b )` group or a loop leaves its running child alive until that child ends. A signalled shell is not covered: SIGTERM skips the `EXIT` trap under zsh and dash, so the helper stays alive (bash cleans up). |
 | Can a leak be tied to its session? | Not reliably. The session id reaches `ps -E` only for non-platform binaries (`node`, not `sleep` or `zsh`). |
 | What does a leftover look like? | Each Bash call has its own process group, led by its shell. A leftover keeps that group id after the leader exits, with parent PID 1 and no terminal. With two deliberate leaks the signature matched four of 495 processes: both loops at about 98% CPU, and two idle helpers at 0%. |
 | Does PostToolUse `additionalContext` from a plugin hook reach the model? | Yes. A headless `claude -p` session printed a random token only the hook held. |
