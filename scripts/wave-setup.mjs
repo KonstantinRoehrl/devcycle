@@ -286,6 +286,15 @@ export const pluginUpdateDetail = (from, to) =>
 const UNREADABLE_DRIVER_VERSION_DETAIL =
   "The driver could not read its devcycle plugin version when it started, so this session cannot confirm it matches and did no work. Restart Claude Code, then run /devcycle:continue.";
 
+// null when the file cannot be read, which differs from any text the first read held.
+const stateTextAt = (path) => {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+};
+
 // `settle(checked)` is the format settle (see waveSetup): given the state's resume-check verdict it
 // returns scripts/cycle-format.mjs's settleFormat result, and null skips it.
 function readSetup(opts) {
@@ -350,7 +359,11 @@ function readSetup(opts) {
   if (settled.status === "driver-live") result.formatReport = settled.report;
   if (settled.status === "locked" || settled.status === "failed") return stop("cycle-format", settled.detail);
   if (settled.status === "question" && drive) return stop("needs-user", settled.question);
-  if (settled.status === "migrated") return { ...readSetup({ ...opts, settle: null }), formatReport: settled.report };
+  // Every migration rewrites state.md last, so state text that is not what this read started from means a
+  // migration (this session's, or another's that finished in the gap since the first read) has
+  // changed the cycle under it. That is the whole staleness, so it is the one test.
+  if (settle && (settled.status === "migrated" || stateTextAt(abs) !== stateText))
+    return { ...readSetup({ ...opts, settle: null }), formatReport: settled.report ?? [] };
   if (settled.status === "question") result.formatQuestion = settled.question;
   state.stopped = checked.stopped ?? null;
   if (checked.kind === "foreign") return stop("foreign-state", `its root: ${checked.recordedRoot} is not this checkout (${checked.actualRoot})`);

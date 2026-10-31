@@ -93,13 +93,14 @@ export function holderLiveness(root, holder) {
 // A watcher whose sandbox runs no ps trusts the pid alone.
 export const holderRunning = (root, holder) => holderLiveness(root, holder) !== "gone";
 
-// Whether a driver may still run in this checkout: the lock names a holder that is not provably gone,
-// by the watcher's reading or the lock module's. A holder only one of them calls dead (a ps that
-// cannot run leaves it "unverified" to the watcher and dead to the lock module) still counts, so
-// whatever attaches to a driver and whatever refuses to migrate beside one cannot disagree.
-export function driverMayRun(root) {
+// Whether a driver of the cycle at statePath may still run: the lock names that state file and its
+// holder is not provably gone, by the watcher's reading or the lock module's. A holder only one of
+// them calls dead (a ps that cannot run leaves it "unverified" to the watcher and dead to the lock
+// module) still counts. Like an attach (classifyDrive), it guards only the driver of this state file:
+// a lock for another cycle in the checkout neither blocks a migration nor means a driver runs here.
+export function driverMayRun(root, statePath) {
   const holder = readDriveLockHolder(root);
-  return holder !== null && (holderRunning(root, holder) || readLiveDriveLock(root) !== null);
+  return lockNamesState(root, holder, statePath) && (holderRunning(root, holder) || readLiveDriveLock(root) !== null);
 }
 
 const real = (path) => {

@@ -132,7 +132,7 @@ checks, so a foreign or leftover file is never touched:
 | Files against plugin | What happens |
 | --- | --- |
 | Same | Nothing, and nothing is printed. |
-| Older | Migrated, then the resume carries on. Originals go to `.devcycle/format-backup-<from>/`. |
+| Older | Migrated, then the resume carries on. Originals go to `.devcycle/format-backup-<from>*`. |
 | Newer | Stop: the message names `claude plugin update devcycle@devcycle` and the restart it needs. |
 | Row is not a number | Stop: the message quotes the row and says how to correct it. |
 | Another session migrating | Stop: wait for it, then run `/devcycle:continue` again. |

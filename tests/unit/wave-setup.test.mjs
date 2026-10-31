@@ -10,7 +10,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, sh, writeInto } from "./helpers.mjs";
-import { MIGRATIONS, stampFormat } from "../../scripts/cycle-format.mjs";
+import { MIGRATIONS, settleFormat, stampFormat } from "../../scripts/cycle-format.mjs";
+import { checkState } from "../../scripts/resume-check.mjs";
 import { isLiveHolder } from "../../scripts/file-lock.mjs";
 import { RETRY_CAP, pluginUpdateDetail, taskPosition, waveSetup } from "../../scripts/wave-setup.mjs";
 import { UNREADABLE_PLUGIN_VERSION, installedVersion } from "../../scripts/verification.mjs";
@@ -624,6 +625,26 @@ test("format: an unbackticked header is normalized and the migrated position is 
   assert.equal(r.overview.committed, 1);
   assert.equal(r.ledgerSlot, "fresh");
   assert.ok(r.formatReport.some((l) => l.includes("ledger.md")));
+});
+
+test("format: another session migrating between the first read and the format check cannot leave a stale position", () => {
+  const c = cycle();
+  writeFileSync(c.ledgerPath, `Plan: docs/plan.md\n\n${committed(1)}\n`);
+  // The token is read after the cycle's first read and before the format check: the session
+  // that wins the race finishes its whole migration in that gap.
+  let migrated = false;
+  const env = { get DEVCYCLE_DRIVE_TOKEN() {
+    if (!migrated) {
+      migrated = true;
+      assert.equal(settleFormat(c.statePath, { checked: checkState(c.statePath) }).status, "migrated");
+    }
+    return undefined;
+  } };
+  const r = setup(c, { env });
+  assert.ok(migrated, "control: the other session's migration ran in the gap");
+  assert.equal(r.overview.committed, 1, "the position is the migrated ledger's, not an unreadable one's");
+  assert.equal(r.ledgerSlot, "fresh");
+  assert.deepEqual(r.formatReport, []);
 });
 
 test("format: files newer than the plugin stop with cycle-format, unchanged", () => {

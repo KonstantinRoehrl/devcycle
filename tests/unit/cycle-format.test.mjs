@@ -1,7 +1,7 @@
 // scripts/cycle-format.mjs: the cycle format version, its migrations and the settle that runs them.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
@@ -135,6 +135,19 @@ test("a live driver blocks the settle, unless this session is that driver's", ()
     assert.match(blocked.report.join("\n"), /driver is running/, "the user is told why nothing migrated");
     assert.equal(read(c.ledgerPath), before);
     assert.equal(settle(c, { driven: true }).status, "migrated");
+  } finally {
+    releaseDriveLock(c.repo, lock);
+  }
+});
+
+test("a live lock naming another cycle's state file neither blocks the migration nor claims a driver is running", () => {
+  const c = frozenCycle("ledger-unbackticked.md");
+  const { lock } = acquireDriveLock(c.repo, { statePath: join(c.repo, ".devcycle/other-state.md"), logPath: join(c.repo, ".devcycle/drive.log"), tokenHash: null });
+  try {
+    const r = settle(c);
+    assert.equal(r.status, "migrated");
+    assert.doesNotMatch(r.report.join("\n"), /driver is running/);
+    assert.equal(formatVerdict(read(c.statePath)).verdict, "equal");
   } finally {
     releaseDriveLock(c.repo, lock);
   }
@@ -276,16 +289,32 @@ test("a rollback that fails beside a leftover backup points at this run's origin
   assert.match(read(join(backup, "ledger.md")), /an earlier cycle's ledger/, "the leftover itself is untouched");
 });
 
-test("a success beside a leftover backup says it was kept, and does not call it this run's originals", () => {
+test("a success beside a leftover backup keeps it and saves this run's originals in a directory of its own", () => {
   const c = frozenCycle("ledger-unbackticked.md");
+  const original = read(c.ledgerPath);
   const backup = leftoverBackup(c);
   const r = settle(c);
   assert.equal(r.status, "migrated");
   const text = r.report.join("\n");
-  assert.doesNotMatch(text, /original/, "the kept files are not this run's originals");
-  assert.match(text, /earlier/);
-  assert.match(text, /\.devcycle\/format-backup-0/);
-  assert.match(read(join(backup, "ledger.md")), /an earlier cycle's ledger/);
+  const saved = savedIn(c, r.report.find((line) => /^originals/.test(line)));
+  assert.notEqual(saved, backup, "the report names the directory that holds this run's originals");
+  assert.equal(read(join(saved, "ledger.md")), original);
+  assert.match(text, /earlier/, "the leftover is reported as kept");
+  assert.match(read(join(backup, "ledger.md")), /an earlier cycle's ledger/, "the leftover itself is untouched");
+});
+
+test("a re-run after a crash reuses the matching backup and writes no second copy", () => {
+  const c = frozenCycle("ledger-unbackticked.md");
+  const original = [read(c.statePath), read(c.ledgerPath)];
+  const backup = join(c.repo, ".devcycle/format-backup-0");
+  mkdirSync(backup, { recursive: true });
+  writeFileSync(join(backup, "state.md"), original[0]);
+  writeFileSync(join(backup, "ledger.md"), original[1]);
+  const r = settle(c);
+  assert.equal(r.status, "migrated");
+  assert.deepEqual(readdirSync(join(c.repo, ".devcycle")).filter((name) => name.startsWith("format-backup-")), ["format-backup-0"]);
+  assert.deepEqual([read(join(backup, "state.md")), read(join(backup, "ledger.md"))], original);
+  assert.match(r.report.join("\n"), /format-backup-0\//);
 });
 
 test("files another session migrated while this one waited settle as migrated, so the caller reads them again", () => {

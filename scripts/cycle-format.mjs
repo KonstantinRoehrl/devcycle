@@ -94,11 +94,11 @@ function applySteps(files, from, { migrations, current, answer }) {
   return { files: next, notes };
 }
 
-// Where a failed restore sends the user. The backup directory may hold an earlier run's files, so this
-// run's originals go to a directory only this run wrote. Its name keeps the `format-backup-` prefix,
-// which is what playbooks/finishing-the-cycle.md sweeps into the archive.
-function setAsideOriginals(dir, from, names, originals) {
-  const aside = join(dir, `format-backup-${from}-restore-${Date.now().toString(36)}-${process.pid}`);
+// Where this run's originals go when the backup directory cannot hold them: it may hold an earlier
+// run's files. Only this run wrote the directory (`kind` says why), and its name keeps the
+// `format-backup-` prefix, which is what playbooks/finishing-the-cycle.md sweeps into the archive.
+function setAsideOriginals(dir, from, names, originals, kind) {
+  const aside = join(dir, `format-backup-${from}-${kind}-${Date.now().toString(36)}-${process.pid}`);
   mkdirSync(aside, { recursive: true });
   for (const name of names) writeFileSync(join(aside, name), originals[name]);
   return aside;
@@ -125,13 +125,17 @@ function migrateLocked(statePath, ledgerPath, { answer, migrations, current, wri
   const kept = [];
   for (const name of changed) {
     mkdirSync(backupDir, { recursive: true });
-    // An existing copy is kept: a re-run after a crash must not back up half-migrated files.
-    if (existsSync(join(backupDir, name))) kept.push(name);
-    else {
-      copyFileSync(pathOf(name), join(backupDir, name));
+    const held = join(backupDir, name);
+    // An existing copy is never overwritten: a re-run after a crash must not back up half-migrated
+    // files. One that holds what this run read is that crash's backup, and serves as this run's.
+    if (!existsSync(held)) {
+      copyFileSync(pathOf(name), held);
       saved.push(name);
-    }
+    } else if (readFileSync(held, "utf8") === originals[name]) saved.push(name);
+    else kept.push(name);
   }
+  // A copy that is not this run's cannot restore it, so this run's originals also go where only it wrote.
+  const aside = kept.length ? setAsideOriginals(dir, verdict.from, kept, originals, "run") : null;
   const written = [];
   const put = (name, text) => { write(pathOf(name), text); written.push(name); };
   try {
@@ -148,8 +152,8 @@ function migrateLocked(statePath, ledgerPath, { answer, migrations, current, wri
       const where = unrestored.map((name) => relative(rootOf, pathOf(name))).join(", ");
       const failure = `Migrating the cycle's files failed (${err.message}), and ${where} could not be put back.`;
       try {
-        const aside = setAsideOriginals(dir, verdict.from, unrestored, originals);
-        return { status: "failed", report: [], detail: `${failure} The copies from before the migration are in ${relative(rootOf, aside)}/: copy ${unrestored.join(" and ")} from there back into .devcycle/, then run /devcycle:continue again.` };
+        const restore = setAsideOriginals(dir, verdict.from, unrestored, originals, "restore");
+        return { status: "failed", report: [], detail: `${failure} The copies from before the migration are in ${relative(rootOf, restore)}/: copy ${unrestored.join(" and ")} from there back into .devcycle/, then run /devcycle:continue again.` };
       } catch (saveErr) {
         return { status: "failed", report: [], detail: `${failure} A copy from before the migration could not be saved either (${saveErr.message}). Check ${where} by hand before running /devcycle:continue again.` };
       }
@@ -160,7 +164,8 @@ function migrateLocked(statePath, ledgerPath, { answer, migrations, current, wri
     ...applied.notes,
     ...(rejected ? [`${LEDGER}: ${rejected} event-shaped line${rejected === 1 ? "" : "s"} can't be read and stay ignored, as before`] : []),
     ...(saved.length ? [`originals of ${saved.join(" and ")} are in ${relative(rootOf, backupDir)}/`] : []),
-    ...(kept.length ? [`${relative(rootOf, backupDir)}/ already held ${kept.join(" and ")} from an earlier run, and they were kept as they were`] : []),
+    ...(kept.length ? [`${relative(rootOf, backupDir)}/ already held ${kept.join(" and ")} from an earlier run, and they were kept as they were`,
+      `originals of ${kept.join(" and ")} are in ${relative(rootOf, aside)}/`] : []),
   ];
   return { status: "migrated", report };
 }
@@ -169,8 +174,8 @@ const DRIVER_LIVE_REPORT = "A driver is running on this cycle, so its files in t
 
 // The one writer of a cycle's format. `checked` is scripts/resume-check.mjs's checkState result: the
 // ownership and stale checks run there first, so a foreign or leftover file is never migrated or
-// backed up here. Beside a driver that may be running nothing migrates (scripts/drive-result.mjs's
-// driverMayRun, the answer an attach is made on too): state writers take no lock, so the lock below
+// backed up here. Beside a driver of this cycle that may be running nothing migrates (scripts/drive-result.mjs's
+// driverMayRun, which agrees with what an attach requires): state writers take no lock, so the lock below
 // could not keep them out. `driven` names a session that driver started, which passed the token and
 // version checks before getting here. A "migrated" result with an empty report is another session's
 // migration, found under the lock: either way the caller reads the cycle again.
@@ -179,7 +184,7 @@ export function settleFormat(statePath, {
 } = {}) {
   if (!checked?.ok || checked.stage === CLOSED_STAGE || checked.format?.verdict !== "older") return { status: "none", report: [] };
   const dir = dirname(statePath);
-  if (!driven && driverMayRun(dirname(dir))) return { status: "driver-live", report: [DRIVER_LIVE_REPORT] };
+  if (!driven && driverMayRun(dirname(dir), statePath)) return { status: "driver-live", report: [DRIVER_LIVE_REPORT] };
   const ledgerPath = join(dir, LEDGER);
   try {
     return withFileLock(statePath, () => withFileLock(ledgerPath, () => migrateLocked(statePath, ledgerPath, { answer, migrations, current, write }),
