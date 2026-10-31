@@ -85,6 +85,18 @@ A third form, the section read, loads one `##` section:
 `node scripts/read-section.mjs references/<file>.md <slug>` prints it. `references/README.md`
 § Citation grammar owns when a citation may take it.
 
+## Changing a cycle's on-disk format
+
+`references/resume.md` § The format row owns what the `format:` row means. This is when it rises: any change that would make an in-flight cycle read wrongly, meaning a removed or renamed `state.md` row, or a changed ledger event line or `Plan:`/`Run:` header. To bump it:
+
+1. Raise `CURRENT_FORMAT` in `scripts/cycle-format.mjs` and add a `{ from, to, renames, migrate }` step to `MIGRATIONS`. Steps are never retired, and each must be a no-op on files already past it.
+2. Update the row in `references/resume.md`'s template, and refresh `tests/fixtures/cycle-format-contract.json`.
+3. Freeze the old format as a new `tests/fixtures/cycle-format/format-<n>/` directory, and add its fixture to `tests/unit/cycle-format.test.mjs`. Frozen fixtures are never edited.
+
+Adding a stage, knob or state row needs no bump, only the contract fixture updated in the same change. Removing or renaming a stage needs a step declaring it under `renames`. Removing or renaming a knob needs a `KNOB_RENAMES` entry in `scripts/resolve-knobs.mjs`, or the knob declared under `retiredKnobs` in the fixture.
+
+`node scripts/validate.mjs` check 29 enforces this against the fixture, within limits. It leaves out the plan's Dispatch Map, per-task reports and verdicts, the stop record and `drive-stop.json`: their readers are tolerant or their contents live for one task, and the plan can be tracked in git, so a step rewriting it would dirty the working tree. It also can't stop someone editing the fixture to match a removal: that is a deliberate act a reviewer sees in the diff, so don't use it to silence the check.
+
 ## Before opening a PR
 
 Run the validators and the unit suite locally. CI (`.github/workflows/validate.yml`)
@@ -200,6 +212,8 @@ improvements; routine work — engine swaps, doc edits, refactors, small fixes �
 malformed title fails CI; one that slipped through would ship no release. Evidence for
 behavior changes goes in the PR description; the structural checks above are the only
 merge gate.
+
+`.github/workflows/canary.yml` runs `claude plugin validate`, the hooks tests, a real install and the golden-path suite against the latest Claude Code once a day, and reports a suspected break to one rolling issue labelled `canary`. It is not a required check. A manual run on a branch never touches the issue, and the schedule runs only from `main`, so a change to it takes effect after the next release.
 
 ## What belongs in `docs/`
 
