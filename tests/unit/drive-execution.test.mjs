@@ -20,7 +20,7 @@ const RUN = "0123456789abcdef";
 const MODEL = "claude-sonnet-5-5";
 // scripts/drive-signal.mjs's reasons, pinned verbatim: the driver passes each one through untouched.
 const STOP_REASONS = ["needs-user", "knob-drift", "foreign-state", "resume-check", "branch", "depth-at-start",
-  "sweep-fallback", "scope-change", "no-driver", "not-opted-in"];
+  "sweep-fallback", "scope-change", "no-driver", "not-opted-in", "cycle-format"];
 
 const PLAN = [
   "# Fixture plan", "",

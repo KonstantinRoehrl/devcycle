@@ -35,6 +35,13 @@ test("a stop lands in drive-stop.json with its reason, detail, stage, stamp and 
   assert.deepEqual(readdirSync(dir).sort(), ["drive-stop.json", "state.md"], "no temp file is left behind");
 });
 
+test("cycle-format is a reason a driven session can signal", () => {
+  const { dir, statePath } = devcycleDir();
+  const r = signal(["cycle-format", "--detail", "files are newer than the plugin", "--state", statePath]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(stopFile(dir).reason, "cycle-format");
+});
+
 test("the detail is one line, capped; without a session id the hash is null; a later signal replaces an earlier one", () => {
   const { dir, statePath } = devcycleDir();
   assert.equal(signal(["needs-user", "--detail", "Which plan?\nA or B?", "--state", statePath]).status, 0);

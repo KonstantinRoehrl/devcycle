@@ -13,12 +13,13 @@ import { isMain } from "./is-main.mjs";
 import { field } from "./md-field.mjs";
 import { describe } from "./find-state-files.mjs";
 import { checkState } from "./resume-check.mjs";
+import { settleFormat } from "./cycle-format.mjs";
 import { parseHandoff } from "./handoff-mark.mjs";
 import { compareKnobs, parseRecordedLine, resolveKnobs } from "./resolve-knobs.mjs";
 import { resolveDepth } from "./depth-probe.mjs";
 import { TEST_FILE_SUFFIXES, fieldValue, gateCommand, parseDispatchMap, taskBlocks, taskFileMap } from "./task-files.mjs";
 import {
-  isNoVerdict, ledgerPlan, nextReviewRound, noVerdictReason, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot,
+  isNoVerdict, ledgerPlan, nextReviewRound, noVerdictReason, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot, UsageError,
 } from "./task-ledger.mjs";
 import { ledgerSlotState } from "./ledger-slot.mjs";
 import { pendingReviewLoop, reviewLoopId } from "./review-loop.mjs";
@@ -277,7 +278,7 @@ function wavePosition(root, planText, { waves, positions }, lines) {
   return { wave, tasks, dispatchable, pendingDecision: pending ? { task: pending.task, loopId: reviewLoopId(pending.task) } : null };
 }
 
-export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPath = null, env = process.env, cwd = process.cwd() }) {
+function readSetup({ statePath, drive = false, knobsLine = null, ledgerPath = null, env = process.env, cwd = process.cwd() }) {
   const abs = resolve(cwd, statePath);
   let stateText;
   try {
@@ -309,7 +310,7 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   const result = {
     ok: true, action: "resume", state, knobDrift: [], branch: null, depth, wave: null, tasks: [], dispatchable: [],
     pendingDecision: null, drive: status.drive, entryLines: [], appended: [], depthBand: depth?.band ?? null,
-    handoff: { ...parseHandoff(field(stateText, "handoff")), ask: false },
+    handoff: { ...parseHandoff(field(stateText, "handoff")), ask: false }, formatQuestion: null, formatReport: [],
   };
   // A stop on one task's pending decision names it, so the answer is recorded as that task's.
   const stop = (stopReason, stopDetail, stopTask = null) => ({ ...result, action: "stop", stopReason, stopDetail, stopTask });
@@ -329,6 +330,7 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   Object.assign(result, { overview: overviewOf(map), ledgerSlot: slot });
   const decided = (decision) => ({ ...result.drive, ...decision, result: driver });
   if (attach) return { ...result, drive: decided({ lock: { pid: driver.pid, log: driver.log }, action: "attach", writeRow: null, confirm: null, gate: null }) };
+  if (checked.kind === "format") return stop("cycle-format", checked.errors[0]);
   if (!checked.ok) return stop("resume-check", checked.errors.join("; "));
   if (state.stage !== "execution") return stop("resume-check", `the state file is at stage ${state.stage}, not execution`);
 
@@ -358,11 +360,27 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   return result;
 }
 
-const FLAGS = { "--state": "value", "--drive": "none", "--knobs": "value", "--ledger": "value" };
+// Reads first, so the token and opt-in stops (and a running driver's attach) are decided before
+// anything is written, then settles the format and re-reads whatever a migration changed.
+export function waveSetup(opts) {
+  const first = readSetup(opts);
+  if (first.action === "stop" || first.drive.action === "attach") return first;
+  const { statePath, drive = false, formatAnswer = null, cwd = process.cwd() } = opts;
+  const abs = resolve(cwd, statePath);
+  const settled = settleFormat(abs, { checked: checkState(abs), answer: formatAnswer, driven: drive });
+  const halt = (stopReason, stopDetail) => ({ ...first, action: "stop", stopReason, stopDetail, stopTask: null });
+  if (settled.status === "locked" || settled.status === "failed") return halt("cycle-format", settled.detail);
+  if (settled.status === "question") return drive ? halt("needs-user", settled.question) : { ...first, formatQuestion: settled.question };
+  return settled.status === "migrated" ? { ...readSetup(opts), formatReport: settled.report } : first;
+}
+
+const FLAGS = { "--state": "value", "--drive": "none", "--knobs": "value", "--ledger": "value", "--format-answer": "value" };
 
 function cli(argv) {
   const flags = taskFlags(argv, FLAGS, ["--state"]);
-  return waveSetup({ statePath: flags["--state"], drive: flags["--drive"] === true, knobsLine: flags["--knobs"] ?? null, ledgerPath: flags["--ledger"] ?? null });
+  const formatAnswer = flags["--format-answer"] ?? null;
+  if (formatAnswer !== null && formatAnswer !== "yes" && formatAnswer !== "no") throw new UsageError(`--format-answer takes yes or no, got ${JSON.stringify(formatAnswer)}`);
+  return waveSetup({ statePath: flags["--state"], drive: flags["--drive"] === true, knobsLine: flags["--knobs"] ?? null, ledgerPath: flags["--ledger"] ?? null, formatAnswer });
 }
 
 if (isMain(import.meta.url, process.argv[1])) runTaskScript("wave-setup", () => cli(process.argv.slice(2)));

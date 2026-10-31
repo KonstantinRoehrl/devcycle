@@ -590,6 +590,87 @@ test("overview: waves, tasks and committed counts from the Dispatch Map, for par
   assert.deepEqual([done.overview.committed, done.overview.nextWave], [3, null]);
 });
 
+const stateOf = (c) => readFileSync(c.statePath, "utf8");
+
+test("format: an older cycle gains the row silently and resumes where it was", () => {
+  const c = cycle({ ledger: [committed(1)] });
+  const r = setup(c);
+  assert.equal(r.action, "resume");
+  assert.deepEqual([r.formatReport, r.formatQuestion], [[], null]);
+  assert.match(stateOf(c), /^- format: 1$/m);
+  assert.equal(r.overview.committed, 1);
+});
+
+test("format: a headerless ledger asks, then keeps progress on yes", () => {
+  const c = cycle();
+  writeFileSync(c.ledgerPath, `${committed(1)}\n${committed(2)}\n`);
+  const asked = setup(c);
+  assert.match(asked.formatQuestion, /2 events/);
+  assert.equal(asked.overview.committed, 0, "before the answer the ledger still reads as another cycle's");
+  assert.doesNotMatch(stateOf(c), /^- format:/m);
+  const yes = setup(c, { formatAnswer: "yes" });
+  assert.equal(yes.formatQuestion, null);
+  assert.equal(yes.overview.committed, 2);
+});
+
+test("format: an unbackticked header is normalized and the migrated position is the one returned", () => {
+  const c = cycle();
+  writeFileSync(c.ledgerPath, `Plan: docs/plan.md\n\n${committed(1)}\n`);
+  const r = setup(c);
+  assert.equal(r.overview.committed, 1);
+  assert.equal(r.ledgerSlot, "fresh");
+  assert.ok(r.formatReport.some((l) => l.includes("ledger.md")));
+});
+
+test("format: files newer than the plugin stop with cycle-format, unchanged", () => {
+  const c = cycle({ state: ["- format: 999"] });
+  const before = stateOf(c);
+  const r = setup(c);
+  assert.deepEqual([r.action, r.stopReason], ["stop", "cycle-format"]);
+  assert.match(r.stopDetail, /claude plugin update devcycle@devcycle/);
+  assert.equal(stateOf(c), before);
+});
+
+test("format: an unparseable row stops with cycle-format", () => {
+  const r = setup(cycle({ state: ["- format: one"] }));
+  assert.deepEqual([r.action, r.stopReason], ["stop", "cycle-format"]);
+});
+
+test("format: a foreign file is reported as foreign and never stamped", () => {
+  const c = cycle({ root: "/elsewhere" });
+  assert.equal(setup(c).stopReason, "foreign-state");
+  assert.doesNotMatch(stateOf(c), /^- format:/m);
+});
+
+test("format: beside a running driver an interactive resume attaches and changes nothing", () => {
+  const c = cycle({ state: [DRIVE_ROW], ledger: [] });
+  withLock(c, () => {
+    const r = setup(c);
+    assert.equal(r.drive.action, "attach");
+    assert.doesNotMatch(stateOf(c), /^- format:/m);
+  });
+});
+
+test("format: a driven session migrates under its own driver, and a driven question stops needs-user", () => {
+  const plain = cycle({ state: [DRIVE_ROW], ledger: [] });
+  withLock(plain, () => assert.notEqual(driven(plain).stopReason, "cycle-format"));
+  assert.match(stateOf(plain), /^- format: 1$/m);
+
+  const headerless = cycle({ state: [DRIVE_ROW] });
+  writeFileSync(headerless.ledgerPath, `${committed(1)}\n`);
+  withLock(headerless, () => {
+    const q = driven(headerless);
+    assert.deepEqual([q.action, q.stopReason], ["stop", "needs-user"]);
+    assert.match(q.stopDetail, /1 events/);
+  });
+});
+
+test("format: a typed --drive with no token is refused before any migration", () => {
+  const c = cycle();
+  assert.equal(setup(c, { drive: true }).stopReason, "no-driver");
+  assert.doesNotMatch(stateOf(c), /^- format:/m);
+});
+
 test("cli: one JSON object on stdout; a usage error exits 2, a state file outside git exits 3", () => {
   const home = makeTempDir("wave-setup-home-");
   const env = { PATH: process.env.PATH, HOME: home, CLAUDE_DOCTOR_PROJECTS: home };
@@ -600,7 +681,7 @@ test("cli: one JSON object on stdout; a usage error exits 2, a state file outsid
   assert.equal(ok.stdout.trim().split("\n").length, 1);
   const out = JSON.parse(ok.stdout);
   assert.deepEqual([out.ok, out.action, out.wave, out.appended, out.depthBand], [true, "resume", 1, [], "unknown"]);
-  for (const args of [[], ["--state"], ["--state", c.statePath, "--bogus"]]) {
+  for (const args of [[], ["--state"], ["--state", c.statePath, "--bogus"], ["--state", c.statePath, "--format-answer", "maybe"]]) {
     const r = run(args, { cwd: c.repo });
     assert.equal(r.status, 2, `${args.join(" ")}: ${r.stdout}`);
     const usage = JSON.parse(r.stdout);
