@@ -116,10 +116,11 @@ devcycle/                (public GitHub repo)
 │   └── on-device-driver.md       # drives claude-in-chrome for the on-device stage; the only
 │                                 # origin the browser guard below permits
 ├── hooks/                        # L4 — the hooks that ship (docs/decisions/README.md, 2026-08-20, 2026-09-02, 2026-09-05, 2026-10-07, 2026-10-30)
-│   ├── hooks.json                # registers the guards on PreToolUse (browser, destructive-git, and stop-guard on every tool), the commit-sensor and process-sensor on PostToolUse, the depth-sensor and process-sensor on SubagentStop, process-sensor on Stop, and the hooks module under modules
+│   ├── hooks.json                # registers the guards on PreToolUse (browser, destructive-git, and stop-guard on every tool), the commit-sensor, process-sensor and leftover-sensor on PostToolUse, the depth-sensor and process-sensor on SubagentStop, process-sensor on Stop, and the hooks module under modules
 │   ├── block-main-thread-browser.mjs  # denies browser calls from any origin but on-device-driver
 │   ├── stop-guard.mjs                 # while a /devcycle:stop request stands, denies a listed session's tool calls but the ones that finish the stop
 │   ├── process-sensor.mjs             # PostToolUse/SubagentStop/Stop: keeps .devcycle/processes.jsonl, the registry of background work /devcycle:stop reads
+│   ├── leftover-sensor.mjs            # PostToolUse(Bash): reports process groups that look leaked to a joined main thread; kills nothing (#395)
 │   ├── block-destructive-git.mjs      # denies destructive git from a guarded dispatch, and git stash on the main thread mid-cycle (#165, #235); also denies a guarded dispatch an until/while loop that sleeps; also denies a live $(jobs -p) (#395)
 │   ├── lib/find-state-file.mjs        # the bounded .devcycle/state.md walk the git guard and both sensors key off
 │   ├── lib/poll-guard.mjs             # the until/while-loop-that-sleeps check the git guard applies to a guarded dispatch (#385)
@@ -131,6 +132,7 @@ devcycle/                (public GitHub repo)
 │   └── mod-sink.mjs              # the module's Node side: the joined check and agent-trace writes
 ├── references/                   # L3 — one owner per convention; enumerated in §15.1
 ├── scripts/                      # L4 — validate.mjs, doctor.mjs, dream.mjs, the checkers, bump-version.mjs
+│   ├── leftover-processes.mjs         # the leaked-process-group signature and report the leftover-sensor reads; kills nothing (#395)
 ├── types/index.d.ts              # the hooks module's $.state contract, named by plugin.json "types"
 ├── workflows/                    # L4
 │   ├── lib/agent-cli.js          # shared subprocess layer: tagged logger, run(), claudeStructured()
@@ -359,9 +361,9 @@ gated by `userConfig.crossModelReview`.
   `devcycle:spec-reviewer`. The plugin id is not decoration:
   the harness passes `<plugin>:<name>` as a subagent's `agent_type`, which is the spelling the
   browser guard's allowlist must carry (`docs/platform-notes.md` § (e)).
-- Hooks: six settings hooks and one hooks module — three guards, `block-main-thread-browser`, `block-destructive-git` and `stop-guard`, named for
+- Hooks: seven settings hooks and one hooks module — three guards, `block-main-thread-browser`, `block-destructive-git` and `stop-guard`, named for
   what they deny rather than whom they guard (the git guard was `block-reviewer-git-write` until it
-  grew past reviewers, #235); and three sensors, `workload-sensor`, `dispatch-sensor` and `process-sensor`, named for
+  grew past reviewers, #235); and four sensors, `workload-sensor`, `dispatch-sensor`, `process-sensor` and `leftover-sensor`, named for
   what they watch rather than for the record they write. They are the only surface components not
   loaded by a command: each fires on a matched tool call, or when a subagent or a turn stops, instead
   (`docs/README.md` § Hooks). The hooks module, `devcycle-mod`, is named for the plugin it serves
