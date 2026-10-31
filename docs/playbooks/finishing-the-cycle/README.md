@@ -53,6 +53,8 @@ files, generated per-task briefs); anything short of an explicit yes leaves ever
 place, and the state file, ledger, scope, spec, plan, checklist, and on-device results — plus
 anything git-tracked — are never removed regardless of the answer.
 
+The stage also runs `scripts/leftover-processes.mjs` and passes on anything it reports: process groups still busy after their leader exited, which may be this cycle's leak. It is a notice, kills nothing and never changes the outcome. The diagram leaves it out because it does not branch.
+
 ## How it fits
 - Up: [the pipeline](../../pipeline/README.md) — where finish sits, the pipeline's last stage.
 - Source: [`playbooks/finishing-the-cycle.md`](../../../playbooks/finishing-the-cycle.md) — the
