@@ -132,7 +132,9 @@ current stage dispatched has not handed back, no message — a waiting message, 
 budget note — names `/clear`, `/devcycle:continue`, a fresh session or the context action. If
 anything is said, it is `still running: <n> pending — don't clear yet`. Safe to clear is what the
 `ready` mark records once the boundary completes, never a forecast. An unattended run's `--follow`
-and `--wait` watches are watches, not dispatched work.
+and `--wait` watches are watches, not dispatched work. `/devcycle:stop` ends work instead of waiting for
+it, so what it stopped is not in flight: its report names `/devcycle:continue` once `left` lists no
+subagent or background task, and until then names neither that nor the clear.
 
 **Proceeding without a clear.** When this session goes on past a boundary — a `Continue` action,
 or the user telling it to continue anyway — run

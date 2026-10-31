@@ -17,17 +17,20 @@ discovery step, so `commandMax` stays 183.
 **Supersedes:** nothing.
 
 ```text
-budget: surface-budget.json surfaceTotal 6706
-budget: context-budget.json commands/continue.md 70084
-budget: context-budget.json commands/cycle.md 83031
-budget: context-budget.json playbooks/finishing-the-cycle.md 49901
-budget: context-budget.json playbooks/planning-waves.md 78358
-budget: context-budget.json playbooks/receiving-review.md 115994
-budget: context-budget.json playbooks/reviewing-the-branch.md 58713
-budget: context-budget.json playbooks/scoping-the-request.md 35020
-budget: context-budget.json playbooks/sweeping-mechanical-changes.md 89334
-budget: context-budget.json playbooks/verifying-on-device.md 65270
-budget: context-budget.json references/handoff.md 11602
+budget: surface-budget.json surfaceTotal 6709
+budget: context-budget.json commands/continue.md 70312
+budget: context-budget.json commands/cycle.md 83259
+budget: context-budget.json playbooks/executing-waves.md 113743
+budget: context-budget.json playbooks/finishing-the-cycle.md 50129
+budget: context-budget.json playbooks/planning-waves.md 78586
+budget: context-budget.json playbooks/receiving-review.md 116222
+budget: context-budget.json playbooks/reviewing-the-branch.md 58941
+budget: context-budget.json playbooks/scoping-the-request.md 35248
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 89562
+budget: context-budget.json playbooks/taking-the-fast-path.md 53210
+budget: context-budget.json playbooks/verifying-on-device.md 65498
+budget: context-budget.json playbooks/writing-the-findings-document.md 64587
+budget: context-budget.json references/handoff.md 11830
 ```
 
 ## 2026-10-30 — Command ceiling raised 9→10 for /devcycle:stop
@@ -51,7 +54,7 @@ The growth below is the new command file and its routing row:
 
 ```text
 budget: surface-budget.json surfaceTotal 6699
-budget: context-budget.json commands/stop.md 4170
+budget: context-budget.json commands/stop.md 4185
 ```
 
 ## 2026-10-30 — A stopped branch review or on-device walk keeps what finished

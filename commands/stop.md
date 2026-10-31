@@ -54,13 +54,14 @@ cycle every other tool call, so use no other tool for reading or checking, this 
    - The stage it stopped in and its position: `record.stage` and `record.position.summary`.
    - What was stopped: each `stopped` entry's `id`, `kind` and `how`.
    - What was left running: each `left` entry's `id`, `kind` and `reason`, word for word, since the
-     `reason` says how to stop it. If `left` is empty, say nothing tracked was left running.
+     `reason` says how to stop it. If `left` is empty, say only that the stop found nothing still
+     running among the cycle's dispatch records and the background work it tracks.
    - That edits stay on disk, with the paths in `record.uncommitted`. A stop deletes, commits and
      resets nothing.
-   - The stop record's `path`, and that `/devcycle:continue` resumes at the step it stopped.
+   - The stop record's `path`, and how to resume only as `references/handoff.md` § Never name the
+     clear while work is in flight allows a stop to.
 
-   Do not suggest `/clear` while `left` names a subagent: its report has not come back, and
-   `references/handoff.md` owns that rule. Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
+   Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.
 
 A stop that was cut short can simply be run again: each step repeats safely and keeps what the first
 run recorded.

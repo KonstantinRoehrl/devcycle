@@ -87,6 +87,7 @@ devcycle/                (public GitHub repo)
 │   ├── doctor.md                 # standalone token/context/routing profile and config drift; starts no cycle
 │   ├── maintain.md               # read-only longitudinal repo-health assessment; starts no cycle
 │   ├── onboard.md                # bootstrap tier-2 in a repo; starts no cycle (see §8)
+│   ├── stop.md                   # stop a cycle at once, at any stage, and record the position `/devcycle:continue` resumes from
 │   └── reconcile.md              # triage/fix/reply to a PR's review comments; re-enters the branch's cycle when one exists
 ├── playbooks/                    # L1 — loaded only as ${CLAUDE_PLUGIN_ROOT}/playbooks/<name>.md
 │   ├── scoping-the-request.md    # rough idea → bounded scope; batched AskUserQuestion; nothing assumed;
@@ -114,9 +115,11 @@ devcycle/                (public GitHub repo)
 │   ├── spec-reviewer.md          # read-only spec-claims check against live code, before brainstorm's approval question
 │   └── on-device-driver.md       # drives claude-in-chrome for the on-device stage; the only
 │                                 # origin the browser guard below permits
-├── hooks/                        # L4 — the hooks that ship (docs/decisions/README.md, 2026-08-20, 2026-09-02, 2026-09-05, 2026-10-07)
-│   ├── hooks.json                # registers the guards on PreToolUse (browser + destructive-git), the commit-sensor on PostToolUse, the depth-sensor on SubagentStop, and the hooks module under modules
+├── hooks/                        # L4 — the hooks that ship (docs/decisions/README.md, 2026-08-20, 2026-09-02, 2026-09-05, 2026-10-07, 2026-10-30)
+│   ├── hooks.json                # registers the guards on PreToolUse (browser, destructive-git, and stop-guard on every tool), the commit-sensor and process-sensor on PostToolUse, the depth-sensor and process-sensor on SubagentStop, process-sensor on Stop, and the hooks module under modules
 │   ├── block-main-thread-browser.mjs  # denies browser calls from any origin but on-device-driver
+│   ├── stop-guard.mjs                 # while a /devcycle:stop request stands, denies a listed session's tool calls but the ones that finish the stop
+│   ├── process-sensor.mjs             # PostToolUse/SubagentStop/Stop: keeps .devcycle/processes.jsonl, the registry of background work /devcycle:stop reads
 │   ├── block-destructive-git.mjs      # denies destructive git from a guarded dispatch, and git stash on the main thread mid-cycle (#165, #235); also denies a guarded dispatch an until/while loop that sleeps
 │   ├── lib/find-state-file.mjs        # the bounded .devcycle/state.md walk the git guard and both sensors key off
 │   ├── lib/poll-guard.mjs             # the until/while-loop-that-sleeps check the git guard applies to a guarded dispatch (#385)

@@ -38,6 +38,9 @@ function stoppedOf(statePath, text) {
   if (!row) return null;
   const [stamp, recordPath = null] = row.split(/\s+/);
   const record = readStopRecord(dirname(statePath));
+  const run = field(text, "run");
+  // A record left by another run is not this cycle's stop, whatever the row says.
+  if (record?.run && run && record.run !== run) return null;
   return {
     stamp, recordPath, stage: record?.stage ?? field(text, "stage"), position: record?.position ?? null,
     left: record?.left ?? [], uncommitted: record?.uncommitted ?? [],

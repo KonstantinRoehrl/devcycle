@@ -3,19 +3,20 @@
 // repeat. It signals only what the driver lock and the on-device launch record name, through their
 // owners, and it never deletes a draft, commits or resets the tree.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as defaultSleep } from "node:timers/promises";
 import { activeRun } from "../hooks/lib/run-scope.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
 import { parseFlags } from "./cli-flags.mjs";
-import { markStopped } from "./dispatch-health.mjs";
+import { cycleDispatches, markStopped } from "./dispatch-health.mjs";
 import { readDriveLockHolder } from "./drive-lock.mjs";
 import { SIGNAL_GRACE_MS, stopDriver } from "./drive-execution.mjs";
 import { holderRunning } from "./drive-result.mjs";
 import { describe, findStateFiles } from "./find-state-files.mjs";
 import { markHandoff, withStateRow, withoutStateRow } from "./handoff-mark.mjs";
 import { isMain } from "./is-main.mjs";
+import { ledgerSlotState } from "./ledger-slot.mjs";
 import { field } from "./md-field.mjs";
 import { stopAll } from "./on-device-launch.mjs";
 import { openProcesses, readProcesses } from "./process-registry.mjs";
@@ -25,6 +26,7 @@ import { readStage } from "./stage-log.mjs";
 import { CLOSED_STAGE } from "./stage-entry.mjs";
 import { now as stamp } from "./stamp.mjs";
 import { isLiveRequest, readStopRecord, readStopRequest, stopPaths } from "./stop-files.mjs";
+import { taskBlocks } from "./task-files.mjs";
 import { parseLedgerLine, workTreeRoot } from "./task-ledger.mjs";
 
 const RECORD_REL = ".devcycle/stop.json";
@@ -66,6 +68,20 @@ function joinedSessions(root, run) {
   const text = orElse(() => readFileSync(recordPath(gitToplevel(root), run), "utf8"), "");
   const rows = text.split("\n").map((line) => orElse(() => JSON.parse(line), null));
   return [...new Set(rows.filter((row) => row?.kind === "session" && row.sessionHash).map((row) => row.sessionHash))];
+}
+
+// The foreground subagents the cycle's dispatch records name as running. The registry is fed only by async
+// launches and Stop's task list, so a normal implementer or reviewer dispatch is in it only when its id
+// matches an entry, and that entry reports it.
+function foregroundSubagents(devcycleDir, root) {
+  const registered = new Set(readProcesses(devcycleDir).map((p) => p.id));
+  return orElse(() => cycleDispatches(root), [])
+    .filter(({ record }) => !record.endedAt && !registered.has(record.agentId))
+    .map(({ task, role, record }) => ({
+      id: `task ${task} ${role}${record.agentId ? ` (agent ${record.agentId})` : ""}`,
+      kind: "subagent",
+      session: record.sessionId ? hashSession(record.sessionId) : null,
+    }));
 }
 
 async function stopTheDriver(statePath, root, { kill, sleep, now }) {
@@ -145,7 +161,7 @@ export async function requestStop({ state, env = process.env, kill, sleep = defa
   const onDevice = await stopTheApp(root);
   const actions = mergedActions(live ? earlier.actions : null, driver, onDevice);
   atomicWrite(paths.request, `${JSON.stringify({ ...request, actions })}\n`);
-  const open = run ? openProcesses(devcycleDir, { run, now: now() }) : [];
+  const open = [...(run ? openProcesses(devcycleDir, { run, now: now() }) : []), ...foregroundSubagents(devcycleDir, root)];
   return {
     requested: true,
     ...actions,
@@ -185,24 +201,53 @@ function uncommittedPaths(root) {
   return paths;
 }
 
-function latestLedgerEvents(devcycleDir) {
+const latestEvents = (ledgerText) => {
   const latest = {};
-  for (const line of readFileSync(join(devcycleDir, "ledger.md"), "utf8").split("\n")) {
+  for (const line of ledgerText.split("\n")) {
     const entry = parseLedgerLine(line);
     if (entry) latest[entry.task] = entry.event;
   }
   return latest;
+};
+const latestLedgerEvents = (devcycleDir) => latestEvents(readFileSync(join(devcycleDir, "ledger.md"), "utf8"));
+
+const NEXT_LISTED = 5;
+
+// Done and next in the plan's own terms: only its numbered tasks count, and only from a ledger of the
+// state's current plan slot, so the branch and drive pseudo-tasks and a previous cycle's lines never do.
+function executionSummary(root, devcycleDir, stateText, run) {
+  const plan = field(stateText, "plan")?.split(/\s+/)[0];
+  if (!plan || ["none", "<tbd>"].includes(plan)) return null;
+  const ledgerPath = join(devcycleDir, "ledger.md");
+  const current = ledgerSlotState({ root, plan, run }) !== "stale" && existsSync(ledgerPath);
+  const latest = latestEvents(current ? readFileSync(ledgerPath, "utf8") : "");
+  const planned = taskBlocks(readFileSync(join(root, plan), "utf8")).map(({ num }) => String(num));
+  if (!planned.length) return null;
+  const next = planned.filter((task) => latest[task] !== "committed").map((task) => `${task} (${latest[task] ?? "not started"})`);
+  const more = next.length > NEXT_LISTED ? `, and ${next.length - NEXT_LISTED} more` : "";
+  return `${planned.length - next.length} of ${planned.length} plan tasks committed${next.length ? `; next: ${next.slice(0, NEXT_LISTED).join(", ")}${more}` : ""}`;
 }
 
-function positionOf(devcycleDir, run, stage, ledger) {
+// The panel keeps a lens job's result as it resolves (workflows/review-panel.js § Result files), so a
+// stopped round shows what finished even though the stage log only records the refutation.
+function branchReviewSummary(devcycleDir) {
+  const reviewDir = join(devcycleDir, "review");
+  const round = Math.max(0, ...readdirSync(reviewDir).map((name) => Number(name.match(/^round-(\d+)$/)?.[1] ?? 0)));
+  if (!round) return null;
+  const files = readdirSync(join(reviewDir, `round-${round}`));
+  const lenses = files.filter((name) => !name.startsWith("_")).length;
+  return `round ${round}: ${lenses} lens result ${lenses === 1 ? "file" : "files"} on disk, ${files.includes("_refutation.json") ? "refutation results present" : "no refutation results"}`;
+}
+
+function positionOf(root, devcycleDir, stateText, run, stage) {
   const lines = run ? orElse(() => Object.values(readStage(devcycleDir, { run, stage })), []) : [];
   lines.sort((a, b) => a.at.localeCompare(b.at));
   const done = lines.map(({ key }) => key);
   const last = lines.at(-1)?.key ?? null;
-  const tasks = Object.keys(ledger).length;
-  const summary = tasks ? `${tasks} tasks in the ledger`
-    : done.length ? `${done.length} steps logged, the last ${last}`
-    : "no steps logged";
+  const fromFiles = stage === "execution" ? orElse(() => executionSummary(root, devcycleDir, stateText, run), null)
+    : stage === "branch-review" ? orElse(() => branchReviewSummary(devcycleDir), null)
+    : null;
+  const summary = fromFiles ?? (done.length ? `${done.length} steps logged, the last ${last}` : "no steps logged");
   return { done, last, summary };
 }
 
@@ -222,19 +267,28 @@ function leftReason({ kind, session }, caller) {
   return "started by another session: only that session can stop it, with /tasks";
 }
 
+// A record is filed, never deleted: it is the only account of what that stop left.
+function shelveRecord(paths, record) {
+  mkdirSync(paths.history, { recursive: true });
+  renameSync(paths.record, join(paths.history, `${(record?.stoppedAt ?? stamp()).replaceAll(":", "-")}.json`));
+}
+
 export async function finalizeStop({ state, env = process.env, sleep = defaultSleep, now = Date.now, mark = markStopped }) {
   const { statePath, devcycleDir, root } = placeOf(state);
   const paths = stopPaths(devcycleDir);
   const request = readStopRequest(devcycleDir);
-  const prior = readStopRecord(devcycleDir);
+  const stored = readStopRecord(devcycleDir);
   if (!request)
-    return prior
-      ? { record: prior, path: RECORD_REL, stopped: prior.stopped, left: prior.left }
+    return stored
+      ? { record: stored, path: RECORD_REL, stopped: stored.stopped, left: stored.left }
       : { record: null, path: null, stopped: [], left: [], reason: "no stop was requested for this cycle" };
   await waitForQuiet(devcycleDir, request.requestedAt, { sleep, now });
 
   const caller = callerHash(env);
   const run = request.run;
+  // Only this run's record continues: another run's leftover would lend its time, results and row stamp.
+  const prior = stored?.run === run ? stored : null;
+  if (stored && !prior) shelveRecord(paths, stored);
   const requestedMs = Date.parse(request.requestedAt);
   const retired = run
     ? readProcesses(devcycleDir).filter((p) => p.run === run && p.endedAt && new Date(p.endedAt).getTime() >= requestedMs)
@@ -261,9 +315,11 @@ export async function finalizeStop({ state, env = process.env, sleep = defaultSl
       reason: reason === "mismatch" ? "it is not the process the launch started, so it was left alone" : "could not confirm it is the process the launch started, so it was left alone",
     })),
     ...(onDevice?.error ? [{ id: "on-device app", kind: "app", reason: onDevice.error }] : []),
-    ...(run ? openProcesses(devcycleDir, { run, now: now() }) : []).map((p) => ({ id: p.id, kind: p.kind, reason: leftReason(p, caller) })),
+    ...[...(run ? openProcesses(devcycleDir, { run, now: now() }) : []), ...foregroundSubagents(devcycleDir, root)]
+      .map((p) => ({ id: p.id, kind: p.kind, reason: leftReason(p, caller) })),
     ...(stage === "on-device" ? [{ id: "browser tabs", kind: "tabs", reason: "tabs the on-device driver opened may remain, and devcycle keeps no record of them: close them yourself" }] : []),
   ]);
+  const stateText = readFileSync(statePath, "utf8");
   const ledger = stage === "execution" ? orElse(() => latestLedgerEvents(devcycleDir), {}) : {};
   const record = {
     stage,
@@ -271,7 +327,7 @@ export async function finalizeStop({ state, env = process.env, sleep = defaultSl
     stoppedBy: prior?.stoppedBy ?? caller,
     run,
     sessions: request.sessions,
-    position: positionOf(devcycleDir, run, stage, ledger),
+    position: positionOf(root, devcycleDir, stateText, run, stage),
     ledger,
     uncommitted: orElse(() => uncommittedPaths(root), []),
     stopped,
@@ -296,8 +352,7 @@ export function resumeStopped({ state }) {
   // A finalize that died before its last step would otherwise keep denying this session.
   if (hadRow || hadRecord) rmSync(paths.request, { force: true });
   if (!hadRecord) return { resumed: hadRow, record: null };
-  mkdirSync(paths.history, { recursive: true });
-  renameSync(paths.record, join(paths.history, `${(record?.stoppedAt ?? stamp()).replaceAll(":", "-")}.json`));
+  shelveRecord(paths, record);
   return { resumed: true, record };
 }
 

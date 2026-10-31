@@ -164,11 +164,10 @@ function outputPresent(root, rec) {
   return existsSync(path) && statSync(path).mtimeMs >= Date.parse(rec.record.startedAt);
 }
 
-// This session's in-flight task dispatches: a task whose last ledger line is its dispatch, keyed, with
-// a record this session wrote. An earlier session's are orphans of a cut-off, which the resume path
-// redispatches uncapped (references/resume.md § Resuming a wave's per-task position). A record stamped
-// `stopped` was ended by /devcycle:stop: neither in flight nor dead, so it spends no cap.
-function inFlightRecords(root, ledgerPath, sessionId) {
+// The in-flight task dispatches `keep` accepts: a task whose last ledger line is its dispatch, keyed, with
+// a record. A record stamped `stopped` was ended by /devcycle:stop: neither in flight nor dead, so it spends
+// no cap.
+function openRecords(root, ledgerPath, keep) {
   const last = new Map();
   const text = existsSync(ledgerPath) ? readFileSync(ledgerPath, "utf8") : "";
   for (const entry of text.split("\n").map(parseLedgerLine).filter(Boolean)) last.set(entry.task, entry);
@@ -178,9 +177,16 @@ function inFlightRecords(root, ledgerPath, sessionId) {
     const [, , round, retry] = e.key.split("/").map(Number);
     const recordPath = `.devcycle/dispatch/${e.task}-${role}-${round}-${retry}.json`;
     const record = readJson(join(root, recordPath));
-    return record?.sessionId === sessionId && !record.stopped ? [{ task: e.task, role, round, retry, recordPath, record }] : [];
+    return record && keep(record) && !record.stopped ? [{ task: e.task, role, round, retry, recordPath, record }] : [];
   });
 }
+
+// This session's: an earlier session's are orphans of a cut-off, which the resume path redispatches
+// uncapped (references/resume.md § Resuming a wave's per-task position).
+const inFlightRecords = (root, ledgerPath, sessionId) => openRecords(root, ledgerPath, (record) => record.sessionId === sessionId);
+
+// Every session's, for /devcycle:stop, which reports what a second terminal's cycle still has running.
+export const cycleDispatches = (root, ledgerPath = join(root, LEDGER_REL)) => openRecords(root, ledgerPath, () => true);
 
 // A transcript binds to the record whose brief its dispatch prompt names, started at or after the
 // record; the earliest such wins. The agent id is written back, so later calls read one file.

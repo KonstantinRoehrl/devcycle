@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { startProcess, readRecord } from "../../scripts/on-device-launch.mjs";
@@ -43,6 +43,15 @@ const fakeTime = (startMs = Date.now()) => {
   const clock = { ms: startMs };
   return { now: () => clock.ms, sleep: async (ms) => { clock.ms += ms; }, clock };
 };
+// A normal implementer dispatch: its ledger line and the record scripts/task-dispatch.mjs writes, which
+// names the dispatching session and, once bound, the agent.
+function dispatched(dir, task, { session = OTHER, agentId, role = "implementer", ...rest } = {}) {
+  const key = role === "implementer" ? `${task}/dispatched/1/0` : `${task}/review-round/1/0`;
+  appendFileSync(join(dir, "ledger.md"), `- [${OLD}] task=${task} event=${role === "implementer" ? "dispatched" : "review-round"} outcome=ok ref=none key=${key}\n`);
+  mkdirSync(join(dir, "dispatch"), { recursive: true });
+  const [, , round, retry] = key.split("/");
+  writeFileSync(join(dir, "dispatch", `${task}-${role}-${round}-${retry}.json`), JSON.stringify({ startedAt: OLD, sessionId: session, ...(agentId ? { agentId } : {}), ...rest }));
+}
 const writeLock = (root, fields) =>
   writeFileSync(join(root, ".devcycle/drive.lock"), JSON.stringify({ hostname: hostname(), state: ".devcycle/state.md", log: ".devcycle/drive.log", ...fields }));
 
@@ -81,6 +90,45 @@ test("request records who joined, reports what each session owns, and refuses a 
   assert.equal(refused.requested, false);
   assert.match(refused.reason, /another checkout/);
   assert.equal(existsSync(join(foreign.dir, "stop-request")), false, "a foreign cycle got a stop request");
+});
+
+test("request lists a foreground subagent another session dispatched, which no registry entry covers", async () => {
+  const { root, state, dir } = cycle({ stage: "execution" });
+  joinRun(root, ME, OTHER);
+  dispatched(dir, "3", { agentId: "afg" });
+  dispatched(dir, "4", { role: "reviewer" });
+  dispatched(dir, "5", { agentId: "astopped", stopped: OLD });
+  dispatched(dir, "6", { agentId: "aended", endedAt: OLD });
+  open(dir, "acovered", "subagent");
+  dispatched(dir, "7", { session: ME, agentId: "acovered" });
+  dispatched(dir, "8", { session: ME });
+  const result = await requestStop({ state, env: ENV, ...fakeTime() });
+  assert.deepEqual(result.owned.map(({ id }) => id), ["acovered", "task 8 implementer"]);
+  assert.deepEqual(result.otherSessions.map(({ id, kind, session }) => [id, kind, session]), [
+    ["task 3 implementer (agent afg)", "subagent", hashSession(OTHER)],
+    ["task 4 reviewer", "subagent", hashSession(OTHER)],
+  ]);
+});
+
+test("finalize reports an in-flight foreground subagent in left by task, role and agent, never one already stopped or ended", async () => {
+  const { root, state, dir } = cycle({ stage: "execution" });
+  joinRun(root, ME, OTHER);
+  dispatched(dir, "3", { agentId: "afg" });
+  dispatched(dir, "4", { role: "reviewer" });
+  dispatched(dir, "5", { agentId: "astopped", stopped: OLD });
+  dispatched(dir, "6", { agentId: "aended", endedAt: OLD });
+  open(dir, "acovered", "subagent");
+  dispatched(dir, "7", { session: ME, agentId: "acovered" });
+  dispatched(dir, "8", { session: ME });
+  await requestStop({ state, env: ENV, ...fakeTime() });
+  const { left, record } = await finalizeStop({ state, env: ENV, mark: () => {}, ...fakeTime() });
+  const reason = Object.fromEntries(left.map((e) => [e.id, e.reason]));
+  assert.deepEqual(Object.keys(reason).sort(), ["acovered", "task 3 implementer (agent afg)", "task 4 reviewer", "task 8 implementer"]);
+  assert.match(reason["task 3 implementer (agent afg)"], /next tool call is denied, so it ends then, and one inside a long tool call runs until that call returns/);
+  assert.match(reason["task 4 reviewer"], /next tool call is denied/);
+  assert.match(reason["task 8 implementer"], /stop it here with \/tasks/);
+  assert.deepEqual(left.filter(({ id }) => id.startsWith("task ")).map((e) => e.kind), ["subagent", "subagent", "subagent"]);
+  assert.deepEqual(record.left, left);
 });
 
 test("request signals a live driver and waits for its lock to clear before it returns", async () => {
@@ -276,19 +324,71 @@ test("finalize reports what was stopped and left, and stamps only this stop's Ta
   assert.match(reason["browser tabs"], /close them yourself/);
 });
 
-test("finalize in execution records each task's last ledger event", async () => {
-  const { state, dir } = cycle({ stage: "execution" });
+test("finalize in execution records each task's last ledger event and names the plan's tasks not yet committed", async () => {
+  const { root, state, dir } = cycle({ stage: "execution" });
+  mkdirSync(join(root, "docs"));
+  writeFileSync(join(root, "docs/plan.md"), "# Plan\n\n### Task 1: a\n\n### Task 2: b\n\n### Task 3: c\n");
+  appendFileSync(state, "- plan: docs/plan.md\n");
   writeFileSync(join(dir, "ledger.md"), [
-    "# ledger",
+    "# ledger", "Plan: `docs/plan.md`", `Run: \`${RUN}\``,
     "- [2026-10-30T09:00:00Z] task=1 event=dispatched outcome=ok ref=none key=1",
     "- [2026-10-30T09:01:00Z] task=1 event=committed outcome=green ref=none key=2",
     "- [2026-10-30T09:02:00Z] task=2 event=dispatched outcome=ok ref=none key=3",
+    "- [2026-10-30T09:03:00Z] task=branch event=review-round outcome=ok ref=none key=4",
+    "- [2026-10-30T09:04:00Z] task=drive event=user-decision outcome=ok ref=none key=5",
     "",
   ].join("\n"));
   await requestStop({ state, env: ENV, ...fakeTime() });
   const { record } = await finalizeStop({ state, env: ENV, ...fakeTime() });
-  assert.deepEqual(record.ledger, { 1: "committed", 2: "dispatched" });
-  assert.equal(record.position.summary, "2 tasks in the ledger");
+  assert.deepEqual(record.ledger, { 1: "committed", 2: "dispatched", branch: "review-round", drive: "user-decision" });
+  assert.equal(record.position.summary, "1 of 3 plan tasks committed; next: 2 (dispatched), 3 (not started)");
+});
+
+test("a ledger from another plan slot does not count toward the position", async () => {
+  const { root, state, dir } = cycle({ stage: "execution" });
+  mkdirSync(join(root, "docs"));
+  writeFileSync(join(root, "docs/plan.md"), "### Task 1: a\n");
+  appendFileSync(state, "- plan: docs/plan.md\n");
+  writeFileSync(join(dir, "ledger.md"), [
+    "# ledger", "Plan: `docs/older-plan.md`", "- [2026-10-30T09:01:00Z] task=1 event=committed outcome=green ref=none key=2", "",
+  ].join("\n"));
+  await requestStop({ state, env: ENV, ...fakeTime() });
+  const { record } = await finalizeStop({ state, env: ENV, ...fakeTime() });
+  assert.equal(record.position.summary, "0 of 1 plan tasks committed; next: 1 (not started)");
+});
+
+test("finalize in branch-review reports the lens result files on disk in the highest round and whether the refutation exists", async () => {
+  const { state, dir } = cycle({ stage: "branch-review" });
+  for (const [round, file] of [["round-1", "old.json"], ["round-2", "conventions.json"], ["round-2", "spec-compliance.md"], ["round-2", "_args.json"], ["round-10", "conventions.json"]]) {
+    mkdirSync(join(dir, "review", round), { recursive: true });
+    writeFileSync(join(dir, "review", round, file), "{}");
+  }
+  await requestStop({ state, env: ENV, ...fakeTime() });
+  assert.equal((await finalizeStop({ state, env: ENV, ...fakeTime() })).record.position.summary, "round 10: 1 lens result file on disk, no refutation results");
+
+  rmSync(join(dir, "review/round-10"), { recursive: true });
+  writeFileSync(join(dir, "review/round-2/_refutation.json"), "{}");
+  rmSync(join(dir, "stop.json"));
+  await requestStop({ state, env: ENV, ...fakeTime() });
+  assert.equal((await finalizeStop({ state, env: ENV, ...fakeTime() })).record.position.summary, "round 2: 2 lens result files on disk, refutation results present");
+});
+
+test("a stop record left by another run is filed under stop-history and not merged into this stop", async () => {
+  const { state, dir } = cycle();
+  writeFileSync(join(dir, "stop.json"), JSON.stringify({
+    stage: "planning", stoppedAt: OLD, stoppedBy: "someone-else", run: "ffffffffffffffff",
+    stopped: [{ id: "old", kind: "shell", how: "stopped with TaskStop" }], left: [{ id: "oldapp", kind: "app", reason: "left alone" }],
+  }));
+  await requestStop({ state, env: ENV, ...fakeTime() });
+  const { record, stopped, left } = await finalizeStop({ state, env: ENV, ...fakeTime() });
+  assert.notEqual(record.stoppedAt, OLD);
+  assert.equal(record.stoppedBy, hashSession(ME));
+  assert.equal(record.run, RUN);
+  assert.ok(!stopped.some(({ id }) => id === "old") && !left.some(({ id }) => id === "oldapp"), "the other run's results were inherited");
+  assert.match(readFileSync(state, "utf8"), new RegExp(`^- stopped: ${record.stoppedAt} `, "m"));
+  const filed = JSON.parse(readFileSync(join(dir, "stop-history", `${OLD.replaceAll(":", "-")}.json`), "utf8"));
+  assert.equal(filed.run, "ffffffffffffffff");
+  assert.equal(filed.stoppedBy, "someone-else");
 });
 
 test("a second finalize leaves one record, and one with no request and no record says so", async () => {
