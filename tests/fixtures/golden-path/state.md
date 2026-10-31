@@ -1,4 +1,5 @@
 # devcycle state
+- format: 1
 - stage: scoping
 - root: /repo
 - branch: topic/example

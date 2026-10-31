@@ -5,6 +5,39 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-31 — A cycle's files carry a format, and a driven session stops on a plugin update
+
+**Decision:** `.devcycle/state.md` gains `- format: <n>`, one version per cycle, with an ordered list of tested migrations that are never retired. Older files migrate on resume, in interactive and driven sessions alike, backing up what changes. Newer files stop with a message. A driven session on a different plugin version from its driver stops `plugin-updated`, and a pre-change driver stops through `needs-user`, the one reason its schema accepts as a stop for a person. `commands/continue.md` grows by one line to carry the format pointers, so `commandMax` moves to 184; the rest of the new prose lives in `references/resume.md`, which is why `surfaceTotal` and the closure figures below rise.
+
+**Why:** Plugin updates reach in-flight cycles. Field-by-field "predates this format" fallbacks left real gaps: older ledgers read as a previous cycle's and were archived, and a removed stage read as an abandoned cycle. `docs/platform-notes.md` § (m) records the measurements.
+
+**Supersedes:** nothing. Validate check 29 now holds the format's surface to `tests/fixtures/cycle-format-contract.json`.
+
+```text
+budget: surface-budget.json surfaceTotal 6749
+budget: surface-budget.json commandMax 184
+budget: context-budget.json commands/continue.md 73608
+budget: context-budget.json commands/cycle.md 85825
+budget: context-budget.json commands/learn.md 17170
+budget: context-budget.json commands/maintain.md 18349
+budget: context-budget.json commands/onboard.md 17458
+budget: context-budget.json commands/reconcile.md 24895
+budget: context-budget.json commands/review.md 25525
+budget: context-budget.json commands/verify.md 24623
+budget: context-budget.json playbooks/executing-waves.md 114084
+budget: context-budget.json playbooks/finishing-the-cycle.md 50309
+budget: context-budget.json playbooks/learning-from-sessions.md 64893
+budget: context-budget.json playbooks/maintaining-the-repo.md 65419
+budget: context-budget.json playbooks/onboarding-a-repo.md 31117
+budget: context-budget.json playbooks/planning-waves.md 78748
+budget: context-budget.json playbooks/receiving-review.md 118788
+budget: context-budget.json playbooks/reviewing-code.md 95901
+budget: context-budget.json playbooks/reviewing-the-branch.md 59103
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 91966
+budget: context-budget.json playbooks/verifying-on-device.md 65660
+budget: context-budget.json references/config.md 14644
+```
+
 ## 2026-10-30 — A stopped cycle resumes from a recorded row (`/devcycle:stop`)
 
 **Decision:** `.devcycle/state.md` gains the optional `stopped:` row. `/devcycle:continue` announces

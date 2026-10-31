@@ -18,6 +18,7 @@ transition, in this shape:
 
 ```markdown
 # devcycle state
+- format: 1
 - stage: <the stage to RESUME at; the enum lives in commands/cycle.md>
 - root: <absolute repo toplevel this cycle belongs to>
 - branch: <git branch> (cut from <base> at <sha>)
@@ -116,6 +117,40 @@ and let the user choose between adopting it (the repo genuinely moved: rewrite `
 keep everything else) and leaving it alone. The adopt-or-leave answer is the user's to
 give. A file with no `root:` line predates this format and is not foreign: adopt it by writing
 `root:` and `request:` at the next rewrite.
+
+## The format row
+
+`- format: <n>` says which on-disk format wrote this cycle's files. One number covers the state file
+and the ledger, and `scripts/cycle-format.mjs` holds the current number and the ordered migrations
+(`CONTRIBUTING.md` owns when it rises). Every rewrite carries the row forward like `kind:`, and
+`/devcycle:cycle` writes it from the template above. No row means format 0, which is every cycle from
+before the row existed, including ledgers with no readable `Plan:` header.
+
+`scripts/resume-check.mjs` and `scripts/wave-setup.mjs` settle it, after the ownership and stale
+checks, so a foreign or leftover file is never touched:
+
+| Files against plugin | What happens |
+| --- | --- |
+| Same | Nothing, and nothing is printed. |
+| Older | Migrated, then the resume carries on. Originals go to `.devcycle/format-backup-<from>/`. |
+| Newer | Stop: the message names `claude plugin update devcycle@devcycle` and the restart it needs. |
+| Row is not a number | Stop: the message quotes the row and says how to correct it. |
+| Another session migrating | Stop: wait for it, then run `/devcycle:continue` again. |
+
+A migration prints only what really changed: `resume-check.mjs` as `format-report:` lines,
+`wave-setup.mjs` as `formatReport`. Relay them once. A cycle whose only change is gaining the row
+prints nothing. A `stage: done` file is not migrated, since `/devcycle:cycle` resets it on reuse.
+
+**The headerless-ledger question.** A ledger with event lines and no `Plan:` header can't prove it
+belongs to this cycle, so the settle changes nothing and returns one question, as a
+`format-question:` line or as `formatQuestion`: ONE AskUserQuestion with that text — **Yes, it's this
+cycle's** · **No, it's an earlier cycle's**. Re-run the same script with `--format-answer yes` or
+`--format-answer no`. Yes writes the header and keeps the progress. No leaves the ledger alone, and
+the existing path archives it as a previous cycle's.
+
+Beside a live driver nothing migrates: an interactive resume attaches as it always does, the driver's
+next session stops on the version check, and the following `/devcycle:continue` migrates.
+`/devcycle:stop` never migrates and never refuses over the format.
 
 ## The state file's `configured:` line
 

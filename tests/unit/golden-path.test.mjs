@@ -565,8 +565,8 @@ test("harvested: commands/state-file-resume — the state file's shape and owner
   const t = read("references/resume.md");
   const template = t.match(/```markdown\n# devcycle state\n([\s\S]*?)```/)?.[1] ?? "";
   const lines = template.trim().split("\n");
-  assert.equal(lines.length, 17, "the state template is no longer 17 lines");
-  for (const field of ["stage", "root", "branch", "request", "kind", "scope", "audit", "diagnosis", "spec", "plan", "plan-counts", "ledger", "checklist", "run", "configured", "knobs", "updated"])
+  assert.equal(lines.length, 18, "the state template is no longer 18 lines");
+  for (const field of ["format", "stage", "root", "branch", "request", "kind", "scope", "audit", "diagnosis", "spec", "plan", "plan-counts", "ledger", "checklist", "run", "configured", "knobs", "updated"])
     assert.ok(lines.some((l) => l.startsWith(`- ${field}:`)), `state field missing: ${field}`);
   assert.ok(template.includes("- ledger: .devcycle/ledger.md"), "the ledger path is not pinned");
   assert.match(t, /The ownership check, run before trusting anything else in the file/);
@@ -2695,4 +2695,21 @@ test("a stopped cycle: continue announces it and closes it with the pending mark
   assert.ok(start.includes('scripts/stop-cycle.mjs" resume --state .devcycle/state.md'), "the start path no longer closes a recorded stop");
   assert.ok(start.indexOf("stop-cycle.mjs") < start.indexOf("--check-sandbox"), "the stop must close before the driver starts");
   assert.ok(read("references/handoff.md").includes("`/devcycle:stop`"), "handoff.md no longer names the continue action a stop uses");
+});
+
+test("/devcycle:continue routes every format outcome to the section that owns it", () => {
+  const t = read("commands/continue.md");
+  assert.match(t, /format-question:/);
+  assert.match(t, /format-report:/);
+  assert.match(t, /formatQuestion/);
+  assert.match(t, /formatReport/);
+  assert.match(t, /cycle-format/);
+  const resume = read("references/resume.md");
+  assert.match(resume, /^- format: 1$/m);
+  assert.match(resume, /^## The format row$/m);
+  const drive = read("references/drive.md");
+  assert.match(drive, /`plugin-updated`/);
+  assert.match(drive, /`cycle-format`/);
+  assert.match(read("playbooks/finishing-the-cycle.md"), /format-backup-\*/);
+  assert.match(read("references/config.md"), /`knob-renamed:`/);
 });

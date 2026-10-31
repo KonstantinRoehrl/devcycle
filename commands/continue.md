@@ -57,7 +57,7 @@ without that line, skip this section. In drive mode:
    update of a prior line, since a `/clear` always mints a new `$CLAUDE_CODE_SESSION_ID`.
 2a. Validate the state file against on-disk reality before trusting it — `node
    ${CLAUDE_PLUGIN_ROOT}/scripts/resume-check.mjs --state <the chosen state file>`. A non-zero exit
-   means `state.md` is stale (a recorded spec/plan/checklist artifact is gone, the recorded branch no
+   means `state.md` is stale or its format can't be settled (a recorded spec/plan/checklist artifact is gone, the recorded branch no
    longer exists — a leftover from a completed or abandoned cycle — or the stage is not a real enum
    value): surface the specific finding and ask the user how to proceed rather than
    continuing on the stale record. On success it also prints the stage's `entry:` and `note:`
@@ -65,6 +65,7 @@ without that line, skip this section. In drive mode:
    assuming a stale `state.md` already cleared it.
    On its last line, `handoff: pending`, ask the not-ready question
    `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § The state file holds, unless it printed `stopped:`.
+   A `format-question:` or `format-report:` line → `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § The format row.
 2b. Resolve knobs per the knob channel
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/config.md knob-channel`
    prints — only now, once the ownership check and `resume-check` have passed:
@@ -124,8 +125,9 @@ resolver command first, unchanged (it reads no state file), then
 It runs the ownership check, `resume-check`, the knob comparison, the branch check and the depth
 probe, and prints one JSON object. Every gate stays this command's; it reads their inputs there:
 
-- `action: "stop"` → report `stopDetail` and stop; `foreign-state` and `resume-check` go to the
+- `action: "stop"` → report `stopDetail` and stop; `foreign-state`, `resume-check` and `cycle-format` go to the
   user as steps 2 and 2a say.
+- `formatQuestion` or `formatReport` → step 2a's format lines, first; an answer re-runs this script with `--format-answer`.
 - Otherwise append this session's row as its own Bash call, never folded into another command —
   the hooks module joins a session to its run only on a main-loop call carrying `--kind session`:
   `node ${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append --run <state.run> --kind session --sessionId "$CLAUDE_CODE_SESSION_ID"`.
