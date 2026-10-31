@@ -143,11 +143,11 @@ verdict the run superseded into `.devcycle/archive-<YYYY-MM-DD>-<branch-slug>/`,
 `${CLAUDE_PLUGIN_ROOT}/references/loops.md`. A findings directory holding two contradicting
 verdicts for one loop is a defect, not a record.
 
-Then copy, never move, into `.devcycle/archive-<YYYY-MM-DD>-<branch-slug>/`: `ledger.md`, and
-the `briefs/`, `evidence/`, `findings/`, `reports/` and `format-backup-*` directories. Use the cycle's own branch name,
-slugified, and today's UTC date. The copy runs unconditionally and asks nothing: it only
-duplicates files this stage already declines to delete, so it cannot lose work and cannot
-change the finish verdict. A failed copy is reported and the stage continues.
+Then copy into `.devcycle/archive-<YYYY-MM-DD>-<branch-slug>/`: `ledger.md`, and
+the `briefs/`, `evidence/`, `findings/` and `reports/` directories; move `format-backup-*` there. Use the cycle's own branch name,
+slugified, and today's UTC date. The step asks nothing: it only
+duplicates files this stage already declines to delete, or moves a backup, so it cannot
+lose work or change the finish verdict. A failed copy is reported and the stage continues.
 
 ## Clean up this cycle's ephemeral artifacts
 

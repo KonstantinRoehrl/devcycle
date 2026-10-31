@@ -10,7 +10,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { isMain } from "./is-main.mjs";
-import { installedVersion } from "./verification.mjs";
+import { UNREADABLE_PLUGIN_VERSION, installedVersion } from "./verification.mjs";
 import { field } from "./md-field.mjs";
 import { describe } from "./find-state-files.mjs";
 import { checkState } from "./resume-check.mjs";
@@ -282,7 +282,10 @@ function wavePosition(root, planText, { waves, positions }, lines) {
 export const pluginUpdateDetail = (from, to) =>
   `The devcycle plugin updated from ${from} to ${to} while the driver was running, so this session did no work. Restart Claude Code, then run /devcycle:continue to carry on with ${to}.`;
 
-function readSetup({ statePath, drive = false, knobsLine = null, ledgerPath = null, env = process.env, cwd = process.cwd(), pluginVersion = installedVersion() }) {
+// `settle(checked)` is the format settle (see waveSetup): given the state's resume-check verdict it
+// returns scripts/cycle-format.mjs's settleFormat result, and null skips it.
+function readSetup(opts) {
+  const { statePath, drive = false, knobsLine = null, ledgerPath = null, env = process.env, cwd = process.cwd(), pluginVersion = installedVersion(), settle = null } = opts;
   const abs = resolve(cwd, statePath);
   let stateText;
   try {
@@ -327,13 +330,22 @@ function readSetup({ statePath, drive = false, knobsLine = null, ledgerPath = nu
   if (drive && !result.drive.opted) return stop("not-opted-in", "the state file carries no drive: auto row");
   // A driver from before this variable existed rejects any reason its own schema lacks, and would end
   // `failed` and restart, so needs-user is the one route that reaches it as a stop for a person. An
-  // installed version that cannot be read confirms nothing and blocks nothing.
+  // installed version that cannot be read confirms nothing and blocks nothing, and neither does a
+  // driver that says it could not read its own.
   if (drive && pluginVersion) {
     const started = env.DEVCYCLE_DRIVER_PLUGIN_VERSION;
     if (started === undefined) return stop("needs-user", pluginUpdateDetail("an earlier version", pluginVersion));
-    if (started !== pluginVersion) return stop("plugin-updated", pluginUpdateDetail(started, pluginVersion));
+    if (started !== UNREADABLE_PLUGIN_VERSION && started !== pluginVersion) return stop("plugin-updated", pluginUpdateDetail(started, pluginVersion));
   }
   const checked = checkState(abs);
+  // The format settles here, after the gates that decide whether this session may act at all and
+  // before any verdict reads the cycle: a migration may rename the stage or rewrite the ledger, so
+  // what it changes is read again from the top.
+  const settled = settle ? settle(checked) : { status: "none" };
+  if (settled.status === "locked" || settled.status === "failed") return stop("cycle-format", settled.detail);
+  if (settled.status === "question" && drive) return stop("needs-user", settled.question);
+  if (settled.status === "migrated") return { ...readSetup({ ...opts, settle: null }), formatReport: settled.report };
+  if (settled.status === "question") result.formatQuestion = settled.question;
   state.stopped = checked.stopped ?? null;
   if (checked.kind === "foreign") return stop("foreign-state", `its root: ${checked.recordedRoot} is not this checkout (${checked.actualRoot})`);
 
@@ -344,7 +356,8 @@ function readSetup({ statePath, drive = false, knobsLine = null, ledgerPath = nu
   if (attach) return { ...result, drive: decided({ lock: { pid: driver.pid, log: driver.log }, action: "attach", writeRow: null, confirm: null, gate: null }) };
   if (checked.kind === "format") return stop("cycle-format", checked.errors[0]);
   if (!checked.ok) return stop("resume-check", checked.errors.join("; "));
-  if (state.stage !== "execution") return stop("resume-check", `the state file is at stage ${state.stage}, not execution`);
+  if (state.stage !== "execution")
+    return result.formatQuestion ? result : stop("resume-check", `the state file is at stage ${state.stage}, not execution`);
 
   result.entryLines = checked.lines;
   result.knobDrift = recordedKnobs && knobsLine
@@ -372,18 +385,12 @@ function readSetup({ statePath, drive = false, knobsLine = null, ledgerPath = nu
   return result;
 }
 
-// Reads first, so the token and opt-in stops (and a running driver's attach) are decided before
-// anything is written, then settles the format and re-reads whatever a migration changed.
+// The token, opt-in and driver-version stops are decided before anything is written; then the format
+// settles (scripts/cycle-format.mjs) and the cycle is read as the migration left it.
 export function waveSetup(opts) {
-  const first = readSetup(opts);
-  if (first.action === "stop" || first.drive.action === "attach") return first;
   const { statePath, drive = false, formatAnswer = null, cwd = process.cwd() } = opts;
   const abs = resolve(cwd, statePath);
-  const settled = settleFormat(abs, { checked: checkState(abs), answer: formatAnswer, driven: drive });
-  const halt = (stopReason, stopDetail) => ({ ...first, action: "stop", stopReason, stopDetail, stopTask: null });
-  if (settled.status === "locked" || settled.status === "failed") return halt("cycle-format", settled.detail);
-  if (settled.status === "question") return drive ? halt("needs-user", settled.question) : { ...first, formatQuestion: settled.question };
-  return settled.status === "migrated" ? { ...readSetup(opts), formatReport: settled.report } : first;
+  return readSetup({ ...opts, settle: (checked) => settleFormat(abs, { checked, answer: formatAnswer, driven: drive }) });
 }
 
 const FLAGS = { "--state": "value", "--drive": "none", "--knobs": "value", "--ledger": "value", "--format-answer": "value" };

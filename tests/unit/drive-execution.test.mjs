@@ -8,10 +8,10 @@ import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { readSection } from "../../scripts/read-section.mjs";
-import { installedVersion } from "../../scripts/verification.mjs";
+import { UNREADABLE_PLUGIN_VERSION, installedVersion } from "../../scripts/verification.mjs";
 import { DRIVE_LOCK_REL, readDriveLockHolder } from "../../scripts/drive-lock.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
-import { classifyTrackedChanges, inFlightFiles, SESSION_START_TOKENS, stopDriver } from "../../scripts/drive-execution.mjs";
+import { childEnv, classifyTrackedChanges, inFlightFiles, SESSION_START_TOKENS, stopDriver } from "../../scripts/drive-execution.mjs";
 import { classifyDrive, HANDLED_REL, readDriveResult, readHandledResult, RESULT_REL, STOP_REQUEST_REL } from "../../scripts/drive-result.mjs";
 import { commitAll, makeFakeBin, makeRepo, sh, writeInto } from "./helpers.mjs";
 
@@ -351,6 +351,19 @@ test("each session is told the plugin version its driver started on, overriding 
   const { first, second } = await driverCallsWithEnv({ DEVCYCLE_DRIVER_PLUGIN_VERSION: "0.0.0-inherited" });
   assert.equal(first.driverVersion, installedVersion());
   assert.equal(second.driverVersion, installedVersion());
+});
+
+test("a driver that cannot read its own plugin version says so, rather than leaving the variable out", () => {
+  const ctx = { token: "t", effort: "default" };
+  const inherited = process.env.DEVCYCLE_DRIVER_PLUGIN_VERSION;
+  process.env.DEVCYCLE_DRIVER_PLUGIN_VERSION = "0.0.0-inherited";
+  try {
+    assert.equal(childEnv(ctx, "1.2.3").DEVCYCLE_DRIVER_PLUGIN_VERSION, "1.2.3");
+    assert.equal(childEnv(ctx, null).DEVCYCLE_DRIVER_PLUGIN_VERSION, UNREADABLE_PLUGIN_VERSION);
+  } finally {
+    if (inherited === undefined) delete process.env.DEVCYCLE_DRIVER_PLUGIN_VERSION;
+    else process.env.DEVCYCLE_DRIVER_PLUGIN_VERSION = inherited;
+  }
 });
 
 // D5: a driven session holds DEVCYCLE_DRIVE_TOKEN; only /devcycle:continue starts a driver.

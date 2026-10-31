@@ -205,6 +205,62 @@ test("a failed write restores from the backup, and a re-run reuses that backup",
   assert.equal(read(join(c.repo, ".devcycle/format-backup-0/ledger.md")), before[1], "a re-run overwrote the backup");
 });
 
+// A writer that really writes, except that it throws for each (path, nth write to that path) pair in `failures`.
+function flakyWriter(failures) {
+  const seen = new Map();
+  const log = [];
+  const write = (path, text) => {
+    seen.set(path, (seen.get(path) ?? 0) + 1);
+    log.push(path);
+    if (failures.some(([p, nth]) => p === path && nth === seen.get(path))) throw new Error("injected write failure");
+    writeFileSync(path, text);
+  };
+  return { write, log };
+}
+
+test("a failed write restores what this run read, not a leftover backup from an earlier run", () => {
+  const c = frozenCycle("ledger-unbackticked.md");
+  const before = [read(c.statePath), read(c.ledgerPath)];
+  const backup = join(c.repo, ".devcycle/format-backup-0");
+  mkdirSync(backup, { recursive: true });
+  writeFileSync(join(backup, "ledger.md"), "Plan: docs/older.md\nan earlier cycle's ledger\n");
+  writeFileSync(join(backup, "state.md"), "# devcycle state\n- stage: planning\n");
+  const { write } = flakyWriter([[c.statePath, 1]]);
+  const r = settle(c, { write });
+  assert.equal(r.status, "failed");
+  assert.deepEqual([read(c.statePath), read(c.ledgerPath)], before);
+  assert.match(read(join(backup, "ledger.md")), /an earlier cycle's ledger/, "the existing backup is reused, never overwritten");
+});
+
+test("a rollback that itself fails names the files it could not restore and where the backup is", () => {
+  const c = frozenCycle("ledger-unbackticked.md");
+  const { write } = flakyWriter([[c.statePath, 1], [c.ledgerPath, 2]]);
+  const r = settle(c, { write });
+  assert.equal(r.status, "failed");
+  assert.match(r.detail, /ledger\.md/);
+  assert.match(r.detail, /\.devcycle\/format-backup-0/);
+  assert.doesNotMatch(r.detail, /state\.md/, "state.md was never changed, so it is not among the files left unrestored");
+  assert.doesNotMatch(r.detail, /as they were/);
+});
+
+test("a failure before the first write still reports the files as they were", () => {
+  const c = frozenCycle("ledger-unbackticked.md");
+  const before = [read(c.statePath), read(c.ledgerPath)];
+  const { write, log } = flakyWriter([[c.ledgerPath, 1]]);
+  const r = settle(c, { write });
+  assert.equal(r.status, "failed");
+  assert.match(r.detail, /as they were/);
+  assert.deepEqual([read(c.statePath), read(c.ledgerPath)], before);
+  assert.deepEqual(log, [c.ledgerPath], "nothing was written after the first failure");
+});
+
+test("a failed write never rewrites a file this run did not change", () => {
+  const c = frozenCycle("ledger-unbackticked.md");
+  const { write, log } = flakyWriter([[c.statePath, 1]]);
+  settle(c, { write });
+  assert.deepEqual(log, [c.ledgerPath, c.statePath, c.ledgerPath], "ledger written, state write failed, only the ledger put back");
+});
+
 test("the migration list has no gaps from 0 to the current format", () => {
   assert.deepEqual(MIGRATIONS.map((m) => [m.from, m.to]), Array.from({ length: CURRENT_FORMAT }, (_, i) => [i, i + 1]));
 });

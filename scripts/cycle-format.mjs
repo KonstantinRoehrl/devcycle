@@ -114,13 +114,22 @@ function migrateLocked(statePath, ledgerPath, { answer, migrations, current, wri
     // An existing copy is the true original: a re-run after a crash must not back up half-migrated files.
     if (!existsSync(join(backupDir, name))) copyFileSync(pathOf(name), join(backupDir, name));
   }
+  const written = [];
+  const put = (name, text) => { write(pathOf(name), text); written.push(name); };
   try {
-    if (changed.includes(LEDGER)) write(ledgerPath, applied.files[LEDGER]);
+    if (changed.includes(LEDGER)) put(LEDGER, applied.files[LEDGER]);
     // The row goes last: a crash before this write leaves an older row, and the next resume re-runs.
-    write(statePath, stampFormat(applied.files[STATE], current));
+    put(STATE, stampFormat(applied.files[STATE], current));
   } catch (err) {
-    for (const name of changed) write(pathOf(name), readFileSync(join(backupDir, name), "utf8"));
-    if (!changed.includes(STATE)) write(statePath, stateText);
+    // Put back from the originals this run read, never from the backup, which may be an earlier run's.
+    // Only a completed write needs undoing; a file this run never wrote is not touched again.
+    const unrestored = written.filter((name) => {
+      try { write(pathOf(name), originals[name]); return false; } catch { return true; }
+    });
+    if (unrestored.length) {
+      const where = unrestored.map((name) => relative(rootOf, pathOf(name))).join(", ");
+      return { status: "failed", report: [], detail: `Migrating the cycle's files failed (${err.message}), and ${where} could not be put back. The originals are in ${relative(rootOf, backupDir)}/: copy ${unrestored.join(" and ")} from there back into .devcycle/, then run /devcycle:continue again.` };
+    }
     return { status: "failed", report: [], detail: `The cycle's files were not migrated and are as they were: ${err.message}` };
   }
   const report = [

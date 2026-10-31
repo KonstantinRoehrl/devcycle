@@ -9,8 +9,9 @@ import { hostname } from "node:os";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, sh, writeInto } from "./helpers.mjs";
+import { MIGRATIONS } from "../../scripts/cycle-format.mjs";
 import { RETRY_CAP, pluginUpdateDetail, taskPosition, waveSetup } from "../../scripts/wave-setup.mjs";
-import { installedVersion } from "../../scripts/verification.mjs";
+import { UNREADABLE_PLUGIN_VERSION, installedVersion } from "../../scripts/verification.mjs";
 import { DRIVE_LOCK_REL, acquireDriveLock, driveTokenHash, releaseDriveLock } from "../../scripts/drive-lock.mjs";
 import { RESULT_REL } from "../../scripts/drive-result.mjs";
 import { parseLedgerLine } from "../../scripts/task-ledger.mjs";
@@ -643,6 +644,63 @@ test("format: a foreign file is reported as foreign and never stamped", () => {
   assert.doesNotMatch(stateOf(c), /^- format:/m);
 });
 
+// MIGRATIONS holds no stage rename in production, so the step a test needs is put there and taken out again.
+function withStageRename(from, to, fn) {
+  const step = MIGRATIONS.find((m) => m.from === 0);
+  const renames = step.renames;
+  step.renames = { [from]: to };
+  try {
+    return fn();
+  } finally {
+    step.renames = renames;
+  }
+}
+const retired = (c) => writeFileSync(c.statePath, stateOf(c).replace("- stage: execution", "- stage: retired-stage"));
+
+test("format: a stage a pending migration renames to execution is migrated first, then resumes", () => {
+  withStageRename("retired-stage", "execution", () => {
+    const c = cycle({ ledger: [committed(1)] });
+    retired(c);
+    const r = setup(c);
+    assert.equal(r.action, "resume", r.stopDetail);
+    assert.equal(r.state.stage, "execution");
+    assert.match(r.formatReport.join("\n"), /retired-stage is now execution/);
+    assert.match(stateOf(c), /^- stage: execution$/m);
+    assert.match(stateOf(c), /^- format: 1$/m);
+    assert.equal(r.overview.committed, 1);
+  });
+});
+
+test("format: a driven session migrates a renamed stage before it reads it, once its own gates pass", () => {
+  withStageRename("retired-stage", "execution", () => {
+    const c = cycle({ state: [DRIVE_ROW], ledger: [] });
+    retired(c);
+    withLock(c, () => {
+      const r = driven(c);
+      assert.equal(r.action, "resume", r.stopDetail);
+      assert.equal(r.state.stage, "execution");
+    });
+    const mismatched = cycle({ state: [DRIVE_ROW], ledger: [] });
+    retired(mismatched);
+    withLock(mismatched, () => {
+      const r = driven(mismatched, { pluginVersion: "9.9.9" });
+      assert.equal(r.stopReason, "plugin-updated");
+    });
+    assert.match(stateOf(mismatched), /^- stage: retired-stage$/m, "a mismatched session migrated nothing");
+    assert.doesNotMatch(stateOf(mismatched), /^- format:/m);
+  });
+});
+
+test("format: a current-format cycle is read exactly as before, and its file is not touched", () => {
+  const c = cycle({ state: ["- format: 1"], ledger: [committed(1)] });
+  const before = stateOf(c);
+  const r = setup(c);
+  assert.equal(r.action, "resume");
+  assert.deepEqual([r.formatReport, r.formatQuestion], [[], null]);
+  assert.equal(r.overview.committed, 1);
+  assert.equal(stateOf(c), before);
+});
+
 test("format: beside a running driver an interactive resume attaches and changes nothing", () => {
   const c = cycle({ state: [DRIVE_ROW], ledger: [] });
   withLock(c, () => {
@@ -809,6 +867,11 @@ test("driver version: absent means a driver from before this change, and only ne
 
 test("driver version: an unreadable installed version never blocks", () => {
   const { r } = drivenWithLock({ DEVCYCLE_DRIVER_PLUGIN_VERSION: "1.2.3" }, { pluginVersion: null });
+  assert.equal(r.action, "resume");
+});
+
+test("driver version: a driver that could not read its own version is not compared, and the session carries on", () => {
+  const { r } = drivenWithLock({ DEVCYCLE_DRIVER_PLUGIN_VERSION: UNREADABLE_PLUGIN_VERSION }, { pluginVersion: "1.3.0" });
   assert.equal(r.action, "resume");
 });
 

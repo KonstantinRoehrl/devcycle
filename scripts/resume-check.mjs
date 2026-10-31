@@ -96,8 +96,12 @@ export function checkState(statePath) {
   const errors = [];
   const stage = field(text, "stage");
   const format = formatVerdict(text);
-  const pendingRename = format.verdict === "older" && isPendingRename(stage, format.from);
-  if (!pendingRename && (!stage || (VALID_STAGES.size > 0 && !VALID_STAGES.has(stage))))
+  // A stage this plugin does not know is explained, not stale, when the file's format says why: an
+  // older file's step renames it, and a newer plugin's cycle may have added it (the format stop below
+  // tells the user to update).
+  const stageExplained = format.verdict === "newer" || format.verdict === "unparseable"
+    || (format.verdict === "older" && isPendingRename(stage, format.from));
+  if (!stageExplained && (!stage || (VALID_STAGES.size > 0 && !VALID_STAGES.has(stage))))
     errors.push(`stage: "${stage}" is not a valid devcycle stage`);
 
   const root = field(text, "root");

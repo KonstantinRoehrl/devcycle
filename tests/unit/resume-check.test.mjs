@@ -587,3 +587,44 @@ test("--format-answer takes only yes or no", () => {
   assert.equal(r.status, 1);
   assert.match(r.stderr, /--format-answer/);
 });
+
+test("a newer-format file that names a stage this plugin lacks gets the update message, not the stale one", () => {
+  const dir = makeTempDir("resume-check-");
+  const r = run(makeState(dir, ["- format: 999", "- stage: a-stage-from-the-future"]));
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /claude plugin update devcycle@devcycle/);
+  assert.match(r.stderr, /[Rr]estart/);
+  assert.doesNotMatch(r.stderr, /stale|not a valid devcycle stage/);
+});
+
+test("an unparseable format row with an unknown stage gets the row message, not the stale one", () => {
+  const dir = makeTempDir("resume-check-");
+  const r = run(makeState(dir, ["- format: one", "- stage: a-stage-from-the-future"]));
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /"one"/);
+  assert.doesNotMatch(r.stderr, /stale|not a valid devcycle stage/);
+});
+
+test("a stage nothing explains still reads as stale under a current format row", () => {
+  const dir = makeTempDir("resume-check-");
+  const r = run(makeState(dir, ["- format: 1", "- stage: a-stage-from-the-future"]));
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /stale/);
+  assert.match(r.stderr, /not a valid devcycle stage/);
+});
+
+test("a newer-format file whose plan or branch is gone is still reported stale first", () => {
+  const dir = makeTempDir("resume-check-");
+  const missing = run(makeState(dir, ["- format: 999", "- stage: a-stage-from-the-future", "- plan: docs/gone.md"]));
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /stale/);
+  assert.match(missing.stderr, /docs\/gone\.md/);
+  assert.doesNotMatch(missing.stderr, /claude plugin update/);
+
+  const repo = makeRepo();
+  const branchGone = run(makeState(repo, ["- format: 999", "- stage: planning", "- branch: feat/never-existed (cut from main at 0000000)"]));
+  assert.equal(branchGone.status, 1);
+  assert.match(branchGone.stderr, /stale/);
+  assert.match(branchGone.stderr, /feat\/never-existed/);
+  assert.doesNotMatch(branchGone.stderr, /claude plugin update/);
+});
