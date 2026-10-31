@@ -105,7 +105,7 @@ test("the pin step writes only name=success|failure lines to $GITHUB_OUTPUT, how
   assert.equal(run.status, 0, run.stderr);
   assert.ok(run.outputs.length >= 6, `expected the install line and one line per re-run, got ${JSON.stringify(run.outputs)}`);
   for (const line of run.outputs) assert.match(line, WELL_FORMED);
-  for (const line of ["install=success", "validate_marketplace=success", "validate_manifest=success", "hooks_tests=success", "plugin_install=success", "load_check=success"]) {
+  for (const line of ["install=success", "marketplace_add=success", "validate_marketplace=success", "validate_manifest=success", "hooks_tests=success", "plugin_install=success", "load_check=success"]) {
     assert.ok(run.outputs.includes(line), `${line} missing from ${JSON.stringify(run.outputs)}`);
   }
 });
@@ -129,17 +129,42 @@ test("the pin retries its npm install three times, so one blip does not lose the
 
 test("the pin re-runs a failed plugin install, retrying it, and reports failure only once the retries are spent", () => {
   const blip = runPinStep(["plugin_install"], "claude plugin install devcycle@devcycle=2");
-  assert.deepEqual(blip.outputs, ["install=success", "plugin_install=success"]);
+  assert.deepEqual(blip.outputs, ["install=success", "marketplace_add=success", "plugin_install=success"]);
   assert.equal(blip.calls("claude plugin install devcycle@devcycle"), 3);
   const broken = runPinStep(["plugin_install"], "claude plugin install devcycle@devcycle=all");
-  assert.deepEqual(broken.outputs, ["install=success", "plugin_install=failure"]);
+  assert.deepEqual(broken.outputs, ["install=success", "marketplace_add=success", "plugin_install=failure"]);
   assert.equal(broken.calls("claude plugin install devcycle@devcycle"), 3);
 });
 
 test("the pin's load check retries its marketplace adds", () => {
   const run = runPinStep(["load_check"], "claude plugin marketplace add ./=1;claude plugin marketplace add anthropics/claude-plugins-official=2");
-  assert.deepEqual(run.outputs, ["install=success", "load_check=success"]);
+  assert.deepEqual(run.outputs, ["install=success", "marketplace_add=success", "load_check=success"]);
   assert.equal(run.calls("claude plugin marketplace add anthropics/claude-plugins-official"), 3);
   const down = runPinStep(["load_check"], "claude plugin marketplace add ./=all");
-  assert.deepEqual(down.outputs, ["install=success", "load_check=failure"]);
+  assert.deepEqual(down.outputs, ["install=success", "marketplace_add=failure"]);
+});
+
+test("the pin records its marketplace adds as their own output and judges neither re-run when they fail", () => {
+  const installOnly = runPinStep(["plugin_install"]);
+  assert.deepEqual(installOnly.outputs, ["install=success", "marketplace_add=success", "plugin_install=success"]);
+  for (const line of installOnly.outputs) assert.match(line, WELL_FORMED);
+  const loadOnly = runPinStep(["load_check"]);
+  assert.deepEqual(loadOnly.outputs, ["install=success", "marketplace_add=success", "load_check=success"]);
+  const down = runPinStep(["plugin_install"], "claude plugin marketplace add ./=all");
+  assert.equal(down.status, 0, down.stderr);
+  assert.deepEqual(down.outputs, ["install=success", "marketplace_add=failure"], "a failed marketplace add is not an install verdict");
+  assert.equal(down.calls("claude plugin install devcycle@devcycle"), 0);
+  const blip = runPinStep(["load_check"], "claude plugin marketplace add anthropics/claude-plugins-official=2");
+  assert.deepEqual(blip.outputs, ["install=success", "marketplace_add=success", "load_check=success"]);
+  const noMarketplaceNeeded = runPinStep(["hooks_tests"]);
+  assert.deepEqual(noMarketplaceNeeded.outputs, ["install=success", "hooks_tests=success"], "validators and hooks tests need no marketplace");
+});
+
+test("the confirmation step retries the install on latest in the clean latest config", () => {
+  const text = readFileSync(".github/workflows/canary.yml", "utf8");
+  const script = stepScript(text, "Confirm the install failure on latest");
+  assert.match(script, /for attempt in 1 2 3/);
+  assert.match(script, /claude plugin install devcycle@devcycle/);
+  const block = text.slice(text.indexOf("id: plugin_install_confirm"));
+  assert.match(block.slice(0, block.indexOf("run:")), /CLAUDE_CONFIG_DIR: \$\{\{ runner\.temp \}\}\/canary-config/);
 });

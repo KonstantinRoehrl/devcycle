@@ -17,15 +17,20 @@ export function currentPin(workflowText) {
   return matrix[1].split(",").at(-1).trim().replace(/^["']|["']$/g, "");
 }
 
+// A fetch can fail without Claude Code being at fault. The pin's marketplace outage and an install that
+// failed on latest but passes once tried again there both read as infrastructure, never as a break.
 export function computeVerdict(steps) {
   const failed = (name) => steps[name]?.outcome === "failure";
   if (INFRASTRUCTURE_STEPS.some(failed)) return { verdict: "infrastructure", step: null };
   const suspects = Object.keys(SUSPECT_STEPS).filter(failed);
   if (!suspects.length) return { verdict: "pass", step: null };
   const pin = steps.pin?.outputs ?? {};
-  if (pin.install !== "success") return { verdict: "infrastructure", step: null };
-  const breaks = suspects.filter((name) => pin[name] === "success");
-  return breaks.length ? { verdict: "break", step: breaks[0] } : { verdict: "repo-side", step: suspects[0] };
+  if (pin.install !== "success" || pin.marketplace_add === "failure") return { verdict: "infrastructure", step: null };
+  const confirmed = (name) => name !== "plugin_install" || failed("plugin_install_confirm");
+  const breaks = suspects.filter((name) => pin[name] === "success" && confirmed(name));
+  if (breaks.length) return { verdict: "break", step: breaks[0] };
+  const blamable = suspects.filter((name) => pin[name] !== "success");
+  return blamable.length ? { verdict: "repo-side", step: blamable[0] } : { verdict: "infrastructure", step: null };
 }
 
 export function decideAction({ verdict, version, step, issue }) {

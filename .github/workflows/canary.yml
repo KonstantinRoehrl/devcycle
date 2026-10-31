@@ -131,10 +131,13 @@ jobs:
             if "${@:2}"; then result=success; fi
             echo "$1=$result" >> "$GITHUB_OUTPUT"
           }
-          plugin_install_on_pin() {
+          # The marketplaces are fetched, so their outage is its own output: it says nothing about the install.
+          marketplaces_on_pin() {
             retry claude plugin marketplace add ./ < /dev/null \
-              && retry claude plugin marketplace add anthropics/claude-plugins-official < /dev/null \
-              && retry claude plugin install devcycle@devcycle < /dev/null
+              && retry claude plugin marketplace add anthropics/claude-plugins-official < /dev/null
+          }
+          plugin_install_on_pin() {
+            retry claude plugin install devcycle@devcycle < /dev/null
           }
           load_check_on_pin() {
             plugin_install_on_pin \
@@ -144,8 +147,27 @@ jobs:
           if [ "$VALIDATE_MARKETPLACE" = failure ]; then record validate_marketplace claude plugin validate . --strict < /dev/null; fi
           if [ "$VALIDATE_MANIFEST" = failure ]; then record validate_manifest claude plugin validate .claude-plugin/plugin.json --strict < /dev/null; fi
           if [ "$HOOKS_TESTS" = failure ]; then record hooks_tests claude plugin test . < /dev/null; fi
-          if [ "$PLUGIN_INSTALL" = failure ]; then record plugin_install plugin_install_on_pin; fi
-          if [ "$LOAD_CHECK" = failure ]; then record load_check load_check_on_pin; fi
+          if [ "$PLUGIN_INSTALL" = failure ] || [ "$LOAD_CHECK" = failure ]; then
+            record marketplace_add marketplaces_on_pin
+            if grep -qx marketplace_add=success "$GITHUB_OUTPUT"; then
+              if [ "$PLUGIN_INSTALL" = failure ]; then record plugin_install plugin_install_on_pin; fi
+              if [ "$LOAD_CHECK" = failure ]; then record load_check load_check_on_pin; fi
+            fi
+          fi
+      # claude plugin install fetches too, so a failure the pin does not share could still be a network blip
+      # that outlasted the retries. Only an install that fails again here is a Claude Code break.
+      - name: Confirm the install failure on latest
+        id: plugin_install_confirm
+        if: steps.plugin_install.outcome == 'failure' && steps.pin.outputs.plugin_install == 'success'
+        continue-on-error: true
+        env:
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/canary-config
+        run: |
+          for attempt in 1 2 3; do
+            claude plugin install devcycle@devcycle < /dev/null && exit 0
+            sleep 30
+          done
+          exit 1
       - name: Decide what the failures mean
         id: verdict
         env:
@@ -156,7 +178,8 @@ jobs:
           steps.install.outcome == 'failure' || steps.validate_marketplace.outcome == 'failure' ||
           steps.validate_manifest.outcome == 'failure' || steps.hooks_tests.outcome == 'failure' ||
           steps.marketplace_add.outcome == 'failure' || steps.plugin_install.outcome == 'failure' ||
-          steps.load_check.outcome == 'failure' || steps.golden_path.outcome == 'failure'
+          steps.plugin_install_confirm.outcome == 'failure' || steps.load_check.outcome == 'failure' ||
+          steps.golden_path.outcome == 'failure'
         run: exit 1
   report:
     name: Update the rolling canary issue

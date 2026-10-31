@@ -37,10 +37,39 @@ test("a failed npm or marketplace step is infrastructure, whatever else failed",
 
 test("a failing plugin install is judged by the pin like any other Claude Code step", () => {
   const installFails = { ...green, plugin_install: FAIL, load_check: SKIP };
-  assert.deepEqual(computeVerdict({ ...installFails, pin: pinWith({ plugin_install: "success" }) }), { verdict: "break", step: "plugin_install" });
+  assert.deepEqual(computeVerdict({ ...installFails, plugin_install_confirm: FAIL, pin: pinWith({ plugin_install: "success" }) }), { verdict: "break", step: "plugin_install" });
   assert.deepEqual(computeVerdict({ ...installFails, pin: pinWith({ plugin_install: "failure" }) }), { verdict: "repo-side", step: "plugin_install" });
   assert.equal(computeVerdict({ ...installFails, pin: { outcome: "success", outputs: { install: "failure" } } }).verdict, "infrastructure");
   assert.equal(computeVerdict({ ...installFails, pin: SKIP }).verdict, "infrastructure", "no pin re-run means no break is called");
+});
+
+test("an install that failed on latest and passed on the pin is a break only when a second try on latest fails too", () => {
+  const installFails = { ...green, plugin_install: FAIL, load_check: SKIP, pin: pinWith({ plugin_install: "success" }) };
+  assert.deepEqual(computeVerdict({ ...installFails, plugin_install_confirm: FAIL }), { verdict: "break", step: "plugin_install" });
+  assert.deepEqual(computeVerdict({ ...installFails, plugin_install_confirm: OK }), { verdict: "infrastructure", step: null }, "the first failure was a blip");
+  for (const absent of [undefined, SKIP]) {
+    const verdict = computeVerdict({ ...installFails, plugin_install_confirm: absent });
+    assert.notEqual(verdict.verdict, "break", "no failed confirmation, no break");
+    assert.equal(verdict.verdict, "infrastructure");
+  }
+});
+
+test("a confirmation only matters for the install: an install that fails on both is repo-side, the other steps need none", () => {
+  const installFails = { ...green, plugin_install: FAIL, load_check: SKIP };
+  assert.deepEqual(computeVerdict({ ...installFails, pin: pinWith({ plugin_install: "failure" }), plugin_install_confirm: OK }), { verdict: "repo-side", step: "plugin_install" });
+  assert.deepEqual(computeVerdict({ ...green, hooks_tests: FAIL, pin: pinWith({ hooks_tests: "success" }) }), { verdict: "break", step: "hooks_tests" });
+  assert.deepEqual(computeVerdict({ ...green, load_check: FAIL, pin: pinWith({ load_check: "success" }) }), { verdict: "break", step: "load_check" });
+  assert.deepEqual(computeVerdict({ ...green, hooks_tests: FAIL, plugin_install: FAIL, load_check: SKIP, pin: pinWith({ hooks_tests: "success", plugin_install: "success" }), plugin_install_confirm: OK }), { verdict: "break", step: "hooks_tests" }, "a transient install does not hide a real break");
+});
+
+test("the pin's marketplace outage is infrastructure, not repo-side", () => {
+  const outage = (latest, pinOutputs) => computeVerdict({ ...green, ...latest, pin: pinWith({ marketplace_add: "failure", ...pinOutputs }) });
+  assert.deepEqual(outage({ plugin_install: FAIL, load_check: SKIP }, {}), { verdict: "infrastructure", step: null });
+  assert.deepEqual(outage({ load_check: FAIL }, {}), { verdict: "infrastructure", step: null });
+  assert.deepEqual(outage({ plugin_install: FAIL, load_check: SKIP }, { plugin_install: "failure" }), { verdict: "infrastructure", step: null });
+  assert.deepEqual(outage({ load_check: FAIL }, { load_check: "failure" }), { verdict: "infrastructure", step: null });
+  assert.deepEqual(outage({ plugin_install: FAIL, load_check: SKIP, plugin_install_confirm: FAIL }, {}), { verdict: "infrastructure", step: null });
+  assert.equal(computeVerdict({ ...green, load_check: FAIL, pin: pinWith({ marketplace_add: "success", load_check: "failure" }) }).verdict, "repo-side", "a pin whose marketplaces were fine is judged as before");
 });
 
 test("golden-path failing alone is repo-side for the run, but counts as a pass for Claude Code", () => {
@@ -126,4 +155,15 @@ test("the pin step re-runs a failed plugin install, and the run still fails when
   for (const id of ["install", "validate_marketplace", "validate_manifest", "hooks_tests", "marketplace_add", "plugin_install", "load_check", "golden_path"]) {
     assert.match(failRun, new RegExp(`steps\\.${id}\\.outcome == 'failure'`), `${id} missing from the final failure gate`);
   }
+});
+
+test("the workflow confirms a failed install on latest, only when the pin passed it, and the run still fails on it", () => {
+  const text = workflow();
+  const confirmIf = text.match(/id: plugin_install_confirm\n\s+if: (.*)\n\s+continue-on-error/)[1];
+  assert.match(confirmIf, /steps\.plugin_install\.outcome == 'failure'/);
+  assert.match(confirmIf, /steps\.pin\.outputs\.plugin_install == 'success'/);
+  assert.ok(text.indexOf("id: plugin_install_confirm") > text.indexOf("id: pin\n"), "the confirmation runs after the pin");
+  assert.ok(text.indexOf("id: plugin_install_confirm") < text.indexOf("id: verdict"), "and before the verdict reads it");
+  const failRun = text.match(/- name: Fail the run when any check failed\n\s+if: >-\n((?:\s+.*\n)+?)\s+run:/)[1];
+  assert.match(failRun, /steps\.plugin_install_confirm\.outcome == 'failure'/);
 });
