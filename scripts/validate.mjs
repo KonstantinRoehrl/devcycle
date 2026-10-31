@@ -10,6 +10,7 @@ import { validate as validateRecord, validateCulprit, subSchemaFor } from "./run
 import { readPolicy } from "./reinforcement-policy.mjs";
 import { closure } from "./context-closure.mjs";
 import { ROSTER } from "./resolve-knobs.mjs";
+import { CURRENT_FORMAT, contractErrors, liveLedgerPatterns } from "./cycle-format.mjs";
 import {
   bareExistsErrors,
   grammarFiles,
@@ -1298,6 +1299,20 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       // loadStages names the file by its absolute path; render it relative, and name it only once.
       const reason = err.message.replaceAll(stagesFile, "references/stages.json");
       fail(reason.includes("references/stages.json") ? reason : `references/stages.json: ${reason}`);
+    }
+  }
+
+  // 29. The on-disk surface a live cycle depends on is held to a recorded contract, so an incompatible
+  //     change cannot ship without a format bump and a migration (CONTRIBUTING.md § Changing a cycle's
+  //     on-disk format). A tree with no format module, a fixture plugin, has nothing to hold.
+  const CONTRACT_PATH = "tests/fixtures/cycle-format-contract.json";
+  if (existsSync(join(root, "scripts/cycle-format.mjs"))) {
+    if (!existsSync(join(root, CONTRACT_PATH))) fail(`${CONTRACT_PATH}: missing, so the cycle format's surface has no guard`);
+    else {
+      const live = { stages: [...stages], knobs: ROSTER.map(({ key }) => key), stateRows: stateFields, ledger: liveLedgerPatterns() };
+      for (const message of contractErrors(live, JSON.parse(readFileSync(join(root, CONTRACT_PATH), "utf8")))) fail(`check 29: ${message}`);
+      if (!new RegExp(`^- format: ${CURRENT_FORMAT}$`, "m").test(stateTemplate))
+        fail(`references/resume.md: the state template's format row must read "- format: ${CURRENT_FORMAT}", the current format new cycles are written at`);
     }
   }
 

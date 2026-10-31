@@ -8,7 +8,7 @@ import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
 import {
-  CURRENT_FORMAT, MIGRATIONS, formatStopMessage, formatVerdict, isPendingRename, settleFormat, stampFormat,
+  CURRENT_FORMAT, MIGRATIONS, contractErrors, formatStopMessage, formatVerdict, isPendingRename, liveLedgerPatterns, settleFormat, stampFormat,
 } from "../../scripts/cycle-format.mjs";
 import { checkState } from "../../scripts/resume-check.mjs";
 import { ledgerPlan, parseLedgerLine } from "../../scripts/task-ledger.mjs";
@@ -214,4 +214,46 @@ test("a tmp dir with no git and no .devcycle parent still settles", () => {
   const statePath = join(dir, "state.md");
   writeFileSync(statePath, "# devcycle state\n- stage: planning\n");
   assert.equal(settleFormat(statePath, { checked: checkState(statePath) }).status, "migrated");
+});
+
+const LIVE = { stages: ["planning", "execution"], knobs: ["profile", "gitPolicy"], stateRows: ["format", "stage"], ledger: { eventLine: "a", planHeader: "b", runHeader: "c" } };
+const CONTRACT = { format: 1, retiredKnobs: [], ...structuredClone(LIVE) };
+const judge = (live, contract = CONTRACT, opts = {}) => contractErrors(live, contract, { current: 1, migrations: [], knobRenames: {}, ...opts });
+
+test("contract: a matching surface passes", () => {
+  assert.deepEqual(judge(LIVE), []);
+});
+
+test("contract: anything added must be recorded in the fixture in the same change", () => {
+  for (const live of [{ ...LIVE, stages: [...LIVE.stages, "new"] }, { ...LIVE, knobs: [...LIVE.knobs, "new"] }, { ...LIVE, stateRows: [...LIVE.stateRows, "new"] }])
+    assert.match(judge(live)[0], /new.*tests\/fixtures\/cycle-format-contract\.json/);
+});
+
+test("contract: a removed stage fails unless a step's renames declares it", () => {
+  const live = { ...LIVE, stages: ["execution"] };
+  assert.match(judge(live)[0], /stage "planning"/);
+  assert.deepEqual(judge(live, CONTRACT, { migrations: [{ renames: { planning: "execution" } }] }), []);
+});
+
+test("contract: a removed knob fails unless renamed or declared retired", () => {
+  const live = { ...LIVE, knobs: ["profile"] };
+  assert.match(judge(live)[0], /knob "gitPolicy"/);
+  assert.deepEqual(judge(live, CONTRACT, { knobRenames: { gitPolicy: "git" } }), []);
+  assert.deepEqual(judge(live, { ...CONTRACT, retiredKnobs: ["gitPolicy"] }), []);
+});
+
+test("contract: a removed state row or a changed ledger pattern fails, and says to bump", () => {
+  assert.match(judge({ ...LIVE, stateRows: ["stage"] })[0], /row "format".*format bump/);
+  assert.match(judge({ ...LIVE, ledger: { ...LIVE.ledger, eventLine: "z" } })[0], /eventLine.*format bump/);
+});
+
+test("contract: a fixture at another format than the code fails until it is refreshed", () => {
+  assert.match(judge(LIVE, CONTRACT, { current: 2 })[0], /format 1.*format 2/);
+});
+
+test("contract: the live patterns are the readers' own", () => {
+  const live = liveLedgerPatterns();
+  assert.ok(new RegExp(live.planHeader, "m").test("Plan: `x`"));
+  assert.ok(new RegExp(live.runHeader, "m").test("Run: `0123456789abcdef`"));
+  assert.ok(new RegExp(live.eventLine).test("- [s] task=1 event=e outcome=o ref=r"));
 });

@@ -2739,3 +2739,12 @@ test("budget decisions: a tree without the decisions log fails rather than skipp
   rmSync(join(dir, DECISIONS_DOC));
   failsWith(runValidate(dir), /docs\/decisions\/README\.md: missing/);
 });
+
+test("check 29: engages only where the format module ships, and fails with no contract fixture", () => {
+  const dir = makePluginFixture();
+  assert.doesNotMatch(runValidate(dir).stderr ?? "", /cycle-format-contract/);
+  writeInto(dir, "scripts/cycle-format.mjs", "// present\n");
+  const r = runValidate(dir);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /tests\/fixtures\/cycle-format-contract\.json/);
+});

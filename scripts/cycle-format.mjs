@@ -9,7 +9,9 @@ import { LockTimeoutError, withFileLock } from "./file-lock.mjs";
 import { readLiveDriveLock } from "./drive-lock.mjs";
 import { field } from "./md-field.mjs";
 import { CLOSED_STAGE } from "./stage-entry.mjs";
-import { parseLedgerLine } from "./task-ledger.mjs";
+import { LEDGER_LINE_RE, LEDGER_PLAN_RE, parseLedgerLine } from "./task-ledger.mjs";
+import { LEDGER_RUN_RE } from "./ledger-slot.mjs";
+import { KNOB_RENAMES } from "./resolve-knobs.mjs";
 
 export const CURRENT_FORMAT = 1;
 
@@ -148,4 +150,31 @@ export function settleFormat(statePath, {
     if (err instanceof LockTimeoutError) return { status: "locked", report: [], detail: "Another session is migrating this cycle's files. Wait for it to finish, then run /devcycle:continue again." };
     return { status: "failed", report: [], detail: `The cycle's files were not migrated and are as they were: ${err.message}` };
   }
+}
+
+export const liveLedgerPatterns = () => ({ eventLine: LEDGER_LINE_RE.source, planHeader: LEDGER_PLAN_RE.source, runHeader: LEDGER_RUN_RE.source });
+
+const CONTRACT_PATH = "tests/fixtures/cycle-format-contract.json";
+const BUMP = "this needs a format bump: raise CURRENT_FORMAT in scripts/cycle-format.mjs, add a migration step, then refresh";
+
+// Validate check 29. What it leaves out, deliberately, is in CONTRIBUTING.md: the plan's Dispatch Map,
+// per-task files and the stop record have tolerant readers or live for one task.
+export function contractErrors(live, contract, { current = CURRENT_FORMAT, migrations = MIGRATIONS, knobRenames = KNOB_RENAMES } = {}) {
+  if (contract.format !== current)
+    return [`${CONTRACT_PATH} records format ${contract.format}, and scripts/cycle-format.mjs is at format ${current}: refresh the fixture in the same change`];
+  const errors = [];
+  const gone = (from, to) => from.filter((name) => !to.includes(name));
+  const renamedStages = new Set(migrations.flatMap((step) => Object.keys(step.renames ?? {})));
+  const retired = new Set(contract.retiredKnobs ?? []);
+  for (const [what, name] of [...gone(live.stages, contract.stages).map((n) => ["stage", n]), ...gone(live.knobs, contract.knobs).map((n) => ["knob", n]), ...gone(live.stateRows, contract.stateRows).map((n) => ["state row", n])])
+    errors.push(`${what} "${name}" is new: record it in ${CONTRACT_PATH} in the same change`);
+  for (const stage of gone(contract.stages, live.stages))
+    if (!renamedStages.has(stage)) errors.push(`stage "${stage}" was removed or renamed with no migration step declaring it under renames: a live cycle at that stage would read as abandoned`);
+  for (const knob of gone(contract.knobs, live.knobs))
+    if (!Object.hasOwn(knobRenames, knob) && !retired.has(knob)) errors.push(`knob "${knob}" was removed or renamed: add it to KNOB_RENAMES in scripts/resolve-knobs.mjs, or declare it under retiredKnobs in ${CONTRACT_PATH}`);
+  for (const row of gone(contract.stateRows, live.stateRows))
+    errors.push(`state row "${row}" was removed or renamed; ${BUMP} ${CONTRACT_PATH}`);
+  for (const key of Object.keys(contract.ledger))
+    if (live.ledger[key] !== contract.ledger[key]) errors.push(`the ledger pattern ${key} changed; ${BUMP} ${CONTRACT_PATH}`);
+  return errors;
 }
