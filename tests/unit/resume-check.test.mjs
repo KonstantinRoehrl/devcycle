@@ -468,3 +468,65 @@ test("reports the handoff row: pending and ready with their stamp, and no row as
   assert.equal(out(base), "handoff: ready (no row)");
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("a stopped: row prints the stop record's stage, position, left and uncommitted lines before the handoff line", () => {
+  const dir = makeTempDir("resume-check-");
+  try {
+    const base = ["- stage: planning", `- root: ${dir}`, "- spec: none", "- plan: none", "- checklist: none", "- handoff: ready 2026-10-30T10:00:00Z"];
+    const state = makeState(dir, [...base, "- stopped: 2026-10-30T10:00:00Z .devcycle/stop.json"]);
+    writeFileSync(join(dir, "stop.json"), JSON.stringify({
+      stage: "planning", position: { done: ["feasibility-verdict"] },
+      left: [{ id: "b1", kind: "shell", reason: "owned by another session" }], uncommitted: ["docs/plan.md"],
+    }));
+    const r = run(state);
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    const lines = r.stdout.trim().split("\n");
+    assert.ok(lines.includes('stopped: 2026-10-30T10:00:00Z in planning: {"done":["feasibility-verdict"]} (.devcycle/stop.json)'), r.stdout);
+    assert.ok(lines.includes("stopped-left: b1 (shell): owned by another session"), r.stdout);
+    assert.ok(lines.includes("stopped-uncommitted: docs/plan.md"), r.stdout);
+    assert.equal(lines.at(-1), "handoff: ready 2026-10-30T10:00:00Z");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a stopped: row with its record gone still prints, naming the state file's stage", () => {
+  const dir = makeTempDir("resume-check-");
+  try {
+    const state = makeState(dir, ["- stage: planning", `- root: ${dir}`, "- stopped: 2026-10-30T10:00:00Z .devcycle/stop.json"]);
+    const r = run(state);
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    assert.match(r.stdout, /^stopped: 2026-10-30T10:00:00Z in planning: position not recorded \(\.devcycle\/stop\.json\)$/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a stop record that belongs to another run is not announced", () => {
+  const dir = makeTempDir("resume-check-");
+  try {
+    const state = makeState(dir, [
+      "- stage: planning", `- root: ${dir}`, "- run: 0123456789abcdef", "- stopped: 2026-10-30T10:00:00Z .devcycle/stop.json",
+    ]);
+    writeFileSync(join(dir, "stop.json"), JSON.stringify({ stage: "execution", run: "ffffffffffffffff", position: { summary: "old" }, left: [], uncommitted: [] }));
+    const r = run(state);
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    assert.doesNotMatch(r.stdout, /^stopped/m);
+
+    writeFileSync(join(dir, "stop.json"), JSON.stringify({ stage: "planning", run: "0123456789abcdef", position: { summary: "mine" }, left: [], uncommitted: [] }));
+    assert.match(run(state).stdout, /^stopped: 2026-10-30T10:00:00Z in planning: mine /m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("no stopped: row prints no stopped line", () => {
+  const dir = makeTempDir("resume-check-");
+  try {
+    const r = run(makeState(dir, ["- stage: planning", `- root: ${dir}`]));
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    assert.doesNotMatch(r.stdout, /^stopped/m);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

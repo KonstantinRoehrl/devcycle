@@ -296,7 +296,7 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   const declined = field(stateText, "knobs-declined");
   const state = {
     stage: summary.stage, branch: summary.branch, request: summary.request, plan, run: known(field(stateText, "run")),
-    knobsLine: recordedKnobs, knobsDeclined: Boolean(declined && knobsLine && sameValues(declined, knobsLine)),
+    knobsLine: recordedKnobs, knobsDeclined: Boolean(declined && knobsLine && sameValues(declined, knobsLine)), stopped: null,
   };
   const ledger = ledgerPath ? resolve(cwd, ledgerPath) : join(root, ".devcycle", "ledger.md");
   const slot = ledgerSlotState({ root, plan, run: state.run });
@@ -321,6 +321,7 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
     return stop("no-driver", `no live driver lock names ${abs} with this session's drive token`);
   if (drive && !result.drive.opted) return stop("not-opted-in", "the state file carries no drive: auto row");
   const checked = checkState(abs);
+  state.stopped = checked.stopped ?? null;
   if (checked.kind === "foreign") return stop("foreign-state", `its root: ${checked.recordedRoot} is not this checkout (${checked.actualRoot})`);
 
   const planText = readPlan(root, plan);
@@ -340,7 +341,7 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   if (!drive) {
     const decision = driveAction(result.drive, driver, result.pendingDecision);
     // A recorded driver end or stop asks its own question instead (references/resume.md § The state file).
-    const ask = result.handoff.state === "pending" && decision.action !== "gate" && !(decision.action === "start" && driver.next !== "none");
+    const ask = result.handoff.state === "pending" && !state.stopped && decision.action !== "gate" && !(decision.action === "start" && driver.next !== "none");
     return { ...result, handoff: { ...result.handoff, ask }, drive: decided(decision) };
   }
 

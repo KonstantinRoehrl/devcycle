@@ -22,6 +22,7 @@ import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, readDriveLockHolder, 
 import { buildProgress, removeProgress, writeProgress } from "./drive-progress.mjs";
 import { holderLiveness, LOG_REL, lockNamesState, markResultHandled, noProgressEndsAfter, RESULT_REL, STOP_REQUEST_REL, writeCrashedResult, writeDriveResult } from "./drive-result.mjs";
 import { readPluginList, surfaceArgs } from "./drive-surface.mjs";
+import { stopWindowOpen } from "./stop-files.mjs";
 import { follow, statusReport, WATCH_LEVELS, waitForEnd } from "./drive-watch.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
 import { isMain } from "./is-main.mjs";
@@ -55,7 +56,7 @@ const HEARTBEAT_MS = Number(process.env.DEVCYCLE_DRIVE_HEARTBEAT_MS) || 30_000;
 const WATCHDOG_GRACE_MS = Number(process.env.DEVCYCLE_DRIVE_WATCHDOG_GRACE_MS) || 5 * 60_000;
 const DEAD_STATES = new Set(["ended-without-output", "quiet"]);
 const DEFAULT_BACKOFF_MS = 5 * 60_000;
-const SIGNAL_GRACE_MS = 10_000;
+export const SIGNAL_GRACE_MS = 10_000;
 const DETACH_POLL_MS = 50;
 const USAGE_LIMIT_TEXT = /usage limit|rate limit|hit your limit/i;
 // Every wait is a wall-clock deadline checked in slices, so a machine that sleeps through a deadline
@@ -815,8 +816,8 @@ function makeLog(root) {
 // One heartbeat's look at the live session's dispatches (scripts/dispatch-health.mjs): the band's
 // per-task health and, once a dispatch has been dead past the grace with no dispatch running and no
 // main-thread tool call pending, the session stopped so a fresh one redispatches. A dispatch that ended
-// without its output is recorded first, spending its cap; a quiet one dies with the session and is
-// redispatched uncapped by the resume path.
+// without its output is recorded first, spending its cap, unless /devcycle:stop ended it; a quiet one
+// dies with the session and is redispatched uncapped by the resume path.
 function watchdogBeat(ctx, log) {
   const live = ctx.live;
   if (!live?.s.sessionId || live.s.deadDispatch) return null;
@@ -829,7 +830,8 @@ function watchdogBeat(ctx, log) {
   }
   live.deadSince ??= clockNow();
   if (clockNow() - live.deadSince < WATCHDOG_GRACE_MS) return health;
-  for (const d of dead.filter((x) => x.state === "ended-without-output"))
+  const stopping = stopWindowOpen(dirname(ctx.statePath), readFileSync(ctx.statePath, "utf8"), clockNow());
+  for (const d of stopping ? [] : dead.filter((x) => x.state === "ended-without-output"))
     recordDeath({ ledgerPath: join(ctx.root, LEDGER_REL), task: d.task, role: d.role, round: d.round, recordPath: d.recordPath });
   live.s.deadDispatch = dead.map((d) => d.task);
   log(`watchdog: session ${live.n} — task ${live.s.deadDispatch.join(", ")} ended without its output or went quiet, and nothing else is live; stopping the session for a fresh one`);
@@ -1042,14 +1044,15 @@ async function detach(opts, argv) {
 }
 
 // The way to stop a driver on purpose: the request on disk is what makes its 130 read as stopped,
-// which /devcycle:continue never restarts unasked.
-export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, signal) } = {}) {
+// which /devcycle:continue never restarts unasked. out and say take what it says, for a caller whose
+// own stdout is one JSON object (scripts/stop-cycle.mjs).
+export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, signal), out = console.log, say = console.error } = {}) {
   const statePath = resolve(state);
   const root = dirname(dirname(statePath));
   const request = join(root, STOP_REQUEST_REL);
   const notRunning = () => {
     rmSync(request, { force: true });
-    console.error(`drive-execution: no driver is running for ${state}`);
+    say(`drive-execution: no driver is running for ${state}`);
     return 3;
   };
   const requestStays = `the stop request stays in ${STOP_REQUEST_REL}, so the driver stops before its next session or within a minute of a wait`;
@@ -1060,7 +1063,7 @@ export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, si
   atomicWrite(request, `${now()}\n`);
   // A pid ps cannot vouch for may be a later process that reused a dead driver's pid: never signal it.
   if (liveness === "unverified") {
-    console.error(`drive-execution: cannot confirm pid ${holder.pid} is still the driver, because ps does not run here, so it was not signalled — ` +
+    say(`drive-execution: cannot confirm pid ${holder.pid} is still the driver, because ps does not run here, so it was not signalled — ` +
       `${requestStays}; to stop it now, run kill ${holder.pid} from a shell where ps shows that pid is the driver`);
     return 1;
   }
@@ -1068,11 +1071,11 @@ export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, si
     kill(holder.pid, "SIGTERM");
   } catch (err) {
     if (err.code === "ESRCH") return notRunning();
-    console.error(`drive-execution: could not signal the driver (pid ${holder.pid}: ${err.code ?? err.message}) — ` +
+    say(`drive-execution: could not signal the driver (pid ${holder.pid}: ${err.code ?? err.message}) — ` +
       `${requestStays}; to stop it now, run kill ${holder.pid} from a shell allowed to signal it`);
     return 1;
   }
-  console.log(JSON.stringify({ stopped: true, pid: holder.pid }));
+  out(JSON.stringify({ stopped: true, pid: holder.pid }));
   return 0;
 }
 

@@ -939,8 +939,9 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   //     2026-08-12) and removing `onboard` (never specified anywhere). Neither happened. The
   //     ceiling is today's count so an added command is a deliberate surface decision, not a file
   //     addition; it was raised 7→8 when `maintain` landed (the deliberate eighth command), and
-  //     8→9 when `reconcile` landed (the deliberate ninth command).
-  const COMMAND_CEILING = 9;
+  //     8→9 when `reconcile` landed (the deliberate ninth command), and 9→10 when `stop` landed (the
+  //     deliberate tenth command).
+  const COMMAND_CEILING = 10;
   const commandCount = namesIn("commands").length;
   if (commandCount > COMMAND_CEILING)
     fail(

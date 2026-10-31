@@ -29,7 +29,8 @@ is asked on its own, telling you exactly where to look — bundling judgment mea
 findings quality. **Teardown:** everything the stage launched is stopped, whether it completes,
 blocks or stops for your decision. The walkthrough ends with a results report, one line per
 item, symptom first, each verdict one of `passed`, `FAILED` with a severity, `waived` with a
-reason, or `unverified`.
+reason, or `unverified`. In a cycle each verdict is logged as it resolves, so a stopped walk relaunches
+the app and resumes at the first item with none; a standalone walk starts over.
 
 The resolved `onDeviceGate` decides which steps run and when the stage closes. `auto`, the
 default, runs the agent pass and asks you only the batch and the `needs-eyes` items.

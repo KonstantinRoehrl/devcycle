@@ -1368,6 +1368,20 @@ test("the watchdog stops a session whose dispatch ended without its report once 
   assert.match(readFileSync(join(root, ".devcycle/drive.log"), "utf8"), /watchdog: session 1 — task 1 ended without its output or went quiet/);
 });
 
+test("the watchdog records no death for a session ended under a live stop request", async () => {
+  const root = makeCycle();
+  mkdirSync(join(root, ".devcycle/dispatch"), { recursive: true });
+  writeFileSync(join(root, ".devcycle/stop-request"), JSON.stringify({ requestedAt: new Date().toISOString(), sessions: [] }));
+  const env = { DEVCYCLE_DRIVE_HEARTBEAT_MS: "50", DEVCYCLE_DRIVE_WATCHDOG_GRACE_MS: "1" };
+  const r = await drive(root, [
+    { ledger: [DISPATCHED_1], toolUseId: "toolu_1", toolResult: true, hangMs: 60_000 },
+    { ledger: [DONE[0], DONE[1]], stage: "branch-review" },
+  ], { env, beforeStart: (h) => seedDispatch(root, h.env.HOME, "interrupted") });
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.records[0].exitReason, "dead-dispatch");
+  assert.doesNotMatch(readFileSync(join(root, ".devcycle/ledger.md"), "utf8"), /event=dispatch-ended/);
+});
+
 test("the watchdog never acts while a main-thread tool call is pending", async () => {
   const root = makeCycle();
   mkdirSync(join(root, ".devcycle/dispatch"), { recursive: true });

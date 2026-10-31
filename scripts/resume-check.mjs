@@ -10,6 +10,7 @@ import { field } from "./md-field.mjs";
 import { stageEntry, entryLines, CLOSED_STAGE, CLOSED_LINE, FALLBACK } from "./stage-entry.mjs";
 import { isMain } from "./is-main.mjs";
 import { parseHandoff } from "./handoff-mark.mjs";
+import { readStopRecord } from "./stop-files.mjs";
 
 // The stage enum's single source of truth is the `- stage: <a|b|c>` line in
 // commands/cycle.md, read the same way scripts/validate.mjs reads it, so this guard never
@@ -28,6 +29,34 @@ const VALID_STAGES = (() => {
   }
 })();
 const NONE = new Set(["none", "<tbd>", ""]);
+
+// The `- stopped:` row, with what the stop record adds. The record only reports: position is
+// rederived from the stage log, the ledger and git (references/resume.md § The state file), so a
+// missing or hand-edited record still prints and never fails the check.
+function stoppedOf(statePath, text) {
+  const row = field(text, "stopped");
+  if (!row) return null;
+  const [stamp, recordPath = null] = row.split(/\s+/);
+  const record = readStopRecord(dirname(statePath));
+  const run = field(text, "run");
+  // A record left by another run is not this cycle's stop, whatever the row says.
+  if (record?.run && run && record.run !== run) return null;
+  return {
+    stamp, recordPath, stage: record?.stage ?? field(text, "stage"), position: record?.position ?? null,
+    left: record?.left ?? [], uncommitted: record?.uncommitted ?? [],
+  };
+}
+
+const positionText = (position) => (position === null ? "position not recorded" : typeof position === "string" ? position : position.summary ?? JSON.stringify(position));
+
+export function stoppedLines(stopped) {
+  if (!stopped) return [];
+  return [
+    `stopped: ${stopped.stamp} in ${stopped.stage}: ${positionText(stopped.position)} (${stopped.recordPath ?? "no record path"})`,
+    ...stopped.left.map(({ id, kind, reason }) => `stopped-left: ${id} (${kind}): ${reason}`),
+    ...stopped.uncommitted.map((path) => `stopped-uncommitted: ${path}`),
+  ];
+}
 
 // The ownership check, the stale checks and the stage's entry lines, as data: `kind` names the
 // failing class (`unreadable`, `foreign`, `stale`), and a passing check's `lines` are what the CLI
@@ -113,11 +142,12 @@ export function checkState(statePath) {
 
   if (errors.length) return { ok: false, kind: "stale", errors };
   const handoff = parseHandoff(field(text, "handoff"));
-  if (stage === CLOSED_STAGE) return { ok: true, stage, handoff, lines: [CLOSED_LINE] };
+  const stopped = stoppedOf(statePath, text);
+  if (stage === CLOSED_STAGE) return { ok: true, stage, handoff, stopped, lines: [CLOSED_LINE] };
   try {
-    return { ok: true, stage, handoff, lines: entryLines(stageEntry(stage)) };
+    return { ok: true, stage, handoff, stopped, lines: entryLines(stageEntry(stage)) };
   } catch (err) {
-    return { ok: true, stage, handoff, lines: [`resume-check: no entry line — ${err.message}; fall back to ${FALLBACK}`] };
+    return { ok: true, stage, handoff, stopped, lines: [`resume-check: no entry line — ${err.message}; fall back to ${FALLBACK}`] };
   }
 }
 
@@ -155,6 +185,7 @@ function main(argv) {
   }
   console.log(`resume-check: ok — stage ${result.stage}, all recorded artifacts present`);
   for (const line of result.lines) console.log(line);
+  for (const line of stoppedLines(result.stopped)) console.log(line);
   console.log(`handoff: ${result.handoff.state} ${result.handoff.stamp ?? "(no row)"}`);
 }
 

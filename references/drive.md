@@ -65,7 +65,7 @@ left unhandled, so the next `/devcycle:continue` asks again.
 | `needs-user` or `sweep-fallback`, `task` set otherwise — a blocked implementer, a retry cap, a refused commit, a human-required step, a sweep fallback | The stop's `detail` as the question; record `task=<n> event=user-decision outcome=<answer>`. |
 | `needs-user` or `sweep-fallback` with no `task` | The stop's `detail` as the question; record `task=drive event=user-decision outcome=<answer>`. |
 | `scope-change` | The stop's `detail` as the question: whether the cycle goes back to brainstorm or planning. The answer rewrites `stage:` to that stage, so no driver starts; continue there as § Resume says. |
-| `stopped` | **Resume unattended** first. The user stopped the run with `--stop`; it never restarts unasked. |
+| `stopped` | **Resume unattended** first. The user stopped the run with `--stop` or `/devcycle:stop`; it never restarts unasked. When `state.stopped` is set, the question also names its `position` and each `left` entry. |
 | `stalled`, `no-progress`, `environment`, `max-usd` | The stop's `detail` — for `stalled` the last session's text (a session the watchdog stopped when a dispatch ended without output, nothing else live, ends `dead-dispatch` and counts toward it), for `no-progress` that two restarts in a row added no ledger line beyond a dispatch's start or ending — with **Restart unattended** first. |
 
 Append each record as one ledger line, `- [<stamp>] <the record above> ref=.devcycle/state.md`, in
@@ -83,9 +83,10 @@ In this order, never dispatching a task from this session:
 1. **Settle the branch.** On the default or an integration branch, cut the topic branch and
    record it on `branch:` as `references/branch.md` § Committing requires, so the driver's
    pre-flight finds it.
-2. **Reset a stale ledger slot.** When `wave-setup.mjs` reported `ledgerSlot: "stale"`, run
+2. **Clear what the last run left.** When `wave-setup.mjs` reported `ledgerSlot: "stale"`, run
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/ledger-slot.mjs" --state .devcycle/state.md --reset` and
-   name the archive it prints.
+   name the archive it prints. When it reported `state.stopped`, run
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-cycle.mjs" resume --state .devcycle/state.md`.
 3. **Start the driver.** Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --check-sandbox`
    first. When it prints `{"sandboxed":true}`, run the start below outside the sandbox through the
    Bash tool's sandbox override, which asks the user to approve it. The start, `<drive.plugins>`

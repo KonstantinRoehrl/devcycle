@@ -32,11 +32,12 @@ native planning and execution engines that overlay their upstream counterparts o
 ```mermaid
 ---
 title: devcycle — where to start
-accDescr: Command-level map of devcycle's nine slash commands. /devcycle:onboard scaffolds a new repo before the first cycle; /devcycle:cycle runs the guided pipeline through Scope/Design, Plan, Build, Review, and Ship; /devcycle:continue resumes a stopped cycle; and /devcycle:review, /devcycle:doctor, /devcycle:verify, /devcycle:learn, /devcycle:maintain, and /devcycle:reconcile each run standalone at any time.
+accDescr: Command-level map of devcycle's ten slash commands. /devcycle:onboard scaffolds a new repo before the first cycle; /devcycle:cycle runs the guided pipeline through Scope/Design, Plan, Build, Review, and Ship; /devcycle:stop halts a running cycle at any stage and records where it was; /devcycle:continue resumes a stopped cycle; and /devcycle:review, /devcycle:doctor, /devcycle:verify, /devcycle:learn, /devcycle:maintain, and /devcycle:reconcile each run standalone at any time.
 ---
 flowchart LR
     CYCLE(["/devcycle:cycle"]):::tool
     CONT(["/devcycle:continue"]):::tool
+    STOP(["/devcycle:stop"]):::tool
     ONBOARD(["/devcycle:onboard"]):::tool
     REVIEWCMD(["/devcycle:review"]):::tool
     DOCTOR(["/devcycle:doctor"]):::tool
@@ -53,6 +54,7 @@ flowchart LR
     REVIEW --> SHIP["Ship"]:::stage
 
     CONT -. "resumes wherever the cycle stopped" .-> PLAN
+    STOP -. "halts a cycle, which continue resumes" .-> CONT
 
     REVIEWCMD -. "standalone, anytime" .-> SHIP
     DOCTOR -. "standalone, anytime" .-> SHIP
@@ -67,7 +69,7 @@ flowchart LR
 ```
 Command-level only — for stage internals, see `docs/pipeline/`.
 
-Those nine commands are devcycle's entire surface — everything else it ships is machinery they
+Those ten commands are devcycle's entire surface — everything else it ships is machinery they
 load. The full stage-level pipeline is in [`docs/pipeline/`](docs/pipeline/README.md).
 
 Two of the standalone commands form a review write-back path around a pull request:
