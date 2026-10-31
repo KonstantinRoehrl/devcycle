@@ -5,6 +5,31 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-30 — A stopped cycle resumes from a recorded row (`/devcycle:stop`)
+
+**Decision:** `.devcycle/state.md` gains the optional `stopped:` row. `/devcycle:continue` announces
+it, skips the not-ready question over it, and closes it through `stop-cycle.mjs resume` once every
+gate that can end the session has passed. `commands/continue.md` paid for this by shortening its
+discovery step, so `commandMax` stays 183.
+
+**Why:** A stop is deliberate, and `handoff: pending` could only read as "still running, or dead".
+
+**Supersedes:** nothing.
+
+```text
+budget: surface-budget.json surfaceTotal 6706
+budget: context-budget.json commands/continue.md 70084
+budget: context-budget.json commands/cycle.md 83031
+budget: context-budget.json playbooks/finishing-the-cycle.md 49901
+budget: context-budget.json playbooks/planning-waves.md 78358
+budget: context-budget.json playbooks/receiving-review.md 115994
+budget: context-budget.json playbooks/reviewing-the-branch.md 58713
+budget: context-budget.json playbooks/scoping-the-request.md 35020
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 89334
+budget: context-budget.json playbooks/verifying-on-device.md 65270
+budget: context-budget.json references/handoff.md 11602
+```
+
 ## 2026-10-30 — Command ceiling raised 9→10 for /devcycle:stop
 
 **Decision:** `COMMAND_CEILING` in `scripts/validate.mjs` is raised from **9** to **10** to admit

@@ -673,3 +673,17 @@ test("a dispatch-ended line routes a redispatch of its role once, then the user 
   assert.deepEqual(pos([dispatched, dead("implementer", 0), dead("reviewer", 1)]), { position: "dead-reviewer", next: "redispatch-reviewer" });
   assert.deepEqual(pos([dispatched, dead("implementer", 0), keyed(5, "dispatched", "model x", 0, 1)]), { position: "dispatched", next: "redispatch-implementer" });
 });
+
+test("a stopped row is reported on state, with the record's position and left list, and never asks the not-ready question", () => {
+  const STOPPED = "- stopped: 2026-10-30T10:00:00Z .devcycle/stop.json";
+  const c = cycle({ state: [STOPPED, "- handoff: pending 2026-10-30T09:00:00Z", MANUAL_ROW] });
+  writeFileSync(join(c.repo, ".devcycle", "stop.json"), JSON.stringify({
+    stage: "execution", position: { next: "task 1" }, left: [{ id: "m1", kind: "monitor", reason: "may remain" }], uncommitted: [],
+  }));
+  const r = setup(c);
+  assert.equal(r.state.stopped.stamp, "2026-10-30T10:00:00Z");
+  assert.deepEqual(r.state.stopped.position, { next: "task 1" });
+  assert.deepEqual(r.state.stopped.left, [{ id: "m1", kind: "monitor", reason: "may remain" }]);
+  assert.equal(r.handoff.ask, false, "a recorded stop is deliberate: the not-ready question is not asked");
+  assert.equal(setup(cycle()).state.stopped, null);
+});

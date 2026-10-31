@@ -2657,7 +2657,7 @@ test("the handoff row: cycle and continue mark the stage pending, continue asks 
   assert.ok(cont.includes("`handoff: pending`"), "continue.md step 2a no longer reads resume-check's handoff line");
   const resume = read("references/resume.md");
   assert.ok(resume.includes("**Resume anyway** · **Stop**"), "resume.md no longer holds the not-ready question");
-  assert.ok(resume.includes("Four optional rows sit outside the template"), "resume.md's optional-row count is stale");
+  assert.ok(resume.includes("Five optional rows sit outside the template"), "resume.md's optional-row count is stale");
   assert.match(read("references/delegation.md"), /a stage never pauses mid-flight/, "the stage budget no longer says the boundary waits for in-flight work");
 });
 
@@ -2677,4 +2677,22 @@ test("commands/stop.md acts at once, states the literal TaskStop input, and runs
     'node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-cycle.mjs" request --state "<state>"',
     'node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-cycle.mjs" finalize --state "<state>"',
   ]);
+});
+
+test("a stopped cycle: continue announces it and closes it with the pending mark, and the start path closes it before a driver starts", () => {
+  const cont = read("commands/continue.md");
+  const resume = sectionOf(cont, "Resume");
+  const close = 'scripts/stop-cycle.mjs" resume --state <the chosen state file>';
+  assert.ok(resume.includes(close), "continue.md § Resume no longer closes a recorded stop");
+  assert.ok(resume.indexOf("`closed:`") < resume.indexOf(close), "a closed cycle must stop before a stop record is closed");
+  assert.ok(resume.indexOf("**Depth check first.**") < resume.indexOf(close), "a depth stop must leave the stop record in place");
+  assert.match(sectionOf(cont, "Announce the derived position"), /stopped at <stamp> in <stage>: <position>/);
+  assert.ok(sectionOf(cont, "Execution resume").includes("`state.stopped`"), "§ Execution resume no longer reads state.stopped");
+  const resumeRef = read("references/resume.md");
+  assert.ok(resumeRef.includes("- `- stopped: <stamp> <record path>`"), "resume.md no longer owns the stopped: row");
+  const drive = read("references/drive.md");
+  const start = drive.slice(drive.indexOf("## The start path"), drive.indexOf("## When the run ends"));
+  assert.ok(start.includes('scripts/stop-cycle.mjs" resume --state .devcycle/state.md'), "the start path no longer closes a recorded stop");
+  assert.ok(start.indexOf("stop-cycle.mjs") < start.indexOf("--check-sandbox"), "the stop must close before the driver starts");
+  assert.ok(read("references/handoff.md").includes("`/devcycle:stop`"), "handoff.md no longer names the continue action a stop uses");
 });
