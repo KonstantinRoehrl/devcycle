@@ -13,7 +13,7 @@ one line per entry; the hub (`README.md`) mirrors this roster in its surface tab
 | `culprits.json` | The culprit vocabulary — each slug with its kind, phase, description, and the version it entered. |
 | `delegation.md` | Who does the work inside a stage — the coordinator's closed duty list, the stage budget, the research-dispatch contract, and the return envelopes. |
 | `drive.md` | What `/devcycle:continue` does with unattended execution at execution start — the drive actions, the stopped-run question, the start path and watch, the run's end, and the `drive:` row's two forms and writers. |
-| `evidence.md` | How devcycle proves a task did what it claims — the evidence classes, the file-backed contract, and the report and verdict shapes. |
+| `evidence.md` | How devcycle proves a task did what it claims — the evidence classes, the file-backed contract, the report and verdict shapes — and what a verification command may leave behind. |
 | `findings.md` | How a finding is expressed — the four-value severity vocabulary with blocking derived, the core and document field sets, the evidence discipline, and the panel's machine shape. |
 | `first-run-config.md` | devcycle's first-run configuration dialogue. |
 | `handoff.md` | What happens at a stage boundary — the handoff block, the three-value context action, the one-block-per-stage rule, and the await gate. |

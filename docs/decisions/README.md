@@ -5,6 +5,23 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-31 — Verification bounds its background helpers (#395)
+
+**Decision:** `references/evidence.md` § Background processes owns the rule, since it already owns the sibling capture-wait rule and the verdict list. `agents/implementer.md` already reads that file; `playbooks/executing-waves.md` gets one section read. No other stage reads it: the guard's denial and the live notice reach their coordinators, and each added read charges a closure budget. The prescribed form is one command per helper, narrowing the design's `(work)`, because `kill` reaches a subshell alone and leaves its running child alive. The figures below rise for that text.
+
+```text
+budget: surface-budget.json surfaceTotal 6777
+budget: context-budget.json playbooks/executing-waves.md 115302
+budget: context-budget.json playbooks/planning-waves.md 79770
+budget: context-budget.json playbooks/profiling-sessions.md 42778
+budget: context-budget.json playbooks/receiving-review.md 119919
+budget: context-budget.json playbooks/reviewing-code.md 96923
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 93097
+budget: context-budget.json playbooks/taking-the-fast-path.md 53323
+budget: context-budget.json playbooks/writing-the-findings-document.md 65609
+budget: context-budget.json references/evidence.md 14212
+```
+
 ## 2026-10-31 — The finish stage reports leftover process groups (#395)
 
 **Decision:** `playbooks/finishing-the-cycle.md` runs `scripts/leftover-processes.mjs` and surfaces what it prints. It is a notice that never blocks. The figures below rise for that paragraph.

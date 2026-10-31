@@ -15,6 +15,7 @@ wave 1, a pre-flight archives a ledger and per-task files a previous cycle left 
 (`scripts/ledger-slot.mjs --reset`, when `wave-setup.mjs` reports the slot stale), settles branch
 discipline (the topic branch must exist and be recorded) and the commit-message convention, and
 patches any task whose plan-level requirements aren't yet reflected in its own steps.
+Commands the coordinator or an implementer runs must not leave background helpers behind; `references/evidence.md` § Background processes owns how, and a reviewer rejects a verification that does not bound them.
 
 A wave is formed from the plan's dependency declarations and file lists: every task whose
 dependencies are already committed AND whose files overlap no other candidate or running task
