@@ -647,6 +647,43 @@ test("format: another session migrating between the first read and the format ch
   assert.deepEqual(r.formatReport, []);
 });
 
+// An unrelated write to state.md between the first read and the format check: the re-read it forces
+// refreshes the data and never discards what the format check decided.
+function unrelatedStateWriteInTheGap(c) {
+  let written = false;
+  const env = { get DEVCYCLE_DRIVE_TOKEN() {
+    if (!written) {
+      written = true;
+      appendFileSync(c.statePath, "- note: written by another session\n");
+    }
+    return undefined;
+  } };
+  return { env, wasWritten: () => written };
+}
+
+test("format: a headerless ledger's question survives an unrelated state.md write in the gap", () => {
+  const c = cycle();
+  writeFileSync(c.ledgerPath, `${committed(1)}\n${committed(2)}\n`);
+  const gap = unrelatedStateWriteInTheGap(c);
+  const r = setup(c, { env: gap.env });
+  assert.ok(gap.wasWritten(), "control: state.md changed in the gap");
+  assert.match(r.formatQuestion, /2 events/);
+  assert.equal(r.overview.committed, 0, "before the answer the ledger still reads as another cycle's");
+  assert.doesNotMatch(stateOf(c), /^- format:/m);
+});
+
+test("format: beside a running driver the attach report survives an unrelated state.md write in the gap", () => {
+  const c = cycle({ state: [DRIVE_ROW], ledger: [] });
+  withLock(c, () => {
+    const gap = unrelatedStateWriteInTheGap(c);
+    const r = setup(c, { env: gap.env });
+    assert.ok(gap.wasWritten(), "control: state.md changed in the gap");
+    assert.equal(r.drive.action, "attach");
+    assert.ok(r.formatReport.length > 0, "the interactive resume still says why nothing was migrated");
+    assert.doesNotMatch(stateOf(c), /^- format:/m);
+  });
+});
+
 test("format: files newer than the plugin stop with cycle-format, unchanged", () => {
   const c = cycle({ state: ["- format: 999"] });
   const before = stateOf(c);

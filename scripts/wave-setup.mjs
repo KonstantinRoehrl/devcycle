@@ -361,9 +361,14 @@ function readSetup(opts) {
   if (settled.status === "question" && drive) return stop("needs-user", settled.question);
   // Every migration rewrites state.md last, so state text that is not what this read started from means a
   // migration (this session's, or another's that finished in the gap since the first read) has
-  // changed the cycle under it. That is the whole staleness, so it is the one test.
-  if (settle && (settled.status === "migrated" || stateTextAt(abs) !== stateText))
-    return { ...readSetup({ ...opts, settle: null }), formatReport: settled.report ?? [] };
+  // changed the cycle under it. That is the whole staleness, so it is the one test. The read is
+  // repeated to refresh the data and never to discard what the check decided: a question or a live
+  // driver is replayed into it, since neither wrote anything.
+  if (settle && (settled.status === "migrated" || stateTextAt(abs) !== stateText)) {
+    const replay = settled.status === "question" || settled.status === "driver-live";
+    const again = readSetup({ ...opts, settle: replay ? () => settled : null });
+    return { ...again, formatReport: settled.report ?? again.formatReport };
+  }
   if (settled.status === "question") result.formatQuestion = settled.question;
   state.stopped = checked.stopped ?? null;
   if (checked.kind === "foreign") return stop("foreign-state", `its root: ${checked.recordedRoot} is not this checkout (${checked.actualRoot})`);
