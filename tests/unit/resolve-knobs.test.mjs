@@ -4,8 +4,11 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  ROSTER, isUnset, resolveKnobs, formatKnobsLine, formatExplicitLine, parseRecordedLine, compareKnobs,
+  ROSTER, KNOB_RENAMES, isUnset, resolveKnobs, formatKnobsLine, formatExplicitLine, formatRenamedLine, parseRecordedLine, compareKnobs,
+  readStoredOptions, recoverRenamedKnobs,
 } from "../../scripts/resolve-knobs.mjs";
+import { makeTempDir } from "../../scripts/temp-dir.mjs";
+import { writeInto } from "./helpers.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/resolve-knobs.mjs");
 const UNSET = Object.fromEntries(ROSTER.map(({ key }) => [key, "${user_config." + key + "}"]));
@@ -328,4 +331,57 @@ test("cli: --json prints knobs, explicit and warnings", () => {
   assert.equal(out.knobs.gitPolicy, "open-pr");
   assert.deepEqual(out.explicit, ["gitPolicy"]);
   assert.equal(out.warnings.length, 1);
+});
+
+const RENAMES = { oldGit: "gitPolicy", oldProfile: "profile" };
+
+test("a rename map starts empty, so no read of the settings file happens today", () => {
+  assert.deepEqual(KNOB_RENAMES, {});
+});
+
+test("an unset new key takes the old key's stored in-set value", () => {
+  const { raw, renamed } = recoverRenamedKnobs({ gitPolicy: "${user_config.gitPolicy}" }, { renames: RENAMES, stored: { oldGit: "open-pr" } });
+  assert.equal(raw.gitPolicy, "open-pr");
+  assert.deepEqual(renamed, [{ old: "oldGit", key: "gitPolicy", value: "open-pr" }]);
+});
+
+test("a value already set under the new key wins and nothing is noted", () => {
+  const { raw, renamed } = recoverRenamedKnobs({ gitPolicy: "push-allowed" }, { renames: RENAMES, stored: { oldGit: "open-pr" } });
+  assert.equal(raw.gitPolicy, "push-allowed");
+  assert.deepEqual(renamed, []);
+});
+
+test("an out-of-set or absent stored value counts as unset", () => {
+  for (const stored of [{ oldGit: "nonsense" }, {}]) {
+    const { raw, renamed } = recoverRenamedKnobs({ gitPolicy: "" }, { renames: RENAMES, stored });
+    assert.equal(raw.gitPolicy, "");
+    assert.deepEqual(renamed, []);
+  }
+});
+
+test("the recovered value lands in explicit: through resolveKnobs", () => {
+  const unset = Object.fromEntries(ROSTER.map(({ key }) => [key, ""]));
+  const { raw } = recoverRenamedKnobs(unset, { renames: RENAMES, stored: { oldGit: "open-pr" } });
+  const { knobs, explicit } = resolveKnobs(raw);
+  assert.equal(knobs.gitPolicy, "open-pr");
+  assert.ok(explicit.includes("gitPolicy"));
+});
+
+test("the note names how to store the value under the new name", () => {
+  assert.match(formatRenamedLine({ old: "oldGit", key: "gitPolicy", value: "open-pr" }), /^knob-renamed: oldGit → gitPolicy=open-pr; .*claude plugin install devcycle@devcycle --config gitPolicy=open-pr/);
+});
+
+test("the stored options come from the user settings file, and a missing or broken file is empty", () => {
+  const home = makeTempDir("knob-renames-");
+  assert.deepEqual(readStoredOptions({ CLAUDE_CONFIG_DIR: home }), {});
+  writeInto(home, "settings.json", "{ not json");
+  assert.deepEqual(readStoredOptions({ CLAUDE_CONFIG_DIR: home }), {});
+  writeInto(home, "settings.json", JSON.stringify({ pluginConfigs: { "devcycle@devcycle": { options: { oldGit: "open-pr", count: 5 } } } }));
+  assert.deepEqual(readStoredOptions({ CLAUDE_CONFIG_DIR: home }), { oldGit: "open-pr", count: "5" });
+});
+
+test("a recorded line with the old key compares under the new one, and the new key wins when both appear", () => {
+  assert.deepEqual(parseRecordedLine("knobs: oldGit=open-pr", RENAMES), { gitPolicy: "open-pr" });
+  assert.deepEqual(parseRecordedLine("knobs: gitPolicy=push-allowed oldGit=open-pr", RENAMES), { gitPolicy: "push-allowed" });
+  assert.deepEqual(parseRecordedLine("knobs: oldGit=open-pr"), {});
 });
