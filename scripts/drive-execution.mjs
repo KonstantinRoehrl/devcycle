@@ -61,7 +61,7 @@ export const SIGNAL_GRACE_MS = 10_000;
 const DETACH_POLL_MS = 50;
 // The plugin version this driver started on. A running process keeps its code across an update, so
 // each session it starts compares this with its own (scripts/wave-setup.mjs). A version this driver
-// could not read goes out as UNREADABLE_PLUGIN_VERSION, which that comparison skips.
+// could not read goes out as UNREADABLE_PLUGIN_VERSION, which stops each session for a person.
 const DRIVER_PLUGIN_VERSION = installedVersion();
 const USAGE_LIMIT_TEXT = /usage limit|rate limit|hit your limit/i;
 // Every wait is a wall-clock deadline checked in slices, so a machine that sleeps through a deadline

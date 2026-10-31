@@ -282,6 +282,10 @@ function wavePosition(root, planText, { waves, positions }, lines) {
 export const pluginUpdateDetail = (from, to) =>
   `The devcycle plugin updated from ${from} to ${to} while the driver was running, so this session did no work. Restart Claude Code, then run /devcycle:continue to carry on with ${to}.`;
 
+// No update is known here, only that nothing can be compared.
+const UNREADABLE_DRIVER_VERSION_DETAIL =
+  "The driver could not read its devcycle plugin version when it started, so this session cannot confirm it matches and did no work. Restart Claude Code, then run /devcycle:continue.";
+
 // `settle(checked)` is the format settle (see waveSetup): given the state's resume-check verdict it
 // returns scripts/cycle-format.mjs's settleFormat result, and null skips it.
 function readSetup(opts) {
@@ -330,18 +334,20 @@ function readSetup(opts) {
   if (drive && !result.drive.opted) return stop("not-opted-in", "the state file carries no drive: auto row");
   // A driver from before this variable existed rejects any reason its own schema lacks, and would end
   // `failed` and restart, so needs-user is the one route that reaches it as a stop for a person. An
-  // installed version that cannot be read confirms nothing and blocks nothing, and neither does a
-  // driver that says it could not read its own.
+  // installed version that cannot be read confirms nothing and blocks nothing. A driver that could not
+  // read its own is a stop for a person whatever this session reads: nothing can be compared.
+  const started = env.DEVCYCLE_DRIVER_PLUGIN_VERSION;
+  if (drive && started === UNREADABLE_PLUGIN_VERSION) return stop("needs-user", UNREADABLE_DRIVER_VERSION_DETAIL);
   if (drive && pluginVersion) {
-    const started = env.DEVCYCLE_DRIVER_PLUGIN_VERSION;
     if (started === undefined) return stop("needs-user", pluginUpdateDetail("an earlier version", pluginVersion));
-    if (started !== UNREADABLE_PLUGIN_VERSION && started !== pluginVersion) return stop("plugin-updated", pluginUpdateDetail(started, pluginVersion));
+    if (started !== pluginVersion) return stop("plugin-updated", pluginUpdateDetail(started, pluginVersion));
   }
   const checked = checkState(abs);
   // The format settles here, after the gates that decide whether this session may act at all and
   // before any verdict reads the cycle: a migration may rename the stage or rewrite the ledger, so
   // what it changes is read again from the top.
   const settled = settle ? settle(checked) : { status: "none" };
+  if (settled.status === "driver-live") result.formatReport = settled.report;
   if (settled.status === "locked" || settled.status === "failed") return stop("cycle-format", settled.detail);
   if (settled.status === "question" && drive) return stop("needs-user", settled.question);
   if (settled.status === "migrated") return { ...readSetup({ ...opts, settle: null }), formatReport: settled.report };

@@ -4,16 +4,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { hostname } from "node:os";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, sh, writeInto } from "./helpers.mjs";
-import { MIGRATIONS } from "../../scripts/cycle-format.mjs";
+import { MIGRATIONS, stampFormat } from "../../scripts/cycle-format.mjs";
+import { isLiveHolder } from "../../scripts/file-lock.mjs";
 import { RETRY_CAP, pluginUpdateDetail, taskPosition, waveSetup } from "../../scripts/wave-setup.mjs";
 import { UNREADABLE_PLUGIN_VERSION, installedVersion } from "../../scripts/verification.mjs";
 import { DRIVE_LOCK_REL, acquireDriveLock, driveTokenHash, releaseDriveLock } from "../../scripts/drive-lock.mjs";
-import { RESULT_REL } from "../../scripts/drive-result.mjs";
+import { RESULT_REL, holderLiveness } from "../../scripts/drive-result.mjs";
 import { parseLedgerLine } from "../../scripts/task-ledger.mjs";
 import { reviewLoopId } from "../../scripts/review-loop.mjs";
 import { ROSTER, formatKnobsLine, resolveKnobs } from "../../scripts/resolve-knobs.mjs";
@@ -870,9 +872,23 @@ test("driver version: an unreadable installed version never blocks", () => {
   assert.equal(r.action, "resume");
 });
 
-test("driver version: a driver that could not read its own version is not compared, and the session carries on", () => {
-  const { r } = drivenWithLock({ DEVCYCLE_DRIVER_PLUGIN_VERSION: UNREADABLE_PLUGIN_VERSION }, { pluginVersion: "1.3.0" });
-  assert.equal(r.action, "resume");
+test("driver version: a driver that could not read its own version stops its sessions needs-user, and claims no update", () => {
+  const { r, changed } = drivenWithLock({ DEVCYCLE_DRIVER_PLUGIN_VERSION: UNREADABLE_PLUGIN_VERSION }, { pluginVersion: "1.3.0" });
+  assert.deepEqual([r.action, r.stopReason], ["stop", "needs-user"]);
+  assert.match(r.stopDetail, /could not read its devcycle plugin version when it started/);
+  assert.match(r.stopDetail, /cannot confirm/);
+  assert.match(r.stopDetail, /Restart Claude Code, then run \/devcycle:continue/);
+  assert.doesNotMatch(r.stopDetail, /updated|1\.3\.0/, "nothing is known to have changed, so the detail names no version");
+  assert.doesNotMatch(r.stopDetail, /[;&|`\n]|\$\(/, "drive-signal takes one line with none of ; & | $( or a backtick");
+  assert.notDeepEqual(r.stopDetail, drivenWithLock({}, { pluginVersion: "1.3.0" }).r.stopDetail, "told apart from a driver that predates the variable");
+  assert.equal(changed, false);
+});
+
+test("driver version: a driver that could not read its version stops a session that cannot read its own either", () => {
+  const { r, changed } = drivenWithLock({ DEVCYCLE_DRIVER_PLUGIN_VERSION: UNREADABLE_PLUGIN_VERSION }, { pluginVersion: null });
+  assert.deepEqual([r.action, r.stopReason], ["stop", "needs-user"]);
+  assert.match(r.stopDetail, /could not read its devcycle plugin version when it started/);
+  assert.equal(changed, false);
 });
 
 test("driver version: an interactive resume is never asked about it", () => {
@@ -883,4 +899,80 @@ test("plugin-updated and cycle-format stay out of the reasons that restart on th
   const source = readFileSync(SCRIPT, "utf8");
   const settled = source.match(/const SETTLED_REASONS = new Set\(\[([^\]]*)\]\)/)[1];
   assert.doesNotMatch(settled, /plugin-updated|cycle-format/);
+});
+
+// A `ps` that exits non-zero for everything, as a sandboxed one does. A live pid then has no start
+// time to verify, so the watcher's liveness reads it "unverified" while the lock module's reads it dead.
+function withUnreadablePs(fn) {
+  const bin = makeTempDir("wave-setup-ps-");
+  writeFileSync(join(bin, "ps"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}${delimiter}${path}`;
+  try {
+    return fn();
+  } finally {
+    process.env.PATH = path;
+  }
+}
+// A lock naming this state file whose holder is this very process: alive, and impossible to verify.
+function unverifiableLock(c) {
+  const holder = { pid: process.pid, startTime: "Tue Oct 13 09:00:00 2026", hostname: hostname(), state: c.statePath,
+    log: join(c.repo, ".devcycle", "drive.log"), tokenHash: driveTokenHash(TOKEN) };
+  writeInto(c.repo, DRIVE_LOCK_REL, JSON.stringify(holder) + "\n");
+  return holder;
+}
+
+test("format: a holder no check can prove dead counts as a live driver, so an interactive resume attaches and migrates nothing", () => {
+  const c = cycle({ ledger: [committed(1)] });
+  const holder = unverifiableLock(c);
+  const before = [stateOf(c), readFileSync(c.ledgerPath, "utf8")];
+  const r = withUnreadablePs(() => {
+    assert.equal(holderLiveness(c.repo, holder), "unverified", "premise: the watcher cannot verify the holder");
+    assert.equal(isLiveHolder(holder), false, "premise: the lock module reads the same holder as dead");
+    return setup(c);
+  });
+  assert.equal(r.drive.action, "attach");
+  assert.deepEqual([stateOf(c), readFileSync(c.ledgerPath, "utf8")], before, "nothing was rewritten beside the driver");
+  assert.match(r.formatReport.join("\n"), /driver is running/, "the user is told why nothing migrated");
+});
+
+test("format: the session a live driver started migrates, and a provably dead lock does not hold a migration back", () => {
+  const c = cycle({ state: [DRIVE_ROW], ledger: [committed(1)] });
+  withLock(c, () => {
+    const r = driven(c);
+    assert.equal(r.action, "resume", r.stopDetail);
+    assert.deepEqual(r.formatReport, []);
+  });
+  assert.match(stateOf(c), /^- format: 1$/m);
+
+  const dead = deadLock(cycle({ ledger: [committed(1)] }));
+  const r = setup(dead);
+  assert.deepEqual(r.formatReport, []);
+  assert.match(stateOf(dead), /^- format: 1$/m);
+});
+
+test("format: a resume that waited while another session migrated reads the migrated files", async () => {
+  const c = cycle();
+  writeFileSync(c.ledgerPath, `Plan: docs/plan.md\n\n${committed(1)}\n`);
+  const migrated = { state: stampFormat(stateOf(c), 1), ledger: `Plan: \`docs/plan.md\`\n\n${committed(1)}\n` };
+  // The other session holds both locks, as settleFormat does, and writes the migrated files before releasing them.
+  const script = `
+    import { writeFileSync } from "node:fs";
+    import { withFileLock } from ${JSON.stringify(new URL("../../scripts/file-lock.mjs", import.meta.url).href)};
+    const [state, ledger, files] = process.argv.slice(1);
+    const { state: stateText, ledger: ledgerText } = JSON.parse(files);
+    withFileLock(state, () => withFileLock(ledger, () => {
+      console.log("held");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
+      writeFileSync(ledger, ledgerText);
+      writeFileSync(state, stateText);
+    }));`;
+  const other = spawn(process.execPath, ["--input-type=module", "-e", script, c.statePath, c.ledgerPath, JSON.stringify(migrated)], { stdio: ["ignore", "pipe", "inherit"] });
+  await once(other.stdout, "data");
+  const r = setup(c);
+  const [code] = await once(other, "exit");
+  assert.equal(code, 0);
+  assert.equal(r.action, "resume", r.stopDetail);
+  assert.equal(r.overview.committed, 1, "the ledger was read before the other session migrated it, so its tasks read as undone");
+  assert.equal(r.ledgerSlot, "fresh");
 });

@@ -148,8 +148,9 @@ cycle's** · **No, it's an earlier cycle's**. Re-run the same script with `--for
 `--format-answer no`. Yes writes the header and keeps the progress. No leaves the ledger alone, and
 the existing path archives it as a previous cycle's.
 
-Beside a live driver nothing migrates: an interactive resume attaches as it always does, the driver's
-next session stops on the version check, and the following `/devcycle:continue` migrates.
+Only the session a live driver started migrates beside it: its token proves it, and the driver never
+writes `state.md`. An interactive resume attaches and says why nothing migrated; after a plugin update
+the driver's next session stops on the version check and the next `/devcycle:continue` migrates.
 `/devcycle:stop` never migrates and never refuses over the format.
 
 ## The state file's `configured:` line

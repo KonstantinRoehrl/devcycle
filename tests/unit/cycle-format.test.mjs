@@ -130,7 +130,9 @@ test("a live driver blocks the settle, unless this session is that driver's", ()
   const before = read(c.ledgerPath);
   const { lock } = acquireDriveLock(c.repo, { statePath: c.statePath, logPath: join(c.repo, ".devcycle/drive.log"), tokenHash: null });
   try {
-    assert.equal(settle(c).status, "driver-live");
+    const blocked = settle(c);
+    assert.equal(blocked.status, "driver-live");
+    assert.match(blocked.report.join("\n"), /driver is running/, "the user is told why nothing migrated");
     assert.equal(read(c.ledgerPath), before);
     assert.equal(settle(c, { driven: true }).status, "migrated");
   } finally {
@@ -232,15 +234,69 @@ test("a failed write restores what this run read, not a leftover backup from an 
   assert.match(read(join(backup, "ledger.md")), /an earlier cycle's ledger/, "the existing backup is reused, never overwritten");
 });
 
-test("a rollback that itself fails names the files it could not restore and where the backup is", () => {
+// The directory a failed-restore message sends the user to: every path in it is relative to the repo.
+const savedIn = (c, detail) => {
+  const dir = detail.match(/\.devcycle\/(format-backup-[\w-]+)\//)?.[1];
+  assert.ok(dir, `no directory named in: ${detail}`);
+  return join(c.repo, ".devcycle", dir);
+};
+
+test("a rollback that itself fails names the files it could not restore and a copy of this run's originals", () => {
   const c = frozenCycle("ledger-unbackticked.md");
+  const original = read(c.ledgerPath);
   const { write } = flakyWriter([[c.statePath, 1], [c.ledgerPath, 2]]);
   const r = settle(c, { write });
   assert.equal(r.status, "failed");
   assert.match(r.detail, /ledger\.md/);
-  assert.match(r.detail, /\.devcycle\/format-backup-0/);
+  assert.equal(read(join(savedIn(c, r.detail), "ledger.md")), original);
   assert.doesNotMatch(r.detail, /state\.md/, "state.md was never changed, so it is not among the files left unrestored");
   assert.doesNotMatch(r.detail, /as they were/);
+});
+
+// An earlier run's backup, with other content, where this run's backup would go.
+function leftoverBackup(c) {
+  const backup = join(c.repo, ".devcycle/format-backup-0");
+  mkdirSync(backup, { recursive: true });
+  writeFileSync(join(backup, "ledger.md"), "Plan: docs/older.md\nan earlier cycle's ledger\n");
+  writeFileSync(join(backup, "state.md"), "# devcycle state\n- stage: planning\n");
+  return backup;
+}
+
+test("a rollback that fails beside a leftover backup points at this run's originals, never at the leftover", () => {
+  const c = frozenCycle("ledger-unbackticked.md");
+  const original = read(c.ledgerPath);
+  const backup = leftoverBackup(c);
+  const { write } = flakyWriter([[c.statePath, 1], [c.ledgerPath, 2]]);
+  const r = settle(c, { write });
+  assert.equal(r.status, "failed");
+  const saved = savedIn(c, r.detail);
+  assert.notEqual(saved, backup);
+  assert.equal(read(join(saved, "ledger.md")), original, "copying back from the named directory would restore this run's ledger");
+  assert.doesNotMatch(r.detail, /format-backup-0\//, "the leftover is not named");
+  assert.match(read(join(backup, "ledger.md")), /an earlier cycle's ledger/, "the leftover itself is untouched");
+});
+
+test("a success beside a leftover backup says it was kept, and does not call it this run's originals", () => {
+  const c = frozenCycle("ledger-unbackticked.md");
+  const backup = leftoverBackup(c);
+  const r = settle(c);
+  assert.equal(r.status, "migrated");
+  const text = r.report.join("\n");
+  assert.doesNotMatch(text, /original/, "the kept files are not this run's originals");
+  assert.match(text, /earlier/);
+  assert.match(text, /\.devcycle\/format-backup-0/);
+  assert.match(read(join(backup, "ledger.md")), /an earlier cycle's ledger/);
+});
+
+test("files another session migrated while this one waited settle as migrated, so the caller reads them again", () => {
+  const c = frozenCycle("ledger-unbackticked.md");
+  const checked = checkState(c.statePath);
+  assert.equal(checked.format.verdict, "older");
+  settle(c);
+  const migrated = [read(c.statePath), read(c.ledgerPath)];
+  const r = settleFormat(c.statePath, { checked });
+  assert.deepEqual([r.status, r.report], ["migrated", []]);
+  assert.deepEqual([read(c.statePath), read(c.ledgerPath)], migrated, "and rewrote nothing");
 });
 
 test("a failure before the first write still reports the files as they were", () => {

@@ -7,17 +7,17 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 
 ## 2026-10-31 — A cycle's files carry a format, and a driven session stops on a plugin update
 
-**Decision:** `.devcycle/state.md` gains `- format: <n>`, one version per cycle, with an ordered list of tested migrations that are never retired. Older files migrate on resume, in interactive and driven sessions alike, backing up what changes. Newer files stop with a message. A driven session on a different plugin version from its driver stops `plugin-updated`, and a pre-change driver stops through `needs-user`, the one reason its schema accepts as a stop for a person. `commands/continue.md` grows by one line to carry the format pointers, so `commandMax` moves to 184; the rest of the new prose lives in `references/resume.md`, which is why `surfaceTotal` and the closure figures below rise. Nothing migrates beside a live driver except the session that driver started, which carries its token: during a session the driver writes the cycle's files only as ledger appends, under the lock a migration holds, and never writes `state.md`. A driver that cannot read its own plugin version sets `DEVCYCLE_DRIVER_PLUGIN_VERSION` to `unreadable` and the session compares nothing, so only a driver that predates the variable, which sets nothing, stops `needs-user`. Both are recorded here and not in `references/resume.md` or `references/drive.md`, whose closure ceilings they would have raised.
+**Decision:** `.devcycle/state.md` gains `- format: <n>`, one version per cycle, with an ordered list of tested migrations that are never retired. Older files migrate on resume, in interactive and driven sessions alike, backing up what changes. Newer files stop with a message. A driven session on a different plugin version from its driver stops `plugin-updated`, and a pre-change driver stops through `needs-user`, the one reason its schema accepts as a stop for a person. `commands/continue.md` grows by one line to carry the format pointers, so `commandMax` moves to 184; the rest of the new prose lives in `references/resume.md`, which is why `surfaceTotal` and the closure figures below rise. Nothing migrates beside a live driver except the session that driver started, which carries its token: during a session the driver writes the cycle's files only as ledger appends, under the lock a migration holds, and never writes `state.md`. A holder no liveness check can prove dead counts as a live driver, for an attach and for the migration alike, so an interactive resume beside one attaches, migrates nothing and says why. A driver that cannot read its own plugin version sets `DEVCYCLE_DRIVER_PLUGIN_VERSION` to `unreadable`, and each of its sessions stops `needs-user` with a detail that claims no update, since nothing can be compared; a driver that predates the variable, which sets nothing, stops `needs-user` as an update. `references/resume.md` and `references/drive.md` say both, and the figures below rose again for those sentences: `surfaceTotal` by 1, `commands/continue.md` by 213 bytes, and `commands/cycle.md`, `playbooks/receiving-review.md` and `playbooks/sweeping-mechanical-changes.md` by 109 each.
 
 **Why:** Plugin updates reach in-flight cycles. Field-by-field "predates this format" fallbacks left real gaps: older ledgers read as a previous cycle's and were archived, and a removed stage read as an abandoned cycle. `docs/platform-notes.md` § (m) records the measurements.
 
 **Supersedes:** nothing. Validate check 29 now holds the format's surface to `tests/fixtures/cycle-format-contract.json`.
 
 ```text
-budget: surface-budget.json surfaceTotal 6749
+budget: surface-budget.json surfaceTotal 6750
 budget: surface-budget.json commandMax 184
-budget: context-budget.json commands/continue.md 73608
-budget: context-budget.json commands/cycle.md 85825
+budget: context-budget.json commands/continue.md 73821
+budget: context-budget.json commands/cycle.md 85934
 budget: context-budget.json commands/learn.md 17170
 budget: context-budget.json commands/maintain.md 18349
 budget: context-budget.json commands/onboard.md 17458
@@ -30,10 +30,10 @@ budget: context-budget.json playbooks/learning-from-sessions.md 64893
 budget: context-budget.json playbooks/maintaining-the-repo.md 65419
 budget: context-budget.json playbooks/onboarding-a-repo.md 31117
 budget: context-budget.json playbooks/planning-waves.md 78748
-budget: context-budget.json playbooks/receiving-review.md 118788
+budget: context-budget.json playbooks/receiving-review.md 118897
 budget: context-budget.json playbooks/reviewing-code.md 95901
 budget: context-budget.json playbooks/reviewing-the-branch.md 59103
-budget: context-budget.json playbooks/sweeping-mechanical-changes.md 91966
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 92075
 budget: context-budget.json playbooks/verifying-on-device.md 65660
 budget: context-budget.json references/config.md 14644
 ```
