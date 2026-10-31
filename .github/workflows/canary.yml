@@ -1,0 +1,162 @@
+name: Canary
+# Runs devcycle's model-free checks against the latest Claude Code once a day, so a breaking release
+# raises one rolling issue before a user reports it. It is not a required check and never blocks a PR.
+# GitHub runs a schedule only from the default branch, so this tests what users have installed.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: canary-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  canary:
+    name: Plugin loads and tests pass on the latest Claude Code
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      verdict: ${{ steps.verdict.outputs.verdict }}
+      step: ${{ steps.verdict.outputs.step }}
+      version: ${{ steps.version.outputs.version }}
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ".nvmrc"
+      - name: Install the latest Claude Code
+        id: install
+        continue-on-error: true
+        run: |
+          for attempt in 1 2 3; do
+            npm install -g @anthropic-ai/claude-code@latest && exit 0
+            sleep 30
+          done
+          exit 1
+      - name: Record the version under test
+        id: version
+        if: steps.install.outcome == 'success'
+        run: echo "version=$(claude --version < /dev/null | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Validate the marketplace on latest
+        id: validate_marketplace
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: claude plugin validate . --strict < /dev/null
+      - name: Validate the plugin manifest on latest
+        id: validate_manifest
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: claude plugin validate .claude-plugin/plugin.json --strict < /dev/null
+      - name: Run the hooks module's tests on latest
+        id: hooks_tests
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        run: claude plugin test . < /dev/null
+      - name: Install the plugin in a clean config on latest
+        id: plugin_install
+        if: steps.install.outcome == 'success'
+        continue-on-error: true
+        env:
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/canary-config
+        run: |
+          for attempt in 1 2 3; do
+            claude plugin marketplace add ./ < /dev/null \
+              && claude plugin marketplace add anthropics/claude-plugins-official < /dev/null \
+              && claude plugin install devcycle@devcycle < /dev/null \
+              && exit 0
+            sleep 30
+          done
+          exit 1
+      - name: Check the installed plugin loaded on latest
+        id: load_check
+        if: steps.plugin_install.outcome == 'success'
+        continue-on-error: true
+        env:
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/canary-config
+        run: |
+          claude plugin list --json < /dev/null > "$RUNNER_TEMP/plugin-list.json"
+          node scripts/canary-load-check.mjs "$RUNNER_TEMP/plugin-list.json"
+      - name: Run the golden-path suite
+        id: golden_path
+        continue-on-error: true
+        run: node --test tests/unit/golden-path.test.mjs
+      - name: Re-run what failed on the pinned Claude Code
+        id: pin
+        if: >-
+          steps.validate_marketplace.outcome == 'failure' || steps.validate_manifest.outcome == 'failure' ||
+          steps.hooks_tests.outcome == 'failure' || steps.load_check.outcome == 'failure'
+        continue-on-error: true
+        env:
+          VALIDATE_MARKETPLACE: ${{ steps.validate_marketplace.outcome }}
+          VALIDATE_MANIFEST: ${{ steps.validate_manifest.outcome }}
+          HOOKS_TESTS: ${{ steps.hooks_tests.outcome }}
+          LOAD_CHECK: ${{ steps.load_check.outcome }}
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/pin-config
+        run: |
+          pin="$(node scripts/canary-report.mjs pin)"
+          if ! npm install --prefix "$RUNNER_TEMP/pin" "@anthropic-ai/claude-code@$pin"; then
+            echo "install=failure" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "install=success" >> "$GITHUB_OUTPUT"
+          export PATH="$RUNNER_TEMP/pin/node_modules/.bin:$PATH"
+          record() {
+            if "${@:2}"; then echo "$1=success"; else echo "$1=failure"; fi >> "$GITHUB_OUTPUT"
+          }
+          load_check_on_pin() {
+            claude plugin marketplace add ./ < /dev/null \
+              && claude plugin marketplace add anthropics/claude-plugins-official < /dev/null \
+              && claude plugin install devcycle@devcycle < /dev/null \
+              && claude plugin list --json < /dev/null > "$RUNNER_TEMP/pin-plugin-list.json" \
+              && node scripts/canary-load-check.mjs "$RUNNER_TEMP/pin-plugin-list.json"
+          }
+          if [ "$VALIDATE_MARKETPLACE" = failure ]; then record validate_marketplace claude plugin validate . --strict < /dev/null; fi
+          if [ "$VALIDATE_MANIFEST" = failure ]; then record validate_manifest claude plugin validate .claude-plugin/plugin.json --strict < /dev/null; fi
+          if [ "$HOOKS_TESTS" = failure ]; then record hooks_tests claude plugin test . < /dev/null; fi
+          if [ "$LOAD_CHECK" = failure ]; then record load_check load_check_on_pin; fi
+      - name: Decide what the failures mean
+        id: verdict
+        env:
+          STEPS: ${{ toJSON(steps) }}
+        run: node scripts/canary-report.mjs verdict
+      - name: Fail the run when any check failed
+        if: >-
+          steps.install.outcome == 'failure' || steps.validate_marketplace.outcome == 'failure' ||
+          steps.validate_manifest.outcome == 'failure' || steps.hooks_tests.outcome == 'failure' ||
+          steps.plugin_install.outcome == 'failure' || steps.load_check.outcome == 'failure' ||
+          steps.golden_path.outcome == 'failure'
+        run: exit 1
+  report:
+    name: Update the rolling canary issue
+    needs: canary
+    # Only the default branch's runs may touch the issue, so a manual run on a branch cannot.
+    if: >-
+      always() && needs.canary.result != 'cancelled' && needs.canary.outputs.verdict != '' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ".nvmrc"
+      - name: Open, comment on or close the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERDICT: ${{ needs.canary.outputs.verdict }}
+          VERSION: ${{ needs.canary.outputs.version }}
+          STEP: ${{ needs.canary.outputs.step }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          node scripts/canary-report.mjs report --verdict "$VERDICT" --version "${VERSION:-unknown}" ${STEP:+--step "$STEP"} --run-url "$RUN_URL"
