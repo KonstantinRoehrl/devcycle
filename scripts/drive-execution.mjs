@@ -26,6 +26,7 @@ import { stopWindowOpen } from "./stop-files.mjs";
 import { follow, statusReport, WATCH_LEVELS, waitForEnd } from "./drive-watch.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
 import { isMain } from "./is-main.mjs";
+import { UNREADABLE_PLUGIN_VERSION, installedVersion } from "./verification.mjs";
 import { field } from "./md-field.mjs";
 import { gitToplevel, hashSession } from "./run-record.mjs";
 import { eachRecord } from "./jsonl.mjs";
@@ -58,6 +59,10 @@ const DEAD_STATES = new Set(["ended-without-output", "quiet"]);
 const DEFAULT_BACKOFF_MS = 5 * 60_000;
 export const SIGNAL_GRACE_MS = 10_000;
 const DETACH_POLL_MS = 50;
+// The plugin version this driver started on. A running process keeps its code across an update, so
+// each session it starts compares this with its own (scripts/wave-setup.mjs). A version this driver
+// could not read goes out as UNREADABLE_PLUGIN_VERSION, which stops each session for a person.
+const DRIVER_PLUGIN_VERSION = installedVersion();
 const USAGE_LIMIT_TEXT = /usage limit|rate limit|hit your limit/i;
 // Every wait is a wall-clock deadline checked in slices, so a machine that sleeps through a deadline
 // starts the next session on wake. DEVCYCLE_DRIVE_SLICE_MS and DEVCYCLE_DRIVE_CLOCK_FILE (a file
@@ -376,8 +381,8 @@ function sessionArgs(ctx, opts, spent) {
   return args;
 }
 
-function childEnv(ctx) {
-  const env = { ...process.env, DEVCYCLE_DRIVE_TOKEN: ctx.token };
+export function childEnv(ctx, pluginVersion = DRIVER_PLUGIN_VERSION) {
+  const env = { ...process.env, DEVCYCLE_DRIVE_TOKEN: ctx.token, DEVCYCLE_DRIVER_PLUGIN_VERSION: pluginVersion || UNREADABLE_PLUGIN_VERSION };
   // agent-cli's claudeStructured sets DEVCYCLE_NESTED_RUN for its own children, and a driver
   // started from one of them inherits it; a driven session that kept it would run with the hooks
   // module inert — no agent tracing, no subagent budget governor. CLAUDECODE is there because

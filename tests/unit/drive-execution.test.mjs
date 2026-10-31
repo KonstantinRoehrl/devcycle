@@ -8,9 +8,10 @@ import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { readSection } from "../../scripts/read-section.mjs";
+import { UNREADABLE_PLUGIN_VERSION, installedVersion } from "../../scripts/verification.mjs";
 import { DRIVE_LOCK_REL, readDriveLockHolder } from "../../scripts/drive-lock.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
-import { classifyTrackedChanges, inFlightFiles, SESSION_START_TOKENS, stopDriver } from "../../scripts/drive-execution.mjs";
+import { childEnv, classifyTrackedChanges, inFlightFiles, SESSION_START_TOKENS, stopDriver } from "../../scripts/drive-execution.mjs";
 import { classifyDrive, HANDLED_REL, readDriveResult, readHandledResult, RESULT_REL, STOP_REQUEST_REL } from "../../scripts/drive-result.mjs";
 import { commitAll, makeFakeBin, makeRepo, sh, writeInto } from "./helpers.mjs";
 
@@ -20,7 +21,7 @@ const RUN = "0123456789abcdef";
 const MODEL = "claude-sonnet-5-5";
 // scripts/drive-signal.mjs's reasons, pinned verbatim: the driver passes each one through untouched.
 const STOP_REASONS = ["needs-user", "knob-drift", "foreign-state", "resume-check", "branch", "depth-at-start",
-  "sweep-fallback", "scope-change", "no-driver", "not-opted-in"];
+  "sweep-fallback", "scope-change", "no-driver", "not-opted-in", "cycle-format", "plugin-updated"];
 
 const PLAN = [
   "# Fixture plan", "",
@@ -329,15 +330,40 @@ test("an effort the driver cannot use refuses the start with exit 3 naming where
   }
 });
 
-test("each session gets this driver's own token, whose hash and only its hash the lock holds; every run draws a new one", async () => {
-  const r = await drive(makeCycle(), [{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }]);
+// A two-session run with `env` on the driver, returning the stub's record of each session.
+async function driverCallsWithEnv(env) {
+  const r = await drive(makeCycle(), [{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }], { env });
   assert.equal(r.code, 0, r.out);
   const [first, second] = r.calls;
+  return { first, second };
+}
+
+test("each session gets this driver's own token, whose hash and only its hash the lock holds; every run draws a new one", async () => {
+  const { first, second } = await driverCallsWithEnv({});
   assert.match(first.token, /^[0-9a-f]{32}$/, "the driven session was not handed a token");
   assert.equal(first.lockTokenHash, createHash("sha256").update(first.token).digest("hex"));
   assert.equal(second.token, first.token, "one driver run hands every session the same token");
   const again = await drive(makeCycle(), [{ ledger: DONE, stage: "branch-review" }]);
   assert.notEqual(again.calls[0].token, first.token, "two driver runs share a token");
+});
+
+test("each session is told the plugin version its driver started on, overriding an inherited one", async () => {
+  const { first, second } = await driverCallsWithEnv({ DEVCYCLE_DRIVER_PLUGIN_VERSION: "0.0.0-inherited" });
+  assert.equal(first.driverVersion, installedVersion());
+  assert.equal(second.driverVersion, installedVersion());
+});
+
+test("a driver that cannot read its own plugin version says so, rather than leaving the variable out", () => {
+  const ctx = { token: "t", effort: "default" };
+  const inherited = process.env.DEVCYCLE_DRIVER_PLUGIN_VERSION;
+  process.env.DEVCYCLE_DRIVER_PLUGIN_VERSION = "0.0.0-inherited";
+  try {
+    assert.equal(childEnv(ctx, "1.2.3").DEVCYCLE_DRIVER_PLUGIN_VERSION, "1.2.3");
+    assert.equal(childEnv(ctx, null).DEVCYCLE_DRIVER_PLUGIN_VERSION, UNREADABLE_PLUGIN_VERSION);
+  } finally {
+    if (inherited === undefined) delete process.env.DEVCYCLE_DRIVER_PLUGIN_VERSION;
+    else process.env.DEVCYCLE_DRIVER_PLUGIN_VERSION = inherited;
+  }
 });
 
 // D5: a driven session holds DEVCYCLE_DRIVE_TOKEN; only /devcycle:continue starts a driver.

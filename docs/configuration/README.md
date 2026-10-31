@@ -77,6 +77,8 @@ global, as `/plugin configure` stores them: a repo's old `configured:` values ar
 drift notice, never applied, then dropped from the state file.
 [`references/config.md`](../../references/config.md) § Knob channel owns the details.
 
+If a release renames an option, your value carries over: the resolver reads it from the old name in `settings.json`, and a `knob-renamed:` line gives the command that stores it under the new name. This reads the user settings file only, so a project- or local-scoped install falls back to the default until you set the new name.
+
 Developing devcycle itself: a checkout loaded with `claude --plugin-dir` sees none of these values
 and silently runs every knob at its fallback. [`docs/platform-notes.md`](../platform-notes.md)
 § (h) records why, and how to try a branch with your real settings.

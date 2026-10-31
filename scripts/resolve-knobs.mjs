@@ -5,7 +5,10 @@
 // printed `knobs:` line. references/config.md states the resolution order; this file is its
 // executable form, and ROSTER is the roster's fifth hand-kept copy that golden-path holds in parity.
 // Its enum `values` own each fixed set: validate.mjs holds plugin.json's `options` lists to them.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { claudeConfigHome } from "./claude-settings.mjs";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { parsePool } from "./model-pool.mjs";
 
@@ -36,6 +39,39 @@ export const ROSTER = [
 ];
 
 const ROSTER_KEYS = new Set(ROSTER.map(({ key }) => key));
+
+
+// A renamed knob, old key to new. An update keeps the old key's stored value in settings.json but
+// drops its rendered placeholder (docs/platform-notes.md § (m)), so the resolver's CLI reads it from
+// there. Only the user settings file: a project- or local-scoped install falls back to unset.
+export const KNOB_RENAMES = {};
+const PLUGIN_ID = "devcycle@devcycle";
+
+export function readStoredOptions(env = process.env) {
+  try {
+    const options = JSON.parse(readFileSync(join(claudeConfigHome(env), "settings.json"), "utf8"))?.pluginConfigs?.[PLUGIN_ID]?.options ?? {};
+    return Object.fromEntries(Object.entries(options).map(([key, value]) => [key, String(value)]));
+  } catch {
+    return {};
+  }
+}
+
+export function recoverRenamedKnobs(raw, { renames = KNOB_RENAMES, stored = {} } = {}) {
+  const next = { ...raw };
+  const renamed = [];
+  for (const [old, key] of Object.entries(renames)) {
+    const entry = ROSTER.find((knob) => knob.key === key);
+    if (!entry || !isUnset(next[key]) || isUnset(stored[old])) continue;
+    const value = inSet(entry, stored[old]);
+    if (value === null) continue;
+    next[key] = value;
+    renamed.push({ old, key, value });
+  }
+  return { raw: next, renamed };
+}
+
+export const formatRenamedLine = ({ old, key, value }) =>
+  `knob-renamed: ${old} → ${key}=${value}; your value was kept. To store it under the new name, run: claude plugin install devcycle@devcycle --config ${key}=${value}`;
 
 // An unset option renders as its literal placeholder -- even when the manifest declares a default
 // (docs/platform-notes.md) -- and `auto` is config.md's sanctioned spelling of it: unset → the knob's fallback.
@@ -114,13 +150,16 @@ export const formatExplicitLine = (explicit) => ["explicit:", ...explicit].join(
 // `configured:` KEY=VALUE list. Tokens split on whitespace and one trailing comma (the
 // `configured:` list's separator) is dropped; anything that is not a roster `key=value` -- the
 // `knobs:` label, a date, the legacy `· profile-asked` marker -- is ignored.
-export function parseRecordedLine(line) {
+export function parseRecordedLine(line, renames = KNOB_RENAMES) {
   const recorded = {};
+  const fromOld = {};
   for (const token of line.trim().split(/\s+/)) {
     const m = /^([A-Za-z]+)=(.+)$/.exec(token.replace(/,$/, ""));
-    if (m && ROSTER_KEYS.has(m[1])) recorded[m[1]] = m[2];
+    if (!m) continue;
+    if (ROSTER_KEYS.has(m[1])) recorded[m[1]] = m[2];
+    else if (ROSTER_KEYS.has(renames[m[1]])) fromOld[renames[m[1]]] = m[2];
   }
-  return recorded;
+  return { ...fromOld, ...recorded };
 }
 
 // A recorded `auto` on a knob whose fallback is not `auto` is only the unset spelling, which that
@@ -150,7 +189,8 @@ function cli(argv) {
   const { flags } = parseFlags(argv, KNOWN_FLAGS);
   const missing = ROSTER.map(({ key }) => `--${key}`).filter((flag) => !(flag in flags));
   if (missing.length) throw new Error(`missing ${missing.join(", ")} -- pass every knob's rendered placeholder`);
-  const raw = Object.fromEntries(ROSTER.map(({ key }) => [key, flags[`--${key}`] ?? ""]));
+  const provided = Object.fromEntries(ROSTER.map(({ key }) => [key, flags[`--${key}`] ?? ""]));
+  const { raw, renamed } = Object.keys(KNOB_RENAMES).length ? recoverRenamedKnobs(provided, { stored: readStoredOptions() }) : { raw: provided, renamed: [] };
   const { knobs, explicit, warnings } = resolveKnobs(raw);
   for (const w of warnings) console.error(`resolve-knobs: warning: ${w}`);
   const compareLine = requireValue(flags, "--compare", "a recorded knobs: or configured: line");
@@ -162,6 +202,7 @@ function cli(argv) {
   } else {
     console.log(formatKnobsLine(knobs));
     console.log(formatExplicitLine(explicit));
+    for (const r of renamed) console.log(formatRenamedLine(r));
   }
 }
 

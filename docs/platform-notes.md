@@ -543,3 +543,19 @@ capture hook on every event and a plugin holding a deny-all `PreToolUse` guard, 
 `hooks/process-sensor.mjs` takes ids from `PostToolUse` and treats `Stop`'s array as complete for
 shells and subagents only. `scripts/stop-cycle.mjs` stamps a `TaskStop`-ed subagent's dispatch itself,
 since no `SubagentStop` will, and reports a Monitor's stop as unconfirmed.
+
+## (m) What a plugin update does to a running cycle
+
+Measured on Claude Code 2.1.316 against throwaway `CLAUDE_CONFIG_DIR` directories with no login. A probe plugin was installed with stored options, then updated to a version whose manifest dropped one key and added another.
+
+| Question | Result |
+| --- | --- |
+| Does an update keep a removed key's stored value? | Yes. `settings.json` still held it under `pluginConfigs[<id>].options` after the update. |
+| Does an update delete the old cache directory? | No. Both versions stayed on disk and the old one gained `.orphaned_at`. When it gets pruned was not measured. |
+| Does a session pick up an update live? | The CLI reports "Restart to apply changes", so a running session keeps its code. |
+| Does `claude plugin list --json` expose load failures? | Yes. A failed plugin carries `errors` and `errorDetails`; a healthy one has neither. The command exits 0 either way, so the exit code proves nothing. |
+| Does a fresh install of devcycle load with no model? | Yes, after adding `./` and `anthropics/claude-plugins-official` as marketplaces. Adding the latter installed the superpowers dependency. |
+
+A scan of real `.devcycle/` directories also found ledgers with event lines and no `Plan:` header, a `Plan:` header without the backticks the reader needs, and hand-written event-shaped lines the parser rejects in about a fifth of this repo's archived ledgers. Those shapes are format 0 (`references/resume.md` § The format row).
+
+Two limits follow. A dispatched brief can name an absolute versioned cache path, which keeps working until Claude Code prunes the old directory and then fails loudly. And a session already open on old code can write old-format lines after a newer session migrated the files, until it next resumes and stops on the "newer" check, so migrated readers stay tolerant of the previous format's lines.

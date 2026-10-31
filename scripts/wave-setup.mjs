@@ -10,15 +10,17 @@ import { readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { isMain } from "./is-main.mjs";
+import { UNREADABLE_PLUGIN_VERSION, installedVersion } from "./verification.mjs";
 import { field } from "./md-field.mjs";
 import { describe } from "./find-state-files.mjs";
 import { checkState } from "./resume-check.mjs";
+import { settleFormat } from "./cycle-format.mjs";
 import { parseHandoff } from "./handoff-mark.mjs";
 import { compareKnobs, parseRecordedLine, resolveKnobs } from "./resolve-knobs.mjs";
 import { resolveDepth } from "./depth-probe.mjs";
 import { TEST_FILE_SUFFIXES, fieldValue, gateCommand, parseDispatchMap, taskBlocks, taskFileMap } from "./task-files.mjs";
 import {
-  isNoVerdict, ledgerPlan, nextReviewRound, noVerdictReason, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot,
+  isNoVerdict, ledgerPlan, nextReviewRound, noVerdictReason, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot, UsageError,
 } from "./task-ledger.mjs";
 import { ledgerSlotState } from "./ledger-slot.mjs";
 import { pendingReviewLoop, reviewLoopId } from "./review-loop.mjs";
@@ -277,7 +279,26 @@ function wavePosition(root, planText, { waves, positions }, lines) {
   return { wave, tasks, dispatchable, pendingDecision: pending ? { task: pending.task, loopId: reviewLoopId(pending.task) } : null };
 }
 
-export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPath = null, env = process.env, cwd = process.cwd() }) {
+export const pluginUpdateDetail = (from, to) =>
+  `The devcycle plugin updated from ${from} to ${to} while the driver was running, so this session did no work. Restart Claude Code, then run /devcycle:continue to carry on with ${to}.`;
+
+// No update is known here, only that nothing can be compared.
+const UNREADABLE_DRIVER_VERSION_DETAIL =
+  "The driver could not read its devcycle plugin version when it started, so this session cannot confirm it matches and did no work. Restart Claude Code, then run /devcycle:continue.";
+
+// null when the file cannot be read, which differs from any text the first read held.
+const stateTextAt = (path) => {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+};
+
+// `settle(checked)` is the format settle (see waveSetup): given the state's resume-check verdict it
+// returns scripts/cycle-format.mjs's settleFormat result, and null skips it.
+function readSetup(opts) {
+  const { statePath, drive = false, knobsLine = null, ledgerPath = null, env = process.env, cwd = process.cwd(), pluginVersion = installedVersion(), settle = null } = opts;
   const abs = resolve(cwd, statePath);
   let stateText;
   try {
@@ -309,7 +330,7 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   const result = {
     ok: true, action: "resume", state, knobDrift: [], branch: null, depth, wave: null, tasks: [], dispatchable: [],
     pendingDecision: null, drive: status.drive, entryLines: [], appended: [], depthBand: depth?.band ?? null,
-    handoff: { ...parseHandoff(field(stateText, "handoff")), ask: false },
+    handoff: { ...parseHandoff(field(stateText, "handoff")), ask: false }, formatQuestion: null, formatReport: [],
   };
   // A stop on one task's pending decision names it, so the answer is recorded as that task's.
   const stop = (stopReason, stopDetail, stopTask = null) => ({ ...result, action: "stop", stopReason, stopDetail, stopTask });
@@ -320,7 +341,35 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   if (drive && !(result.drive.lock && token && status.tokenHash === driveTokenHash(token)))
     return stop("no-driver", `no live driver lock names ${abs} with this session's drive token`);
   if (drive && !result.drive.opted) return stop("not-opted-in", "the state file carries no drive: auto row");
+  // A driver from before this variable existed rejects any reason its own schema lacks, and would end
+  // `failed` and restart, so needs-user is the one route that reaches it as a stop for a person. An
+  // installed version that cannot be read confirms nothing and blocks nothing. A driver that could not
+  // read its own is a stop for a person whatever this session reads: nothing can be compared.
+  const started = env.DEVCYCLE_DRIVER_PLUGIN_VERSION;
+  if (drive && started === UNREADABLE_PLUGIN_VERSION) return stop("needs-user", UNREADABLE_DRIVER_VERSION_DETAIL);
+  if (drive && pluginVersion) {
+    if (started === undefined) return stop("needs-user", pluginUpdateDetail("an earlier version", pluginVersion));
+    if (started !== pluginVersion) return stop("plugin-updated", pluginUpdateDetail(started, pluginVersion));
+  }
   const checked = checkState(abs);
+  // The format settles here, after the gates that decide whether this session may act at all and
+  // before any verdict reads the cycle: a migration may rename the stage or rewrite the ledger, so
+  // what it changes is read again from the top.
+  const settled = settle ? settle(checked) : { status: "none" };
+  if (settled.status === "driver-live") result.formatReport = settled.report;
+  if (settled.status === "locked" || settled.status === "failed") return stop("cycle-format", settled.detail);
+  if (settled.status === "question" && drive) return stop("needs-user", settled.question);
+  // Every migration rewrites state.md last, so state text that is not what this read started from means a
+  // migration (this session's, or another's that finished in the gap since the first read) has
+  // changed the cycle under it. That is the whole staleness, so it is the one test. The read is
+  // repeated to refresh the data and never to discard what the check decided: a question or a live
+  // driver is replayed into it, since neither wrote anything.
+  if (settle && (settled.status === "migrated" || stateTextAt(abs) !== stateText)) {
+    const replay = settled.status === "question" || settled.status === "driver-live";
+    const again = readSetup({ ...opts, settle: replay ? () => settled : null });
+    return { ...again, formatReport: settled.report ?? again.formatReport };
+  }
+  if (settled.status === "question") result.formatQuestion = settled.question;
   state.stopped = checked.stopped ?? null;
   if (checked.kind === "foreign") return stop("foreign-state", `its root: ${checked.recordedRoot} is not this checkout (${checked.actualRoot})`);
 
@@ -329,8 +378,10 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   Object.assign(result, { overview: overviewOf(map), ledgerSlot: slot });
   const decided = (decision) => ({ ...result.drive, ...decision, result: driver });
   if (attach) return { ...result, drive: decided({ lock: { pid: driver.pid, log: driver.log }, action: "attach", writeRow: null, confirm: null, gate: null }) };
+  if (checked.kind === "format") return stop("cycle-format", checked.errors[0]);
   if (!checked.ok) return stop("resume-check", checked.errors.join("; "));
-  if (state.stage !== "execution") return stop("resume-check", `the state file is at stage ${state.stage}, not execution`);
+  if (state.stage !== "execution")
+    return result.formatQuestion ? result : stop("resume-check", `the state file is at stage ${state.stage}, not execution`);
 
   result.entryLines = checked.lines;
   result.knobDrift = recordedKnobs && knobsLine
@@ -358,11 +409,21 @@ export function waveSetup({ statePath, drive = false, knobsLine = null, ledgerPa
   return result;
 }
 
-const FLAGS = { "--state": "value", "--drive": "none", "--knobs": "value", "--ledger": "value" };
+// The token, opt-in and driver-version stops are decided before anything is written; then the format
+// settles (scripts/cycle-format.mjs) and the cycle is read as the migration left it.
+export function waveSetup(opts) {
+  const { statePath, drive = false, formatAnswer = null, cwd = process.cwd() } = opts;
+  const abs = resolve(cwd, statePath);
+  return readSetup({ ...opts, settle: (checked) => settleFormat(abs, { checked, answer: formatAnswer, driven: drive }) });
+}
+
+const FLAGS = { "--state": "value", "--drive": "none", "--knobs": "value", "--ledger": "value", "--format-answer": "value" };
 
 function cli(argv) {
   const flags = taskFlags(argv, FLAGS, ["--state"]);
-  return waveSetup({ statePath: flags["--state"], drive: flags["--drive"] === true, knobsLine: flags["--knobs"] ?? null, ledgerPath: flags["--ledger"] ?? null });
+  const formatAnswer = flags["--format-answer"] ?? null;
+  if (formatAnswer !== null && formatAnswer !== "yes" && formatAnswer !== "no") throw new UsageError(`--format-answer takes yes or no, got ${JSON.stringify(formatAnswer)}`);
+  return waveSetup({ statePath: flags["--state"], drive: flags["--drive"] === true, knobsLine: flags["--knobs"] ?? null, ledgerPath: flags["--ledger"] ?? null, formatAnswer });
 }
 
 if (isMain(import.meta.url, process.argv[1])) runTaskScript("wave-setup", () => cli(process.argv.slice(2)));

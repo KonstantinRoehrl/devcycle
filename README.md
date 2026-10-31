@@ -179,6 +179,7 @@ run at once. The full configuration surface is in
   any shell, a dispatched subagent's included. The quotes are load-bearing: command substitution is
   word-split, so an unquoted form tears a plugin root containing a space and fails as a
   module-not-found on the truncated path.
+- **Updated devcycle mid-cycle?** `/devcycle:continue` handles it. If the update changed how a cycle's files are written, it migrates them, keeps the originals in `.devcycle/format-backup-*`, and tells you what changed. If your files are newer than the installed plugin, it stops and tells you to update. An unattended run stops at its next session and tells you to restart Claude Code.
 - **Source edits don't show up after reinstalling** — the plugin cache is keyed by
   version, and reinstalling the same version does not refresh it. Bump the version or
   uninstall and reinstall.

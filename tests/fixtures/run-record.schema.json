@@ -298,7 +298,7 @@
         "stopReason": {
           "enum": [
             "needs-user", "knob-drift", "foreign-state", "resume-check", "branch", "depth-at-start",
-            "sweep-fallback", "scope-change", "no-driver", "not-opted-in"
+            "sweep-fallback", "scope-change", "no-driver", "not-opted-in", "cycle-format", "plugin-updated"
           ]
         },
         "costUsd": { "type": "number", "minimum": 0 },

@@ -169,7 +169,8 @@ wait.
   exits 4, printing the reason and a one-line detail.
   The reasons are `needs-user` (the catch-all: exhausted review rounds, a blocked implementer, a
   retry cap, any gate not named here), `knob-drift`, `foreign-state`, `resume-check`, `branch`,
-  `depth-at-start`, `sweep-fallback`, `scope-change`, `no-driver` and `not-opted-in`.
+  `depth-at-start`, `sweep-fallback`, `scope-change`, `no-driver`, `not-opted-in`, `cycle-format` and `plugin-updated`.
+- **Run across a plugin update.** A running driver keeps its old code, so a session that starts on a newer plugin does no work and stops `plugin-updated`, telling you to restart Claude Code and run `/devcycle:continue`. A driver from before this check existed stops the same way under `needs-user`.
 - **Go past execution.** It ends at the branch-review handoff (exit 0); branch review, on-device
   verification and finish stay with you.
 - **Start itself from a driven session.** A session the driver started never starts another

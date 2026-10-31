@@ -13,7 +13,7 @@ and the full inventory of everything the plugin ships.
 - [`playbooks/executing-waves/unattended.md`](playbooks/executing-waves/unattended.md) — running execution unattended: opting in at execution start, how /devcycle:continue starts, watches and restarts the driver, what the driver does and refuses, its options and exit codes, and how to stop it.
 - [`configuration/`](configuration/README.md) — the options, the profile presets, and how a value resolves when you configure some but not all of them.
 - [`decisions/`](decisions/README.md) — the decision log: the choices that shaped devcycle and why each was made.
-- [`platform-notes.md`](platform-notes.md) — platform verification notes and the §10.D gate.
+- [`platform-notes.md`](platform-notes.md) — platform verification notes and the §10.D gate, including what a plugin update does to a running cycle (§ (m)).
 - [`routing.md`](routing.md) — which command answers which intent, and what each may do before your first confirmation.
 - [`known-issues.md`](known-issues.md) — confirmed open defects in devcycle's own engines, each with a located cause.
 - [`case-studies/`](case-studies/) — devcycle's own before/after payoff, measured from its session corpus. Currently a dated checkpoint: doctor's matched-cohort bar is not yet cleared, so no payoff number is published.

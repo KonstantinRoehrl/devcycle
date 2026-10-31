@@ -4,14 +4,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { hostname } from "node:os";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, sh, writeInto } from "./helpers.mjs";
-import { RETRY_CAP, taskPosition, waveSetup } from "../../scripts/wave-setup.mjs";
+import { MIGRATIONS, settleFormat, stampFormat } from "../../scripts/cycle-format.mjs";
+import { checkState } from "../../scripts/resume-check.mjs";
+import { isLiveHolder } from "../../scripts/file-lock.mjs";
+import { RETRY_CAP, pluginUpdateDetail, taskPosition, waveSetup } from "../../scripts/wave-setup.mjs";
+import { UNREADABLE_PLUGIN_VERSION, installedVersion } from "../../scripts/verification.mjs";
 import { DRIVE_LOCK_REL, acquireDriveLock, driveTokenHash, releaseDriveLock } from "../../scripts/drive-lock.mjs";
-import { RESULT_REL } from "../../scripts/drive-result.mjs";
+import { RESULT_REL, holderLiveness } from "../../scripts/drive-result.mjs";
 import { parseLedgerLine } from "../../scripts/task-ledger.mjs";
 import { reviewLoopId } from "../../scripts/review-loop.mjs";
 import { ROSTER, formatKnobsLine, resolveKnobs } from "../../scripts/resolve-knobs.mjs";
@@ -69,7 +74,7 @@ function cycle({ ledger = null, state = [], branch = "feat/x", root = null, plan
 }
 const setup = (c, opts = {}) => waveSetup({ statePath: c.statePath, cwd: c.repo, env: {}, ...opts });
 // A driven session: --drive, with the token the lock's driver handed it.
-const driven = (c, opts = {}) => setup(c, { drive: true, ...opts, env: { DEVCYCLE_DRIVE_TOKEN: TOKEN, ...opts.env } });
+const driven = (c, opts = {}) => setup(c, { drive: true, ...opts, env: { DEVCYCLE_DRIVE_TOKEN: TOKEN, DEVCYCLE_DRIVER_PLUGIN_VERSION: installedVersion(), ...opts.env } });
 function withLock(c, fn, statePath = c.statePath) {
   const { lock } = acquireDriveLock(c.repo, { statePath, logPath: join(c.repo, ".devcycle", "drive.log"), tokenHash: driveTokenHash(TOKEN) });
   try {
@@ -590,6 +595,201 @@ test("overview: waves, tasks and committed counts from the Dispatch Map, for par
   assert.deepEqual([done.overview.committed, done.overview.nextWave], [3, null]);
 });
 
+const stateOf = (c) => readFileSync(c.statePath, "utf8");
+
+test("format: an older cycle gains the row silently and resumes where it was", () => {
+  const c = cycle({ ledger: [committed(1)] });
+  const r = setup(c);
+  assert.equal(r.action, "resume");
+  assert.deepEqual([r.formatReport, r.formatQuestion], [[], null]);
+  assert.match(stateOf(c), /^- format: 1$/m);
+  assert.equal(r.overview.committed, 1);
+});
+
+test("format: a headerless ledger asks, then keeps progress on yes", () => {
+  const c = cycle();
+  writeFileSync(c.ledgerPath, `${committed(1)}\n${committed(2)}\n`);
+  const asked = setup(c);
+  assert.match(asked.formatQuestion, /2 events/);
+  assert.equal(asked.overview.committed, 0, "before the answer the ledger still reads as another cycle's");
+  assert.doesNotMatch(stateOf(c), /^- format:/m);
+  const yes = setup(c, { formatAnswer: "yes" });
+  assert.equal(yes.formatQuestion, null);
+  assert.equal(yes.overview.committed, 2);
+});
+
+test("format: an unbackticked header is normalized and the migrated position is the one returned", () => {
+  const c = cycle();
+  writeFileSync(c.ledgerPath, `Plan: docs/plan.md\n\n${committed(1)}\n`);
+  const r = setup(c);
+  assert.equal(r.overview.committed, 1);
+  assert.equal(r.ledgerSlot, "fresh");
+  assert.ok(r.formatReport.some((l) => l.includes("ledger.md")));
+});
+
+test("format: another session migrating between the first read and the format check cannot leave a stale position", () => {
+  const c = cycle();
+  writeFileSync(c.ledgerPath, `Plan: docs/plan.md\n\n${committed(1)}\n`);
+  // The token is read after the cycle's first read and before the format check: the session
+  // that wins the race finishes its whole migration in that gap.
+  let migrated = false;
+  const env = { get DEVCYCLE_DRIVE_TOKEN() {
+    if (!migrated) {
+      migrated = true;
+      assert.equal(settleFormat(c.statePath, { checked: checkState(c.statePath) }).status, "migrated");
+    }
+    return undefined;
+  } };
+  const r = setup(c, { env });
+  assert.ok(migrated, "control: the other session's migration ran in the gap");
+  assert.equal(r.overview.committed, 1, "the position is the migrated ledger's, not an unreadable one's");
+  assert.equal(r.ledgerSlot, "fresh");
+  assert.deepEqual(r.formatReport, []);
+});
+
+// An unrelated write to state.md between the first read and the format check: the re-read it forces
+// refreshes the data and never discards what the format check decided.
+function unrelatedStateWriteInTheGap(c) {
+  let written = false;
+  const env = { get DEVCYCLE_DRIVE_TOKEN() {
+    if (!written) {
+      written = true;
+      appendFileSync(c.statePath, "- note: written by another session\n");
+    }
+    return undefined;
+  } };
+  return { env, wasWritten: () => written };
+}
+
+test("format: a headerless ledger's question survives an unrelated state.md write in the gap", () => {
+  const c = cycle();
+  writeFileSync(c.ledgerPath, `${committed(1)}\n${committed(2)}\n`);
+  const gap = unrelatedStateWriteInTheGap(c);
+  const r = setup(c, { env: gap.env });
+  assert.ok(gap.wasWritten(), "control: state.md changed in the gap");
+  assert.match(r.formatQuestion, /2 events/);
+  assert.equal(r.overview.committed, 0, "before the answer the ledger still reads as another cycle's");
+  assert.doesNotMatch(stateOf(c), /^- format:/m);
+});
+
+test("format: beside a running driver the attach report survives an unrelated state.md write in the gap", () => {
+  const c = cycle({ state: [DRIVE_ROW], ledger: [] });
+  withLock(c, () => {
+    const gap = unrelatedStateWriteInTheGap(c);
+    const r = setup(c, { env: gap.env });
+    assert.ok(gap.wasWritten(), "control: state.md changed in the gap");
+    assert.equal(r.drive.action, "attach");
+    assert.ok(r.formatReport.length > 0, "the interactive resume still says why nothing was migrated");
+    assert.doesNotMatch(stateOf(c), /^- format:/m);
+  });
+});
+
+test("format: files newer than the plugin stop with cycle-format, unchanged", () => {
+  const c = cycle({ state: ["- format: 999"] });
+  const before = stateOf(c);
+  const r = setup(c);
+  assert.deepEqual([r.action, r.stopReason], ["stop", "cycle-format"]);
+  assert.match(r.stopDetail, /claude plugin update devcycle@devcycle/);
+  assert.equal(stateOf(c), before);
+});
+
+test("format: an unparseable row stops with cycle-format", () => {
+  const r = setup(cycle({ state: ["- format: one"] }));
+  assert.deepEqual([r.action, r.stopReason], ["stop", "cycle-format"]);
+});
+
+test("format: a foreign file is reported as foreign and never stamped", () => {
+  const c = cycle({ root: "/elsewhere" });
+  assert.equal(setup(c).stopReason, "foreign-state");
+  assert.doesNotMatch(stateOf(c), /^- format:/m);
+});
+
+// MIGRATIONS holds no stage rename in production, so the step a test needs is put there and taken out again.
+function withStageRename(from, to, fn) {
+  const step = MIGRATIONS.find((m) => m.from === 0);
+  const renames = step.renames;
+  step.renames = { [from]: to };
+  try {
+    return fn();
+  } finally {
+    step.renames = renames;
+  }
+}
+const retired = (c) => writeFileSync(c.statePath, stateOf(c).replace("- stage: execution", "- stage: retired-stage"));
+
+test("format: a stage a pending migration renames to execution is migrated first, then resumes", () => {
+  withStageRename("retired-stage", "execution", () => {
+    const c = cycle({ ledger: [committed(1)] });
+    retired(c);
+    const r = setup(c);
+    assert.equal(r.action, "resume", r.stopDetail);
+    assert.equal(r.state.stage, "execution");
+    assert.match(r.formatReport.join("\n"), /retired-stage is now execution/);
+    assert.match(stateOf(c), /^- stage: execution$/m);
+    assert.match(stateOf(c), /^- format: 1$/m);
+    assert.equal(r.overview.committed, 1);
+  });
+});
+
+test("format: a driven session migrates a renamed stage before it reads it, once its own gates pass", () => {
+  withStageRename("retired-stage", "execution", () => {
+    const c = cycle({ state: [DRIVE_ROW], ledger: [] });
+    retired(c);
+    withLock(c, () => {
+      const r = driven(c);
+      assert.equal(r.action, "resume", r.stopDetail);
+      assert.equal(r.state.stage, "execution");
+    });
+    const mismatched = cycle({ state: [DRIVE_ROW], ledger: [] });
+    retired(mismatched);
+    withLock(mismatched, () => {
+      const r = driven(mismatched, { pluginVersion: "9.9.9" });
+      assert.equal(r.stopReason, "plugin-updated");
+    });
+    assert.match(stateOf(mismatched), /^- stage: retired-stage$/m, "a mismatched session migrated nothing");
+    assert.doesNotMatch(stateOf(mismatched), /^- format:/m);
+  });
+});
+
+test("format: a current-format cycle is read exactly as before, and its file is not touched", () => {
+  const c = cycle({ state: ["- format: 1"], ledger: [committed(1)] });
+  const before = stateOf(c);
+  const r = setup(c);
+  assert.equal(r.action, "resume");
+  assert.deepEqual([r.formatReport, r.formatQuestion], [[], null]);
+  assert.equal(r.overview.committed, 1);
+  assert.equal(stateOf(c), before);
+});
+
+test("format: beside a running driver an interactive resume attaches and changes nothing", () => {
+  const c = cycle({ state: [DRIVE_ROW], ledger: [] });
+  withLock(c, () => {
+    const r = setup(c);
+    assert.equal(r.drive.action, "attach");
+    assert.doesNotMatch(stateOf(c), /^- format:/m);
+  });
+});
+
+test("format: a driven session migrates under its own driver, and a driven question stops needs-user", () => {
+  const plain = cycle({ state: [DRIVE_ROW], ledger: [] });
+  withLock(plain, () => assert.notEqual(driven(plain).stopReason, "cycle-format"));
+  assert.match(stateOf(plain), /^- format: 1$/m);
+
+  const headerless = cycle({ state: [DRIVE_ROW] });
+  writeFileSync(headerless.ledgerPath, `${committed(1)}\n`);
+  withLock(headerless, () => {
+    const q = driven(headerless);
+    assert.deepEqual([q.action, q.stopReason], ["stop", "needs-user"]);
+    assert.match(q.stopDetail, /1 events/);
+  });
+});
+
+test("format: a typed --drive with no token is refused before any migration", () => {
+  const c = cycle();
+  assert.equal(setup(c, { drive: true }).stopReason, "no-driver");
+  assert.doesNotMatch(stateOf(c), /^- format:/m);
+});
+
 test("cli: one JSON object on stdout; a usage error exits 2, a state file outside git exits 3", () => {
   const home = makeTempDir("wave-setup-home-");
   const env = { PATH: process.env.PATH, HOME: home, CLAUDE_DOCTOR_PROJECTS: home };
@@ -600,7 +800,7 @@ test("cli: one JSON object on stdout; a usage error exits 2, a state file outsid
   assert.equal(ok.stdout.trim().split("\n").length, 1);
   const out = JSON.parse(ok.stdout);
   assert.deepEqual([out.ok, out.action, out.wave, out.appended, out.depthBand], [true, "resume", 1, [], "unknown"]);
-  for (const args of [[], ["--state"], ["--state", c.statePath, "--bogus"]]) {
+  for (const args of [[], ["--state"], ["--state", c.statePath, "--bogus"], ["--state", c.statePath, "--format-answer", "maybe"]]) {
     const r = run(args, { cwd: c.repo });
     assert.equal(r.status, 2, `${args.join(" ")}: ${r.stdout}`);
     const usage = JSON.parse(r.stdout);
@@ -686,4 +886,151 @@ test("a stopped row is reported on state, with the record's position and left li
   assert.deepEqual(r.state.stopped.left, [{ id: "m1", kind: "monitor", reason: "may remain" }]);
   assert.equal(r.handoff.ask, false, "a recorded stop is deliberate: the not-ready question is not asked");
   assert.equal(setup(cycle()).state.stopped, null);
+});
+
+function drivenWithLock(env, opts = {}) {
+  const c = cycle({ state: [DRIVE_ROW, "- format: 1"], ledger: [] });
+  const before = readFileSync(c.statePath, "utf8");
+  let r;
+  withLock(c, () => { r = setup(c, { drive: true, env: { DEVCYCLE_DRIVE_TOKEN: TOKEN, ...env }, ...opts }); });
+  return { r, changed: readFileSync(c.statePath, "utf8") !== before };
+}
+
+test("driver version: equal carries on", () => {
+  const { r } = drivenWithLock({ DEVCYCLE_DRIVER_PLUGIN_VERSION: "1.2.3" }, { pluginVersion: "1.2.3" });
+  assert.equal(r.action, "resume");
+});
+
+test("driver version: a different one stops plugin-updated, naming both and the restart", () => {
+  const { r, changed } = drivenWithLock({ DEVCYCLE_DRIVER_PLUGIN_VERSION: "1.2.3" }, { pluginVersion: "1.3.0" });
+  assert.deepEqual([r.action, r.stopReason], ["stop", "plugin-updated"]);
+  assert.equal(r.stopDetail, pluginUpdateDetail("1.2.3", "1.3.0"));
+  assert.match(r.stopDetail, /from 1\.2\.3 to 1\.3\.0/);
+  assert.match(r.stopDetail, /Restart Claude Code/);
+  assert.equal(changed, false);
+});
+
+test("driver version: an older file never migrates in a mismatched session", () => {
+  const c = cycle({ state: [DRIVE_ROW], ledger: [] });
+  withLock(c, () => {
+    const r = setup(c, { drive: true, pluginVersion: "1.3.0", env: { DEVCYCLE_DRIVE_TOKEN: TOKEN, DEVCYCLE_DRIVER_PLUGIN_VERSION: "1.2.3" } });
+    assert.equal(r.stopReason, "plugin-updated");
+    assert.doesNotMatch(readFileSync(c.statePath, "utf8"), /^- format:/m);
+  });
+});
+
+test("driver version: absent means a driver from before this change, and only needs-user reaches it", () => {
+  const { r } = drivenWithLock({}, { pluginVersion: "1.3.0" });
+  assert.deepEqual([r.action, r.stopReason], ["stop", "needs-user"]);
+  assert.match(r.stopDetail, /to 1\.3\.0/);
+});
+
+test("driver version: an unreadable installed version never blocks", () => {
+  const { r } = drivenWithLock({ DEVCYCLE_DRIVER_PLUGIN_VERSION: "1.2.3" }, { pluginVersion: null });
+  assert.equal(r.action, "resume");
+});
+
+test("driver version: a driver that could not read its own version stops its sessions needs-user, and claims no update", () => {
+  const { r, changed } = drivenWithLock({ DEVCYCLE_DRIVER_PLUGIN_VERSION: UNREADABLE_PLUGIN_VERSION }, { pluginVersion: "1.3.0" });
+  assert.deepEqual([r.action, r.stopReason], ["stop", "needs-user"]);
+  assert.match(r.stopDetail, /could not read its devcycle plugin version when it started/);
+  assert.match(r.stopDetail, /cannot confirm/);
+  assert.match(r.stopDetail, /Restart Claude Code, then run \/devcycle:continue/);
+  assert.doesNotMatch(r.stopDetail, /updated|1\.3\.0/, "nothing is known to have changed, so the detail names no version");
+  assert.doesNotMatch(r.stopDetail, /[;&|`\n]|\$\(/, "drive-signal takes one line with none of ; & | $( or a backtick");
+  assert.notDeepEqual(r.stopDetail, drivenWithLock({}, { pluginVersion: "1.3.0" }).r.stopDetail, "told apart from a driver that predates the variable");
+  assert.equal(changed, false);
+});
+
+test("driver version: a driver that could not read its version stops a session that cannot read its own either", () => {
+  const { r, changed } = drivenWithLock({ DEVCYCLE_DRIVER_PLUGIN_VERSION: UNREADABLE_PLUGIN_VERSION }, { pluginVersion: null });
+  assert.deepEqual([r.action, r.stopReason], ["stop", "needs-user"]);
+  assert.match(r.stopDetail, /could not read its devcycle plugin version when it started/);
+  assert.equal(changed, false);
+});
+
+test("driver version: an interactive resume is never asked about it", () => {
+  assert.notEqual(setup(cycle({ ledger: [] }), { pluginVersion: "1.3.0" }).stopReason, "plugin-updated");
+});
+
+test("plugin-updated and cycle-format stay out of the reasons that restart on their own", () => {
+  const source = readFileSync(SCRIPT, "utf8");
+  const settled = source.match(/const SETTLED_REASONS = new Set\(\[([^\]]*)\]\)/)[1];
+  assert.doesNotMatch(settled, /plugin-updated|cycle-format/);
+});
+
+// A `ps` that exits non-zero for everything, as a sandboxed one does. A live pid then has no start
+// time to verify, so the watcher's liveness reads it "unverified" while the lock module's reads it dead.
+function withUnreadablePs(fn) {
+  const bin = makeTempDir("wave-setup-ps-");
+  writeFileSync(join(bin, "ps"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  const path = process.env.PATH;
+  process.env.PATH = `${bin}${delimiter}${path}`;
+  try {
+    return fn();
+  } finally {
+    process.env.PATH = path;
+  }
+}
+// A lock naming this state file whose holder is this very process: alive, and impossible to verify.
+function unverifiableLock(c) {
+  const holder = { pid: process.pid, startTime: "Tue Oct 13 09:00:00 2026", hostname: hostname(), state: c.statePath,
+    log: join(c.repo, ".devcycle", "drive.log"), tokenHash: driveTokenHash(TOKEN) };
+  writeInto(c.repo, DRIVE_LOCK_REL, JSON.stringify(holder) + "\n");
+  return holder;
+}
+
+test("format: a holder no check can prove dead counts as a live driver, so an interactive resume attaches and migrates nothing", () => {
+  const c = cycle({ ledger: [committed(1)] });
+  const holder = unverifiableLock(c);
+  const before = [stateOf(c), readFileSync(c.ledgerPath, "utf8")];
+  const r = withUnreadablePs(() => {
+    assert.equal(holderLiveness(c.repo, holder), "unverified", "premise: the watcher cannot verify the holder");
+    assert.equal(isLiveHolder(holder), false, "premise: the lock module reads the same holder as dead");
+    return setup(c);
+  });
+  assert.equal(r.drive.action, "attach");
+  assert.deepEqual([stateOf(c), readFileSync(c.ledgerPath, "utf8")], before, "nothing was rewritten beside the driver");
+  assert.match(r.formatReport.join("\n"), /driver is running/, "the user is told why nothing migrated");
+});
+
+test("format: the session a live driver started migrates, and a provably dead lock does not hold a migration back", () => {
+  const c = cycle({ state: [DRIVE_ROW], ledger: [committed(1)] });
+  withLock(c, () => {
+    const r = driven(c);
+    assert.equal(r.action, "resume", r.stopDetail);
+    assert.deepEqual(r.formatReport, []);
+  });
+  assert.match(stateOf(c), /^- format: 1$/m);
+
+  const dead = deadLock(cycle({ ledger: [committed(1)] }));
+  const r = setup(dead);
+  assert.deepEqual(r.formatReport, []);
+  assert.match(stateOf(dead), /^- format: 1$/m);
+});
+
+test("format: a resume that waited while another session migrated reads the migrated files", async () => {
+  const c = cycle();
+  writeFileSync(c.ledgerPath, `Plan: docs/plan.md\n\n${committed(1)}\n`);
+  const migrated = { state: stampFormat(stateOf(c), 1), ledger: `Plan: \`docs/plan.md\`\n\n${committed(1)}\n` };
+  // The other session holds both locks, as settleFormat does, and writes the migrated files before releasing them.
+  const script = `
+    import { writeFileSync } from "node:fs";
+    import { withFileLock } from ${JSON.stringify(new URL("../../scripts/file-lock.mjs", import.meta.url).href)};
+    const [state, ledger, files] = process.argv.slice(1);
+    const { state: stateText, ledger: ledgerText } = JSON.parse(files);
+    withFileLock(state, () => withFileLock(ledger, () => {
+      console.log("held");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
+      writeFileSync(ledger, ledgerText);
+      writeFileSync(state, stateText);
+    }));`;
+  const other = spawn(process.execPath, ["--input-type=module", "-e", script, c.statePath, c.ledgerPath, JSON.stringify(migrated)], { stdio: ["ignore", "pipe", "inherit"] });
+  await once(other.stdout, "data");
+  const r = setup(c);
+  const [code] = await once(other, "exit");
+  assert.equal(code, 0);
+  assert.equal(r.action, "resume", r.stopDetail);
+  assert.equal(r.overview.committed, 1, "the ledger was read before the other session migrated it, so its tasks read as undone");
+  assert.equal(r.ledgerSlot, "fresh");
 });

@@ -36,7 +36,7 @@ The leading `[<ISO-8601 UTC>]` bracket is the output of `node "${CLAUDE_PLUGIN_R
 taken when the entry is appended — never a narrated or estimated time.
 A task script (§ Task scripts) appends one more token after `ref=`, `key=<id>/<event>/<round>/<retry>`:
 `<round>` is the review round (0 before the first), `<retry>` the dispatch's retry index for that
-task. A line without it stays valid, and a reader that does not know it ignores it.
+task. A line without it stays valid, and a reader that does not know it ignores it. A change to this line's shape or to the `Plan:` and `Run:` headers needs a format bump (`references/resume.md` § The format row), which `scripts/validate.mjs` check 29 enforces.
 
 ## The run record
 

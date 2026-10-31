@@ -530,3 +530,101 @@ test("no stopped: row prints no stopped line", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+const runWith = (statePath, ...args) => spawnSync("node", [SCRIPT, "--state", statePath, ...args], { encoding: "utf8" });
+
+test("a state file newer than the plugin stops, naming the update command", () => {
+  const dir = makeTempDir("resume-check-");
+  const state = makeState(dir, ["- format: 999", "- stage: planning"]);
+  const r = run(state);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /claude plugin update devcycle@devcycle/);
+  assert.match(readFileSync(state, "utf8"), /^- format: 999$/m);
+});
+
+test("an unparseable format row stops and quotes it", () => {
+  const dir = makeTempDir("resume-check-");
+  const r = run(makeState(dir, ["- format: one", "- stage: planning"]));
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /"one"/);
+});
+
+test("an older state file gains the row and prints nothing extra when nothing else changed", () => {
+  const dir = makeTempDir("resume-check-");
+  const state = makeState(dir, ["- stage: planning"]);
+  const r = run(state);
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /format-/);
+  assert.match(readFileSync(state, "utf8"), /^- format: 1$/m);
+});
+
+test("a stale older file is reported as stale and never stamped", () => {
+  const dir = makeTempDir("resume-check-");
+  const state = makeState(dir, ["- stage: planning", "- spec: docs/gone.md"]);
+  assert.equal(run(state).status, 1);
+  assert.doesNotMatch(readFileSync(state, "utf8"), /^- format:/m);
+});
+
+test("a headerless ledger prints the question, no entry line, and --format-answer settles it", () => {
+  const dir = makeTempDir("resume-check-");
+  mkdirSync(join(dir, "docs"), { recursive: true });
+  writeFileSync(join(dir, "docs", "plan.md"), "x");
+  writeFileSync(join(dir, "ledger.md"), "- [2026-08-01T00:00:00Z] task=1 event=committed outcome=accepted ref=abc1234\n");
+  const state = makeState(dir, ["- stage: branch-review", `- root: ${dir}`, "- plan: docs/plan.md"]);
+  const asked = run(state);
+  assert.equal(asked.status, 0, asked.stderr);
+  assert.match(asked.stdout, /^format-question: /m);
+  assert.doesNotMatch(asked.stdout, /^entry:/m);
+  const answered = runWith(state, "--format-answer", "yes");
+  assert.equal(answered.status, 0, answered.stderr);
+  assert.match(answered.stdout, /^entry:/m);
+  assert.match(readFileSync(join(dir, "ledger.md"), "utf8"), /^Plan: `docs\/plan\.md`$/m);
+});
+
+test("--format-answer takes only yes or no", () => {
+  const dir = makeTempDir("resume-check-");
+  const r = runWith(makeState(dir, ["- stage: planning"]), "--format-answer", "maybe");
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /--format-answer/);
+});
+
+test("a newer-format file that names a stage this plugin lacks gets the update message, not the stale one", () => {
+  const dir = makeTempDir("resume-check-");
+  const r = run(makeState(dir, ["- format: 999", "- stage: a-stage-from-the-future"]));
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /claude plugin update devcycle@devcycle/);
+  assert.match(r.stderr, /[Rr]estart/);
+  assert.doesNotMatch(r.stderr, /stale|not a valid devcycle stage/);
+});
+
+test("an unparseable format row with an unknown stage gets the row message, not the stale one", () => {
+  const dir = makeTempDir("resume-check-");
+  const r = run(makeState(dir, ["- format: one", "- stage: a-stage-from-the-future"]));
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /"one"/);
+  assert.doesNotMatch(r.stderr, /stale|not a valid devcycle stage/);
+});
+
+test("a stage nothing explains still reads as stale under a current format row", () => {
+  const dir = makeTempDir("resume-check-");
+  const r = run(makeState(dir, ["- format: 1", "- stage: a-stage-from-the-future"]));
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /stale/);
+  assert.match(r.stderr, /not a valid devcycle stage/);
+});
+
+test("a newer-format file whose plan or branch is gone is still reported stale first", () => {
+  const dir = makeTempDir("resume-check-");
+  const missing = run(makeState(dir, ["- format: 999", "- stage: a-stage-from-the-future", "- plan: docs/gone.md"]));
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /stale/);
+  assert.match(missing.stderr, /docs\/gone\.md/);
+  assert.doesNotMatch(missing.stderr, /claude plugin update/);
+
+  const repo = makeRepo();
+  const branchGone = run(makeState(repo, ["- format: 999", "- stage: planning", "- branch: feat/never-existed (cut from main at 0000000)"]));
+  assert.equal(branchGone.status, 1);
+  assert.match(branchGone.stderr, /stale/);
+  assert.match(branchGone.stderr, /feat\/never-existed/);
+  assert.doesNotMatch(branchGone.stderr, /claude plugin update/);
+});
