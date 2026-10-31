@@ -14,7 +14,7 @@ import { resolveDepth } from "./depth-probe.mjs";
 import { gateCommand, taskFileMap } from "./task-files.mjs";
 
 const SCHEMA_PATH = new URL("../tests/fixtures/run-record.schema.json", import.meta.url);
-const LEDGER_LINE_RE = /^- \[([^\]]+)\] task=(\S+) event=(\S+) outcome=(.*?) ref=(\S+)(?: key=(\S+))?$/;
+export const LEDGER_LINE_RE = /^- \[([^\]]+)\] task=(\S+) event=(\S+) outcome=(.*?) ref=(\S+)(?: key=(\S+))?$/;
 
 export class UsageError extends Error {}
 
@@ -46,7 +46,7 @@ export const taskEntries = (ledgerPath, task) => ledgerEntries(ledgerPath).filte
 
 // A ledger's `Plan:` preamble names the plan its lines belong to (references/resume.md § The state
 // file); one naming another plan is a previous cycle's slot.
-const LEDGER_PLAN_RE = /^Plan:\s*`([^`]+)`/m;
+export const LEDGER_PLAN_RE = /^Plan:\s*`([^`]+)`/m;
 
 export function ledgerPlan(ledgerPath) {
   return ledgerText(ledgerPath).match(LEDGER_PLAN_RE)?.[1] ?? null;

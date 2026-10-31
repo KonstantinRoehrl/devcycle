@@ -11,7 +11,7 @@ import { ledgerPlan, runTaskScript, taskFlags } from "./task-ledger.mjs";
 // The directories the task scripts and implementer reports write per task, beside the ledger.
 export const PER_TASK_DIRS = ["briefs", "dispatch", "evidence", "findings", "reports"];
 
-const LEDGER_RUN_RE = /^Run:\s*`?([0-9a-f]{16})`?\s*$/m;
+export const LEDGER_RUN_RE = /^Run:\s*`?([0-9a-f]{16})`?\s*$/m;
 const LEDGER_BRANCH_RE = /^Branch:\s*`([^`]+)`/m;
 
 const devcycleDir = (root) => join(root, ".devcycle");

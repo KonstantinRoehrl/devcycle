@@ -594,7 +594,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const stateFields = [...stateTemplate.matchAll(/^- ([A-Za-z][A-Za-z0-9_-]*):/gm)].map((m) => m[1]);
   const fixturesDir = join(root, "tests/fixtures");
   const stateFixtures = (existsSync(fixturesDir) ? [...walk(fixturesDir)] : []).filter(
-    (p) => p.endsWith(".md") && readFileSync(p, "utf8").startsWith(STATE_HEADER)
+    (p) => p.endsWith(".md") && !rel(p).startsWith("tests/fixtures/cycle-format/") && readFileSync(p, "utf8").startsWith(STATE_HEADER)
   );
   if (stateFields.length && !stateFixtures.length)
     fail(
