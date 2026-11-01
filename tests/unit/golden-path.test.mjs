@@ -565,8 +565,8 @@ test("harvested: commands/state-file-resume — the state file's shape and owner
   const t = read("references/resume.md");
   const template = t.match(/```markdown\n# devcycle state\n([\s\S]*?)```/)?.[1] ?? "";
   const lines = template.trim().split("\n");
-  assert.equal(lines.length, 17, "the state template is no longer 17 lines");
-  for (const field of ["stage", "root", "branch", "request", "kind", "scope", "audit", "diagnosis", "spec", "plan", "plan-counts", "ledger", "checklist", "run", "configured", "knobs", "updated"])
+  assert.equal(lines.length, 18, "the state template is no longer 18 lines");
+  for (const field of ["format", "stage", "root", "branch", "request", "kind", "scope", "audit", "diagnosis", "spec", "plan", "plan-counts", "ledger", "checklist", "run", "configured", "knobs", "updated"])
     assert.ok(lines.some((l) => l.startsWith(`- ${field}:`)), `state field missing: ${field}`);
   assert.ok(template.includes("- ledger: .devcycle/ledger.md"), "the ledger path is not pinned");
   assert.match(t, /The ownership check, run before trusting anything else in the file/);
@@ -1426,6 +1426,8 @@ const gatingSections = (text) =>
 // — an entry naming a section that no longer exists, or no longer matches the vocabulary, fails
 // rather than sitting stale.
 const DESCRIBES_NOT_GATES = [
+  // Its one question picks which cycle to stop: no decision of the run, and nothing to record.
+  "commands/stop.md § # /devcycle:stop",
   // Describes what the brainstorm stage does with AskUserQuestion; cycle.md's own gate is in
   // `## Triage the input`, which cites correctly.
   "commands/cycle.md § ## Stage walk",
@@ -1915,6 +1917,7 @@ test("C3 leg 2: every module-only script has a non-test importer", () => {
   const consumers = [
     ...scriptFiles().map((f) => `scripts/${f}`),
     ...readdirSync(join(root, "workflows")).filter((f) => f.endsWith(".js")).map((f) => `workflows/${f}`),
+    ...readdirSync(join(root, "hooks")).filter((f) => f.endsWith(".mjs")).map((f) => `hooks/${f}`),
   ];
   const orphans = modules.filter((mod) =>
     !consumers.some((c) => c !== `scripts/${mod}` && read(c).includes(`/${mod}"`)),
@@ -2347,6 +2350,29 @@ test("the git guard is registered on PreToolUse over Bash", () => {
   assert.equal(entry.matcher, "Bash", `${GIT_GUARD_SRC} must match Bash, got "${entry.matcher}"`);
 });
 
+test("the stop guard is registered on PreToolUse over every tool", () => {
+  const STOP_GUARD_SRC = "hooks/stop-guard.mjs";
+  const entry = (JSON.parse(read("hooks/hooks.json")).hooks?.PreToolUse ?? []).find((e) =>
+    (e.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(STOP_GUARD_SRC))
+  );
+  assert.ok(entry, `hooks/hooks.json must register ${STOP_GUARD_SRC} on PreToolUse`);
+  assert.equal(entry.matcher, "*", `${STOP_GUARD_SRC} must match every tool, got "${entry.matcher}"`);
+  assert.equal(entry.hooks[0].timeout, 5);
+});
+
+test("the process sensor is registered wherever a background task's id or end appears", () => {
+  const PROCESS_SENSOR_SRC = "hooks/process-sensor.mjs";
+  const hooks = JSON.parse(read("hooks/hooks.json")).hooks;
+  const entryOf = (event) => (hooks?.[event] ?? []).find((e) =>
+    (e.hooks ?? []).some((h) => typeof h.command === "string" && h.command.includes(PROCESS_SENSOR_SRC))
+  );
+  for (const tool of ["Agent", "Bash", "Monitor", "TaskStop"])
+    assert.ok(matches(entryOf("PostToolUse")?.matcher ?? "^$", tool), `${PROCESS_SENSOR_SRC} must see ${tool} on PostToolUse`);
+  // The loader and scripts/validate.mjs both pass an unknown event name, so this spelling is the check.
+  for (const event of ["Stop", "SubagentStop"])
+    assert.equal(entryOf(event)?.matcher, "*", `${PROCESS_SENSOR_SRC} must be registered on ${event}`);
+});
+
 test("DESIGN.md §10 no longer rejects the hooks that ship", () => {
   assert.doesNotMatch(
     read(DESIGN_DOC),
@@ -2439,7 +2465,7 @@ test("C6: plugin.json, the configuration hub, references/config.md, DESIGN §7 a
   assert.deepEqual(resolver, config, "scripts/resolve-knobs.mjs prints knobs: in references/config.md's roster order");
 });
 
-test("every entry command except doctor resolves knobs through the identical full-roster invocation", () => {
+test("every entry command except doctor and stop resolves knobs through the identical full-roster invocation", () => {
   const INVOCATION =
     "```\n" +
     'node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \\\n' +
@@ -2447,8 +2473,8 @@ test("every entry command except doctor resolves knobs through the identical ful
     "\n```";
   for (const f of readdirSync(join(root, "commands")).filter((n) => n.endsWith(".md"))) {
     const text = read(`commands/${f}`);
-    if (f === "doctor.md") {
-      assert.ok(!text.includes("user_config."), "commands/doctor.md consumes no knob and must carry no placeholder");
+    if (f === "doctor.md" || f === "stop.md") {
+      assert.ok(!text.includes("user_config."), `commands/${f} consumes no knob and must carry no placeholder`);
       continue;
     }
     assert.ok(text.includes(`\n\n${INVOCATION}\n\n`), `commands/${f} must carry the resolver invocation verbatim, as its own paragraph (references/config.md § Knob channel)`);
@@ -2631,6 +2657,59 @@ test("the handoff row: cycle and continue mark the stage pending, continue asks 
   assert.ok(cont.includes("`handoff: pending`"), "continue.md step 2a no longer reads resume-check's handoff line");
   const resume = read("references/resume.md");
   assert.ok(resume.includes("**Resume anyway** · **Stop**"), "resume.md no longer holds the not-ready question");
-  assert.ok(resume.includes("Four optional rows sit outside the template"), "resume.md's optional-row count is stale");
+  assert.ok(resume.includes("Five optional rows sit outside the template"), "resume.md's optional-row count is stale");
   assert.match(read("references/delegation.md"), /a stage never pauses mid-flight/, "the stage budget no longer says the boundary waits for in-flight work");
+});
+
+// --- /devcycle:stop: what its text must keep, because a stop that hesitates or cannot load TaskStop fails ---
+
+test("commands/stop.md acts at once, states the literal TaskStop input, and runs only stop-cycle.mjs", () => {
+  assert.ok(existsSync(join(root, "commands/stop.md")), "commands/stop.md must exist");
+  const text = read("commands/stop.md");
+  assert.match(text, /^disable-model-invocation: true$/m);
+  assert.match(text, /act\s+immediately/);
+  assert.match(text, /Ask nothing and confirm nothing/);
+  assert.ok(text.includes('`{"task_id": "<id>"}`'), "the literal TaskStop input is what survives a denied ToolSearch");
+  assert.ok(text.includes("`select:TaskStop`"), "the one search the guard allows");
+  const commands = [...text.matchAll(/^\s*node .*$/gm)].map((m) => m[0].trim());
+  assert.deepEqual(commands, [
+    'node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-cycle.mjs" list',
+    'node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-cycle.mjs" request --state "<state>"',
+    'node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-cycle.mjs" finalize --state "<state>"',
+  ]);
+});
+
+test("a stopped cycle: continue announces it and closes it with the pending mark, and the start path closes it before a driver starts", () => {
+  const cont = read("commands/continue.md");
+  const resume = sectionOf(cont, "Resume");
+  const close = 'scripts/stop-cycle.mjs" resume --state <the chosen state file>';
+  assert.ok(resume.includes(close), "continue.md § Resume no longer closes a recorded stop");
+  assert.ok(resume.indexOf("`closed:`") < resume.indexOf(close), "a closed cycle must stop before a stop record is closed");
+  assert.ok(resume.indexOf("**Depth check first.**") < resume.indexOf(close), "a depth stop must leave the stop record in place");
+  assert.match(sectionOf(cont, "Announce the derived position"), /stopped at <stamp> in <stage>: <position>/);
+  assert.ok(sectionOf(cont, "Execution resume").includes("`state.stopped`"), "§ Execution resume no longer reads state.stopped");
+  const resumeRef = read("references/resume.md");
+  assert.ok(resumeRef.includes("- `- stopped: <stamp> <record path>`"), "resume.md no longer owns the stopped: row");
+  const drive = read("references/drive.md");
+  const start = drive.slice(drive.indexOf("## The start path"), drive.indexOf("## When the run ends"));
+  assert.ok(start.includes('scripts/stop-cycle.mjs" resume --state .devcycle/state.md'), "the start path no longer closes a recorded stop");
+  assert.ok(start.indexOf("stop-cycle.mjs") < start.indexOf("--check-sandbox"), "the stop must close before the driver starts");
+  assert.ok(read("references/handoff.md").includes("`/devcycle:stop`"), "handoff.md no longer names the continue action a stop uses");
+});
+
+test("/devcycle:continue routes every format outcome to the section that owns it", () => {
+  const t = read("commands/continue.md");
+  assert.match(t, /format-question:/);
+  assert.match(t, /format-report:/);
+  assert.match(t, /formatQuestion/);
+  assert.match(t, /formatReport/);
+  assert.match(t, /cycle-format/);
+  const resume = read("references/resume.md");
+  assert.match(resume, /^- format: 1$/m);
+  assert.match(resume, /^## The format row$/m);
+  const drive = read("references/drive.md");
+  assert.match(drive, /`plugin-updated`/);
+  assert.match(drive, /`cycle-format`/);
+  assert.match(read("playbooks/finishing-the-cycle.md"), /format-backup-\*/);
+  assert.match(read("references/config.md"), /`knob-renamed:`/);
 });

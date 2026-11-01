@@ -1,0 +1,16 @@
+# devcycle state
+- stage: execution
+- root: /repo
+- branch: feat/old-cycle (cut from dev at 0000000)
+- request: a frozen format-0 cycle
+- kind: feature
+- scope: none
+- audit: none
+- diagnosis: none
+- spec: none
+- plan: docs/plan.md
+- ledger: .devcycle/ledger.md
+- checklist: none
+- run: 00000000000000a1
+- configured: no
+- updated: 2026-08-01T00:00:00Z

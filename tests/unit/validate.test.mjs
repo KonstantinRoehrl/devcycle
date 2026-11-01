@@ -1529,12 +1529,12 @@ test("plugin-root check: a citation to a script path resolves too", () => {
 
 // --- check 17: the command count is a regression guard ---
 
-test("command ceiling: a tenth command fails", () => {
+test("command ceiling: an eleventh command fails", () => {
   const dir = makePluginFixture();
-  for (const name of ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"])
+  for (const name of ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"])
     writeInto(dir, `commands/${name}.md`, `---\ndescription: "Fixture command."\n---\n\n# /devcycle:${name}\n`);
   const { stderr } = runValidate(dir);
-  assert.match(stderr, /10 commands > 9/);
+  assert.match(stderr, /11 commands > 10/);
   assert.match(stderr, /surface decision/);
 });
 
@@ -2738,4 +2738,13 @@ test("budget decisions: a tree without the decisions log fails rather than skipp
   ok(runValidate(dir));
   rmSync(join(dir, DECISIONS_DOC));
   failsWith(runValidate(dir), /docs\/decisions\/README\.md: missing/);
+});
+
+test("check 29: engages only where the format module ships, and fails with no contract fixture", () => {
+  const dir = makePluginFixture();
+  assert.doesNotMatch(runValidate(dir).stderr ?? "", /cycle-format-contract/);
+  writeInto(dir, "scripts/cycle-format.mjs", "// present\n");
+  const r = runValidate(dir);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /tests\/fixtures\/cycle-format-contract\.json/);
 });

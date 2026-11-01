@@ -140,7 +140,10 @@ node "${CLAUDE_PLUGIN_ROOT}/workflows/review-panel.js" '{"scope":{"ref":"<base>.
 
 One JSON argv: `scope` carries exactly one of `ref` or `paths`, `specPath` is omitted when no spec
 governs the scope, `lenses` mixes built-in keys and `{key, charter}` objects, and `crossModel`
-mirrors `crossModelReview`. The JSON report is stdout ONLY — progress goes to stderr. When
+mirrors `crossModelReview`. `resultDir`, which only the branch-review stage passes, names a directory
+directly under `.devcycle/review/`: the panel writes each lens's result and each refutation verdict
+there as it resolves, and a rerun over that directory runs only what has no result, or, given
+`{"resultDir":"<dir>"}` alone, does so with the arguments the directory saved. The JSON report is stdout ONLY — progress goes to stderr. When
 `branchReviewModel` resolves to an explicit id per `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`,
 export it (`DEVCYCLE_PANEL_MODEL=<id> node ...`) or
 the CLI's default silently replaces the user's binding choice; on the session tier omit it.
@@ -162,7 +165,8 @@ input reached the reviewers truncated — an oversize lone hunk, an oversize spe
 file list.
 
 **`single`** — the same lenses as inline read-only reviewers, same refutation pass, same finding
-shape; a complete review in its own right, not a degraded panel.
+shape; a complete review in its own right, not a degraded panel. Its lenses run inside one reviewer
+and leave no per-lens result, so a stop re-runs the whole round.
 
 **Reviewers never write the working tree — the owner of that rule for every reviewer, inline or
 dispatched; the reviewer agents and the branch-review stage name it and do not restate it.** A

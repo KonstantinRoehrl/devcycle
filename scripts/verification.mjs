@@ -10,6 +10,10 @@ import { lessonKind, isConsolidated } from "./lessons.mjs";
 const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const RELEASE_CHANGELOG_PATH = join(PLUGIN_ROOT, "CHANGELOG.md");
 
+// What a driver puts in DEVCYCLE_DRIVER_PLUGIN_VERSION when it cannot read its own plugin version: a
+// driver from before the variable existed sets nothing, and a session that reads this stops needs-user.
+export const UNREADABLE_PLUGIN_VERSION = "unreadable";
+
 export function installedVersion() {
   try {
     return JSON.parse(readFileSync(join(PLUGIN_ROOT, ".claude-plugin", "plugin.json"), "utf8")).version ?? null;

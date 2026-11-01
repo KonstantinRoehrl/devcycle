@@ -53,7 +53,7 @@ try {
   // No lock: a dry run, or a test that drives without one.
 }
 appendFileSync(callsPath, JSON.stringify({ argv, nested: "DEVCYCLE_NESTED_RUN" in process.env, pid: process.pid,
-  token: process.env.DEVCYCLE_DRIVE_TOKEN ?? null, effort: process.env.CLAUDE_CODE_EFFORT_LEVEL ?? null,
+  token: process.env.DEVCYCLE_DRIVE_TOKEN ?? null, driverVersion: process.env.DEVCYCLE_DRIVER_PLUGIN_VERSION ?? null, effort: process.env.CLAUDE_CODE_EFFORT_LEVEL ?? null,
   outputEffort: process.env.CLAUDE_EFFORT ?? null, lockTokenHash, clock: clockNow() }) + "\n");
 if (step.noInit) process.exit(step.exitCode ?? 1);
 

@@ -11,7 +11,8 @@
 //   { scope: {ref: string} | {paths: string[]},   // exactly one of the two
 //     specPath?: string,
 //     lenses?: (string | {key: string, charter: string})[],
-//     crossModel?: boolean }
+//     crossModel?: boolean,
+//     resultDir?: string }  // a directory directly under .devcycle/review/, see "Result files"
 // Output (stdout, JSON):
 //   { findings: [{ file, line: integer|null, claim,
 //                  severity: "critical"|"high"|"medium"|"low",
@@ -34,11 +35,21 @@
 // dropped) -> 3) dedup by file+claim -> 4) reconciler ranks confirmed
 // findings by severity.
 //
-// STRICTLY READ-ONLY: the script itself only runs `git diff`/`git rev-parse`;
+// READ-ONLY toward the reviewed code: the script itself only runs `git diff`/`git rev-parse`;
 // the lens reviewers get --tools "Read,Grep,Glob"; the adversarial verifier
 // additionally gets Bash so it can re-run and recompute a claim (still read-only
 // in intent — no --permission-mode is passed, so nothing grants writes); the
-// codex lens runs with --sandbox read-only. Nothing here mutates files or git.
+// codex lens runs with --sandbox read-only. Nothing here mutates tracked files or git. The one
+// write is the result files below, only when `resultDir` is given, and only under the gitignored
+// .devcycle/review/.
+//
+// Result files: with `resultDir`, `<resultDir>/<lens>.json` takes each lens job's result as it
+// resolves, `_refutation.json` each finding's verdict, `_args.json` the arguments, so a stopped
+// round loses nothing that finished. A rerun over the same directory, with the full arguments or
+// with `{ resultDir }` alone (which reuses `_args.json`), runs only what has no entry. An entry is
+// keyed by a hash of what it reviewed, so a moved branch re-runs rather than replays. A failed
+// lens or verifier is never stored, so a rerun retries it. `costByLens` is this run's spend: a
+// reused entry costs 0.
 //
 // Optional env: DEVCYCLE_PANEL_MODEL sets --model for the claude subagents
 // (unset -> the CLI's configured default model).
@@ -52,8 +63,9 @@
 "use strict";
 
 const { execFileSync } = require("node:child_process");
-const { readFileSync, existsSync, mkdtempSync, rmSync } = require("node:fs");
-const { join } = require("node:path");
+const { createHash } = require("node:crypto");
+const { readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } = require("node:fs");
+const { join, resolve } = require("node:path");
 const os = require("node:os");
 const { makeLogger, run, claudeStructured: claudeStructuredCli } = require("./lib/agent-cli.js");
 
@@ -65,6 +77,9 @@ const VERIFY_CONCURRENCY = 4;
 // chunk under crossModel. Same cap as stage 2's verification, same reason.
 const LENS_CONCURRENCY = 4;
 const SEVERITIES = ["critical", "high", "medium", "low"];
+const RESULT_DIR_SHAPE = /(^|\/)\.devcycle\/review\/[^/]+$/;
+const SAVED_ARGS_FILE = "_args.json";
+const REFUTATION_FILE = "_refutation.json";
 const LENS_CHARTERS = {
   spec:
     "Spec compliance: compare the diff against the spec below. Report every place the " +
@@ -107,6 +122,51 @@ async function mapLimit(items, limit, fn, label) {
 const PANEL_ERRORS = { agent: "claude subagent", output: "claude", cap: 500 };
 const claudeStructured = (opts) => claudeStructuredCli({ ...opts, attempts: 2, errors: PANEL_ERRORS });
 
+// ---------- result files ----------
+
+const contentKey = (...parts) => createHash("sha256").update(JSON.stringify(parts)).digest("hex");
+
+// A caller-supplied lens key becomes one path component: encoding removes every "/", and the
+// ".json" suffix means no key can resolve to "." or "..".
+const lensResultFile = (lensKey) => `${encodeURIComponent(lensKey)}.json`;
+
+function readJsonObject(path) {
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+const NO_RESULT_STORE = { get: () => null, put() {}, saveArgs() {} };
+
+// The review must survive a write that fails: a lost result file costs one re-run on resume, and
+// failing the panel for it would cost the whole round.
+function createResultStore(dir, atomicWrite) {
+  const write = (name, value) => {
+    try {
+      mkdirSync(dir, { recursive: true });
+      atomicWrite(join(dir, name), JSON.stringify(value, null, 2) + "\n");
+    } catch (e) {
+      log(`result file ${name} not written: ${e.message}`);
+    }
+  };
+  const files = new Map();
+  const entriesOf = (name) => {
+    if (!files.has(name)) files.set(name, readJsonObject(join(dir, name)) ?? {});
+    return files.get(name);
+  };
+  return {
+    get: (name, key) => entriesOf(name)[key] ?? null,
+    put(name, key, value) {
+      entriesOf(name)[key] = value;
+      write(name, entriesOf(name));
+    },
+    saveArgs: (args) => write(SAVED_ARGS_FILE, args),
+  };
+}
+
 // ---------- args + repo inputs ----------
 
 function parseArgs() {
@@ -116,6 +176,18 @@ function parseArgs() {
   } catch {
     fatal("argv[2] must be a JSON object: { scope, specPath?, lenses?, crossModel? }");
   }
+  if (args.resultDir !== undefined) {
+    if (typeof args.resultDir !== "string" || !RESULT_DIR_SHAPE.test(resolve(args.resultDir))) {
+      fatal(`args.resultDir, when given, must name a directory directly under .devcycle/review/ (got ${JSON.stringify(args.resultDir)})`);
+    }
+    if (args.scope === undefined) {
+      const savedPath = join(args.resultDir, SAVED_ARGS_FILE);
+      const saved = readJsonObject(savedPath);
+      if (!saved) fatal(`no saved arguments at ${savedPath}: pass the full arguments for a round that never started`);
+      args = { ...saved, resultDir: args.resultDir };
+    }
+  }
+  const { resultDir, ...reviewArgs } = args;
   const scope = args.scope;
   if (!scope || typeof scope !== "object" || Array.isArray(scope)) {
     fatal("args.scope (object) is required: { ref: string } or { paths: string[] }");
@@ -177,6 +249,8 @@ function parseArgs() {
     specLensDropped,
     crossModel: args.crossModel === true,
     maxChunks: Number.isInteger(args.maxChunks) ? args.maxChunks : null,
+    resultDir: resultDir ?? null,
+    reviewArgs,
   };
 }
 
@@ -549,6 +623,7 @@ async function verifyFinding(finding, ctx, model, charter) {
       verification: String(v.verification ?? "").slice(0, 600) || "no verification detail returned",
     },
     cost: res.cost ?? null,
+    settled: true,
   };
 }
 
@@ -684,6 +759,17 @@ function buildLensJobs({ lenses, reviewedChunks, crossModel }) {
   return descriptors;
 }
 
+// Reuses a finished lens job or runs it. A result with a note failed or degraded, so it stays out
+// of the store and the next run retries it.
+async function reuseOrRunLens(store, lensKey, jobKey, runLens) {
+  const name = lensResultFile(lensKey);
+  const saved = store.get(name, jobKey);
+  if (saved) return { lens: lensKey, findings: saved.findings, strengths: saved.strengths, note: null, cost: 0, reused: true };
+  const result = await runLens();
+  if (!result.note) store.put(name, jobKey, { findings: result.findings, strengths: result.strengths ?? [] });
+  return result;
+}
+
 // ---------- main ----------
 
 // Wrap an async job so an unexpected throw degrades to a fallback value instead of
@@ -704,6 +790,12 @@ async function main() {
   if (args.specLensDropped) notes.push("spec lens skipped: no specPath given");
 
   gitReadOnly(["rev-parse", "--git-dir"]); // fail fast outside a git repo
+
+  // A dynamic import: this file is CommonJS, and the plugin does not pin the Node that runs it.
+  const store = args.resultDir
+    ? createResultStore(args.resultDir, (await import("../scripts/atomic-write.mjs")).atomicWrite)
+    : NO_RESULT_STORE;
+  store.saveArgs(args.reviewArgs);
 
   // Every input the reviewers saw only part of, kept apart from the other notes: these are
   // coverage reductions and are disclosed in the report itself, not just in the prompts.
@@ -760,9 +852,10 @@ async function main() {
   const lensJobs = buildLensJobs({ lenses: args.lenses, reviewedChunks: diffChunks, crossModel: args.crossModel }).map((desc) => {
     if (desc.kind === "cross-model") {
       const cmCtx = { scopeLabel, specPath: args.specPath, diff: desc.chunk, fileList, spec: null };
+      const jobKey = contentKey("cross-model", lensPrompt(LENS_CHARTERS.correctness, cmCtx));
       return { kind: "cross-model", run: () =>
         runGuarded(
-          () => runCrossModelLens(cmCtx),
+          () => reuseOrRunLens(store, "cross-model", jobKey, () => runCrossModelLens(cmCtx)),
           (msg) => ({ lens: "cross-model", findings: [], strengths: [], note: `cross-model lens crashed: ${msg}` }),
         ),
       };
@@ -776,9 +869,10 @@ async function main() {
     } else {
       ctx = { scopeLabel, specPath: args.specPath, diff: desc.chunk, fileList, spec: null };
     }
+    const jobKey = contentKey("claude-lens", lensPrompt(lens.charter, ctx));
     return { kind: "claude-lens", run: () =>
       runGuarded(
-        () => runClaudeLens(lens, ctx, model),
+        () => reuseOrRunLens(store, lens.key, jobKey, () => runClaudeLens(lens, ctx, model)),
         (msg) => ({ lens: lens.key, findings: [], strengths: [], note: `lens "${lens.key}" crashed: ${msg}` }),
       ),
     };
@@ -793,6 +887,8 @@ async function main() {
   const rawFindings = lensResults.flatMap((r) => r.findings);
   const rawStrengths = lensResults.flatMap((r) => r.strengths ?? []);
   for (const r of lensResults) if (r.note) notes.push(r.note);
+  const reusedJobs = lensResults.filter((r) => r.reused).length;
+  if (reusedJobs) notes.push(`resumed round: reused ${reusedJobs} of ${lensJobs.length} lens job(s) from ${args.resultDir}`);
   const claudeLensJobCount = lensJobs.filter((j) => j.kind === "claude-lens").length;
   const failedClaudeLenses = lensResults.filter((r, i) => r.note && lensJobs[i].kind === "claude-lens").length;
   if (claudeLensJobCount > 0 && failedClaudeLenses === claudeLensJobCount) {
@@ -804,12 +900,19 @@ async function main() {
   const distinct = dedupRaw(rawFindings);
   log(`stage 1→2: ${rawFindings.length} raw finding(s) → ${distinct.length} distinct to verify`);
   const charter = distinct.length ? loadRedTeamCharter() : null;
-  const verifyRaw = await mapLimit(distinct, VERIFY_CONCURRENCY, (f) =>
-    runGuarded(
+  // A verifier re-reads the code, so a verdict holds only for the diff it was reached on.
+  const reviewedInput = contentKey(fullDiff ?? fileList);
+  const verifyRaw = await mapLimit(distinct, VERIFY_CONCURRENCY, async (f) => {
+    const key = contentKey(reviewedInput, f.file, f.line, f.claim, f.severity, f.measuredAgainst, f.needsExecution, f.lens);
+    const saved = store.get(REFUTATION_FILE, key);
+    if (saved) return { finding: { ...f, verified: saved.verified, verification: saved.verification }, cost: 0 };
+    const outcome = await runGuarded(
       () => verifyFinding(f, verifyCtx, model, charter),
       (msg) => ({ finding: { ...f, verified: false, verification: `verifier crashed (${msg}); retained unverified` }, cost: 0 }),
-    ),
-  );
+    );
+    if (outcome.settled) store.put(REFUTATION_FILE, key, { verified: outcome.finding.verified, verification: outcome.finding.verification });
+    return outcome;
+  });
   const verified = verifyRaw.map((v) => v.finding);
   const verifyCost = verifyRaw.reduce((s, v) => s + (Number(v.cost) || 0), 0);
   // Render the merged-lens disclosure onto verification text (was mutated inside dedup before).
@@ -846,5 +949,5 @@ if (require.main === module) {
 // Pure helpers, exported for the deterministic tests in tests/unit/.
 module.exports = {
   dedupRaw, dedupStrengths, rankFindings, truncate, chunkDiff, selectChunksByChurn, buildLensJobs, fallbackSummary, mapLimit, loadRedTeamCharter,
-  SEVERITIES, LENS_CONCURRENCY, verifierTools, aggregateLensCosts,
+  SEVERITIES, LENS_CONCURRENCY, verifierTools, aggregateLensCosts, lensResultFile,
 };

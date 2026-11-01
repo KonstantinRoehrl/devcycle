@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.29.0 — 2026-11-01
+
+- feat: add /devcycle:stop, version the cycle format, canary the latest Claude Code and stop leaked background load (#395)
+
+You can now stop a cycle at any stage and resume it exactly where it left off, a devcycle upgrade no longer breaks a cycle that is mid-flight, and a run can no longer silently leak background processes.
+
+**`/devcycle:stop`.** The new command records a stop request, a stop-guard hook honours it, and `/devcycle:continue` resumes from the recorded row without redoing finished work. A stopped branch review or on-device walk keeps what already finished, and the review panel keeps per-lens results. A new stage log (`scripts/stage-log.mjs`) journals intra-stage progress, and a process registry tracks running subagents, scripts, shells and monitors so a stop can end them. Stopped dispatches are stamped so the health check and watchdog do not read them as failures.
+
+**Upgrade safety.** `scripts/cycle-format.mjs` versions the format of `.devcycle/state.md` and the ledger. A cycle written by an older plugin is migrated on resume; one written by a newer plugin is reported before anything else is trusted. A migration never runs beside a driver that may be running, an unreadable driver version stops the resume instead of guessing, and a driven session stops with a clear reason when the plugin updated under it. A renamed knob keeps its stored value, and `validate.mjs` holds the format to a recorded contract. A new daily canary workflow loads the plugin and runs the golden path against the latest Claude Code release, and re-runs a failed install before calling it a Claude Code break.
+
+**Orphaned background load (#395).** `references/evidence.md` now gives verification one bounded form for background work that was measured under zsh, bash, dash and sh. The destructive-command hook denies a live `$(jobs -p)` kill, which kills nothing under zsh. `scripts/leftover-processes.mjs` finds leftover process groups; the finish stage reports them and a new PostToolUse hook reports them to the coordinator mid-cycle, once per run.
+
+**Known issues.** Stopping a cycle whose driver already ended on its own still lists that driver's dead subagents as running and answers `resume: hold`.
+
 ## 0.28.3 — 2026-10-30
 
 - fix: stop the task checkers bouncing valid work, route on-device FAILED items and fix four learn-tooling bugs (#384, #383, #381, #382, #390, #391, #275, #245, #246, #294, #277)

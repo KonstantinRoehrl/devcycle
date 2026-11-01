@@ -2,7 +2,7 @@
 
 <!-- evidence-contract-version: 2 -->
 
-The single owner of how devcycle proves a task did what it claims. A playbook, command,
+The single owner of how devcycle proves a task did what it claims, and of what a verification command may leave behind. A playbook, command,
 or agent that needs any of this names this file and does not restate it.
 
 ## The three evidence classes
@@ -161,6 +161,7 @@ report. Reject when:
 - a `red-green` before/red whose failure is a bare missing-symbol, import, or collection error
   rather than a discriminating assertion failure — the test never proved the behavior was absent;
 - the class mismatches the diff.
+- a brief or report whose verification starts background work and does not bound it per § Background processes;
 - a red test is explained as **pre-existing / flaky / unrelated / environmental** without a logged
   reproduction. Such an explanation is an unverified authored claim (§ Authored claims); accept it
   only when the verdict cites an evidence artifact
@@ -193,6 +194,23 @@ Culprit: <slug>
 2. [severity] <finding, symptom first>
 ...
 ```
+
+## Background processes
+
+Prefer no background helper during verification; when one must outlive the call, use the Bash tool's
+`run_in_background`. Anything started with `&` is gone when the command returns, on exit or error, in
+this form, one command per helper:
+
+`set --; work & set -- "$@" $!; trap 'kill "$@" 2>/dev/null' EXIT`
+
+`kill` reaches the helper alone: a `( a; b )` group or loop leaves its running child alive until that child ends. These fail:
+
+- `$(jobs -p)`: empty under zsh, so nothing is killed.
+- `kill $pids` on a string: zsh does not word-split it, so the kill fails.
+- An array: a syntax error under dash, and evidence captures run through `sh -c`.
+- `kill 0`: signals the whole process group, the shell and any caller in it included.
+- A `kill` on the last line: any earlier exit skips it.
+- `timeout`: not on a stock macOS PATH.
 
 ## Why the evidence lives in files
 

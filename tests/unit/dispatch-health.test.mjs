@@ -9,7 +9,7 @@ import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { nextReviewRound, parseLedgerLine, taskEntries } from "../../scripts/task-ledger.mjs";
 import {
   DEATH_CAP, DISPATCH_ENDED, QUIET_MS, UNBOUND_MS, deathRoute, deathsOf, dispatchHealth, endedOutcome, endedRole, formatDispatch, lastMilestone,
-  markEnded, recordDeath,
+  markEnded, markStopped, recordDeath,
 } from "../../scripts/dispatch-health.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
 
@@ -249,4 +249,38 @@ test("a long non-task dispatch is in flight with its last milestone until the fi
   writeInto(w.root, ".devcycle/progress/map-scripts.log", "2026-10-28T08:03:00Z 3/3 wrote the map\n");
   assert.equal(health(w, { now: T0 + 4 * 60_000 }).some((d) => d.kind === "progress"), false);
   assert.equal(lastMilestone("garbage\n"), null);
+});
+
+const RECORD_5 = ".devcycle/dispatch/5-implementer-0-0.json";
+const recordOf = (w) => JSON.parse(readFileSync(join(w.root, RECORD_5), "utf8"));
+
+test("a stopped dispatch is neither in flight nor dead, so it writes no capped dispatch-ended line", () => {
+  const w = world({ agents: { a1: "interrupted" } });
+  assert.equal(health(w, { now: T0 + 60_000 })[0].state, "ended-without-output", "dead before the stamp");
+  assert.equal(markStopped({ root: w.root, sessionId: SID, agentId: "a1", env: w.env, now: T0 + 61_000 }), true);
+  const record = recordOf(w);
+  assert.equal(record.stopped, new Date(T0 + 61_000).toISOString());
+  assert.equal(record.endedAt, record.stopped);
+  assert.equal(record.agentId, "a1", "bound through the session's transcript");
+  assert.deepEqual(health(w, { now: T0 + 62_000, record: true }), []);
+  assert.deepEqual(ended(w.ledgerPath), []);
+});
+
+test("markStopped finds a record already bound to the agent, with no transcript to read", () => {
+  const w = world({ agents: {}, record: { startedAt: "2026-10-28T08:00:00Z", sessionId: SID, agentId: "gone" } });
+  assert.equal(markStopped({ root: w.root, sessionId: SID, agentId: "gone", env: w.env, now: T0 }), true);
+  assert.equal(recordOf(w).stopped, new Date(T0).toISOString());
+});
+
+test("markStopped binds through a transcript the caller names", () => {
+  const w = world({ agents: { a1: "interrupted" } });
+  assert.equal(markStopped({ root: w.root, sessionId: SID, agentId: "a1", transcriptPath: agentFile(w, "a1"), env: {}, now: T0 }), true);
+  assert.equal(recordOf(w).agentId, "a1");
+});
+
+test("markStopped leaves another session's record and an unknown agent alone", () => {
+  const w = world({ agents: { a1: "interrupted" } });
+  assert.equal(markStopped({ root: w.root, sessionId: SID, agentId: "unknown", env: w.env }), false);
+  assert.equal(markStopped({ root: w.root, sessionId: "another-session", agentId: "a1", env: w.env }), false);
+  assert.equal(recordOf(w).stopped, undefined);
 });

@@ -21,8 +21,9 @@ the default, a `branch`-scope review is sized from its diff by `scripts/review-d
 the profile's bounds and any other scope takes the profile's row; the playbook's § 3 owns the
 rule, and the report's `Depth:` line shows the pick): `panel`
 dispatches every charter through `workflows/review-panel.js` as one JSON argument (`scope`,
-`specPath`, a `lenses` array of `{key, charter}` objects, and a `crossModel` flag that adds a
-non-Claude lens via the `codex` CLI); `single` runs the same charters as inline read-only
+`specPath`, a `lenses` array of `{key, charter}` objects, a `crossModel` flag that adds a
+non-Claude lens via the `codex` CLI, and, from branch review, a `resultDir` under `.devcycle/review/`
+where each result lands as it resolves, so a rerun runs only what is missing); `single` runs the same charters as inline read-only
 reviewers instead — a complete review in its own right, not a degraded panel. A non-zero or
 missing `review-panel.js` degrades to `single`, disclosed verbatim in the engine line rather
 than silently substituted. Every finding is then adversarially refuted by a second reader,

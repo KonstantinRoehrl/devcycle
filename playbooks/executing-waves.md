@@ -53,6 +53,9 @@ continuous execution, and these deltas are the only places devcycle differs from
    silently skipped. When the pre-dispatch read finds one, patch the owning task's steps explicitly
    and re-extract that task's brief before dispatching it.
 
+**Your own commands.** Before running a command of your own that starts background work, read
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/evidence.md background-processes`.
+
 ## Wave formation
 
 Tasks come from the plan's `## Dispatch Map` and per-task `Dependencies` declarations. A wave = every

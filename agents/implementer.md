@@ -90,6 +90,7 @@ its completion notification. A `sleep` loop polling an evidence file is denied.
 Any prose claim your report makes about source state ("X already existed", "no other caller", "the suite was already green") carries the command that proves it or is labeled an assumption — never stated as bare fact (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims).
 
 On a red-green or green-green task, when a sibling's uncommitted red forces a narrower capture, keep the before on the gate command, narrow only the after, and declare it as `- Narrowing: <selector/scope> — <reason>` — never narrow silently. The before/after rule is `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § File-backed evidence's.
+Bound anything your verification starts in the background: `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Background processes.
 
 Report in the shape `references/evidence.md` pins, with `<N>` taken from
 the brief's `**Evidence tail:** <N>` line. If the brief has no such line,

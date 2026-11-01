@@ -49,7 +49,7 @@ lines at one boundary: the judging stage's own, then the skipped stage's, outcom
 block is emitted, run
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state .devcycle/state.md --ready --action <clear|fresh|continue> --completed '<stage>'`,
 with `--action` from the boundary's context action below (`started` and `stopped` are the driver
-paths `references/drive.md` owns) and, at a wave → wave boundary, `--completed 'wave <n> of <m>'`. It rewrites the state file's `handoff:` row, whose meaning
+paths `references/drive.md` owns; `/devcycle:stop` uses `continue`, since a person is present) and, at a wave → wave boundary, `--completed 'wave <n> of <m>'`. It rewrites the state file's `handoff:` row, whose meaning
 `references/resume.md` § The state file owns, and prints the notifications the
 `handoffNotification` knob asks for. A `notify: terminal` line is the hooks module's to raise. Send
 a `notify: push <message>` line's message with the PushNotification tool, or, where the session has
@@ -132,7 +132,9 @@ current stage dispatched has not handed back, no message — a waiting message, 
 budget note — names `/clear`, `/devcycle:continue`, a fresh session or the context action. If
 anything is said, it is `still running: <n> pending — don't clear yet`. Safe to clear is what the
 `ready` mark records once the boundary completes, never a forecast. An unattended run's `--follow`
-and `--wait` watches are watches, not dispatched work.
+and `--wait` watches are watches, not dispatched work. `/devcycle:stop` ends work instead of waiting for
+it, so what it stopped is not in flight: its report names `/devcycle:continue` once `left` lists no
+subagent or background task, and until then names neither that nor the clear.
 
 **Proceeding without a clear.** When this session goes on past a boundary — a `Continue` action,
 or the user telling it to continue anyway — run

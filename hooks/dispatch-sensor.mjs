@@ -7,12 +7,14 @@
 // the same checkout reads the same state.md but never appended a `session` row. Observe-only: any
 // error, malformed input, or absent/partial cycle => exit 0 with no stdout. Counts/enums only.
 import { readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { AGENT_ID_CHARS, AGENT_TYPE_CHARS, MODEL_CHARS, clean, runContext, sessionJoined } from "./lib/run-context.mjs";
 import { transcriptStats } from "../scripts/depth-probe.mjs";
-import { markEnded } from "../scripts/dispatch-health.mjs";
+import { markEnded, markStopped } from "../scripts/dispatch-health.mjs";
 import { isMain } from "../scripts/is-main.mjs";
+import { stopWindowOpen } from "../scripts/stop-files.mjs";
 
 const RUN_RECORD = fileURLToPath(new URL("../scripts/run-record.mjs", import.meta.url));
 export const DEPTH_WARN = 150_000;
@@ -33,10 +35,11 @@ function main() {
   if (typeof input.session_id !== "string" || !input.session_id) return;
   if (!sessionJoined(context, input.session_id)) return;
   const { run, stage, repoRoot } = context;
-  // The dispatch record learns its agent stopped (scripts/dispatch-health.mjs reads it as ended); a
-  // failure here never costs the depth row.
+  // The dispatch record learns its agent stopped (scripts/dispatch-health.mjs reads it as ended, or,
+  // during a /devcycle:stop, as neither in flight nor dead); a failure here never costs the depth row.
   try {
-    markEnded({ root: repoRoot, sessionId: input.session_id, transcriptPath: input.agent_transcript_path, agentId: clean(input.agent_id, AGENT_ID_CHARS, 40) || null });
+    const mark = stopWindowOpen(dirname(context.stateFile), readFileSync(context.stateFile, "utf8")) ? markStopped : markEnded;
+    mark({ root: repoRoot, sessionId: input.session_id, transcriptPath: input.agent_transcript_path, agentId: clean(input.agent_id, AGENT_ID_CHARS, 40) || null });
   } catch { /* observe-only */ }
   const stats = transcriptStats(input.agent_transcript_path);
   if (!stats) return;

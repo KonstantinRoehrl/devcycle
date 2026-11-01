@@ -41,17 +41,11 @@ without that line, skip this section. In drive mode:
 ## Re-derive position from files
 
 1. Enumerate every resumable cycle by running
-   `node ${CLAUDE_PLUGIN_ROOT}/scripts/find-state-files.mjs` — it Node-walks this repo for
-   every `.devcycle/state.md` and prints each with its request, branch, stage, last ledger
-   event, and age. Use its output as the candidate list; do not hand-roll a `find`/`rg`
-   search. `.devcycle/` is gitignored by convention, and a default-gitignore-aware search tool
-   (a shell hook rewriting `find`, `rg` without `--no-ignore`) silently drops paths under it —
-   the script consults no gitignore, so it cannot be blinded, which is the whole reason this
-   step runs it rather than a search. **Ask which one** — never pick. Resuming the wrong cycle
-   silently is the failure this enumeration exists to prevent. With exactly one candidate,
-   still name it before resuming. If the script reports none, say so plainly ("no devcycle
-   state file found in this repo — there is no in-flight cycle to resume") and offer
-   `/devcycle:cycle <description>` to start one. Stop there.
+   `node ${CLAUDE_PLUGIN_ROOT}/scripts/find-state-files.mjs`, never a `find` or `rg` search: `.devcycle/`
+   is gitignored and a gitignore-aware tool silently drops it. Use its output as the candidate list.
+   **Ask which one** — never pick. With exactly one candidate, still name it before resuming. If the
+   script reports none, say so plainly ("no devcycle state file found in this repo — there is no
+   in-flight cycle to resume") and offer `/devcycle:cycle <description>` to start one. Stop there.
    A chosen file at `stage: execution` resumes through § Execution resume below, in place of
    steps 2–4 and § Resume's depth check.
 2. Run the ownership check on the chosen file before trusting anything in it, per
@@ -63,13 +57,15 @@ without that line, skip this section. In drive mode:
    update of a prior line, since a `/clear` always mints a new `$CLAUDE_CODE_SESSION_ID`.
 2a. Validate the state file against on-disk reality before trusting it — `node
    ${CLAUDE_PLUGIN_ROOT}/scripts/resume-check.mjs --state <the chosen state file>`. A non-zero exit
-   means `state.md` is stale (a recorded spec/plan/checklist artifact is gone, the recorded branch no
+   means `state.md` is stale or its format can't be settled (a recorded spec/plan/checklist artifact is gone, the recorded branch no
    longer exists — a leftover from a completed or abandoned cycle — or the stage is not a real enum
    value): surface the specific finding and ask the user how to proceed rather than
    continuing on the stale record. On success it also prints the stage's `entry:` and `note:`
    lines; when the `note:` names a human-required step, re-walk that step on resume rather than
-   assuming a stale `state.md` already cleared it. On its last line, `handoff: pending`, ask the
-   not-ready question `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § The state file holds.
+   assuming a stale `state.md` already cleared it.
+   On its last line, `handoff: pending`, ask the not-ready question
+   `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § The state file holds, unless it printed `stopped:`.
+   A `format-question:` or `format-report:` line → `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § The format row.
 2b. Resolve knobs per the knob channel
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/config.md knob-channel`
    prints — only now, once the ownership check and `resume-check` have passed:
@@ -129,8 +125,9 @@ resolver command first, unchanged (it reads no state file), then
 It runs the ownership check, `resume-check`, the knob comparison, the branch check and the depth
 probe, and prints one JSON object. Every gate stays this command's; it reads their inputs there:
 
-- `action: "stop"` → report `stopDetail` and stop; `foreign-state` and `resume-check` go to the
+- `action: "stop"` → report `stopDetail` and stop; `foreign-state`, `resume-check` and `cycle-format` go to the
   user as steps 2 and 2a say.
+- `formatQuestion` or `formatReport` → step 2a's format lines, first; an answer re-runs this script with `--format-answer`.
 - Otherwise append this session's row as its own Bash call, never folded into another command —
   the hooks module joins a session to its run only on a main-loop call carrying `--kind session`:
   `node ${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append --run <state.run> --kind session --sessionId "$CLAUDE_CODE_SESSION_ID"`.
@@ -140,6 +137,7 @@ probe, and prints one JSON object. Every gate stays this command's; it reads the
 - `depth.band` `over-budget` or `hard-stop` → § Resume's depth rule; `unknown` → proceed.
 - `pendingDecision`, unless `drive.gate` has it → that task's `exhausted-unresolved` loop is the user's decision.
 - `handoff.ask` → step 2a's not-ready question, before acting on `drive.action`.
+- `state.stopped` → a recorded stop, announced below; at `manual` or `none` § Resume closes it, and the start path otherwise.
 
 `drive.action` then decides, per `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/drive.md drive-actions`.
 At `manual` or `none`, announce the position from `tasks` (each task's `position` and `next`) and
@@ -153,6 +151,8 @@ only: the recorded `request:` (so a wrong-project state is spotted instantly), c
 stage and branch, artifact paths, and — during execution — per-task status from the
 ledger (committed / in review / not yet dispatched) plus the concrete next action. If
 the user's recollection contradicts the files, follow the files and say so.
+A `stopped:` line, or `state.stopped`, is a deliberate stop: say `stopped at <stamp> in <stage>: <position>`,
+then name each process left running and each uncommitted path it lists, which stay on disk.
 
 ## Resume
 
@@ -171,6 +171,7 @@ proceed — an unmeasurable depth is not a deep one.
 If `resume-check.mjs` printed `closed:`, the cycle is done — say so and stop, marking nothing.
 Otherwise **mark the stage in progress** before any work (no-op when driven):
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state <the chosen state file> --pending`.
+When a stop is recorded, close it next: `node "${CLAUDE_PLUGIN_ROOT}/scripts/stop-cycle.mjs" resume --state <the chosen state file>`.
 
 Continue at the recorded stage by following the `entry:` and `note:` lines `resume-check.mjs`
 printed. If it printed `no entry line`, report its reason, then read

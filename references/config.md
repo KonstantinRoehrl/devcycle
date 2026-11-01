@@ -44,7 +44,7 @@ loads, never in a file a stage opens with Read — so knobs reach stages through
   non-zero exit — a missing or unknown flag, or a configured value whose single quote broke the
   invocation's quoting — is reported and stops the run; the cure for the last is correcting that
   value in `/plugin configure`. Nothing resolves a knob by hand in its place. A stderr warning
-  names a rejected out-of-set value and the fallback used: surface it once and proceed.
+  names a rejected out-of-set value and the fallback used: surface it once and proceed. A `knob-renamed:` line names a knob whose value the resolver carried over from its old name in `settings.json`: relay it once, with the install command it gives.
 - **Stages read.** A stage reads its knobs from the `knobs:` line its session's entry command
   printed — in-cycle and standalone alike, including a playbook both share. Inside a cycle the
   state file's `- knobs:` line is the persisted copy: a stage reads it when the printed line is

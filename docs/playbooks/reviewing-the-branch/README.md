@@ -16,7 +16,9 @@ branch and nothing on the branch lacks a ledger trail) and its **findings loop**
 reviews the whole branch; only `critical`/`high` findings are blocking and re-open the loop;
 each blocking finding goes to a fresh implementer dispatch the coordinator commits before a
 narrow re-review of just that fix; and the loop is bounded by a per-cycle round cap tracked
-through `.devcycle/ledger.md`'s `review-round` events. The cap bounds effort, never truth — it
+through `.devcycle/ledger.md`'s `review-round` events. A round that dies stays spent, and on the panel
+the next round runs only the lenses and refutations missing from `.devcycle/review/round-<d>/`; a
+`single` round re-runs whole. The cap bounds effort, never truth — it
 never converts an outstanding blocking finding into a pass.
 
 The stage ends in exactly one of two verdicts: `resolved` (no blocking findings outstanding;

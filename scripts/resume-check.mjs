@@ -10,6 +10,8 @@ import { field } from "./md-field.mjs";
 import { stageEntry, entryLines, CLOSED_STAGE, CLOSED_LINE, FALLBACK } from "./stage-entry.mjs";
 import { isMain } from "./is-main.mjs";
 import { parseHandoff } from "./handoff-mark.mjs";
+import { readStopRecord } from "./stop-files.mjs";
+import { formatStopMessage, formatVerdict, isPendingRename, settleFormat } from "./cycle-format.mjs";
 
 // The stage enum's single source of truth is the `- stage: <a|b|c>` line in
 // commands/cycle.md, read the same way scripts/validate.mjs reads it, so this guard never
@@ -28,6 +30,34 @@ const VALID_STAGES = (() => {
   }
 })();
 const NONE = new Set(["none", "<tbd>", ""]);
+
+// The `- stopped:` row, with what the stop record adds. The record only reports: position is
+// rederived from the stage log, the ledger and git (references/resume.md § The state file), so a
+// missing or hand-edited record still prints and never fails the check.
+function stoppedOf(statePath, text) {
+  const row = field(text, "stopped");
+  if (!row) return null;
+  const [stamp, recordPath = null] = row.split(/\s+/);
+  const record = readStopRecord(dirname(statePath));
+  const run = field(text, "run");
+  // A record left by another run is not this cycle's stop, whatever the row says.
+  if (record?.run && run && record.run !== run) return null;
+  return {
+    stamp, recordPath, stage: record?.stage ?? field(text, "stage"), position: record?.position ?? null,
+    left: record?.left ?? [], uncommitted: record?.uncommitted ?? [],
+  };
+}
+
+const positionText = (position) => (position === null ? "position not recorded" : typeof position === "string" ? position : position.summary ?? JSON.stringify(position));
+
+export function stoppedLines(stopped) {
+  if (!stopped) return [];
+  return [
+    `stopped: ${stopped.stamp} in ${stopped.stage}: ${positionText(stopped.position)} (${stopped.recordPath ?? "no record path"})`,
+    ...stopped.left.map(({ id, kind, reason }) => `stopped-left: ${id} (${kind}): ${reason}`),
+    ...stopped.uncommitted.map((path) => `stopped-uncommitted: ${path}`),
+  ];
+}
 
 // The ownership check, the stale checks and the stage's entry lines, as data: `kind` names the
 // failing class (`unreadable`, `foreign`, `stale`), and a passing check's `lines` are what the CLI
@@ -65,7 +95,13 @@ export function checkState(statePath) {
 
   const errors = [];
   const stage = field(text, "stage");
-  if (!stage || (VALID_STAGES.size > 0 && !VALID_STAGES.has(stage)))
+  const format = formatVerdict(text);
+  // A stage this plugin does not know is explained, not stale, when the file's format says why: an
+  // older file's step renames it, and a newer plugin's cycle may have added it (the format stop below
+  // tells the user to update).
+  const stageExplained = format.verdict === "newer" || format.verdict === "unparseable"
+    || (format.verdict === "older" && isPendingRename(stage, format.from));
+  if (!stageExplained && (!stage || (VALID_STAGES.size > 0 && !VALID_STAGES.has(stage))))
     errors.push(`stage: "${stage}" is not a valid devcycle stage`);
 
   const root = field(text, "root");
@@ -112,30 +148,35 @@ export function checkState(statePath) {
   }
 
   if (errors.length) return { ok: false, kind: "stale", errors };
+  if (format.verdict === "newer" || format.verdict === "unparseable") return { ok: false, kind: "format", format, errors: [formatStopMessage(format)] };
   const handoff = parseHandoff(field(text, "handoff"));
-  if (stage === CLOSED_STAGE) return { ok: true, stage, handoff, lines: [CLOSED_LINE] };
+  const stopped = stoppedOf(statePath, text);
+  if (stage === CLOSED_STAGE) return { ok: true, stage, format, handoff, stopped, lines: [CLOSED_LINE] };
   try {
-    return { ok: true, stage, handoff, lines: entryLines(stageEntry(stage)) };
+    return { ok: true, stage, format, handoff, stopped, lines: entryLines(stageEntry(stage)) };
   } catch (err) {
-    return { ok: true, stage, handoff, lines: [`resume-check: no entry line — ${err.message}; fall back to ${FALLBACK}`] };
+    return { ok: true, stage, format, handoff, stopped, lines: [`resume-check: no entry line — ${err.message}; fall back to ${FALLBACK}`] };
   }
 }
 
 function main(argv) {
   let statePath = ".devcycle/state.md";
+  let answer = null;
   try {
-    const { flags } = parseFlags(argv, { "--state": "value" });
+    const { flags } = parseFlags(argv, { "--state": "value", "--format-answer": "value" });
     statePath = requireValue(flags, "--state") ?? statePath;
+    answer = requireValue(flags, "--format-answer") ?? null;
+    if (answer !== null && answer !== "yes" && answer !== "no") throw new Error(`--format-answer takes yes or no, got ${JSON.stringify(answer)}`);
   } catch (err) {
     // A flag whose value is missing, that was never read at all, or whose name was dropped so only
     // a bare path arrived, is a usage error -- never a silently absent flag resolving to the default
     // state file while the caller had named a different one.
     console.error(`resume-check: ${err.message}`);
-    console.error("resume-check: usage: resume-check.mjs [--state <path>]");
+    console.error("resume-check: usage: resume-check.mjs [--state <path>] [--format-answer yes|no]");
     process.exit(1);
   }
 
-  const result = checkState(statePath);
+  let result = checkState(statePath);
   if (result.kind === "unreadable") {
     console.error(`resume-check: ${result.errors[0]}`);
     process.exit(1);
@@ -153,8 +194,24 @@ function main(argv) {
     for (const e of result.errors) console.error(`  - ${e}`);
     process.exit(1);
   }
+  if (result.kind === "format") {
+    console.error(`resume-check: ${result.errors[0]}`);
+    process.exit(1);
+  }
+  const settled = settleFormat(statePath, { checked: result, answer });
+  if (settled.status === "question") {
+    console.log(`format-question: ${settled.question}`);
+    return;
+  }
+  if (settled.status === "locked" || settled.status === "failed") {
+    console.error(`resume-check: ${settled.detail}`);
+    process.exit(1);
+  }
+  for (const line of settled.report) console.log(`format-report: ${line}`);
+  if (settled.status === "migrated") result = checkState(statePath);
   console.log(`resume-check: ok — stage ${result.stage}, all recorded artifacts present`);
   for (const line of result.lines) console.log(line);
+  for (const line of stoppedLines(result.stopped)) console.log(line);
   console.log(`handoff: ${result.handoff.state} ${result.handoff.stamp ?? "(no row)"}`);
 }
 

@@ -946,3 +946,226 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: out })
   const report = JSON.parse(res.stdout);
   assert.ok(report.summary.length > 0, "a fallback summary must be produced, not a crash");
 });
+
+// ---------- result files (resultDir) ----------
+
+const ROUND_DIR = ".devcycle/review/round-1";
+
+// A diff under review, and a fake claude that appends one line per lens or verifier call to a log.
+// `lensBody` runs for a lens call with `lens` (the charter's first word), and may exit non-zero.
+function resultDirFixture(lensBody = "") {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 1;\n");
+  commitAll(repo, "base");
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 3;\n");
+  const callLog = join(makeTempDir("devcycle-panel-calls-"), "calls.log");
+  const bin = makeFakeBin("claude", `
+const fs = require("node:fs");
+const path = require("node:path");
+const prompt = process.argv[process.argv.length - 1];
+const reply = (out) => process.stdout.write(JSON.stringify({ is_error: false, total_cost_usd: 0.5, structured_output: out }));
+const lensMatch = prompt.match(/Your single lens:\\n(\\w+)/);
+if (prompt.includes("You are one lens")) {
+  const lens = lensMatch[1];
+  fs.appendFileSync(${JSON.stringify(callLog)}, "lens " + lens + "\\n");
+  ${lensBody}
+  reply({ findings: [{ file: "src/a.js", line: 1, claim: "wrong value seen by " + lens, severity: "high", measuredAgainst: "the spec" }], strengths: [] });
+} else if (prompt.includes("adversarial verifier")) {
+  fs.appendFileSync(${JSON.stringify(callLog)}, "verify\\n");
+  reply({ verified: true, verification: "read src/a.js" });
+} else {
+  reply({ summary: "summary" });
+}
+`);
+  const calls = () => (existsSync(callLog) ? readFileSync(callLog, "utf8").trim().split("\n").filter(Boolean) : []);
+  return { repo, bin, callLog, calls };
+}
+
+const threeLenses = ["alpha", "beta", "gamma"].map((key) => ({ key, charter: `${key} review.` }));
+
+test("with no resultDir the panel writes nothing", () => {
+  const { repo, bin } = resultDirFixture();
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: threeLenses }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  assert.equal(existsSync(join(repo, ".devcycle")), false);
+});
+
+test("a lens's result file lands as the lens resolves, not when the panel ends", () => {
+  // gamma waits for alpha's and beta's files, so it can only pass while the panel is still running.
+  const { repo, bin, calls } = resultDirFixture(`
+  if (lens === "gamma") {
+    const dir = path.join(process.cwd(), ${JSON.stringify(ROUND_DIR)});
+    const deadline = Date.now() + 5000;
+    while (!(fs.existsSync(path.join(dir, "alpha.json")) && fs.existsSync(path.join(dir, "beta.json")))) {
+      if (Date.now() > deadline) process.exit(1);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+  }`);
+  const args = { scope: { ref: "HEAD" }, lenses: threeLenses, resultDir: ROUND_DIR };
+  const res = runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  assert.deepEqual(JSON.parse(res.stdout).notes, []);
+  for (const key of ["alpha", "beta", "gamma"]) assert.ok(existsSync(join(repo, ROUND_DIR, `${key}.json`)), key);
+  assert.equal(calls().filter((c) => c === "lens gamma").length, 1, "gamma passed its barrier on the first attempt");
+});
+
+test("a rerun over the same directory runs only the lens with no result file", () => {
+  // The two-attempt retry means gamma fails twice in the first run; the flag file lifts that.
+  const { repo, bin, calls } = resultDirFixture(`
+  if (lens === "gamma" && !fs.existsSync("gamma-may-pass")) process.exit(1);`);
+  const args = { scope: { ref: "HEAD" }, lenses: threeLenses, resultDir: ROUND_DIR };
+
+  const first = runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] });
+  assert.equal(first.status, 0, `stderr: ${first.stderr}`);
+  assert.ok(existsSync(join(repo, ROUND_DIR, "alpha.json")));
+  assert.ok(existsSync(join(repo, ROUND_DIR, "beta.json")));
+  assert.equal(existsSync(join(repo, ROUND_DIR, "gamma.json")), false, "a failed lens stores nothing");
+  const before = calls();
+
+  writeFileSync(join(repo, "gamma-may-pass"), "");
+  const second = runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] });
+  assert.equal(second.status, 0, `stderr: ${second.stderr}`);
+  const added = calls().slice(before.length);
+  assert.deepEqual(added.filter((c) => c.startsWith("lens")), ["lens gamma"]);
+  assert.equal(added.filter((c) => c === "verify").length, 1, "only gamma's new finding reaches a verifier");
+
+  const report = JSON.parse(second.stdout);
+  assert.deepEqual(report.findings.map((f) => f.lens).sort(), ["alpha", "beta", "gamma"]);
+  assert.ok(report.findings.every((f) => f.verified && f.verification === "read src/a.js"));
+  assert.ok(report.notes.includes(`resumed round: reused 2 of 3 lens job(s) from ${ROUND_DIR}`), JSON.stringify(report.notes));
+  const cost = Object.fromEntries(report.costByLens.map((c) => [c.lens, c.cost]));
+  assert.deepEqual([cost.alpha, cost.beta, cost.gamma], [0, 0, 0.5], "costByLens is this run's spend");
+});
+
+test("a finished round replays with no lens and no verifier, from its directory alone", () => {
+  const { repo, bin, calls } = resultDirFixture();
+  const first = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: threeLenses, resultDir: ROUND_DIR }, { cwd: repo, binDirs: [bin] });
+  assert.equal(first.status, 0, `stderr: ${first.stderr}`);
+  const before = calls().length;
+
+  const second = runScript(SCRIPT, { resultDir: ROUND_DIR }, { cwd: repo, binDirs: [bin] });
+  assert.equal(second.status, 0, `stderr: ${second.stderr}`);
+  assert.equal(calls().length, before, "nothing re-ran");
+  assert.deepEqual(JSON.parse(second.stdout).findings, JSON.parse(first.stdout).findings);
+  assert.equal(JSON.parse(readFileSync(join(repo, ROUND_DIR, "_args.json"), "utf8")).resultDir, undefined);
+});
+
+test("a directory with no saved arguments is a fatal error naming the file", () => {
+  const { repo, bin } = resultDirFixture();
+  const res = runScript(SCRIPT, { resultDir: ROUND_DIR }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /no saved arguments at \.devcycle\/review\/round-1\/_args\.json/);
+});
+
+test("a moved diff re-runs its lenses and verifiers instead of replaying them", () => {
+  const { repo, bin, calls } = resultDirFixture();
+  const args = { scope: { ref: "HEAD" }, lenses: threeLenses, resultDir: ROUND_DIR };
+  assert.equal(runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] }).status, 0);
+  const before = calls().length;
+
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 4;\n");
+  const res = runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  const added = calls().slice(before);
+  assert.equal(added.filter((c) => c.startsWith("lens")).length, 3);
+  assert.equal(added.filter((c) => c === "verify").length, 3);
+});
+
+test("a multi-chunk lens keeps its finished chunks and re-runs only the missing one", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  const names = ["f1.js", "f2.js", "f3.js", "f4.js"];
+  for (const n of names) writeFileSync(join(repo, "src", n), "// base\n");
+  commitAll(repo, "base");
+  for (const n of names) writeFileSync(join(repo, "src", n), "// x\n".repeat(3_800));
+  const callLog = join(makeTempDir("devcycle-panel-chunks-"), "calls.log");
+  const bin = makeFakeBin("claude", `
+const fs = require("node:fs");
+const prompt = process.argv[process.argv.length - 1];
+const reply = (out) => process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
+if (prompt.includes("You are one lens")) {
+  const diff = prompt.slice(prompt.indexOf("## Diff"));
+  const carriesF4 = diff.includes("diff --git a/src/f4.js");
+  fs.appendFileSync(${JSON.stringify(callLog)}, (carriesF4 ? "f4" : "other") + "\\n");
+  if (carriesF4 && !fs.existsSync("f4-may-pass")) process.exit(1);
+  reply({ findings: [] });
+} else {
+  reply({ summary: "none" });
+}
+`);
+  const args = { scope: { ref: "HEAD" }, lenses: [{ key: "alpha", charter: "alpha review." }], resultDir: ROUND_DIR };
+  assert.equal(runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] }).status, 0);
+  const before = readFileSync(callLog, "utf8").trim().split("\n");
+  assert.ok(before.includes("other"), "the fixture needs a chunk without f4");
+
+  writeFileSync(join(repo, "f4-may-pass"), "");
+  assert.equal(runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] }).status, 0);
+  const added = readFileSync(callLog, "utf8").trim().split("\n").slice(before.length);
+  assert.deepEqual(added, ["f4"]);
+});
+
+test("a verifier that could not run stores no verdict, so the rerun retries only that finding", () => {
+  const repo = makeRepo();
+  mkdirSync(join(repo, "src"), { recursive: true });
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 1;\n");
+  commitAll(repo, "base");
+  writeFileSync(join(repo, "src", "a.js"), "module.exports = 3;\n");
+  const callLog = join(makeTempDir("devcycle-panel-verdicts-"), "calls.log");
+  const bin = makeFakeBin("claude", `
+const fs = require("node:fs");
+const prompt = process.argv[process.argv.length - 1];
+const reply = (out) => process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
+if (prompt.includes("You are one lens")) {
+  reply({ findings: ["one", "two"].map((id) => ({ file: "src/a.js", claim: "finding " + id, severity: "high", measuredAgainst: "the spec" })) });
+} else if (prompt.includes("adversarial verifier")) {
+  const id = prompt.includes("finding two") ? "two" : "one";
+  fs.appendFileSync(${JSON.stringify(callLog)}, id + "\\n");
+  if (id === "two" && !fs.existsSync("two-may-pass")) process.exit(1);
+  reply({ verified: true, verification: "checked " + id });
+} else {
+  reply({ summary: "summary" });
+}
+`);
+  const args = { scope: { ref: "HEAD" }, lenses: [{ key: "alpha", charter: "alpha review." }], resultDir: ROUND_DIR };
+  const first = runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] });
+  assert.equal(first.status, 0, `stderr: ${first.stderr}`);
+  assert.equal(JSON.parse(first.stdout).findings.find((f) => f.claim === "finding two").verified, false);
+  const before = readFileSync(callLog, "utf8").trim().split("\n").length;
+
+  writeFileSync(join(repo, "two-may-pass"), "");
+  const second = runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] });
+  assert.equal(second.status, 0, `stderr: ${second.stderr}`);
+  assert.deepEqual(readFileSync(callLog, "utf8").trim().split("\n").slice(before), ["two"]);
+  assert.ok(JSON.parse(second.stdout).findings.every((f) => f.verified));
+});
+
+test("resultDir outside .devcycle/review/ is rejected before anything is written", () => {
+  const { repo, bin } = resultDirFixture();
+  for (const resultDir of ["src", ".devcycle/review", ".devcycle/review/a/b", ".devcycle/review/../../src", ""]) {
+    const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: threeLenses, resultDir }, { cwd: repo, binDirs: [bin] });
+    assert.equal(res.status, 1, JSON.stringify(resultDir));
+    assert.match(res.stderr, /directly under \.devcycle\/review\//);
+  }
+  assert.equal(existsSync(join(repo, ".devcycle")), false);
+});
+
+test("a caller-supplied lens key cannot leave the result directory", () => {
+  assert.equal(panel.lensResultFile("../../escape"), "..%2F..%2Fescape.json");
+  assert.equal(panel.lensResultFile(".."), "...json");
+  const { repo, bin } = resultDirFixture();
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: [{ key: "../../escape", charter: "escape review." }], resultDir: ROUND_DIR }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  assert.ok(existsSync(join(repo, ROUND_DIR, "..%2F..%2Fescape.json")));
+  assert.equal(existsSync(join(repo, ".devcycle", "escape.json")), false);
+});
+
+test("a result file that cannot be written leaves the review intact", () => {
+  const { repo, bin } = resultDirFixture();
+  mkdirSync(join(repo, ".devcycle"));
+  writeFileSync(join(repo, ".devcycle", "review"), "a file where the directory belongs");
+  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: threeLenses, resultDir: ROUND_DIR }, { cwd: repo, binDirs: [bin] });
+  assert.equal(res.status, 0, `stderr: ${res.stderr}`);
+  assert.equal(JSON.parse(res.stdout).findings.length, 3);
+  assert.match(res.stderr, /result file \S+ not written/);
+});

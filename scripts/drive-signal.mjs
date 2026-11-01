@@ -12,7 +12,7 @@ import { now } from "./stamp.mjs";
 import { field } from "./md-field.mjs";
 import { hashSession } from "./run-record.mjs";
 
-const STOP_REASONS = ["needs-user", "knob-drift", "foreign-state", "resume-check", "branch", "depth-at-start", "sweep-fallback", "scope-change", "no-driver", "not-opted-in"];
+const STOP_REASONS = ["needs-user", "knob-drift", "foreign-state", "resume-check", "branch", "depth-at-start", "sweep-fallback", "scope-change", "no-driver", "not-opted-in", "cycle-format", "plugin-updated"];
 const MAX_DETAIL = 500;
 const USAGE = "drive-signal: usage: drive-signal.mjs <reason> --detail <text> [--task <n>] [--state <path>]";
 

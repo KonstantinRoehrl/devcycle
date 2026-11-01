@@ -139,6 +139,8 @@ stages' single source of truth — `scripts/validate.mjs` reads its literal form
 
 - stage: <scoping|audit|diagnosis|brainstorm|planning|execution|branch-review|on-device|fast-path|sweep|receiving-review|finish|done>
 
+Diagnosis and brainstorm have no playbook to say so: read `${CLAUDE_PLUGIN_ROOT}/references/stage-log.md` as each starts, and log and skip as it says.
+
 1. **scoping** — (skipped per triage).
 2. **audit** (audit-shaped input only) — in place of scoping. It writes
    `docs/audits/YYYY-MM-DD-<topic>.md`, recorded on the state file's `audit:` line; a cycle that

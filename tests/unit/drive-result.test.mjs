@@ -10,7 +10,7 @@ import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
 import { acquireDriveLock, DRIVE_LOCK_REL, readDriveLockHolder } from "../../scripts/drive-lock.mjs";
 import {
-  classifyDrive, HANDLED_REL, holderRunning, markResultHandled, noProgressEndsAfter, readDriveResult,
+  classifyDrive, driverMayRun, HANDLED_REL, holderRunning, markResultHandled, noProgressEndsAfter, readDriveResult,
   readHandledResult, RESULT_REL, RESUMABLE, writeCrashedResult, writeDriveResult,
 } from "../../scripts/drive-result.mjs";
 
@@ -170,6 +170,19 @@ test("classifyDrive ignores a lock that names another state file, live or dead",
     const c = classify(statePath);
     assert.deepEqual([c.running, c.outcome, c.next], [false, null, "none"], JSON.stringify(holder));
   }
+});
+
+test("driverMayRun protects a driver of this cycle only: the lock must name this state file, as an attach requires", () => {
+  const { root, statePath } = cycle();
+  assert.equal(driverMayRun(root, statePath), false, "no lock, no driver");
+  writeLock(root, live());
+  assert.equal(driverMayRun(root, statePath), true, "a live lock naming this state file");
+  writeLock(root, { ...live(), state: "sub/.devcycle/state.md" });
+  assert.equal(driverMayRun(root, statePath), false, "a live lock naming another state file");
+  writeLock(root, dead());
+  assert.equal(driverMayRun(root, statePath), false, "a lock whose holder is gone");
+  writeLock(root, { ...live(), state: undefined });
+  assert.equal(driverMayRun(root, statePath), false, "a lock naming no state file is no driver of this cycle");
 });
 
 test("classifyDrive maps each outcome to its next step, copying the result's reason, task and detail", () => {

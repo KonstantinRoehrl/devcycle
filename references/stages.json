@@ -2,15 +2,15 @@
   "scoping": { "entry": "playbooks/scoping-the-request.md", "note": "" },
   "audit": {
     "entry": "playbooks/reviewing-code.md",
-    "note": "re-read the confirmed criteria from the state file's audit: artifact if one was written, otherwise re-run the criteria interview; never assume criteria a previous session did not record"
+    "note": "log and skip per references/stage-log.md, which holds the confirmed criteria; otherwise re-read them from the state file's audit: artifact if one was written, else re-run the criteria interview; never assume criteria a previous session did not record"
   },
   "diagnosis": {
     "entry": "superpowers:systematic-debugging",
-    "note": "bugs only — with devcycle's notes for this stage in commands/cycle.md § Stage walk; read that entry, since this session may never have loaded it"
+    "note": "bugs only — with devcycle's notes for this stage in commands/cycle.md § Stage walk; read that entry, since this session may never have loaded it; log and skip per references/stage-log.md"
   },
   "brainstorm": {
     "entry": "superpowers:brainstorming",
-    "note": "with devcycle's notes for this stage in commands/cycle.md § Stage walk; read that entry, since this session may never have loaded it"
+    "note": "with devcycle's notes for this stage in commands/cycle.md § Stage walk; read that entry, since this session may never have loaded it; log and skip per references/stage-log.md"
   },
   "planning": { "entry": "playbooks/planning-waves.md", "note": "" },
   "execution": {

@@ -32,11 +32,12 @@ native planning and execution engines that overlay their upstream counterparts o
 ```mermaid
 ---
 title: devcycle — where to start
-accDescr: Command-level map of devcycle's nine slash commands. /devcycle:onboard scaffolds a new repo before the first cycle; /devcycle:cycle runs the guided pipeline through Scope/Design, Plan, Build, Review, and Ship; /devcycle:continue resumes a stopped cycle; and /devcycle:review, /devcycle:doctor, /devcycle:verify, /devcycle:learn, /devcycle:maintain, and /devcycle:reconcile each run standalone at any time.
+accDescr: Command-level map of devcycle's ten slash commands. /devcycle:onboard scaffolds a new repo before the first cycle; /devcycle:cycle runs the guided pipeline through Scope/Design, Plan, Build, Review, and Ship; /devcycle:stop halts a running cycle at any stage and records where it was; /devcycle:continue resumes a stopped cycle; and /devcycle:review, /devcycle:doctor, /devcycle:verify, /devcycle:learn, /devcycle:maintain, and /devcycle:reconcile each run standalone at any time.
 ---
 flowchart LR
     CYCLE(["/devcycle:cycle"]):::tool
     CONT(["/devcycle:continue"]):::tool
+    STOP(["/devcycle:stop"]):::tool
     ONBOARD(["/devcycle:onboard"]):::tool
     REVIEWCMD(["/devcycle:review"]):::tool
     DOCTOR(["/devcycle:doctor"]):::tool
@@ -53,6 +54,7 @@ flowchart LR
     REVIEW --> SHIP["Ship"]:::stage
 
     CONT -. "resumes wherever the cycle stopped" .-> PLAN
+    STOP -. "halts a cycle, which continue resumes" .-> CONT
 
     REVIEWCMD -. "standalone, anytime" .-> SHIP
     DOCTOR -. "standalone, anytime" .-> SHIP
@@ -67,7 +69,7 @@ flowchart LR
 ```
 Command-level only — for stage internals, see `docs/pipeline/`.
 
-Those nine commands are devcycle's entire surface — everything else it ships is machinery they
+Those ten commands are devcycle's entire surface — everything else it ships is machinery they
 load. The full stage-level pipeline is in [`docs/pipeline/`](docs/pipeline/README.md).
 
 Two of the standalone commands form a review write-back path around a pull request:
@@ -177,6 +179,7 @@ run at once. The full configuration surface is in
   any shell, a dispatched subagent's included. The quotes are load-bearing: command substitution is
   word-split, so an unquoted form tears a plugin root containing a space and fails as a
   module-not-found on the truncated path.
+- **Updated devcycle mid-cycle?** `/devcycle:continue` handles it. If the update changed how a cycle's files are written, it migrates them, keeps the originals in `.devcycle/format-backup-*`, and tells you what changed. If your files are newer than the installed plugin, it stops and tells you to update. An unattended run stops at its next session and tells you to restart Claude Code.
 - **Source edits don't show up after reinstalling** — the plugin cache is keyed by
   version, and reinstalling the same version does not refresh it. Bump the version or
   uninstall and reinstall.

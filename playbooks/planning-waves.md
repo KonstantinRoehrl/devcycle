@@ -6,6 +6,8 @@ playbook to create the implementation plan."
 
 Read this stage's lessons: `node "${CLAUDE_PLUGIN_ROOT}/scripts/dream.mjs" --lessons planning`. No store, no output.
 
+Read `${CLAUDE_PLUGIN_ROOT}/references/stage-log.md` now, and log and skip as it says.
+
 ## Engine selection (keyed to `profile`)
 
 Read `profile` from the `knobs:` line per `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob

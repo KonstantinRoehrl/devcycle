@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // The state file's readiness row (references/resume.md § The state file): `- handoff: pending <stamp>`
 // while a session works a stage, `- handoff: ready <stamp>` once its boundary completed; a cycle with
-// no row reads as ready. The one script that writes .devcycle/state.md, and it rewrites that one row
-// only. A ready mark also prints the notifications the cycle's handoffNotification knob asks for;
+// no row reads as ready. It rewrites that one row only, and owns the row edit scripts/stop-cycle.mjs
+// uses for its `stopped:` row. A ready mark also prints the notifications the cycle's handoffNotification
+// knob asks for;
 // references/handoff.md owns when each mark runs.
 import { readFileSync } from "node:fs";
 import { atomicWrite } from "./atomic-write.mjs";
@@ -16,7 +17,6 @@ export const HANDOFF_STATES = ["pending", "ready"];
 export const ACTIONS = ["clear", "fresh", "continue", "started", "stopped"];
 const NOTIFY_KNOB = ROSTER.find(({ key }) => key === "handoffNotification");
 const CHANNELS = { off: [], terminal: ["terminal"], push: ["push"], both: ["terminal", "push"] };
-const ROW = /^- handoff:.*$/m;
 const ANY_ROW = /^- [a-z][a-z-]*:.*$/gm;
 
 export function parseHandoff(value) {
@@ -25,9 +25,10 @@ export function parseHandoff(value) {
 }
 
 // Replaced in place when present, else added after the file's last `- key: value` row.
-export function withHandoffRow(text, state, stamp) {
-  const row = `- handoff: ${state} ${stamp}`;
-  if (ROW.test(text)) return text.replace(ROW, row);
+export function withStateRow(text, key, value) {
+  const row = `- ${key}: ${value}`;
+  const existing = new RegExp(`^- ${key}:.*$`, "m");
+  if (existing.test(text)) return text.replace(existing, () => row);
   const last = [...text.matchAll(ANY_ROW)].at(-1);
   const end = last ? last.index + last[0].length : text.length;
   // The row it extends decides the ending, so one stray CRLF in a body line cannot change the file's style.
@@ -35,6 +36,10 @@ export function withHandoffRow(text, state, stamp) {
   if (!last) return `${text}${text === "" || text.endsWith("\n") ? "" : eol}${row}${eol}`;
   return `${text.slice(0, end)}${eol}${row}${text.slice(end)}`;
 }
+
+export const withoutStateRow = (text, key) => text.replace(new RegExp(`^- ${key}:.*(?:\\r?\\n|$)`, "m"), "");
+
+export const withHandoffRow = (text, state, stamp) => withStateRow(text, "handoff", `${state} ${stamp}`);
 
 // A Continue boundary and a started driver leave the user nothing to come back for.
 export function notifyLines({ knob, action, completed, reason }) {

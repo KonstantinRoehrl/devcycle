@@ -44,10 +44,11 @@ front; a concern line carries none and is self-contained, though `--lesson` also
 bracketed id. A match that comes back empty adds no such block.
 
 Invoke it with `scope: {ref: "<base>..<branch>"}`, the spec path as `specPath`, and this
-stage's criteria — what the spec requires and forbids, plus the default criteria set — and
+stage's criteria — what the spec requires and forbids, plus the default criteria set — plus, on the
+panel, the `resultDir` § Findings loop's step 1 names, and
 record the engine line it returns **verbatim** in the report below, with its depth line. The
 depth is picked once, in round 1, over the whole branch; rounds 2..N re-run that engine. In
-cycle (the state file names a `run:`), append what round 1 ran once its engine returns —
+cycle (the state file names a `run:`), append what the first round to finish ran once its engine returns —
 `single` after a `panel→single` degradation:
 
 ```bash
@@ -83,7 +84,19 @@ green and diff tidy, and still fail its spec:
    <n> (<engine>)`, and — this stage's binding use of that field — `ref=` set to the spec path
    recorded on the `spec:` line of `.devcycle/state.md`. Log it BEFORE the round's reviewers
    are dispatched, so a round that dies mid-flight still counts as spent, and log a
-   `review-verdict` event for the round's outcome too.
+   `review-verdict` event for the round's outcome too, with the same `ref=`.
+
+   **The next round finishes what a dead round started.** A `review-round` line with no later
+   `review-verdict` under this spec path is a round that died: it stays spent. The round this entry
+   opens logs its own line, runs the engine the dead line names, and reviews the dead round's scope,
+   whichever round that was. Its panel directory is `.devcycle/review/round-<d>`, `<d>` being one more
+   than this cycle's `task=branch event=review-verdict` lines, so a dead round's results wait there for
+   the round after it. With a dead round and that directory's `_args.json`, pass `{"resultDir":"<it>"}`
+   alone: only the missing lenses and verdicts run. With nothing to resume, remove the directory before
+   logging the line, since an earlier cycle may have left one, and pass the full arguments. A `single`
+   round re-runs whole (`playbooks/reviewing-code.md` § 3). Once the panel returns, log the finished
+   refutation for `<n>`, the ledger's round, per `${CLAUDE_PLUGIN_ROOT}/references/stage-log.md`:
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/stage-log.mjs" log --state .devcycle/state.md --stage branch-review --key refutation-<n> --ref .devcycle/review/round-<d>`.
 
    **The ledger is the round counter, and the count is per cycle.** On entry — including every
    re-entry via `/devcycle:continue` after an `exhausted-unresolved` stop or `/clear` — count the
@@ -95,7 +108,7 @@ green and diff tidy, and still fail its spec:
 
    Within a cycle the count is never restarted. A session that finds it already at the cap
    opens no further round — it re-presents the outstanding blocking findings for a user
-   decision, per 5's second terminal state. Only the user may grant rounds beyond the cap, and
+   decision, per 5's second terminal state, and says so when the last round died with no verdict. Only the user may grant rounds beyond the cap, and
    only explicitly: record that as `task=branch event=user-decision outcome=review-cap extended
    to <n>`, treat `<n>` as the cap from then on, and note that granting it via Other also
    appends `user-correction-at-gate` — `references/ledger.md` owns both.

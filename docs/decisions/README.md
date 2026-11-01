@@ -5,6 +5,158 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-31 — Verification bounds its background helpers (#395)
+
+**Decision:** `references/evidence.md` § Background processes owns the rule, since it already owns the sibling capture-wait rule and the verdict list. `agents/implementer.md` already reads that file; `playbooks/executing-waves.md` gets one section read. No other stage reads it: the guard's denial and the live notice reach their coordinators, and each added read charges a closure budget. The prescribed form is one command per helper, narrowing the design's `(work)`, because `kill` reaches a subshell alone and leaves its running child alive. The figures below rise for that text.
+
+```text
+budget: surface-budget.json surfaceTotal 6777
+budget: context-budget.json playbooks/executing-waves.md 115302
+budget: context-budget.json playbooks/planning-waves.md 79770
+budget: context-budget.json playbooks/profiling-sessions.md 42778
+budget: context-budget.json playbooks/receiving-review.md 119919
+budget: context-budget.json playbooks/reviewing-code.md 96923
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 93097
+budget: context-budget.json playbooks/taking-the-fast-path.md 53323
+budget: context-budget.json playbooks/writing-the-findings-document.md 65609
+budget: context-budget.json references/evidence.md 14212
+```
+
+## 2026-10-31 — The finish stage reports leftover process groups (#395)
+
+**Decision:** `playbooks/finishing-the-cycle.md` runs `scripts/leftover-processes.mjs` and surfaces what it prints. It is a notice that never blocks. The figures below rise for that paragraph.
+
+```text
+budget: surface-budget.json surfaceTotal 6755
+budget: context-budget.json playbooks/finishing-the-cycle.md 50504
+```
+
+## 2026-10-31 — A cycle's files carry a format, and a driven session stops on a plugin update
+
+**Decision:** `.devcycle/state.md` gains `- format: <n>`, one version per cycle, with an ordered list of tested migrations that are never retired. Older files migrate on resume, in interactive and driven sessions alike, backing up what changes. Newer files stop with a message. A driven session on a different plugin version from its driver stops `plugin-updated`, and a pre-change driver stops through `needs-user`, the one reason its schema accepts as a stop for a person. `commands/continue.md` grows by one line to carry the format pointers, so `commandMax` moves to 184; the rest of the new prose lives in `references/resume.md`, which is why `surfaceTotal` and the closure figures below rise. Nothing migrates beside a live driver except the session that driver started, which carries its token: during a session the driver writes the cycle's files only as ledger appends, under the lock a migration holds, and never writes `state.md`. A holder no liveness check can prove dead counts as a live driver, for an attach and for the migration alike, so an interactive resume beside one attaches, migrates nothing and says why. A driver that cannot read its own plugin version sets `DEVCYCLE_DRIVER_PLUGIN_VERSION` to `unreadable`, and each of its sessions stops `needs-user` with a detail that claims no update, since nothing can be compared; a driver that predates the variable, which sets nothing, stops `needs-user` as an update. `references/drive.md` § Answering a stopped run lists both under the `needs-user` row with no task, and `references/resume.md` says only that after a plugin update the driver's next session stops on the version check. The figures below rose again for the sentences in those two files: `surfaceTotal` by 1, `commands/continue.md` by 213 bytes, and `commands/cycle.md`, `playbooks/receiving-review.md` and `playbooks/sweeping-mechanical-changes.md` by 109 each.
+
+**Why:** Plugin updates reach in-flight cycles. Field-by-field "predates this format" fallbacks left real gaps: older ledgers read as a previous cycle's and were archived, and a removed stage read as an abandoned cycle. `docs/platform-notes.md` § (m) records the measurements.
+
+**Supersedes:** nothing. Validate check 29 now holds the format's surface to `tests/fixtures/cycle-format-contract.json`.
+
+```text
+budget: surface-budget.json surfaceTotal 6750
+budget: surface-budget.json commandMax 184
+budget: context-budget.json commands/continue.md 73821
+budget: context-budget.json commands/cycle.md 85934
+budget: context-budget.json commands/learn.md 17170
+budget: context-budget.json commands/maintain.md 18349
+budget: context-budget.json commands/onboard.md 17458
+budget: context-budget.json commands/reconcile.md 24895
+budget: context-budget.json commands/review.md 25525
+budget: context-budget.json commands/verify.md 24623
+budget: context-budget.json playbooks/executing-waves.md 114084
+budget: context-budget.json playbooks/finishing-the-cycle.md 50309
+budget: context-budget.json playbooks/learning-from-sessions.md 64893
+budget: context-budget.json playbooks/maintaining-the-repo.md 65419
+budget: context-budget.json playbooks/onboarding-a-repo.md 31117
+budget: context-budget.json playbooks/planning-waves.md 78748
+budget: context-budget.json playbooks/receiving-review.md 118897
+budget: context-budget.json playbooks/reviewing-code.md 95901
+budget: context-budget.json playbooks/reviewing-the-branch.md 59103
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 92075
+budget: context-budget.json playbooks/verifying-on-device.md 65660
+budget: context-budget.json references/config.md 14644
+```
+
+## 2026-10-30 — A stopped cycle resumes from a recorded row (`/devcycle:stop`)
+
+**Decision:** `.devcycle/state.md` gains the optional `stopped:` row. `/devcycle:continue` announces
+it, skips the not-ready question over it, and closes it through `stop-cycle.mjs resume` once every
+gate that can end the session has passed. `commands/continue.md` paid for this by shortening its
+discovery step, so `commandMax` stays 183. `surfaceTotal` later moved to 6710 because `stop-cycle.mjs` now
+sorts out a driven run's dead dispatches and carries the `resume` verdict that `commands/stop.md` relays.
+
+**Why:** A stop is deliberate, and `handoff: pending` could only read as "still running, or dead".
+
+**Supersedes:** nothing.
+
+```text
+budget: surface-budget.json surfaceTotal 6710
+budget: context-budget.json commands/continue.md 70312
+budget: context-budget.json commands/cycle.md 83259
+budget: context-budget.json playbooks/executing-waves.md 113743
+budget: context-budget.json playbooks/finishing-the-cycle.md 50129
+budget: context-budget.json playbooks/planning-waves.md 78586
+budget: context-budget.json playbooks/receiving-review.md 116222
+budget: context-budget.json playbooks/reviewing-the-branch.md 58941
+budget: context-budget.json playbooks/scoping-the-request.md 35248
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 89562
+budget: context-budget.json playbooks/taking-the-fast-path.md 53210
+budget: context-budget.json playbooks/verifying-on-device.md 65498
+budget: context-budget.json playbooks/writing-the-findings-document.md 64587
+budget: context-budget.json references/handoff.md 11830
+```
+
+## 2026-10-30 — Command ceiling raised 9→10 for /devcycle:stop
+
+**Decision:** `COMMAND_CEILING` in `scripts/validate.mjs` is raised from **9** to **10** to admit
+`commands/stop.md`, the deliberate tenth command. `stop` halts a cycle at any stage and records its
+position, through `scripts/stop-cycle.mjs`, `hooks/stop-guard.mjs` and `hooks/process-sensor.mjs`. It
+is `side-effectful` and carries `disable-model-invocation`, so only the user starts it. It acts at once
+once the cycle is chosen: a confirmation would delay the one thing it is for. The raise, the command
+file and this entry land in the same change.
+
+**Why:** the ceiling is a regression guard so an added verb is a deliberate surface decision. `stop`
+earns its own verb because it cannot be an argument on `continue` or `cycle`: those read and resume a
+cycle, where this ends one that is running, often from another terminal, and the call site names that
+intent. The only stop before it was the driver-only `drive-execution.mjs --stop`, which leaves an
+interactive cycle at `handoff: pending` with no position.
+
+**Supersedes:** the ceiling of **9** recorded when `reconcile` landed as the ninth command.
+
+The growth below is the new command file and its routing row; `commands/stop.md` later grew to 4312 bytes when
+its resume sentence began relaying `finalize`'s `resume` field in place of a citation it never opened:
+
+```text
+budget: surface-budget.json surfaceTotal 6699
+budget: context-budget.json commands/stop.md 4312
+```
+
+## 2026-10-30 — A stopped branch review or on-device walk keeps what finished
+
+**Decision:** The review panel takes `resultDir` and writes each lens's result and each refutation
+verdict under `.devcycle/review/round-<d>/` as it resolves, so a rerun runs only what is missing. The
+on-device stage logs each verdict as it resolves and resumes at the first item with none. A round that
+died stays spent: the next round takes the next number and finishes its work. The `single` engine keeps
+no per-lens result, so a stop there re-runs the round.
+
+**Why:** A stopped round threw away every finished lens, and a stopped walk every verdict, which meant
+paying for and answering them twice.
+
+**Supersedes:** the panel's "nothing here mutates files" header, now scoped to tracked files and git.
+
+```text
+budget: surface-budget.json surfaceTotal 6633
+budget: context-budget.json playbooks/reviewing-code.md 95739
+budget: context-budget.json playbooks/reviewing-the-branch.md 58652
+budget: context-budget.json playbooks/verifying-on-device.md 65209
+```
+
+## 2026-10-30 — Stages log their progress; audit and diagnosis log, finish does not
+
+**Decision:** `references/stage-log.md` owns which keys each stage writes. Audit logs its confirmed
+criteria and research, through its stage note, because its playbook also serves `/devcycle:review` and
+`/devcycle:maintain`, which own no state file. Diagnosis logs its reproduction and tested hypotheses.
+Finish and receiving-review log nothing new.
+
+**Why:** Finish's steps re-derive from git and repeat safely, so a log would add a second source of
+truth. An audit's criteria are the user's answers and exist nowhere else until its document is written.
+
+**Supersedes:** nothing.
+
+```text
+budget: surface-budget.json surfaceTotal 6601
+budget: context-budget.json commands/cycle.md 82252
+budget: context-budget.json playbooks/planning-waves.md 78297
+budget: context-budget.json playbooks/scoping-the-request.md 34959
+```
+
 ## 2026-10-30 — A stale-lock reclaim never removes a live lock (`scripts/file-lock.mjs`)
 
 **Decision:** A waiter that judges a lock's holder dead takes a sidecar `<lock>.reclaim` guard, reads the
