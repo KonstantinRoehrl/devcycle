@@ -5,6 +5,12 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-01 — A release closes the issues its PRs name
+
+**Decision:** `Prepare release` writes `Closes #n` lines into the `main` ← `dev` PR body, gathered by `scripts/release-closing-refs.mjs` from the PRs squashed into `dev` since the previous release. A PR names an issue it fully fixes with a closing keyword in its body; `Refs #n` keeps the issue open.
+**Why:** GitHub closes an issue only when a closing keyword reaches the default branch, and every PR here lands on `dev` first, so no issue ever closed on its own and each release needed a manual sweep. Closing at release rather than at the `dev` merge keeps the tracker in step with what users can install. The keyword is read from the PR body, not the squash subject, so subjects keep their bare `(#n)` form and versioning is untouched.
+**Supersedes:** The manual issue-closing step after a release.
+
 ## 2026-10-31 — Verification bounds its background helpers (#395)
 
 **Decision:** `references/evidence.md` § Background processes owns the rule, since it already owns the sibling capture-wait rule and the verdict list. `agents/implementer.md` already reads that file; `playbooks/executing-waves.md` gets one section read. No other stage reads it: the guard's denial and the live notice reach their coordinators, and each added read charges a closure budget. The prescribed form is one command per helper, narrowing the design's `(work)`, because `kill` reaches a subshell alone and leaves its running child alive. The figures below rise for that text.

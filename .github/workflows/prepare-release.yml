@@ -123,28 +123,66 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
+      contents: read
       pull-requests: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The exact commit `prepare` left dev at: the closing-issue walk reads dev's log from here.
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Collect the issues this release closes
+        id: closes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          V: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          # A closing keyword only closes an issue once it reaches main, and feature PRs land on dev,
+          # so the keywords are gathered from those PRs and written into this release PR's body.
+          {
+            echo "lines<<EOF"
+            node scripts/release-closing-refs.mjs --version "$V"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Open the release PR
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TITLE: ${{ inputs.title }}
           V: ${{ needs.prepare.outputs.version }}
+          CLOSES: ${{ steps.closes.outputs.lines }}
         run: |
           set -euo pipefail
-          if gh pr list --base main --head dev --state open --json number \
-               --jq 'length' | grep -qv '^0$'; then
-            echo "Release PR already open."; exit 0
-          fi
-          if ! gh pr create --base main --head dev --title "$TITLE" \
-                 --body "Release **v$V**, staged by \`Prepare release\`.
+          BODY="Release **v$V**, staged by \`Prepare release\`.
 
           \`.claude-plugin/plugin.json\` and \`CHANGELOG.md\` are already bumped in this PR, so
           merging it needs no push to \`main\`. On merge, \`Release\` tags \`devcycle--v$V\` and
           publishes the GitHub release from the CHANGELOG section.
 
-          Squash-merge with this exact title — it becomes main's commit subject."; then
+          Squash-merge with this exact title — it becomes main's commit subject."
+          if [ -n "$CLOSES" ]; then
+            BODY="$BODY
+
+          Merging closes the issues that the PRs in this release marked with a closing keyword:
+
+          $CLOSES"
+          fi
+          OPEN=$(gh pr list --base main --head dev --state open --json number --jq '.[0].number // empty')
+          if [ -n "$OPEN" ]; then
+            # Refreshed rather than skipped: PRs merged to dev after the first run change the list.
+            gh pr edit "$OPEN" --body "$BODY"
+            echo "Release PR #$OPEN already open; body refreshed."; exit 0
+          fi
+          if ! gh pr create --base main --head dev --title "$TITLE" --body "$BODY"; then
             echo "::error::Could not create the release PR. Enable it in the repository settings:"
             echo "::error::Settings -> Actions -> General -> Allow GitHub Actions to create and approve pull requests"
             echo "::error::The version bump is committed and pushed to dev; re-run this workflow after enabling it."
