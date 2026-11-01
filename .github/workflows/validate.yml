@@ -161,6 +161,24 @@ jobs:
             echo "The squash-merge subject drives the release version bump; a malformed title ships no release."
             exit 1
           }
+  pr-issue-reference:
+    name: PR body names an issue or says there is none
+    # Only PRs into dev: the release PR (into main) and the back-merge PR (main into dev) are written
+    # by workflows, and a bot's dependency bump has no issue to cite.
+    if: github.event_name == 'pull_request' && github.base_ref == 'dev' && github.head_ref != 'main' && github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ".nvmrc"
+      - name: Require a closing keyword, a Refs line, or No issue
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/pr-body-check.mjs
   commit-convention:
     name: Commit subjects are Conventional Commits
     runs-on: ubuntu-24.04
