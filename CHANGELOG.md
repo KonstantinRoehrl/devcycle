@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.29.0 — 2026-11-01
+
+- feat: add /devcycle:stop, version the cycle format, canary the latest Claude Code and stop leaked background load (#395)
+
 You can now stop a cycle at any stage and resume it exactly where it left off, a devcycle upgrade no longer breaks a cycle that is mid-flight, and a run can no longer silently leak background processes.
 
 **`/devcycle:stop`.** The new command records a stop request, a stop-guard hook honours it, and `/devcycle:continue` resumes from the recorded row without redoing finished work. A stopped branch review or on-device walk keeps what already finished, and the review panel keeps per-lens results. A new stage log (`scripts/stage-log.mjs`) journals intra-stage progress, and a process registry tracks running subagents, scripts, shells and monitors so a stop can end them. Stopped dispatches are stamped so the health check and watchdog do not read them as failures.
