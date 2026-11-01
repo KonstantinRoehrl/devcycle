@@ -218,6 +218,8 @@ fixes, and `Refs #n` for one it only advances. GitHub acts on a closing keyword 
 `main`, so a feature PR into `dev` closes nothing on its own; `Prepare release` collects the keywords from
 the PRs in the release and writes them into the release PR's body, and the issues close when that PR is
 merged. A keyword inside a code span is ignored, so a PR can explain the syntax without using it.
+CI enforces the convention: a PR into `dev` fails `PR body names an issue or says there is none` unless its body has a
+closing keyword, a `Refs #n`, or a line reading `No issue`.
 
 `.github/workflows/canary.yml` runs `claude plugin validate`, the hooks tests, a real install and the golden-path suite against the latest Claude Code once a day, and reports a suspected break to one rolling issue labelled `canary`. It is not a required check. A manual run on a branch never touches the issue, and the schedule runs only from `main`, so a change to it takes effect after the next release.
 

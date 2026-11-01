@@ -9,6 +9,7 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 
 **Decision:** `Prepare release` writes `Closes #n` lines into the `main` ← `dev` PR body, gathered by `scripts/release-closing-refs.mjs` from the PRs squashed into `dev` since the previous release. A PR names an issue it fully fixes with a closing keyword in its body; `Refs #n` keeps the issue open.
 **Why:** GitHub closes an issue only when a closing keyword reaches the default branch, and every PR here lands on `dev` first, so no issue ever closed on its own and each release needed a manual sweep. Closing at release rather than at the `dev` merge keeps the tracker in step with what users can install. The keyword is read from the PR body, not the squash subject, so subjects keep their bare `(#n)` form and versioning is untouched.
+**Enforcement:** a PR into `dev` must say how it relates to an issue — a closing keyword, `Refs #n`, or a `No issue` line — and CI fails it otherwise (`scripts/pr-body-check.mjs`). A skill was rejected for this: it is advisory and fires only on a description match, which is the forgetting the check exists to stop.
 **Supersedes:** The manual issue-closing step after a release.
 
 ## 2026-10-31 — Verification bounds its background helpers (#395)

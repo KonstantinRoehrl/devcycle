@@ -38,6 +38,7 @@ gated by `scripts/validate.mjs` (its citation-grammar and closure-budget checks)
 - One owner per concept: move a rule, don't copy it — `CONTRIBUTING.md` § One owner per concept.
 - Line and closure ceilings live in `tests/fixtures/*budget*.json` and move, up or down, only with
   a `docs/decisions/README.md` entry naming the new figure (`scripts/validate.mjs` check 28).
+- A PR body names an issue — `Closes #n` for a full fix, `Refs #n` to leave it open, or a `No issue` line; a closing keyword only takes effect once the release PR carries it to `main` — `CONTRIBUTING.md` § Closing issues.
 - `docs/devcycle/promotions/` and `docs/devcycle/maintenance-findings/` are ledgers written by
   `/devcycle:learn` and `/devcycle:maintain` — not hand-edited, not read wholesale.
 
