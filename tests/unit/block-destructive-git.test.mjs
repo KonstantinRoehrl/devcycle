@@ -959,3 +959,56 @@ test("main thread + a live driver lock: the driven session's folded task-verdict
     assert.equal(decideMain(cwd, cmd), "deny", `expected deny under a live driver lock: ${cmd}`);
   assert.equal(decideMain(cycleDir(stateAt("execution")), `${TASK_VERDICT} --test-cmd "$(git stash)" --subject x`), "deny");
 });
+
+// #395: under zsh `$(jobs -p)` is empty, so the cleanup kills nothing and the load runs on.
+const JOBS_DENIED = [
+  "kill $(jobs -p)",
+  "kill $(jobs -pr)",
+  "kill `jobs -p`",
+  'kill "$(jobs -p)"',
+  'pids=$(jobs -p); kill $pids',
+  "cat <<EOF\n$(jobs -p)\nEOF",
+  "trap 'kill $(jobs -p)' EXIT",
+  'trap "kill \\$(jobs -p)" EXIT',
+  "trap -- 'kill $(jobs -p)' EXIT",
+  "if true; then trap 'kill $(jobs -p)' EXIT; fi",
+];
+const JOBS_ALLOWED = [
+  "echo 'kill $(jobs -p)'",
+  "# kill $(jobs -p)",
+  "cat <<'EOF'\nkill $(jobs -p)\nEOF",
+  `echo "$(cat <<'EOF'\nkill $(jobs -p)\nEOF\n)"`,
+  "echo \\$(jobs -p)",
+  "jobs -p",
+  "echo $(jobs -l)",
+  `set --; sleep 5 & set -- "$@" $!; trap 'kill "$@" 2>/dev/null' EXIT`,
+];
+
+test("#395: a live jobs -p substitution is denied on the main thread of a cycle and on a guarded dispatch", () => {
+  const cwd = cycleDir(stateAt("planning"));
+  for (const cmd of JOBS_DENIED) {
+    assert.equal(decideMain(cwd, cmd), "deny", `main thread: ${cmd}`);
+    assert.equal(decide(REVIEWER, cmd), "deny", `guarded: ${cmd}`);
+  }
+});
+
+test("#395: the deny names the cause and teaches the bounded form", () => {
+  const { reason } = decideRaw({ cwd: cycleDir(stateAt("execution")), tool_input: { command: "kill $(jobs -p)" } });
+  assert.match(reason, /zsh/);
+  assert.ok(reason.includes(`set --; work & set -- "$@" $!; trap 'kill "$@" 2>/dev/null' EXIT`), reason);
+  assert.doesNotMatch(reason, /git stash/);
+});
+
+test("#395: quoted text, a comment, a quoted heredoc and the bounded form are allowed", () => {
+  const cwd = cycleDir(stateAt("execution"));
+  for (const cmd of JOBS_ALLOWED) assert.equal(decideMain(cwd, cmd), "allow", cmd);
+});
+
+test("#395: outside a cycle, and under a driver lock alone, the main thread is not denied", () => {
+  assert.equal(decideMain(cycleDir(null), "kill $(jobs -p)"), "allow");
+  assert.equal(decideMain(cycleDir(stateAt("done")), "kill $(jobs -p)"), "allow");
+  const locked = cycleDir(stateAt("done"));
+  const lock = acquireDriveLock(locked, { statePath: join(locked, ".devcycle", "state.md"), logPath: join(locked, ".devcycle", "drive.log") });
+  assert.equal(lock.ok, true);
+  assert.equal(decideMain(locked, "kill $(jobs -p)"), "allow");
+});

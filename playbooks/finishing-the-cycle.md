@@ -21,6 +21,11 @@ It reads the distilling checkpoint's `last-run:` and prints
 nudge, never a forced run — it starts no mining pass and advances no checkpoint. When `stale`
 is `false`, say nothing.
 
+## Leftover processes
+
+Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/leftover-processes.mjs"`. Surface anything it prints in this
+stage's report as a notice. It kills nothing and never changes this stage's outcome.
+
 ## Configured policy
 
 Read `gitPolicy` from the `knobs:` line per `${CLAUDE_PLUGIN_ROOT}/references/config.md`

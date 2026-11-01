@@ -5,6 +5,32 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-10-31 — Verification bounds its background helpers (#395)
+
+**Decision:** `references/evidence.md` § Background processes owns the rule, since it already owns the sibling capture-wait rule and the verdict list. `agents/implementer.md` already reads that file; `playbooks/executing-waves.md` gets one section read. No other stage reads it: the guard's denial and the live notice reach their coordinators, and each added read charges a closure budget. The prescribed form is one command per helper, narrowing the design's `(work)`, because `kill` reaches a subshell alone and leaves its running child alive. The figures below rise for that text.
+
+```text
+budget: surface-budget.json surfaceTotal 6777
+budget: context-budget.json playbooks/executing-waves.md 115302
+budget: context-budget.json playbooks/planning-waves.md 79770
+budget: context-budget.json playbooks/profiling-sessions.md 42778
+budget: context-budget.json playbooks/receiving-review.md 119919
+budget: context-budget.json playbooks/reviewing-code.md 96923
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 93097
+budget: context-budget.json playbooks/taking-the-fast-path.md 53323
+budget: context-budget.json playbooks/writing-the-findings-document.md 65609
+budget: context-budget.json references/evidence.md 14212
+```
+
+## 2026-10-31 — The finish stage reports leftover process groups (#395)
+
+**Decision:** `playbooks/finishing-the-cycle.md` runs `scripts/leftover-processes.mjs` and surfaces what it prints. It is a notice that never blocks. The figures below rise for that paragraph.
+
+```text
+budget: surface-budget.json surfaceTotal 6755
+budget: context-budget.json playbooks/finishing-the-cycle.md 50504
+```
+
 ## 2026-10-31 — A cycle's files carry a format, and a driven session stops on a plugin update
 
 **Decision:** `.devcycle/state.md` gains `- format: <n>`, one version per cycle, with an ordered list of tested migrations that are never retired. Older files migrate on resume, in interactive and driven sessions alike, backing up what changes. Newer files stop with a message. A driven session on a different plugin version from its driver stops `plugin-updated`, and a pre-change driver stops through `needs-user`, the one reason its schema accepts as a stop for a person. `commands/continue.md` grows by one line to carry the format pointers, so `commandMax` moves to 184; the rest of the new prose lives in `references/resume.md`, which is why `surfaceTotal` and the closure figures below rise. Nothing migrates beside a live driver except the session that driver started, which carries its token: during a session the driver writes the cycle's files only as ledger appends, under the lock a migration holds, and never writes `state.md`. A holder no liveness check can prove dead counts as a live driver, for an attach and for the migration alike, so an interactive resume beside one attaches, migrates nothing and says why. A driver that cannot read its own plugin version sets `DEVCYCLE_DRIVER_PLUGIN_VERSION` to `unreadable`, and each of its sessions stops `needs-user` with a detail that claims no update, since nothing can be compared; a driver that predates the variable, which sets nothing, stops `needs-user` as an update. `references/drive.md` § Answering a stopped run lists both under the `needs-user` row with no task, and `references/resume.md` says only that after a plugin update the driver's next session stops on the version check. The figures below rose again for the sentences in those two files: `surfaceTotal` by 1, `commands/continue.md` by 213 bytes, and `commands/cycle.md`, `playbooks/receiving-review.md` and `playbooks/sweeping-mechanical-changes.md` by 109 each.

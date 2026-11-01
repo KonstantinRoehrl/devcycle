@@ -28,8 +28,9 @@
 // command it runs; a command word that is a substitution naming git (`$(which git)`) is read as git,
 // and so is the variable `$GIT` as a command's first word (not behind a launcher); and `rtk` is a
 // transparent launcher whose git is classified like any other.
-// Scope is git, plus one non-git rule for the guarded dispatches below: no until/while loop that
-// sleeps (hooks/lib/poll-guard.mjs). Other non-git commands (tests, greps) are allowed. Four dispatch origins are guarded
+// Scope is git, plus two non-git rules: for the guarded dispatches below, no until/while loop that
+// sleeps (hooks/lib/poll-guard.mjs); and for those and the main thread of a cycle, no live `$(jobs -p)`,
+// which is empty under zsh. Other non-git commands (tests, greps) are allowed. Four dispatch origins are guarded
 // by the allowlist — task-reviewer, red-team-reviewer, since #235 implementer and, since #304,
 // spec-reviewer — and the main
 // thread (no agent_type) is guarded for `git stash` while a .devcycle/state.md above the call's cwd
@@ -141,7 +142,7 @@ const denyReason = (guardedTail, mainThreadTail) =>
     : `devcycle: main thread may not run git stash while a devcycle cycle is active (stage: ${cycleStage}) — ${mainThreadTail}`) +
   ` command: ${command.slice(0, 200)}`;
 
-// The one non-git rule: a guarded dispatch may not wait in a loop that sleeps (hooks/lib/poll-guard.mjs).
+// The first non-git rule: a guarded dispatch may not wait in a loop that sleeps (hooks/lib/poll-guard.mjs).
 // An error inside that guard reads as "not a poll loop", so it can never crash the hook.
 let pollLoop = false;
 try { pollLoop = guarded && isPollLoop(command); } catch { /* not a poll loop */ }
@@ -1108,6 +1109,32 @@ function shellJoinSpans(text, scan, offset, isData) {
     if (body) spans.push(...shellJoinSpans(bodyText, body, offset + doc.start, () => false));
   }
   return spans;
+}
+
+// The second non-git rule (#395): under zsh `$(jobs -p)` is empty, so `kill $(jobs -p)` kills nothing
+// and the helpers run on. A substitution is live wherever scanShell reports one, and the quoted first
+// argument of a `trap` runs later as a script. `zsh -c '…'` strings, a script file and other spellings
+// pass: scripts/leftover-processes.mjs is the backstop for those.
+const JOBS_PIDS = /^\s*jobs\s+-[a-z]*p/;
+const JOBS_PIDS_DENY = `devcycle: \`$(jobs -p)\` is empty under zsh, so this cleanup would kill nothing and every background helper would keep running (#395). ` +
+  `Bound helpers like this, one command per helper: set --; work & set -- "$@" $!; trap 'kill "$@" 2>/dev/null' EXIT` +
+  ` — references/evidence.md § Background processes. command: ${command.slice(0, 200)}`;
+function trapBodies(text, scan) {
+  const quoted = [...scan.singleQuotes, ...scan.doubleQuotes].filter(([start]) => text[start] !== "$").sort((a, b) => a[0] - b[0]);
+  return scan.segments.flatMap((segment) => {
+    if (normalizeHead(scannedTokens(text, segment).tokens[0] ?? "") !== "trap") return [];
+    const body = quoted.find(([start, end]) => start >= segment.start && end <= segment.end);
+    return body ? [quotedContent(text, body)] : [];
+  });
+}
+function runsJobsPids(text) {
+  const scan = scanShell(text);
+  return scan !== null && (scan.substitutions.some((sub) => JOBS_PIDS.test(sub.inner)) || trapBodies(text, scan).some(runsJobsPids));
+}
+if (guarded || cycleStage !== null) {
+  let leaksHelpers = false;
+  try { leaksHelpers = runsJobsPids(command); } catch { /* not a match: this rule can never crash the hook */ }
+  if (leaksHelpers) deny(JOBS_PIDS_DENY);
 }
 
 const reason = verdict(command);
