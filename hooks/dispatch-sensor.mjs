@@ -1,24 +1,29 @@
 #!/usr/bin/env node
-// SubagentStop hook — the dispatch depth-sensor. When a subagent finishes during an active cycle it
-// appends one `agent-depth` run-record row: the agent's final context depth, model, tool uses and
-// duration, read from the one transcript the hook input names, marked `warn` above DEPTH_WARN and
-// `breach` above DEPTH_BREACH (a breach also appends a `depth-breach` event), and marks the stopped
-// agent's dispatch record ended. Only a session that joined the run records: a parallel session in
-// the same checkout reads the same state.md but never appended a `session` row. Observe-only: any
-// error, malformed input, or absent/partial cycle => exit 0 with no stdout. Counts/enums only.
-import { readFileSync } from "node:fs";
+// SubagentStop hook — the dispatch depth-sensor. It first decides a hold: an implementer stopping
+// before its owed report is told to carry on (`decision: block`), bounded by scripts/dispatch-health.mjs.
+// On a stop it releases during an active cycle it appends one `agent-depth` run-record row (the agent's
+// final context depth, model, tool uses and duration, read from the one transcript the hook input names,
+// marked `warn` above DEPTH_WARN and `breach` above DEPTH_BREACH; a breach also appends a `depth-breach`
+// event), marks the agent's dispatch record ended and retires it in .devcycle/processes.jsonl. Only a
+// session that joined the run records: a parallel session in the same checkout reads the same state.md
+// but never appended a `session` row. Any error is observe-only: it, malformed input, or an
+// absent/partial cycle => exit 0 with no stdout. Counts/enums only.
+import { existsSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { AGENT_ID_CHARS, AGENT_TYPE_CHARS, MODEL_CHARS, clean, runContext, sessionJoined } from "./lib/run-context.mjs";
 import { transcriptStats } from "../scripts/depth-probe.mjs";
-import { markEnded, markStopped } from "../scripts/dispatch-health.mjs";
+import { holdStop, markEnded, markStopped } from "../scripts/dispatch-health.mjs";
 import { isMain } from "../scripts/is-main.mjs";
-import { stopWindowOpen } from "../scripts/stop-files.mjs";
+import { retireProcess } from "../scripts/process-registry.mjs";
+import { now } from "../scripts/stamp.mjs";
+import { stopPaths, stopWindowOpen } from "../scripts/stop-files.mjs";
 
 const RUN_RECORD = fileURLToPath(new URL("../scripts/run-record.mjs", import.meta.url));
 export const DEPTH_WARN = 150_000;
 export const DEPTH_BREACH = 200_000;
+const TASK_ID = /^[0-9A-Za-z_-]{1,64}$/;
 
 export const depthOf = (tokens) => (tokens > DEPTH_BREACH ? "breach" : tokens > DEPTH_WARN ? "warn" : "ok");
 
@@ -35,11 +40,30 @@ function main() {
   if (typeof input.session_id !== "string" || !input.session_id) return;
   if (!sessionJoined(context, input.session_id)) return;
   const { run, stage, repoRoot } = context;
+  const devcycleDir = dirname(context.stateFile);
+  const agentId = clean(input.agent_id, AGENT_ID_CHARS, 40);
+  const markInput = { root: repoRoot, sessionId: input.session_id, transcriptPath: input.agent_transcript_path, agentId: agentId || null };
+  // null when the state file cannot be read: then nothing is held and the record is left alone, as before.
+  let stopWindow = null;
+  try { stopWindow = stopWindowOpen(devcycleDir, readFileSync(context.stateFile, "utf8")); } catch { /* observe-only */ }
+  // A held stop is not an end, so nothing below runs for it; scripts/dispatch-health.mjs decides the hold.
+  let held = null;
+  try {
+    held = holdStop({ ...markInput, backgroundTasks: Array.isArray(input.background_tasks) ? input.background_tasks : [], stopWindow: stopWindow !== false });
+  } catch { /* observe-only */ }
+  if (held?.hold) {
+    process.stdout.write(JSON.stringify({ decision: "block", reason: held.reason }) + "\n");
+    return;
+  }
   // The dispatch record learns its agent stopped (scripts/dispatch-health.mjs reads it as ended, or,
   // during a /devcycle:stop, as neither in flight nor dead); a failure here never costs the depth row.
   try {
-    const mark = stopWindowOpen(dirname(context.stateFile), readFileSync(context.stateFile, "utf8")) ? markStopped : markEnded;
-    mark({ root: repoRoot, sessionId: input.session_id, transcriptPath: input.agent_transcript_path, agentId: clean(input.agent_id, AGENT_ID_CHARS, 40) || null });
+    if (stopWindow !== null) (stopWindow ? markStopped : markEnded)(markInput);
+  } catch { /* observe-only */ }
+  // The one SubagentStop handler retires the agent in /devcycle:stop's registry, on a stop it released.
+  try {
+    if (TASK_ID.test(input.agent_id ?? "") && existsSync(stopPaths(devcycleDir).processes))
+      retireProcess(devcycleDir, input.agent_id, { endedAt: now(), endedBy: "finished" });
   } catch { /* observe-only */ }
   const stats = transcriptStats(input.agent_transcript_path);
   if (!stats) return;
@@ -49,7 +73,6 @@ function main() {
   // real-path slug every other writer uses (macOS temp paths are symlinks).
   const append = (args) => spawnSync(process.execPath, [RUN_RECORD, "append", "--run", run, ...args],
     { cwd: repoRoot, encoding: "utf8", timeout: 2000 });
-  const agentId = clean(input.agent_id, AGENT_ID_CHARS, 40);
   const w = append(["--kind", "agent-depth", "--stage", stage,
     "--agentType", clean(input.agent_type, AGENT_TYPE_CHARS, 80) || "unknown",
     ...(agentId ? ["--agentId", agentId] : []),

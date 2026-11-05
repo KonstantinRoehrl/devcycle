@@ -64,7 +64,7 @@ test("a foreground Agent, a foreground Bash and an unrelated tool record nothing
   assert.equal(existsSync(join(fx.dir, "processes.jsonl")), false);
 });
 
-test("TaskStop retires its target, and SubagentStop retires only the stopping subagent", () => {
+test("TaskStop retires its target; a SubagentStop is left to the dispatch sensor", () => {
   const fx = fixture();
   fire(fx, AGENT);
   fire(fx, SHELL);
@@ -72,7 +72,7 @@ test("TaskStop retires its target, and SubagentStop retires only the stopping su
   assert.equal(byId(fx, "bbhrzj6qw").endedBy, "taskstop");
   fire(fx, post("Bash", { backgroundTaskId: "bother" }));
   fire(fx, { hook_event_name: "SubagentStop", agent_id: "a3174ecde36694932", background_tasks: [{ id: "a3174ecde36694932", type: "subagent", status: "running" }] });
-  assert.equal(byId(fx, "a3174ecde36694932").endedBy, "finished");
+  assert.equal(byId(fx, "a3174ecde36694932").endedAt, undefined, "hooks/dispatch-sensor.mjs retires a finished subagent, knowing whether it held the stop");
   assert.equal(byId(fx, "bother").endedAt, undefined, "SubagentStop never reconciles");
 });
 

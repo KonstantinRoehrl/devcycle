@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// PostToolUse, Stop and SubagentStop hook — feeds scripts/process-registry.mjs for sessions joined to
+// PostToolUse and Stop hook — feeds scripts/process-registry.mjs for sessions joined to
 // the run. Ids come from the launching tool's response, because Stop's background_tasks never lists a
 // Monitor. A task stopped with TaskStop gets no SubagentStop, so its PostToolUse retires it; Stop then
-// reconciles what ended by itself, and is idempotent because it fires once per wake-up. SubagentStop
-// retires only itself: its array lists the stopping subagent as running. Observe-only: any error,
+// reconciles what ended by itself, and is idempotent because it fires once per wake-up. A finished
+// subagent is retired by hooks/dispatch-sensor.mjs, the one SubagentStop handler, which knows whether it
+// held the stop. Observe-only: any error,
 // malformed input or absent cycle exits 0 with no stdout. Most Bash calls end at the shape check, which
 // is why everything past it, and its git spawn, is imported lazily.
 import { existsSync, readFileSync } from "node:fs";
@@ -23,7 +24,6 @@ function launchOf({ tool_name: tool, tool_response: response }, now) {
 function actionOf(input, now) {
   const event = input.hook_event_name;
   if (event === "Stop") return Array.isArray(input.background_tasks) ? { reconcile: input.background_tasks } : null;
-  if (event === "SubagentStop") return TASK_ID.test(input.agent_id ?? "") ? { retire: input.agent_id, endedBy: "finished" } : null;
   if (event !== "PostToolUse") return null;
   if (input.tool_name === "TaskStop") return TASK_ID.test(input.tool_input?.task_id ?? "") ? { retire: input.tool_input.task_id, endedBy: "taskstop" } : null;
   const launch = launchOf(input, now);
