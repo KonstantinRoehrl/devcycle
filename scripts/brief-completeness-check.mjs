@@ -12,7 +12,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   taskBlocks, parseDispatchMap, filesFieldValue, fieldValue, verificationGate, verificationGateField, conventionCommand,
-  createdFiles, isTestPath,
+  createdFiles, isTestPath, FENCE_RE,
 } from "./task-files.mjs";
 import { budgetFixtureGaps, gapRemedy } from "./budget-fixture-check.mjs";
 import { isMain } from "./is-main.mjs";
@@ -91,13 +91,14 @@ function gateLineErrors(planText) {
 const GUARD_HOOK = fileURLToPath(new URL("../hooks/block-destructive-git.mjs", import.meta.url));
 const GUARDED_ORIGIN = "devcycle:implementer";
 const SHELL_FENCE_INFO = new Set(["bash", "sh", "zsh", "shell", "console"]);
-const FENCE_RE = /^\s*(`{3,}|~{3,})\s*([^\s`]*)/;
 const CODE_SPAN_RE = /(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)/g;
 const GIT_WORD_RE = /\bgit\b/;
+const EVIDENCE_LINE_RE = /^\*\*Evidence:\*\*/;
 
 // Every inline code span, and every line of a shell fence, that names git. Other fences hold test
 // code whose git runs through execFileSync, which a Bash hook never sees. The task's convention
-// command is skipped: the capture helper runs it as its own child process, never the implementer.
+// command is skipped on its **Evidence:** line only, where the capture helper runs it as its own
+// child process; a step that has the implementer type it is still scanned.
 function prescribedGitCommands(block) {
   const convention = conventionCommand(fieldValue(block, "Evidence") ?? "");
   const found = [];
@@ -116,9 +117,13 @@ function prescribedGitCommands(block) {
       fence = { char: marker[1][0], length: marker[1].length, shell: SHELL_FENCE_INFO.has(marker[2].toLowerCase()) };
       continue;
     }
-    for (const span of line.matchAll(CODE_SPAN_RE)) found.push(span[2].trim());
+    const runByCapture = EVIDENCE_LINE_RE.test(line) ? convention : null;
+    for (const span of line.matchAll(CODE_SPAN_RE)) {
+      const command = span[2].trim();
+      if (command !== runByCapture) found.push(command);
+    }
   }
-  return [...new Set(found)].filter((command) => GIT_WORD_RE.test(command) && command !== convention);
+  return [...new Set(found)].filter((command) => GIT_WORD_RE.test(command));
 }
 
 function guardDenial(command, { repoRoot, hookPath = GUARD_HOOK }) {
@@ -161,16 +166,18 @@ export function guardDenialNotes(blocks, { repoRoot, hookPath = GUARD_HOOK }) {
 
 // #321: a red-green task that creates its module under test needs a stub step, or its red is a
 // missing-module error that passes vacuously once the file exists (references/evidence.md § The
-// three evidence classes). Code extensions only: a created doc, fixture or config never runs.
+// three evidence classes). Code extensions only: a created doc, fixture or config never runs, and a
+// `.d.ts` declaration file has no runtime to stub.
 const SOURCE_EXTENSIONS = new Set([".mjs", ".cjs", ".js", ".jsx", ".ts", ".tsx", ".mts", ".cts", ".py",
   ".rb", ".go", ".rs", ".java", ".kt", ".swift", ".sh"]);
+const DECLARATION_FILE_RE = /\.d\.[mc]?ts$/i;
 const STUB_RE = /\bstub/i;
 
 function stubErrors(num, block) {
   if ((fieldValue(block, "Evidence") ?? "").split(/\s+/)[0] !== "red-green") return [];
   const files = filesFieldValue(block);
   if (!files) return [];
-  const created = [...createdFiles(files)].filter((path) => SOURCE_EXTENSIONS.has(extname(path).toLowerCase()) && !isTestPath(path));
+  const created = [...createdFiles(files)].filter((path) => SOURCE_EXTENSIONS.has(extname(path).toLowerCase()) && !DECLARATION_FILE_RE.test(path) && !isTestPath(path));
   if (created.length === 0 || STUB_RE.test(block.replace(files, ""))) return [];
   return [
     `Task ${num}: **Evidence:** red-green creates ${created[0]} but no step writes a stub for it — add a step before the ` +

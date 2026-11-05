@@ -486,3 +486,31 @@ test("isTestPath recognizes test files in any language and anything under a test
     assert.equal(isTestPath(p), false, p);
   }
 });
+
+test("createdFiles stops reading a Create label once its declared list has ended on the line", () => {
+  assert.deepEqual([...createdFiles("- Create: `tests/unit/a.test.mjs` (covers the existing `scripts/a.mjs`)")], ["tests/unit/a.test.mjs"]);
+  assert.deepEqual([...createdFiles("- Create: `docs/a.md` (documents `scripts/x.mjs`)")], ["docs/a.md"]);
+  assert.deepEqual([...createdFiles("- Create: `docs/a.md`, wired into `scripts/x.mjs`")], ["docs/a.md"]);
+  assert.deepEqual([...createdFiles("- Create: `a.mjs` and `b.mjs`, read by `c.mjs`")], ["a.mjs", "b.mjs"]);
+  assert.deepEqual([...createdFiles("- Create: `a.mjs` + `b.mjs`")], ["a.mjs", "b.mjs"]);
+});
+
+test("isTestPath recognizes a SwiftPM Tests/ directory and conftest.py, and still not a name that merely ends in tests", () => {
+  for (const p of ["Tests/AppTests/AppTests.swift", "conftest.py", "pkg/conftest.py"]) assert.equal(isTestPath(p), true, p);
+  for (const p of ["src/contests/x.ts", "src/myconftest.py", "scripts/conftest.mjs"]) assert.equal(isTestPath(p), false, p);
+});
+
+test("taskBlocks ends the last task's block at a trailing level-1 or level-2 heading", () => {
+  const plan = "### Task 1: A\n**Files:** `a.mjs`\n\n### Task 2: B\n**Files:** `b.mjs`\n\n## Dispatch Map\n- Wave 1: Task 1, Task 2\n\n# Appendix\nmore\n";
+  const [, last] = taskBlocks(plan);
+  assert.ok(last.text.includes("b.mjs"));
+  assert.ok(!last.text.includes("Dispatch Map") && !last.text.includes("Appendix"), last.text);
+  assert.ok(taskBlocks("### Task 1: A\n## Notes\nx\n### Task 2: B\ny\n")[1].text.startsWith("### Task 2"));
+});
+
+test("taskBlocks keeps a heading inside a code fence in the task's block", () => {
+  const plan = "### Task 1: A\n```markdown\n# Title\n## Section\n```\nafter the fence\n## Dispatch Map\n";
+  const [block] = taskBlocks(plan);
+  assert.ok(block.text.includes("## Section") && block.text.includes("after the fence"), block.text);
+  assert.ok(!block.text.includes("Dispatch Map"));
+});

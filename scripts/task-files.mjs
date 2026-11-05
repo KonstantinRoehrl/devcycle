@@ -10,8 +10,10 @@ export const TEST_FILE_SUFFIXES = [".test.mjs", ".test.js", ".test.ts", "_test.p
 // plans must know a test file in any language, and anything under a test directory.
 const TEST_NAME_RE = /(?:\.(?:test|spec)\.[A-Za-z0-9]+|_test\.(?:go|py)|_spec\.rb)$/;
 const PY_TEST_PREFIX_RE = /(?:^|\/)test_[^/]*\.py$/;
-const TEST_DIR_RE = /(?:^|\/)(?:tests|test|__tests__|spec)\//;
-export const isTestPath = (path) => TEST_NAME_RE.test(path) || PY_TEST_PREFIX_RE.test(path) || TEST_DIR_RE.test(path);
+const TEST_DIR_RE = /(?:^|\/)(?:tests|test|__tests__|spec)\//i;
+const PY_CONFTEST_RE = /(?:^|\/)conftest\.py$/;
+export const isTestPath = (path) =>
+  TEST_NAME_RE.test(path) || PY_TEST_PREFIX_RE.test(path) || PY_CONFTEST_RE.test(path) || TEST_DIR_RE.test(path);
 
 // `trusted` skips the path-shape gate and the character denylist — used by the explicit --files CSV,
 // where the caller has already asserted every token is a file, so a top-level extensionless name
@@ -212,6 +214,8 @@ function scanFiles(block, onFile) {
         afterConjunction = true;
         continue;
       }
+      // A token past the end of the declared list is prose, and so is everything after it on the line.
+      if (!declared) label = null;
       const slashAloneMakesPath = declared && !(afterConjunction && !precededByBarePath);
       let accepted = false;
       let allBare = true;
@@ -287,12 +291,36 @@ export function fieldValue(block, field) {
   return m ? m[1].trim() : null;
 }
 
+// A task's block ends at the next task heading or the next plan-level heading (`# `, `## `), so a
+// trailing "## Dispatch Map" or "## Self-review" is never read as the last task's brief. A heading
+// inside a code fence is example text (a task may carry a whole doc template), not a plan section.
+export const FENCE_RE = /^\s*(`{3,}|~{3,})\s*([^\s`]*)/;
+const PLAN_HEADING_RE = /^#{1,2} /;
+
+function planLevelEnd(text, from) {
+  let fence = null;
+  let offset = from;
+  for (const line of text.slice(from).split("\n")) {
+    const marker = line.match(FENCE_RE);
+    if (fence) {
+      if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && !marker[2]) fence = null;
+    } else if (marker) {
+      fence = { char: marker[1][0], length: marker[1].length };
+    } else if (offset > from && PLAN_HEADING_RE.test(line)) {
+      return offset;
+    }
+    offset += line.length + 1;
+  }
+  return text.length;
+}
+
 export function taskBlocks(planText) {
   const headings = [...planText.matchAll(TASK_HEADING_RE)];
   const blocks = [];
   for (let i = 0; i < headings.length; i++) {
     const start = headings[i].index;
-    const end = i + 1 < headings.length ? headings[i + 1].index : planText.length;
+    const nextTask = i + 1 < headings.length ? headings[i + 1].index : planText.length;
+    const end = Math.min(nextTask, planLevelEnd(planText, start));
     blocks.push({ num: Number(headings[i][1]), text: planText.slice(start, end) });
   }
   return blocks;

@@ -399,3 +399,41 @@ test("a path under Modify, or on a Delete line, is never read as created", () =>
   const r = run(NO_STUB.replace("- Create: `a.mjs`", "- Modify: `a.mjs`\n- Delete: `old.mjs`"));
   assert.equal(r.code, 0, r.out);
 });
+
+// --- branch-review round 1: the stub and guard legs read only the task's own brief ---
+
+test("a stub named in a section after the last task does not silence the stub leg", () => {
+  const r = run(NO_STUB + "\n## Self-review\n- stub coverage checked for every task\n");
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /Task 1: .*creates a\.mjs/);
+});
+
+test("a git command in a section after the last task is not blamed on that task", () => {
+  const r = run(COMPLETE + "\n## Self-review\n- cleanup: `git rm old.mjs`\n");
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(notesIn(r.out), [], r.out);
+});
+
+test("a path in the trailing prose of a Create line is not a created source file", () => {
+  for (const files of ["- Create: `docs/a.md` (documents `scripts/x.mjs`)", "- Create: `docs/a.md`, wired into `scripts/x.mjs`"]) {
+    const r = run(NO_STUB.replace("- Create: `a.mjs`", files));
+    assert.equal(r.code, 0, `${files}\n${r.out}`);
+  }
+});
+
+test("a SwiftPM Tests/ file, a conftest.py and a .d.ts declaration file never need a stub", () => {
+  for (const file of ["Tests/AppTests/AppTests.swift", "conftest.py", "types/index.d.ts", "types/a.d.mts", "types/b.d.cts"]) {
+    const r = run(NO_STUB.replace("`a.mjs`", `\`${file}\``));
+    assert.equal(r.code, 0, `${file}\n${r.out}`);
+  }
+  assert.equal(run(NO_STUB.replace("`a.mjs`", "`src/index.ts`")).code, 1);
+});
+
+test("a convention command is skipped on the Evidence line only; a step that types it is still scanned", () => {
+  const convention = "**Evidence:** convention (`cat $(git rev-parse --show-toplevel)/x`)";
+  const plan = COMPLETE.replace("**Evidence:** red-green", convention);
+  assert.deepEqual(notesIn(run(plan).out), []);
+  const typed = run(plan.replace("- [ ] step", "- [ ] Run `cat $(git rev-parse --show-toplevel)/x` by hand"));
+  assert.equal(notesIn(typed.out).length, 1, typed.out);
+  assert.match(notesIn(typed.out)[0], /command substitution/);
+});
