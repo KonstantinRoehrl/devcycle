@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
@@ -249,4 +249,44 @@ test("a held subagent stays open in the process registry; the stop that releases
   writeInto(fx.repo, ".devcycle/reports/5.md", "## Task report\n");
   assert.equal(callHook(fx).stdout, "");
   assert.equal(entry().endedBy, "finished");
+});
+
+test("a stop with a fresh report is released and the dispatch is marked ended", () => {
+  const fx = implementerFixture();
+  writeInto(fx.repo, ".devcycle/reports/5.md", "## Task report\n");
+  const r = callHook(fx);
+  assert.equal(r.stdout, "");
+  assert.equal(recordOf(fx).holds, undefined);
+  assert.match(recordOf(fx).endedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(recordOf(fx).outputPresent, true);
+});
+
+test("a reviewer stopping without its findings file is never held", () => {
+  const fx = fixture({ stage: "execution" });
+  writeInto(fx.repo, ".devcycle/dispatch/5-reviewer-1-0.json", JSON.stringify({ startedAt: "2026-10-07T07:18:00Z", sessionId: SESSION }) + "\n");
+  writeFileSync(fx.transcript, IMPLEMENTER_STOP.replace("5-implementer.md", "5-reviewer-round-1.md"));
+  const r = callHook(fx);
+  assert.equal(r.stdout, "");
+  const record = JSON.parse(readFileSync(join(fx.repo, ".devcycle/dispatch/5-reviewer-1-0.json"), "utf8"));
+  assert.equal(record.holds, undefined);
+  assert.match(record.endedAt, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("a report older than the dispatch does not release the stop: it is still held", () => {
+  const fx = implementerFixture();
+  writeInto(fx.repo, ".devcycle/reports/5.md", "## Task report\n");
+  const before = new Date(Date.parse("2026-10-07T07:18:00Z") - 60_000);
+  utimesSync(join(fx.repo, ".devcycle/reports/5.md"), before, before);
+  const r = callHook(fx);
+  assert.equal(JSON.parse(r.stdout).decision, "block");
+  assert.equal(recordOf(fx).endedAt, undefined);
+});
+
+test("a stop input with no transcript path still retires the subagent from the process registry", () => {
+  const fx = implementerFixture();
+  const dir = join(fx.repo, ".devcycle");
+  recordProcess(dir, { id: "a3382414bf84c15db", kind: "subagent", session: hashSession(SESSION), run: RUN, stage: "execution", startedAt: "2026-10-07T07:18:00Z" });
+  const r = callHook(fx, { agent_transcript_path: undefined });
+  assert.equal(r.stdout, "");
+  assert.equal(readProcesses(dir).find((e) => e.id === "a3382414bf84c15db").endedBy, "finished");
 });

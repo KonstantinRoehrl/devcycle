@@ -4,7 +4,8 @@
 // findings file. This module is the one writer of the `dispatch-ended` ledger event and the owner
 // of its cap (references/resume.md § Resuming a wave's per-task position, **Retry caps**). Run as a CLI
 // by the coordinator (`playbooks/executing-waves.md` § Per-task cycle), and as a library by the
-// driver's watchdog, the drive band's progress builder and the SubagentStop sensor.
+// driver's watchdog, the drive band's progress builder and the SubagentStop sensor, which also asks it
+// whether to hold an implementer's early stop (`holdStop`, at most HOLD_CAP per dispatch record, counted in its `holds` / `heldAt`).
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWrite } from "./atomic-write.mjs";
@@ -374,6 +375,8 @@ export function markStopped({ root, sessionId, agentId, transcriptPath = null, e
 export const HOLD_CAP = 3;
 export const HOLD_GRACE_MS = Number(process.env.DEVCYCLE_DISPATCH_HOLD_GRACE_MS) || 60_000;
 const CAPTURE_PHASE = /capture-evidence\.mjs\b.*--phase[= ](before|after|red)\b/;
+// A capture another task is running is not this task's to await.
+const CAPTURE_TASK = /capture-evidence\.mjs\b.*--task[= ]["']?([^\s"']+)/;
 
 // A hold the hook wrote after the transcript's last record covers the sub-second window before
 // Claude Code appends its feedback; past the grace the transcript decides, so a hold the platform
@@ -384,7 +387,8 @@ function heldInGrace(record, t, now) {
 }
 
 export function holdReason({ task, holds, backgroundTasks = [] }) {
-  const capture = backgroundTasks.find((b) => b?.status === "running" && typeof b.command === "string" && CAPTURE_PHASE.test(b.command));
+  const capture = backgroundTasks.find((b) => b?.status === "running" && typeof b.command === "string" && CAPTURE_PHASE.test(b.command)
+    && b.command.match(CAPTURE_TASK)?.[1] === task);
   const head = `devcycle: task ${task}'s implementer stopped before writing ${owedPath(task, "implementer")} (hold ${holds} of ${HOLD_CAP}).`;
   if (!capture) return `${head} Finish the task and write the report, or write a report whose status says why you cannot.`;
   const phase = capture.command.match(CAPTURE_PHASE)[1];

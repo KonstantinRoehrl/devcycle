@@ -34,7 +34,7 @@ function readInput() {
 
 function main() {
   const input = readInput();
-  if (!input || input.hook_event_name !== "SubagentStop" || typeof input.agent_transcript_path !== "string") return;
+  if (!input || input.hook_event_name !== "SubagentStop") return;
   const context = runContext(typeof input.cwd === "string" && input.cwd ? input.cwd : process.cwd());
   if (!context) return;
   if (typeof input.session_id !== "string" || !input.session_id) return;
@@ -42,14 +42,16 @@ function main() {
   const { run, stage, repoRoot } = context;
   const devcycleDir = dirname(context.stateFile);
   const agentId = clean(input.agent_id, AGENT_ID_CHARS, 40);
-  const markInput = { root: repoRoot, sessionId: input.session_id, transcriptPath: input.agent_transcript_path, agentId: agentId || null };
+  // Without a transcript there is nothing to hold, mark or measure, but the registry still retires the agent.
+  const transcriptPath = typeof input.agent_transcript_path === "string" ? input.agent_transcript_path : null;
+  const markInput = { root: repoRoot, sessionId: input.session_id, transcriptPath, agentId: agentId || null };
   // null when the state file cannot be read: then nothing is held and the record is left alone, as before.
   let stopWindow = null;
   try { stopWindow = stopWindowOpen(devcycleDir, readFileSync(context.stateFile, "utf8")); } catch { /* observe-only */ }
   // A held stop is not an end, so nothing below runs for it; scripts/dispatch-health.mjs decides the hold.
   let held = null;
   try {
-    held = holdStop({ ...markInput, backgroundTasks: Array.isArray(input.background_tasks) ? input.background_tasks : [], stopWindow: stopWindow !== false });
+    if (transcriptPath) held = holdStop({ ...markInput, backgroundTasks: Array.isArray(input.background_tasks) ? input.background_tasks : [], stopWindow: stopWindow !== false });
   } catch { /* observe-only */ }
   if (held?.hold) {
     process.stdout.write(JSON.stringify({ decision: "block", reason: held.reason }) + "\n");
@@ -58,14 +60,14 @@ function main() {
   // The dispatch record learns its agent stopped (scripts/dispatch-health.mjs reads it as ended, or,
   // during a /devcycle:stop, as neither in flight nor dead); a failure here never costs the depth row.
   try {
-    if (stopWindow !== null) (stopWindow ? markStopped : markEnded)(markInput);
+    if (transcriptPath && stopWindow !== null) (stopWindow ? markStopped : markEnded)(markInput);
   } catch { /* observe-only */ }
   // The one SubagentStop handler retires the agent in /devcycle:stop's registry, on a stop it released.
   try {
     if (TASK_ID.test(input.agent_id ?? "") && existsSync(stopPaths(devcycleDir).processes))
       retireProcess(devcycleDir, input.agent_id, { endedAt: now(), endedBy: "finished" });
   } catch { /* observe-only */ }
-  const stats = transcriptStats(input.agent_transcript_path);
+  const stats = transcriptPath && transcriptStats(transcriptPath);
   if (!stats) return;
 
   const depth = depthOf(stats.depth);

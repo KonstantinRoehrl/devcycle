@@ -328,6 +328,16 @@ test("the hold reason names the await command for a running background capture, 
   assert.match(plain, /write the report, or write a report whose status says why/);
 });
 
+test("the hold reason names only a running capture of its own task, matched as a whole task id", () => {
+  const capture = (task, phase) => ({ id: `b${task}`, type: "shell", status: "running", command: `node "/x/scripts/capture-evidence.mjs" --task ${task} --phase ${phase}` });
+  const other = holdReason({ task: "5", holds: 1, backgroundTasks: [capture("7", "after")] });
+  assert.doesNotMatch(other, /--await/);
+  assert.match(other, /write the report, or write a report whose status says why/);
+  assert.match(holdReason({ task: "5", holds: 1, backgroundTasks: [capture("7", "after"), capture("5", "before")] }), /--await --task 5 --phase before/);
+  assert.doesNotMatch(holdReason({ task: "5", holds: 1, backgroundTasks: [capture("50", "after")] }), /--await/);
+  assert.match(holdReason({ task: "50", holds: 1, backgroundTasks: [capture("5", "after"), capture("50", "red")] }), /--await --task 50 --phase red/);
+});
+
 test("a held record reads in flight for HOLD_GRACE_MS past its hold, then the transcript decides", () => {
   const heldAt = T0 + 120_500; // the final-text fixture's last record is at T0 + 120 s
   const record = (at) => ({ startedAt: "2026-10-28T08:00:00Z", sessionId: SID, holds: 1, heldAt: new Date(at).toISOString() });
