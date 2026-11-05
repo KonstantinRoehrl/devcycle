@@ -19,17 +19,21 @@ const task = (n, files) => [
 const plan = (body, map = "## Dispatch Map\n\n- Wave 1: Task 1, Task 2 (file-disjoint, no dependencies)\n") =>
   `# P Implementation Plan\n\n**Verification gate:** \`npm test\`\n\n${body}\n${map}`;
 
+// Every fixture plan cites these, so the briefFacts leg finds them in whichever repo a test runs in.
+const CITED = ["src/a.txt", "src/b.txt", "playbooks/x.md"];
+
 function run(planText, { repo = realpathSync(makeTempDir("plan-check-repo")), args = [], env = {} } = {}) {
+  for (const path of CITED) if (!existsSync(join(repo, path))) writeInto(repo, path, "");
   const p = join(repo, "plan.md");
   writeFileSync(p, planText);
   return spawnSync(process.execPath, [SCRIPT, p, repo, ...args], { encoding: "utf8", cwd: repo,
     env: { ...process.env, DEVCYCLE_RUNS_DIR: makeTempDir("plan-check-runs"), ...env } });
 }
 
-test("a clean plan prints one ok line naming all seven legs", () => {
+test("a clean plan prints one ok line naming all eight legs", () => {
   const r = run(plan(task(1, ["src/a.txt"]) + task(2, ["src/b.txt"])));
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout.trim(), "plan-check: ok — 7 leg(s): codeBlocks, briefCompleteness, blastRadius, contentCoupling, budgetFixtures, waveDisjointness, authoredClaims");
+  assert.equal(r.stdout.trim(), "plan-check: ok — 8 leg(s): codeBlocks, briefCompleteness, blastRadius, contentCoupling, budgetFixtures, waveDisjointness, authoredClaims, briefFacts");
 });
 
 test("no Dispatch Map fails closed before any leg runs (M16)", () => {
@@ -94,7 +98,7 @@ test("a passing run summarizes each leg's notes as one count line", () => {
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stderr, COUNT_LINE);
   assert.doesNotMatch(r.stderr, /override --/);
-  assert.match(r.stdout, /^plan-check: ok — 7 leg\(s\)/);
+  assert.match(r.stdout, /^plan-check: ok — 8 leg\(s\)/);
 });
 
 test("--verbose lists every note on a passing run", () => {
@@ -148,6 +152,7 @@ const TRIPS = {
   budgetFixtures: () => run(plan(task(1, ["playbooks/x.md"]) + task(2, ["src/b.txt"]))),
   waveDisjointness: () => run(plan(task(1, ["src/a.txt"]) + task(2, ["src/a.txt"]))),
   authoredClaims: () => run(plan(task(1, ["src/a.txt"]) + withProse(2, ["src/b.txt"], "touch 3 files"))),
+  briefFacts: () => run(plan(task(1, ["src/a.txt"]) + task(2, ["src/gone.txt"]))),
 };
 
 for (const [leg, trip] of Object.entries(TRIPS)) {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// One plan gate: seven legs over one plan file, fail-closed on a missing Dispatch Map, one compact
+// One plan gate: eight legs over one plan file, fail-closed on a missing Dispatch Map, one compact
 // line on success. Each leg lives in (and is exported by) the script that still serves it standalone.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -16,6 +16,7 @@ import { contentCouplingLeg } from "./content-coupling-check.mjs";
 import { budgetFixturesLeg } from "./budget-fixture-check.mjs";
 import { waveDisjointnessLeg } from "./wave-disjointness-check.mjs";
 import { authoredClaimsLeg } from "./authored-claims-check.mjs";
+import { briefFactsLeg } from "./brief-facts-check.mjs";
 
 const RUN_RECORD = fileURLToPath(new URL("./run-record.mjs", import.meta.url));
 const STAGES = new Set(["scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
@@ -30,6 +31,7 @@ export const LEGS = {
   budgetFixtures: budgetFixturesLeg,
   waveDisjointness: waveDisjointnessLeg,
   authoredClaims: authoredClaimsLeg,
+  briefFacts: briefFactsLeg,
 };
 
 export function planCheck(planText, { planPath, repoRoot, only }) {
