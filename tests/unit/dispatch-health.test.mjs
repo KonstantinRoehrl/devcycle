@@ -8,8 +8,8 @@ import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { nextReviewRound, parseLedgerLine, taskEntries } from "../../scripts/task-ledger.mjs";
 import {
-  DEATH_CAP, DISPATCH_ENDED, QUIET_MS, UNBOUND_MS, deathRoute, deathsOf, dispatchHealth, endedOutcome, endedRole, formatDispatch, lastMilestone,
-  markEnded, markStopped, recordDeath,
+  DEATH_CAP, DISPATCH_ENDED, HOLD_CAP, HOLD_GRACE_MS, QUIET_MS, UNBOUND_MS, deathRoute, deathsOf, dispatchHealth, endedOutcome, endedRole, formatDispatch, lastMilestone,
+  currentDispatchStartMs, holdReason, holdStop, markEnded, markStopped, recordDeath,
 } from "../../scripts/dispatch-health.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
 
@@ -283,4 +283,76 @@ test("markStopped leaves another session's record and an unknown agent alone", (
   assert.equal(markStopped({ root: w.root, sessionId: SID, agentId: "unknown", env: w.env }), false);
   assert.equal(markStopped({ root: w.root, sessionId: "another-session", agentId: "a1", env: w.env }), false);
   assert.equal(recordOf(w).stopped, undefined);
+});
+
+const recordAt = (w, name = "5-implementer-0-0") => JSON.parse(readFileSync(join(w.root, `.devcycle/dispatch/${name}.json`), "utf8"));
+const hold = (w, opts = {}) => holdStop({ root: w.root, sessionId: SID, transcriptPath: agentFile(w, "a1"), agentId: "a1", ...opts });
+
+test("an implementer stopping with no report is held HOLD_CAP times, then released; the record is never marked ended", () => {
+  assert.equal(HOLD_CAP, 3);
+  const w = world({ agents: { a1: "final-text" } });
+  for (let n = 1; n <= HOLD_CAP; n += 1) {
+    const r = hold(w, { now: T0 + 120_000 + n });
+    assert.deepEqual([r.hold, r.holds], [true, n], `hold ${n}`);
+    assert.match(r.reason, new RegExp(`hold ${n} of ${HOLD_CAP}`));
+    const rec = recordAt(w);
+    assert.deepEqual([rec.holds, rec.agentId, rec.endedAt], [n, "a1", undefined]);
+    assert.equal(rec.heldAt, new Date(T0 + 120_000 + n).toISOString());
+  }
+  assert.deepEqual(hold(w), { hold: false });
+  assert.equal(recordAt(w).holds, HOLD_CAP);
+});
+
+test("no hold for a fresh report, inside a stop window, or for a reviewer; a report older than the dispatch still holds", () => {
+  const fresh = world({ agents: { a1: "final-text" } });
+  writeInto(fresh.root, ".devcycle/reports/5.md", "## Task report\n");
+  assert.deepEqual(hold(fresh), { hold: false });
+  const stale = world({ agents: { a1: "final-text" } });
+  writeInto(stale.root, ".devcycle/reports/5.md", "## Task report\n");
+  utimesSync(join(stale.root, ".devcycle/reports/5.md"), new Date(T0 - 60_000), new Date(T0 - 60_000));
+  assert.equal(hold(stale).hold, true);
+  assert.deepEqual(hold(world({ agents: { a1: "final-text" } }), { stopWindow: true }), { hold: false });
+  const reviewer = world({ agents: { a1: "final-text" } });
+  writeFileSync(agentFile(reviewer, "a1"), readFileSync(agentFile(reviewer, "a1"), "utf8").replace("5-implementer.md", "5-reviewer-round-1.md"));
+  writeInto(reviewer.root, ".devcycle/dispatch/5-reviewer-1-0.json", JSON.stringify({ startedAt: "2026-10-28T08:00:00Z", sessionId: SID }) + "\n");
+  assert.deepEqual(hold(reviewer), { hold: false });
+  assert.equal(recordAt(reviewer, "5-reviewer-1-0").holds, undefined);
+});
+
+test("the hold reason names the await command for a running background capture, and the report otherwise", () => {
+  const running = [{ id: "b1", type: "shell", status: "running", command: 'node "/x/scripts/capture-evidence.mjs" --task 5 --phase after' }];
+  assert.match(holdReason({ task: "5", holds: 1, backgroundTasks: running }),
+    /\.devcycle\/reports\/5\.md.*hold 1 of 3.*capture-evidence\.mjs" --await --task 5 --phase after/);
+  const plain = holdReason({ task: "5", holds: 2, backgroundTasks: [{ ...running[0], status: "completed" }] });
+  assert.doesNotMatch(plain, /--await/);
+  assert.match(plain, /write the report, or write a report whose status says why/);
+});
+
+test("the hold reason names only a running capture of its own task, matched as a whole task id", () => {
+  const capture = (task, phase) => ({ id: `b${task}`, type: "shell", status: "running", command: `node "/x/scripts/capture-evidence.mjs" --task ${task} --phase ${phase}` });
+  const other = holdReason({ task: "5", holds: 1, backgroundTasks: [capture("7", "after")] });
+  assert.doesNotMatch(other, /--await/);
+  assert.match(other, /write the report, or write a report whose status says why/);
+  assert.match(holdReason({ task: "5", holds: 1, backgroundTasks: [capture("7", "after"), capture("5", "before")] }), /--await --task 5 --phase before/);
+  assert.doesNotMatch(holdReason({ task: "5", holds: 1, backgroundTasks: [capture("50", "after")] }), /--await/);
+  assert.match(holdReason({ task: "50", holds: 1, backgroundTasks: [capture("5", "after"), capture("50", "red")] }), /--await --task 50 --phase red/);
+});
+
+test("a held record reads in flight for HOLD_GRACE_MS past its hold, then the transcript decides", () => {
+  const heldAt = T0 + 120_500; // the final-text fixture's last record is at T0 + 120 s
+  const record = (at) => ({ startedAt: "2026-10-28T08:00:00Z", sessionId: SID, holds: 1, heldAt: new Date(at).toISOString() });
+  const w = world({ agents: { a1: "final-text" }, record: record(heldAt) });
+  assert.equal(stateAt(w, heldAt + 1_000), "running");
+  assert.equal(stateAt(w, heldAt + HOLD_GRACE_MS + 1), "ended-without-output");
+  const resumed = world({ agents: { a1: "final-text" }, record: record(T0 + 60_000) });
+  assert.equal(stateAt(resumed, T0 + 121_000), "ended-without-output", "a hold older than the transcript's last record no longer covers it");
+});
+
+test("currentDispatchStartMs is the newest implementer record's start for the task, or null", () => {
+  const w = world();
+  writeInto(w.root, ".devcycle/dispatch/5-implementer-0-1.json", JSON.stringify({ startedAt: "2026-10-28T09:00:00Z", sessionId: SID }) + "\n");
+  writeInto(w.root, ".devcycle/dispatch/5-reviewer-1-0.json", JSON.stringify({ startedAt: "2026-10-28T10:00:00Z", sessionId: SID }) + "\n");
+  writeInto(w.root, ".devcycle/dispatch/15-implementer-0-0.json", JSON.stringify({ startedAt: "2026-10-28T11:00:00Z", sessionId: SID }) + "\n");
+  assert.equal(currentDispatchStartMs(w.root, "5"), Date.parse("2026-10-28T09:00:00Z"));
+  assert.equal(currentDispatchStartMs(w.root, "7"), null);
 });

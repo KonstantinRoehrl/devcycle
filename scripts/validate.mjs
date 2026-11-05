@@ -768,7 +768,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
         }
         for (const f of ["observes", "prevents"]) {
           if (!(f in e)) continue;
-          if (e.kind !== "win") { fail(`${at}: "${f}" is only meaningful on a win-kind entry`); continue; }
+          if (f === "prevents" && e.kind !== "win") { fail(`${at}: "prevents" is only meaningful on a win-kind entry`); continue; }
           if (!Array.isArray(e[f]) || e[f].length === 0) { fail(`${at}: ${f} must be a non-empty array`); continue; }
           for (const k of e[f])
             if (typeof k !== "string" || !IMPACT_KEY_RE.test(k))

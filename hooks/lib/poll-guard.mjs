@@ -1,7 +1,7 @@
 // A guarded devcycle dispatch waiting on a capture in an until/while loop that sleeps can wait forever:
 // #385's implementer polled for a marker line an earlier `&&` step's failure meant would never be
 // written. The bounded forms are a foreground capture under the Bash tool's own timeout, or a
-// background one whose completion notification ends the wait. A `for` loop is bounded by its list,
+// background one waited on with capture-evidence.mjs --await, which blocks in Node. A `for` loop is bounded by its list,
 // and a loop that never sleeps is not a wait.
 //
 // One left-to-right pass, linear in the command's length (a hook must answer whatever it is fed): a
@@ -181,4 +181,4 @@ function scanScript(text, depth) {
 
 export const POLL_DENY_TAIL =
   "poll in an until/while loop that sleeps — run a capture in the foreground with the Bash tool's timeout: 600000, " +
-  "or in the background and wait for its completion notification; never poll an evidence file";
+  "or in the background and then wait on it with capture-evidence.mjs --await; never poll an evidence file";

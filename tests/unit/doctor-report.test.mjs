@@ -13,7 +13,7 @@ import {
   summarizeSession, journalEvents, cycleGroups, impactScores,
   versionProfileTable, stageByVersionTable, stageWindowTable, culpritTable, winTable, WIN_EVENTS,
   parseDraftedMarkers, outerLoop, compiledKnowledge, DEVCYCLE_UPSTREAM, doctorDir,
-  renderReport, buildJsonReport, repoShape, issueBody, issueDraftLines, parseArgs, revertCandidates, winCandidates,
+  renderReport, buildJsonReport, repoShape, issueBody, issueDraftLines, vocabEntry, parseArgs, revertCandidates, winCandidates,
   recencyBand, lifecycle, StaleCulpritError, emitCandidates, formatCandidate,
   matchedCohorts, excessCost, workloadAdjustedSteps,
   changelogEntry, regressionAttribution, excludedNote, formatReport,
@@ -1641,6 +1641,43 @@ test("issueBody refuses a wholly-stale culprit and warns on a partial one", () =
   assert.match(body, /⚠ STALE/);
   const expectedRange = `versions=[${OUT}..${IN_BAND}]`.replace(/[.[\]]/g, "\\$&");
   assert.match(body, new RegExp(expectedRange));
+});
+
+test("vocabEntry resolves by slug before observes", () => {
+  const vocab = [{ slug: "a-friction", kind: "friction", observes: ["x:execution"] }, { slug: "x:execution", kind: "correction" }];
+  assert.equal(vocabEntry(vocab, "x:execution").kind, "correction");
+  assert.equal(vocabEntry(vocab, null, "x:execution").slug, "a-friction");
+  assert.equal(vocabEntry(vocab, "nothing"), null);
+});
+
+const SHIPPED_VOCAB = JSON.parse(readFileSync(new URL("../../references/culprits.json", import.meta.url), "utf8"));
+const redispatchSummaries = [1, 2, 3].map((n) => sum({
+  id: `rd${n}`, pluginVersion: DRAFT_VERSION, costUSD: 4, costByStage: { execution: 4 },
+  impact: [{ key: "re-dispatch:execution", event: "re-dispatch", stage: "execution", frequency: 1, impact: 5 }],
+}));
+
+test("re-dispatch:execution is classified through its observing entry, in the culprit table and the draft alike", () => {
+  const tables = { versionProfile: versionProfileTable(redispatchSummaries), culprits: culpritTable(redispatchSummaries, SHIPPED_VOCAB) };
+  const row = tables.culprits.find((r) => r.culprit === "re-dispatch:execution");
+  assert.deepEqual([row.kind, row.attributed], ["friction", false]);
+  assert.notEqual(row.impact, null);
+  const d = issueBody("re-dispatch:execution", redispatchSummaries, tables, repoShape(process.cwd()));
+  assert.match(d.body, /^Culprit: re-dispatch:execution \(friction\)$/m);
+  assert.match(d.body, /^- Cost attributed to this culprit: .+ over 3 occurrence\(s\)$/m);
+  assert.equal(d.title, "[culprit:re-dispatch:execution] A task was dispatched again from the same brief because an earlier attempt produced nothing usable.");
+});
+
+test("the stale banner reads PARTLY STALE when the newest occurrence is the installed version", () => {
+  const installed = installedVersion();
+  const band = recencyBand(installed, releaseDates(readFileSync(new URL("../../CHANGELOG.md", import.meta.url), "utf8")));
+  const draft = (corpus) => issueDraftLines(issueBody("partial-evidence-capture", corpus, staleCulpritTables(corpus), repoShape(process.cwd()))).join("\n");
+  const esc = (v) => v.replace(/\./g, "\\.");
+  const current = draft(staleCulpritCorpus(["0.0.1", installed]));
+  assert.match(current, new RegExp(`^> ⚠ PARTLY STALE — first seen 0\\.0\\.1, before the recency band; still seen on installed ${esc(installed)}, so older occurrences may describe behaviour a newer release changed$`, "m"));
+  assert.doesNotMatch(current, /last seen .*, installed/);
+  const older = band.find((v) => v !== installed);
+  assert.ok(older, "the recency band holds a release older than the installed one");
+  assert.match(draft(staleCulpritCorpus(["0.0.1", older])), new RegExp(`^> ⚠ STALE — last seen ${esc(older)}, installed ${esc(installed)}$`, "m"));
 });
 
 // Everything above exercises the draft as a value. The flag itself prints it, and what a filer

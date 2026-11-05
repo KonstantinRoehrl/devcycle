@@ -38,14 +38,14 @@ renders as unattributed. The formula is unchanged either way.
 
 The symmetric half of the formula, owned here and implemented in `scripts/impact-ledger.mjs`: one
 period carries a single net figure by pricing wins against the same per-occurrence cost the culprit
-side already computes. A win entry in `references/culprits.json` (`kind: "win"`) may declare two
-optional fields, both absent by default — an entry without them behaves exactly as before:
+side already computes. An entry in `references/culprits.json` may declare two optional fields,
+both absent by default — `prevents` only on a win (`kind: "win"`); without them nothing changes:
 
-- `observes` — the impact keys whose occurrences count as this win happening. It is what makes a
-  win countable at all: the journal names win *events* (`first-round-accept:execution`) while the
-  vocabulary names win *slugs* (`first-round-clean-accept`), and `observes` is the only thing that
-  joins the two namespaces. A win with no `observes` is counted only by its own slug and
-  `novel:<slug>`, which the journal does not emit, so it scores zero occurrences.
+- `observes` — the derived `<event>:<stage>` keys this entry classifies (any kind). Doctor finds a
+  key's entry by slug, then by `observes`, so `re-dispatch:execution` reads as `redispatched-task`.
+  On a win it also makes the win countable: the journal names win *events*
+  (`first-round-accept:execution`), the vocabulary win *slugs* (`first-round-clean-accept`), and
+  `observes` joins them. Without it a win counts only by slug and `novel:<slug>`.
 - `prevents` — the culprit keys a held win avoids paying for. Its savings is `occurrences ×
   mean(cost-per-occurrence over every prevented key)` — the **mean**, not the sum, so declaring
   more prevented keys never inflates the figure.

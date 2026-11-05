@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
-import { makeRepo } from "./helpers.mjs";
+import { spawn, spawnSync } from "node:child_process";
+import { makeRepo, writeInto } from "./helpers.mjs";
 
 const SCRIPT = new URL("../../scripts/capture-evidence.mjs", import.meta.url).pathname;
 const CHECK = new URL("../../scripts/evidence-completeness-check.mjs", import.meta.url).pathname;
@@ -83,4 +83,50 @@ test("a report built from the helper's printed lines passes the evidence check a
   writeFileSync(join(repo, ".devcycle/reports/3.md"), report);
   const r = spawnSync(process.execPath, [CHECK, ".devcycle/reports/3.md", "--task", "3"], { cwd: repo, encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
+});
+
+const awaitCapture = (repo, env = {}) =>
+  spawnSync(process.execPath, [SCRIPT, "--await", "--task", "3", "--phase", "after"], { cwd: repo, encoding: "utf8", env: { ...process.env, ...env } });
+const marker = (repo) => join(repo, ".devcycle/evidence/3-after.running");
+
+test("--await blocks until a background capture finishes, then prints the lines a foreground capture prints", async () => {
+  const repo = checkout();
+  const background = spawn(process.execPath, [SCRIPT, "--task", "3", "--phase", "after", "--cmd", "sleep 1; echo hi"], { cwd: repo });
+  const backgroundDone = new Promise((done) => background.on("close", done));
+  const waited = await new Promise((done) => {
+    const child = spawn(process.execPath, [SCRIPT, "--await", "--task", "3", "--phase", "after"], { cwd: repo });
+    let out = "";
+    child.stdout.on("data", (chunk) => (out += chunk));
+    child.on("close", (status) => done({ status, out }));
+  });
+  assert.equal(await backgroundDone, 0);
+  assert.equal(waited.status, 0);
+  assert.equal(waited.out, "- Evidence: green-green | cmd: sleep 1; echo hi\n- After: .devcycle/evidence/3-after.txt (exit 0)\n");
+  assert.equal(existsSync(marker(repo)), false, "a finished capture leaves no marker");
+});
+
+test("--await gives up at its bound saying the capture still runs, and reports a dead capture as died", () => {
+  const repo = checkout();
+  writeInto(repo, ".devcycle/evidence/3-after.running", JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), cmd: "x" }));
+  const slow = awaitCapture(repo, { DEVCYCLE_AWAIT_TIMEOUT_MS: "400" });
+  assert.equal(slow.status, 1);
+  assert.match(slow.stderr, /still running .*run --await again/);
+  writeInto(repo, ".devcycle/evidence/3-after.running", JSON.stringify({ pid: spawnSync("true").pid, startedAt: new Date().toISOString(), cmd: "x" }));
+  const dead = awaitCapture(repo);
+  assert.equal(dead.status, 1);
+  assert.match(dead.stderr, /died .*re-run the capture in the foreground/);
+});
+
+test("--await refuses a capture never run, an earlier dispatch's capture, and a --cmd", () => {
+  const repo = checkout();
+  const never = awaitCapture(repo, { DEVCYCLE_AWAIT_START_GRACE_MS: "300" });
+  assert.equal(never.status, 1);
+  assert.match(never.stderr, /no after capture is running or written for task 3/);
+  assert.equal(capture(repo, ["--task", "3", "--phase", "after"]).status, 0);
+  utimesSync(join(repo, ".devcycle/evidence/3-after.txt"), new Date("2026-01-01T00:00:00Z"), new Date("2026-01-01T00:00:00Z"));
+  writeInto(repo, ".devcycle/dispatch/3-implementer-0-0.json", JSON.stringify({ startedAt: "2026-02-01T00:00:00Z", sessionId: "s" }) + "\n");
+  const stale = awaitCapture(repo, { DEVCYCLE_AWAIT_START_GRACE_MS: "300" });
+  assert.equal(stale.status, 1);
+  assert.match(stale.stderr, /predates this dispatch/);
+  assert.match(capture(repo, ["--await", "--task", "3", "--phase", "after", "--cmd", "true"]).stderr, /--await .*takes no --cmd/);
 });
