@@ -145,7 +145,7 @@ const withProse = (n, files, prose) => task(n, files).replace("- [ ] step", `- [
 
 // One minimal plan per leg that trips that leg and no other, so a leg swapped for a no-op fails here.
 const TRIPS = {
-  codeBlocks: () => run(plan(task(1, ["src/a.txt"]) + "```js\nconst = ;\n```\n\n" + task(2, ["src/b.txt"]))),
+  codeBlocks: () => run(plan(task(1, ["src/a.txt"]) + "(unrun: a deliberately broken block)\n```js\nconst = ;\n```\n\n" + task(2, ["src/b.txt"]))),
   briefCompleteness: () => run(plan(task(1, ["src/a.txt"]).replace("**Quality constraints:** none\n", "") + task(2, ["src/b.txt"]))),
   blastRadius: () => run(plan(task(1, ["src/a.txt"]) + task(2, ["src/b.txt"])), { repo: referencerRepo() }),
   contentCoupling: () => run(plan(task(1, ["src/a.txt"]) + withProse(2, ["src/b.txt"], "copy the header out of src/a.txt"))),

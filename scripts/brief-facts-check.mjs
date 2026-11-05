@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 // Plan gate leg `briefFacts` (#334): what a task brief cites about the repo holds before anything is
 // dispatched. Every cited path resolves and every cited line is within its file, or a
-// `- Citation override:` line says why not; a call-shaped span nothing defines is a note.
+// `- Citation override:` line says why not, and every fenced block pinned in a task's brief carries a run marker,
+// and a call-shaped span nothing defines is a note.
 // See playbooks/planning-waves.md item 8.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { taskBlocks, filesFieldValue, extractFiles, createdFiles, testFiles, lineFences } from "./task-files.mjs";
-import { LINE_REF_RE } from "./authored-claims-check.mjs";
+import { taskBlocks, filesFieldValue, extractFiles, createdFiles, testFiles, lineFences, fencedBlocks } from "./task-files.mjs";
+import { LINE_REF_RE, VERIFIED_MARKER_RE, UNRUN_MARKER_RE } from "./authored-claims-check.mjs";
 import { GRAMMAR_DIRS, PLUGIN_ROOT_PATH } from "./citation-grammar.mjs";
 import { isMain } from "./is-main.mjs";
 
@@ -58,6 +59,28 @@ function namesInTree(names, { repoRoot, planPath }) {
     { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   if (r.status === 1) return new Set();
   return r.status === 0 ? new Set(r.stdout.split("\n").filter(Boolean)) : null;
+}
+
+// #314: expected output and doc text to paste run nowhere; every other fence, untagged included, does.
+const EXEMPT_FENCE_INFO = new Set(["text", "txt", "markdown", "md"]);
+
+// The marker sits on the nearest non-blank line above the opening fence only, so a marker between two
+// blocks clears just the one below it (references/evidence.md § Authored claims).
+function pinnedBlockErrors(lines, blocks, taskOf) {
+  const errors = [];
+  for (const { open, info } of blocks) {
+    if (taskOf[open] === null || EXEMPT_FENCE_INFO.has(info)) continue;
+    let above = open - 1;
+    while (above >= 0 && lines[above].trim() === "") above--;
+    const marker = above >= 0 ? lines[above] : "";
+    const unrun = marker.match(UNRUN_MARKER_RE);
+    if (VERIFIED_MARKER_RE.test(marker) || unrun?.[1].trim()) continue;
+    const block = `Task ${taskOf[open]}: pinned ${info || "untagged"} block at plan line ${open + 1}`;
+    errors.push(unrun
+      ? `${block} has an (unrun:) marker with no reason — say why it was not run`
+      : `${block} has no (verified: <cmd>) or (unrun: <reason>) marker on the nearest line above it`);
+  }
+  return errors;
 }
 
 export function briefFactsLeg(planText, { planPath, repoRoot = process.cwd() }) {
@@ -132,6 +155,7 @@ export function briefFactsLeg(planText, { planPath, repoRoot = process.cwd() }) 
   for (const name of inTree ? undefinedCalls.filter((n) => !inTree.has(n)) : [])
     notes.push(`${who(calls.get(name))}: names ${name}() — no working-tree file mentions it and no fenced block in the plan defines it`);
 
+  findings.push(...pinnedBlockErrors(lines, fencedBlocks(planText), taskOf));
   return { findings, ok: `ok — every path and line ${planPath} cites resolves`, notes };
 }
 

@@ -95,3 +95,31 @@ test("an unresolved call-shaped span is a note, never a finding; a tracked or pl
   assert.doesNotMatch(r.out, /realThing|names made/);
   assert.doesNotMatch(run(task(1, "call `fooBar()`")).out, /note:/);
 });
+
+// --- #314: a fenced block pinned in a task's brief says whether it was run ---
+
+const pinned = (above, info = "js") => task(1, `${above}\n\n\`\`\`${info}\nconst x = 1;\n\`\`\``);
+
+test("an unmarked js block in a task fails, naming its language and plan line", () => {
+  const r = run(pinned("- [ ] **Step 1: write it**"));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /^brief-facts-check: Task 1: pinned js block at plan line 5 has no \(verified: <cmd>\) or \(unrun: <reason>\) marker on the nearest line above it$/m);
+});
+
+test("(verified: …) or a reasoned (unrun: …) on the nearest non-blank line above clears the block", () => {
+  for (const above of ["- [ ] **Step 1** (verified: node --test x → 3 pass)", "- [ ] **Step 1** (unrun: needs Task 2's export)"])
+    assert.equal(run(pinned(above)).code, 0, above);
+});
+
+test("an empty (unrun: ), an (assumption), a marker below the block and one two lines up all fail", () => {
+  assert.match(run(pinned("- [ ] step (unrun: )")).out, /pinned js block at plan line 5 has an \(unrun:\) marker with no reason/);
+  assert.equal(run(pinned("- [ ] step (assumption)")).code, 1);
+  assert.equal(run(task(1, "- [ ] step\n\n```js\nx;\n```\n(verified: node x.mjs)")).code, 1);
+  assert.equal(run(task(1, "(verified: node x.mjs)\n- [ ] step\n\n```js\nx;\n```")).code, 1);
+});
+
+test("text and markdown blocks are exempt, an untagged block is not, and a block outside every task is never checked", () => {
+  for (const info of ["text", "txt", "markdown", "md"]) assert.equal(run(pinned("- [ ] step", info)).code, 0, info);
+  assert.match(run(pinned("- [ ] step", "")).out, /pinned untagged block at plan line 5/);
+  assert.equal(run(`# P\n\n\`\`\`js\nx;\n\`\`\`\n\n${task(1, "x")}`).code, 0);
+});
