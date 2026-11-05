@@ -85,8 +85,8 @@ Write every capture with
 (`red` takes `--cmd "<the failing subset>"`) and copy the report lines it
 prints; never a hand-written redirect. Never hand-edit, trim, or
 reconstruct those files; they hold what the command actually printed.
-Wait on a long capture the bounded way: foreground with Bash `timeout: 600000`, or background and
-its completion notification. A `sleep` loop polling an evidence file is denied.
+Wait on a long capture: foreground under Bash `timeout: 600000`, or background then
+`capture-evidence.mjs --await`, rerun while running; never end a turn on it or poll its file.
 Any prose claim your report makes about source state ("X already existed", "no other caller", "the suite was already green") carries the command that proves it or is labeled an assumption — never stated as bare fact (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims).
 
 On a red-green or green-green task, when a sibling's uncommitted red forces a narrower capture, keep the before on the gate command, narrow only the after, and declare it as `- Narrowing: <selector/scope> — <reason>` — never narrow silently. The before/after rule is `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § File-backed evidence's.

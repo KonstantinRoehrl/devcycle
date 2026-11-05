@@ -105,7 +105,7 @@ function hook(agentType, command, options = {}) {
 test("the git guard denies a guarded dispatch's poll loop and names the bounded forms", () => {
   const out = hook("devcycle:implementer", POLL);
   assert.equal(out.permissionDecision, "deny");
-  assert.match(out.permissionDecisionReason, /devcycle: reviewer\/implementer dispatch \(devcycle:implementer\) may not poll .*timeout: 600000.*completion notification/);
+  assert.match(out.permissionDecisionReason, /devcycle: reviewer\/implementer dispatch \(devcycle:implementer\) may not poll .*timeout: 600000.*capture-evidence\.mjs --await/);
 });
 
 test("every guarded origin's poll loop is denied", () => {
