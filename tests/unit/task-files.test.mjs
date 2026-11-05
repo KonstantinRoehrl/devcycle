@@ -14,7 +14,10 @@ import {
   verificationGate,
   verificationGateField,
   createdFiles,
+  testFiles,
   isTestPath,
+  fencedBlocks,
+  lineFences,
 } from "../../scripts/task-files.mjs";
 
 test("normalizeFileToken strips ranges, backticks, and rejects non-paths", () => {
@@ -520,4 +523,27 @@ test("taskBlocks with stopAtPlanSection keeps a heading inside a code fence in t
   const [block] = taskBlocks(plan, { stopAtPlanSection: true });
   assert.ok(block.text.includes("## Section") && block.text.includes("after the fence"), block.text);
   assert.ok(!block.text.includes("Dispatch Map"));
+});
+
+test("fencedBlocks pairs each fence with the first closer of its character, at least as long and with no info string", () => {
+  const text = ["a", "````JS title", "x", "```", "```js", "~~~", "````", "b", "~~~~ bash", "~~~", "~~~~", "```md"].join("\n");
+  assert.deepEqual(fencedBlocks(text), [
+    { open: 1, close: 6, info: "js" },
+    { open: 8, close: 10, info: "bash" },
+    { open: 11, close: null, info: "md" },
+  ]);
+  assert.deepEqual(fencedBlocks("```\nplain\n```\n"), [{ open: 0, close: 2, info: "" }]);
+  assert.deepEqual(fencedBlocks("no fences here\n"), []);
+});
+
+test("lineFences maps every line to the block holding it, fence lines included, and null outside one", () => {
+  const owners = lineFences("a\n```sh\nls\n```\nb\n~~~\nopen to the end");
+  assert.deepEqual(owners.map((block) => block && block.open), [null, 1, 1, 1, null, 5, 5]);
+  assert.equal(owners[2].info, "sh");
+  assert.equal(owners[6].close, null);
+});
+
+test("testFiles reads only the paths a Test label declares", () => {
+  assert.deepEqual([...testFiles("- Create: `src/a.mjs`\n- Modify: `src/b.mjs`\n- Test: `tests/unit/a.test.mjs`")], ["tests/unit/a.test.mjs"]);
+  assert.deepEqual([...testFiles("- Modify: `src/b.mjs`")], []);
 });
