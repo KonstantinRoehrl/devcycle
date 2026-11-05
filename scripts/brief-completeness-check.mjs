@@ -1,17 +1,18 @@
 #!/usr/bin/env node
 // Pre-flight check for a devcycle plan: every "### Task N" block must carry the required
-// dispatch fields, the Evidence value must name a valid class, "## Dispatch Map" must list
-// every task, every pinned gate command must run the repo's required checks, and a Files block
-// that edits a budgeted file must list the size baselines that edit trips and the decisions log
+// dispatch fields, the Evidence value must name a valid class, a red-green task that creates a
+// non-test source file must carry a stub step, "## Dispatch Map" must list every task, every
+// pinned gate command must run the repo's required checks, and a Files block that edits a budgeted file must list the size baselines that edit trips and the decisions log
 // that holds them, and a git command a step prescribes that the dispatch guard denies an
 // implementer is reported as a note, never a failure. Modeled on wave-disjointness-check.mjs; a
 // brief missing a field makes the implementer guess. See references/evidence.md and playbooks/planning-waves.md.
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   taskBlocks, parseDispatchMap, filesFieldValue, fieldValue, verificationGate, verificationGateField, conventionCommand,
+  createdFiles, isTestPath,
 } from "./task-files.mjs";
 import { budgetFixtureGaps, gapRemedy } from "./budget-fixture-check.mjs";
 import { isMain } from "./is-main.mjs";
@@ -158,6 +159,26 @@ export function guardDenialNotes(blocks, { repoRoot, hookPath = GUARD_HOOK }) {
   return notes;
 }
 
+// #321: a red-green task that creates its module under test needs a stub step, or its red is a
+// missing-module error that passes vacuously once the file exists (references/evidence.md § The
+// three evidence classes). Code extensions only: a created doc, fixture or config never runs.
+const SOURCE_EXTENSIONS = new Set([".mjs", ".cjs", ".js", ".jsx", ".ts", ".tsx", ".mts", ".cts", ".py",
+  ".rb", ".go", ".rs", ".java", ".kt", ".swift", ".sh"]);
+const STUB_RE = /\bstub/i;
+
+function stubErrors(num, block) {
+  if ((fieldValue(block, "Evidence") ?? "").split(/\s+/)[0] !== "red-green") return [];
+  const files = filesFieldValue(block);
+  if (!files) return [];
+  const created = [...createdFiles(files)].filter((path) => SOURCE_EXTENSIONS.has(extname(path).toLowerCase()) && !isTestPath(path));
+  if (created.length === 0 || STUB_RE.test(block.replace(files, ""))) return [];
+  return [
+    `Task ${num}: **Evidence:** red-green creates ${created[0]} but no step writes a stub for it — add a step before the ` +
+      "failing test that writes a minimal stub, so the red is an assertion failure rather than a missing module " +
+      "(references/evidence.md § The three evidence classes)",
+  ];
+}
+
 // repoRoot is the work tree whose required-checks manifest applies; plan-check passes its own.
 export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cwd() }, { includeBudgetFixtures = true } = {}) {
   const errors = [];
@@ -186,6 +207,7 @@ export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cw
         );
       }
     }
+    errors.push(...stubErrors(num, block));
   }
 
   // An incomplete Files block is not only a missing field: a brief that mandates doc growth but

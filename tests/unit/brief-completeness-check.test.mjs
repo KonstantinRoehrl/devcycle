@@ -34,6 +34,7 @@ const COMPLETE = `# Plan
 **Evidence:** red-green
 **Quality constraints:** none
 **Lessons:**
+- [ ] Write a minimal stub for \`a.mjs\`
 - [ ] step
 ## Dispatch Map
 - Wave 1: Task 1 (no deps)
@@ -356,4 +357,45 @@ test("a guard hook that cannot answer yields a could-not-classify note, never a 
   const failing = join(dir, "failing-hook.mjs");
   writeFileSync(failing, "process.exit(2);\n");
   assert.match(guardDenialNotes(blocks, { repoRoot: dir, hookPath: failing })[0], /could not classify `git rm a\.mjs` \(exit 2/);
+});
+
+// --- #321: a red-green task that creates its module under test writes a stub first ---
+
+const NO_STUB = COMPLETE.replace("- [ ] Write a minimal stub for `a.mjs`\n", "");
+
+test("fails a red-green task that creates a source file and never writes a stub, naming the task and the file", () => {
+  const r = run(NO_STUB);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /Task 1: \*\*Evidence:\*\* red-green creates a\.mjs but no step writes a stub for it — .*references\/evidence\.md § The three evidence classes/);
+});
+
+test("passes the same task once any step outside Files mentions the stub", () => {
+  assert.equal(run(COMPLETE).code, 0);
+  const r = run(NO_STUB.replace("- [ ] step", "- [ ] Stub `a.mjs` with a function that returns null"));
+  assert.equal(r.code, 0, r.out);
+});
+
+test("a stub named only inside the Files field does not count", () => {
+  const r = run(NO_STUB.replace("- Create: `a.mjs`", "- Create: `a.mjs` (stub first)"));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /Task 1: .*creates a\.mjs/);
+});
+
+test("creating only test files, a doc or a fixture never needs a stub", () => {
+  for (const files of ["- Create: `a.test.mjs`", "- Create: `src/a.spec.ts`", "- Create: `tests/helper.mjs`", "- Create: `docs/a.md`", "- Create: `tests/fixtures/a.json`"]) {
+    const r = run(NO_STUB.replace("- Create: `a.mjs`", files));
+    assert.equal(r.code, 0, `${files}\n${r.out}`);
+  }
+});
+
+test("green-green and convention tasks creating a source file never need a stub", () => {
+  for (const evidence of ["green-green (behavior-preserving)", "convention (`npm test`)"]) {
+    const r = run(NO_STUB.replace("**Evidence:** red-green", `**Evidence:** ${evidence}`));
+    assert.equal(r.code, 0, `${evidence}\n${r.out}`);
+  }
+});
+
+test("a path under Modify, or on a Delete line, is never read as created", () => {
+  const r = run(NO_STUB.replace("- Create: `a.mjs`", "- Modify: `a.mjs`\n- Delete: `old.mjs`"));
+  assert.equal(r.code, 0, r.out);
 });

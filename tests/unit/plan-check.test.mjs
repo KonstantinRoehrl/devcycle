@@ -225,3 +225,18 @@ test("a guard note alone leaves plan-check passing, counted by default and liste
   assert.equal(loud.status, 0, loud.stderr);
   assert.match(loud.stderr, /^plan-check: briefCompleteness: Task 2: prescribes `git worktree add \.\.\/wt`, which the dispatch guard denies an implementer — .*\(worktree\)\./m);
 });
+
+test("a red-green task creating a source file with no stub trips only briefCompleteness, with a guard note listed beside it", () => {
+  const creates = withProse(2, ["src/b.txt"], "run `git rm src/old.mjs`").replace("- Modify: src/b.txt", "- Create: src/b.mjs");
+  const r = run(plan(task(1, ["src/a.txt"]) + creates));
+  assert.equal(r.status, 1, r.stdout);
+  assert.deepEqual([...reportingLegs(r.stderr)], ["briefCompleteness"], r.stderr);
+  assert.match(r.stderr, /^plan-check: briefCompleteness: Task 2: \*\*Evidence:\*\* red-green creates src\/b\.mjs but no step writes a stub/m);
+  assert.match(r.stderr, /^plan-check: briefCompleteness: Task 2: prescribes `git rm src\/old\.mjs`/m);
+});
+
+test("the same task passes once a step writes the stub", () => {
+  const creates = withProse(2, ["src/b.txt"], "write a stub `src/b.mjs`, then the failing test").replace("- Modify: src/b.txt", "- Create: src/b.mjs");
+  const r = run(plan(task(1, ["src/a.txt"]) + creates));
+  assert.equal(r.status, 0, r.stderr);
+});
