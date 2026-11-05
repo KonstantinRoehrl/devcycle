@@ -218,7 +218,7 @@ plugin ships. Start there.
   expected deliverable is absent from the branch or the installed copy was written to during the
   run. It is inert in every other repo.
 - The evidence-and-verification contract's gates: planning runs `scripts/plan-check.mjs` in its
-  self-review — one fail-closed gate over seven legs, including the budget-fixture and
+  self-review — one fail-closed gate over eight legs, including the budget-fixture and
   authored-claims checks — and `/devcycle:cycle` runs
   `scripts/contract-staleness-check.mjs` as an advisory preflight that warns when a cached plugin's
   contract predates the target repo's. A host repo can declare its whole-gate checks in the

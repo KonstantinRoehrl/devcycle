@@ -18,7 +18,7 @@ playbook wins, and these rules of that section always override it — the plan h
 line names `playbooks/executing-waves.md` as the executor (never upstream's
 subagent-vs-inline execution choice), the header carries a `**Verification gate:**` line, no task gets a
 commit step, a `red-green` task that creates its module under test writes a stub before its failing test,
-and item 8's plan gate runs. Everything outside that one section is unconditional, so a finished plan has
+every pinned fenced block carries a run marker (item 7), and item 8's plan gate runs. Everything outside that one section is unconditional, so a finished plan has
 the same shape whichever engine produced it.
 
 ## Feasibility gate — before any detailed planning
@@ -121,9 +121,9 @@ fixing what it finds inline as you go; no re-review pass.
 5. **No count-only enumeration:** never cite an enumeration by count alone ("all four guardrails");
    one that more than one task reproduces belongs in Global Constraints, verbatim in every brief.
 6. **Mirrored-file parity:** diff the pinned blocks where tasks restate logic across mirrored files.
-7. **Assumed-tooling cross-check:** every tool or pattern a brief assumes (mock approach, a lint gate such as `prettier --check`, a named test-helper identifier) exists and is accepted by this repo's toolchain — an invented identifier or a rejected pattern is an unverified authored claim (item 4). Verify each against the repo before dispatch. Every command a step prescribes must also be one a guarded dispatch may run: `hooks/block-destructive-git.mjs` decides, and item 8's `briefCompleteness` leg notes each one it denies.
+7. **Assumed-tooling and pinned-code cross-check:** every tool or pattern a brief assumes (mock approach, a lint gate such as `prettier --check`, a named test-helper identifier) exists and is accepted by this repo's toolchain — an invented identifier or a rejected pattern is an unverified authored claim (item 4). Verify each against the repo before dispatch. Every command a step prescribes must also be one a guarded dispatch may run: `hooks/block-destructive-git.mjs` decides, and item 8's `briefCompleteness` leg notes each one it denies. For each task, run every side-effect-free command a brief pins, inline or fenced; prototype or test every pinned code block on a scratch copy or worktree; and compare each block with the quality-constraint ids its task lists. Then mark each fenced block, on the nearest non-blank line above it, `(verified: <cmd>)` or `(unrun: <reason>)` (`references/evidence.md` § Authored claims); a `js` block's `(verified:)` cites more than `node --check`, which `codeBlocks` already runs. Inline commands carry no gate, so dry-running them is this item's job alone, and `briefCompleteness` checks only that fields are present, so the two never overlap.
 8. **Plan gate:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-check.mjs" <plan-path>` — one command,
-   seven legs: pasted JS/mjs code blocks parse (`codeBlocks`); every task carries
+   eight legs: pasted JS/mjs code blocks parse (`codeBlocks`); every task carries
    Files / Interfaces / Dependencies / a valid Evidence class / Quality constraints, the header carries
    one `**Verification gate:**` code span, pinned gates run every required-checks manifest entry, a `red-green` task creating a non-test source file
    mentions a stub, and the Dispatch Map lists every task (`briefCompleteness`, which also notes, never failing,
@@ -133,12 +133,14 @@ fixing what it finds inline as you go; no re-review pass.
    `references/` markdown) also touches its budget fixtures and `docs/decisions/README.md` —
    `references/` and `agents/` markdown match the context budget too: every
    entry point pays for the references it cites, and agents count toward a reference's fan-in
-   (`budgetFixtures`); no two same-wave tasks list the same file (`waveDisjointness`); and item 4's
-   claims (`authoredClaims`). A plan with no `## Dispatch Map` fails before any leg runs. Three
-   findings clear by an explicit override line instead of a fix, each reasonless form a hard error:
+   (`budgetFixtures`); no two same-wave tasks list the same file (`waveDisjointness`); item 4's
+   claims (`authoredClaims`); and every path a brief cites resolves, every cited line is within its file,
+   and every fenced block pinned in a task carries item 7's run marker (`briefFacts`, which also notes,
+   never failing, a call-shaped span nothing defines). A plan with no `## Dispatch Map` fails before any
+   leg runs. Four findings clear by an explicit override line instead of a fix, each reasonless form a hard error:
    `- Blast-radius override: <changed-file> [→ <referencer>] — <reason>` (e.g. referenced only in a
    comment), `- Content-coupling override: Task B → <file> (Task A) — <reason>` (or a real
-   dependency), and `- Budget-fixture override: <surface-or-fixture> — <reason>`. A non-zero exit is
+   dependency), `- Budget-fixture override: <surface-or-fixture> — <reason>`, and `- Citation override: <path> — <reason>` (e.g. a file the host generates at build time). A non-zero exit is
    a stop, resolved by fixing the plan or recording an override — never by handing off around it.
 
 ## The three per-task declaration lines

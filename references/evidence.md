@@ -51,6 +51,12 @@ line-reference or count claim, and a flagged claim clears by carrying a `(verifi
 report's `- Tail (…):` field, which are captured output, not prose. Superlative and uniqueness
 claims are the reviewer's judgment, not linted.
 
+A fenced code or command block that a plan pins in a task's brief takes a run marker instead, on
+the nearest non-blank line above its opening fence: `(verified: <cmd>)` when it was run or
+prototyped, or `(unrun: <reason>)` when it deliberately was not, the reason saying why. That third
+form is valid only there: it never clears a line-reference or count claim, and `(assumption)` never
+clears a block. Plan-check's `briefFacts` leg enforces it.
+
 ## Preloading a class into a brief
 
 The content a dispatching stage splices into a task's brief, per class: `red-green` at
