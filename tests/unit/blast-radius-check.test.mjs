@@ -146,15 +146,16 @@ test("both gates give the same diagnosis for a plan that declares no file", () =
 // F55: the matcher used to key on the extension-stripped basename ("config", not "config.md"),
 // so any file merely containing the word matched -- a false-positive flood. It also walked
 // .worktrees, and offered no way for a planner to acknowledge a referencing-but-unaffected test.
-function planChanging(changedFile, { override } = {}) {
+function planChanging(changedFile, { override, trailingOverride } = {}) {
   const overrideLine = override ? `\n${override}` : "";
+  const trailingSection = trailingOverride ? `\n## Blast-radius overrides\n${trailingOverride}\n` : "";
   return `# Plan
 ### Task 1: Change ${changedFile}
 **Files:**
 - Modify: \`${changedFile}\`${overrideLine}
 ## Dispatch Map
 - Wave 1: Task 1
-`;
+${trailingSection}`;
 }
 
 test("matcher does not fire on a bare word -- a suite mentioning 'config' does not reference config.md", () => {
@@ -187,6 +188,19 @@ test("a per-task override with a reason clears the hard-fail", () => {
   const { code, out } = run(plan, repo);
   assert.equal(code, 0, out);
   assert.match(out, /override/i); // acknowledged, reason echoed
+});
+
+test("an override in a plan-level section after the last task clears the hard-fail", () => {
+  const plan = planChanging("references/config.md", {
+    trailingOverride: "- Blast-radius override: references/config.md — referenced only in a fixture string",
+  });
+  const repo = makeRepo({
+    "references/config.md": "# config\n",
+    "tests/unit/thing.test.mjs": '"../references/config.md"',
+  });
+  const { code, out } = run(plan, repo);
+  assert.equal(code, 0, out);
+  assert.match(out, /override/i);
 });
 
 test("an override with no reason is itself an error", () => {

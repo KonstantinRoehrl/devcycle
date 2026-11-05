@@ -17,8 +17,9 @@ load `superpowers:writing-plans` — the Plan mechanics section below is self-co
 playbook wins, and these rules of that section always override it — the plan header's "For agentic workers"
 line names `playbooks/executing-waves.md` as the executor (never upstream's
 subagent-vs-inline execution choice), the header carries a `**Verification gate:**` line, no task gets a
-commit step, and item 8's plan gate runs. Everything outside that one
-section is unconditional, so a finished plan has the same shape whichever engine produced it.
+commit step, a `red-green` task that creates its module under test writes a stub before its failing test,
+and item 8's plan gate runs. Everything outside that one section is unconditional, so a finished plan has
+the same shape whichever engine produced it.
 
 ## Feasibility gate — before any detailed planning
 
@@ -73,7 +74,8 @@ and is worth a fresh reviewer's gate, ending in an independently testable delive
 configuration, scaffolding, and documentation steps into the task whose deliverable needs them, and
 split only where a reviewer could reject one task while approving its neighbor. Each step is one action,
 2–5 minutes of work, ordered as the evidence class requires — for `red-green`: write the failing test /
-run it and confirm red / write the minimal code / run it and confirm green; for `green-green`, the baseline
+run it and confirm red / write the minimal code / run it and confirm green, opened by a step that writes a minimal
+stub when the task creates the module under test, so the red is an assertion failure and not a missing module; for `green-green`, the baseline
 suite run is step 1. Never a commit step.
 
 **Plan header — every plan starts with it:** an H1 `<Feature Name> Implementation Plan`; a blockquote
@@ -119,11 +121,13 @@ fixing what it finds inline as you go; no re-review pass.
 5. **No count-only enumeration:** never cite an enumeration by count alone ("all four guardrails");
    one that more than one task reproduces belongs in Global Constraints, verbatim in every brief.
 6. **Mirrored-file parity:** diff the pinned blocks where tasks restate logic across mirrored files.
-7. **Assumed-tooling cross-check:** every tool or pattern a brief assumes (mock approach, a lint gate such as `prettier --check`, a named test-helper identifier) exists and is accepted by this repo's toolchain — an invented identifier or a rejected pattern is an unverified authored claim (item 4). Verify each against the repo before dispatch.
+7. **Assumed-tooling cross-check:** every tool or pattern a brief assumes (mock approach, a lint gate such as `prettier --check`, a named test-helper identifier) exists and is accepted by this repo's toolchain — an invented identifier or a rejected pattern is an unverified authored claim (item 4). Verify each against the repo before dispatch. Every command a step prescribes must also be one a guarded dispatch may run: `hooks/block-destructive-git.mjs` decides, and item 8's `briefCompleteness` leg notes each one it denies.
 8. **Plan gate:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-check.mjs" <plan-path>` — one command,
    seven legs: pasted JS/mjs code blocks parse (`codeBlocks`); every task carries
    Files / Interfaces / Dependencies / a valid Evidence class / Quality constraints, the header carries
-   one `**Verification gate:**` code span, pinned gates run every required-checks manifest entry, and the Dispatch Map lists every task (`briefCompleteness`); every referencer of a changed file, test or not, sits in some
+   one `**Verification gate:**` code span, pinned gates run every required-checks manifest entry, a `red-green` task creating a non-test source file
+   mentions a stub, and the Dispatch Map lists every task (`briefCompleteness`, which also notes, never failing,
+   each prescribed git command the dispatch guard denies); every referencer of a changed file, test or not, sits in some
    Files block (`blastRadius`); no same-wave task's brief names a file another same-wave task edits
    (`contentCoupling`); a task touching a budgeted surface (`playbooks/`, `commands/`, `agents/`,
    `references/` markdown) also touches its budget fixtures and `docs/decisions/README.md` —

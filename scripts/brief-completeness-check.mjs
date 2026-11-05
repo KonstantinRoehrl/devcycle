@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 // Pre-flight check for a devcycle plan: every "### Task N" block must carry the required
-// dispatch fields, the Evidence value must name a valid class, "## Dispatch Map" must list
-// every task, every pinned gate command must run the repo's required checks, and a Files block
-// that edits a budgeted file must list the size baselines that edit trips and the decisions log
-// that holds them. Modeled on wave-disjointness-check.mjs; a brief missing a field makes the
-// implementer guess. See references/evidence.md and playbooks/planning-waves.md.
+// dispatch fields, the Evidence value must name a valid class, a red-green task that creates a
+// non-test source file must carry a stub step, "## Dispatch Map" must list every task, every
+// pinned gate command must run the repo's required checks, and a Files block that edits a budgeted file must list the size baselines that edit trips and the decisions log
+// that holds them, and a git command a step prescribes that the dispatch guard denies an
+// implementer is reported as a note, never a failure. Modeled on wave-disjointness-check.mjs; a
+// brief missing a field makes the implementer guess. See references/evidence.md and playbooks/planning-waves.md.
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { extname, join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import {
   taskBlocks, parseDispatchMap, filesFieldValue, fieldValue, verificationGate, verificationGateField, conventionCommand,
+  createdFiles, isTestPath, FENCE_RE,
 } from "./task-files.mjs";
 import { budgetFixtureGaps, gapRemedy } from "./budget-fixture-check.mjs";
 import { isMain } from "./is-main.mjs";
@@ -79,6 +83,109 @@ function gateLineErrors(planText) {
   return [];
 }
 
+// #276: a brief that prescribes a git command the dispatch guard denies costs the implementer a
+// round of rewrites. The guard itself is the classifier, resolved beside this script so the
+// installed plugin's own hook answers, never a second allowlist that drifts from it. The guarded
+// origins share one allowlist, so the implementer's verdict covers them all. Report-only:
+// most hits on real plans quote a denied spelling rather than prescribe it (docs/decisions/README.md).
+const GUARD_HOOK = fileURLToPath(new URL("../hooks/block-destructive-git.mjs", import.meta.url));
+const GUARDED_ORIGIN = "devcycle:implementer";
+const SHELL_FENCE_INFO = new Set(["bash", "sh", "zsh", "shell", "console"]);
+const CODE_SPAN_RE = /(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)/g;
+const GIT_WORD_RE = /\bgit\b/;
+const EVIDENCE_LINE_RE = /^\*\*Evidence:\*\*/;
+
+// Every inline code span, and every line of a shell fence, that names git. Other fences hold test
+// code whose git runs through execFileSync, which a Bash hook never sees. The task's convention
+// command is skipped on its **Evidence:** line only, where the capture helper runs it as its own
+// child process; a step that has the implementer type it is still scanned.
+function prescribedGitCommands(block) {
+  const convention = conventionCommand(fieldValue(block, "Evidence") ?? "");
+  const found = [];
+  let fence = null;
+  for (const line of block.split("\n")) {
+    const marker = line.match(FENCE_RE);
+    if (fence) {
+      if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && !marker[2]) fence = null;
+      else if (fence.shell) {
+        const command = line.trim().replace(/^\$\s+/, "");
+        if (command && !command.startsWith("#")) found.push(command);
+      }
+      continue;
+    }
+    if (marker) {
+      fence = { char: marker[1][0], length: marker[1].length, shell: SHELL_FENCE_INFO.has(marker[2].toLowerCase()) };
+      continue;
+    }
+    const runByCapture = EVIDENCE_LINE_RE.test(line) ? convention : null;
+    for (const span of line.matchAll(CODE_SPAN_RE)) {
+      const command = span[2].trim();
+      if (command !== runByCapture) found.push(command);
+    }
+  }
+  return [...new Set(found)].filter((command) => GIT_WORD_RE.test(command));
+}
+
+function guardDenial(command, { repoRoot, hookPath = GUARD_HOOK }) {
+  const input = JSON.stringify({ agent_type: GUARDED_ORIGIN, cwd: repoRoot, tool_input: { command } });
+  const r = spawnSync(process.execPath, [hookPath], { input, encoding: "utf8", cwd: repoRoot, timeout: 10_000 });
+  if (r.error) return { denied: false, error: r.error.message };
+  if (r.status !== 0) return { denied: false, error: `exit ${r.status}${r.stderr.trim() ? `: ${r.stderr.trim().split("\n")[0]}` : ""}` };
+  const out = r.stdout.trim();
+  if (!out) return { denied: false };
+  let decision;
+  try {
+    decision = JSON.parse(out)?.hookSpecificOutput;
+  } catch {
+    return { denied: false, error: `unparsable hook output: ${out.slice(0, 80)}` };
+  }
+  if (decision?.permissionDecision !== "deny") return { denied: false };
+  // The hook echoes the command after its reason; the note already names it.
+  return { denied: true, reason: String(decision.permissionDecisionReason ?? "").replace(/ command: [\s\S]*$/, "") };
+}
+
+export function guardDenialNotes(blocks, { repoRoot, hookPath = GUARD_HOOK }) {
+  const verdicts = new Map();
+  const notes = [];
+  for (const { num, text } of blocks) {
+    for (const command of prescribedGitCommands(text)) {
+      if (!verdicts.has(command)) verdicts.set(command, guardDenial(command, { repoRoot, hookPath }));
+      const verdict = verdicts.get(command);
+      if (verdict.error) {
+        notes.push(`Task ${num}: the guard leg could not classify \`${command}\` (${verdict.error}) — check it against hooks/block-destructive-git.mjs by hand`);
+      } else if (verdict.denied) {
+        notes.push(
+          `Task ${num}: prescribes \`${command}\`, which the dispatch guard denies an implementer — ${verdict.reason} ` +
+            "Rewrite it as a command a guarded dispatch may run (playbooks/executing-waves.md step 2)",
+        );
+      }
+    }
+  }
+  return notes;
+}
+
+// #321: a red-green task that creates its module under test needs a stub step, or its red is a
+// missing-module error that passes vacuously once the file exists (references/evidence.md § The
+// three evidence classes). Code extensions only: a created doc, fixture or config never runs, and a
+// `.d.ts` declaration file has no runtime to stub.
+const SOURCE_EXTENSIONS = new Set([".mjs", ".cjs", ".js", ".jsx", ".ts", ".tsx", ".mts", ".cts", ".py",
+  ".rb", ".go", ".rs", ".java", ".kt", ".swift", ".sh"]);
+const DECLARATION_FILE_RE = /\.d\.[mc]?ts$/i;
+const STUB_RE = /\bstub/i;
+
+function stubErrors(num, block) {
+  if ((fieldValue(block, "Evidence") ?? "").split(/\s+/)[0] !== "red-green") return [];
+  const files = filesFieldValue(block);
+  if (!files) return [];
+  const created = [...createdFiles(files)].filter((path) => SOURCE_EXTENSIONS.has(extname(path).toLowerCase()) && !DECLARATION_FILE_RE.test(path) && !isTestPath(path));
+  if (created.length === 0 || STUB_RE.test(block.replace(files, ""))) return [];
+  return [
+    `Task ${num}: **Evidence:** red-green creates ${created[0]} but no step writes a stub for it — add a step before the ` +
+      "failing test that writes a minimal stub, so the red is an assertion failure rather than a missing module " +
+      "(references/evidence.md § The three evidence classes)",
+  ];
+}
+
 // repoRoot is the work tree whose required-checks manifest applies; plan-check passes its own.
 export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cwd() }, { includeBudgetFixtures = true } = {}) {
   const errors = [];
@@ -88,7 +195,9 @@ export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cw
   }
   errors.push(...gateLineErrors(planText), ...requiredCheckErrors(planText, blocks, repoRoot));
 
-  for (const { num, text: block } of blocks) {
+  // The stub and guard legs read only a task's own brief; the other legs keep the whole-block read.
+  const ownBriefs = taskBlocks(planText, { stopAtPlanSection: true });
+  for (const [index, { num, text: block }] of blocks.entries()) {
     for (const field of REQUIRED_FIELDS) {
       const val = readField(block, field);
       if (val === null) errors.push(`Task ${num}: missing **${field}:** field`);
@@ -107,6 +216,7 @@ export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cw
         );
       }
     }
+    errors.push(...stubErrors(num, ownBriefs[index].text));
   }
 
   // An incomplete Files block is not only a missing field: a brief that mandates doc growth but
@@ -136,7 +246,7 @@ export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cw
   return {
     findings: errors,
     ok: `ok -- ${blocks.length} task(s), all required fields present`,
-    notes: [],
+    notes: guardDenialNotes(ownBriefs, { repoRoot }),
   };
 }
 
@@ -151,7 +261,8 @@ function main() {
     process.exit(1);
   }
 
-  const { findings, ok } = briefCompletenessLeg(readFileSync(planPath, "utf8"), { planPath });
+  const { findings, ok, notes } = briefCompletenessLeg(readFileSync(planPath, "utf8"), { planPath });
+  for (const n of notes) console.error(`brief-completeness-check: note: ${n}`);
   if (findings.length > 0) {
     for (const f of findings) console.error(`brief-completeness-check: ${f}`);
     process.exit(1);

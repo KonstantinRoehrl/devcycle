@@ -28,11 +28,14 @@ ever carries a commit step, and the plan gate below runs on the finished plan.
 
 Once the plan is drafted, planning runs its own eight-item self-review — spec coverage,
 placeholder scan, type consistency, factual-claim accuracy, no count-only enumeration,
-mirrored-file parity, a manual assumed-tooling cross-check, and the plan gate last — fixing what
-it finds inline, with no separate re-review pass. The plan gate is one command,
+mirrored-file parity, a manual assumed-tooling cross-check (which includes every prescribed
+command being one a guarded dispatch may run), and the plan gate last — fixing what it finds
+inline, with no separate re-review pass. The plan gate is one command,
 `scripts/plan-check.mjs`, running seven legs over the plan: `codeBlocks` (pasted JS/mjs code
-blocks parse), `briefCompleteness` (every task carries its required fields and the Dispatch Map
-lists every task), `blastRadius` (every referencer of a changed file, test or not, sits in some
+blocks parse), `briefCompleteness` (every task carries its required fields, a `red-green` task
+that creates a non-test source file mentions a stub, and the Dispatch Map lists every task; it
+also notes, without failing, each prescribed git command the dispatch guard would deny an
+implementer), `blastRadius` (every referencer of a changed file, test or not, sits in some
 Files block), `contentCoupling` (no same-wave task's brief names a file another same-wave task
 edits), `budgetFixtures` (a task touching a budgeted surface — `playbooks/`, `commands/`,
 `agents/`, `references/` markdown — also touches its budget fixtures and
