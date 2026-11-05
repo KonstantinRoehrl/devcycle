@@ -22,8 +22,9 @@ dependencies are already committed AND whose files overlap no other candidate or
 joins the same wave, executed by readiness rather than written order. Each task then runs its own
 cycle: the brief is sliced down to exactly what that implementer needs — its id, Files,
 Interfaces, Dependencies, evidence class and tail length, quality constraints resolved to
-verbatim lines, and the matched lessons and gate command `task-dispatch.mjs` adds to the brief
-file it writes — and that file is dispatched to a fresh `devcycle:implementer`, never
+verbatim lines, the one sentence of claim-marker grammar its report must follow, and the matched
+lessons and gate command `task-dispatch.mjs` adds to the brief file it writes — and that file is
+dispatched to a fresh `devcycle:implementer`, never
 carrying prior tasks' history. Once its report file is confirmed to exist and carry the fields
 its evidence class requires, a `devcycle:task-reviewer` (read-only apart from its own findings
 file) is dispatched to produce the task's diff itself and return a verdict; it writes that verdict

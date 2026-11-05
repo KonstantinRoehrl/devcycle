@@ -2714,3 +2714,10 @@ test("/devcycle:continue routes every format outcome to the section that owns it
   assert.match(read("playbooks/finishing-the-cycle.md"), /format-backup-\*/);
   assert.match(read("references/config.md"), /`knob-renamed:`/);
 });
+
+test("the sliced brief and the implementer both carry the report's claim-marker sentence (#333)", () => {
+  const sentence = "Every `path.ext:line` reference and every count in your report carries `(verified: <command>)` or " +
+    "`(assumption)` on the same line or an adjacent one — that is what `authored-claims-check.mjs` flags.";
+  for (const file of ["playbooks/executing-waves.md", "agents/implementer.md"])
+    assert.ok(read(file).replace(/\s+/g, " ").includes(sentence), `${file} must carry the claim-marker sentence`);
+});

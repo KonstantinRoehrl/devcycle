@@ -5,6 +5,19 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-05 — The claim-marker sentence travels in every brief (#333)
+
+**Decision:** every sliced implementer brief, and `agents/implementer.md` itself, carries one sentence of the authored-claims marker grammar: every `path.ext:line` reference and every count in the report carries `(verified: <command>)` or `(assumption)` on the same or an adjacent line. It is the one restatement `playbooks/executing-waves.md` step 2 allows of a rule `references/evidence.md` owns.
+
+**Why:** intake's `authored-claims-check.mjs` kept bouncing reports for unmarked line references and counts. The implementer reads `references/evidence.md` up front, but the grammar was absent where the report is written, and a brief does not preload it.
+
+**Supersedes:** step 2's "nothing restated that a named reference owns" as an exceptionless rule.
+
+```text
+budget: surface-budget.json surfaceTotal 6795
+budget: context-budget.json playbooks/executing-waves.md 116199
+```
+
 ## 2026-11-05 — An implementer that stops before its report is held (#404)
 
 **Decision:** `hooks/dispatch-sensor.mjs`, now the one `SubagentStop` handler, answers `decision: block` when an implementer dispatch stops while its owed report is missing, at most 3 times per dispatch record and never inside a `/devcycle:stop` window. `scripts/dispatch-health.mjs` owns the predicate and the cap, and the count lives on the dispatch record. A held stop writes no `agent-depth` row, marks nothing ended and leaves the agent open in `.devcycle/processes.jsonl`; the sensor retires it there on the stop it releases, which `hooks/process-sensor.mjs` no longer does. A long capture is waited on with `capture-evidence.mjs --await`.
