@@ -5,6 +5,22 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-05 — Plan-time checks for a missing stub and a guard-denied command (#321, #276)
+
+**Decision:** plan-check's `briefCompleteness` leg (`scripts/brief-completeness-check.mjs`) gains two checks. A `red-green` task whose **Files:** creates a non-test source file, and whose text outside **Files:** never mentions a stub, is a finding that fails the plan. Each distinct git-bearing command a task prescribes — an inline code span, or a line of a `bash`, `sh`, `zsh`, `shell` or `console` fence — that `hooks/block-destructive-git.mjs` denies an implementer is a note, reported and never failing. The leg asks the hook itself, run as a subprocess, so no second classifier can drift from it.
+
+**Why:** both failures surfaced only at execution, a round late: a red that passed vacuously once its module existed, and an implementer rewriting a command its own brief prescribed. A spike on 2026-11-05 over the 94 local plans (643 tasks) found 70 red-green tasks that create a non-test source file, 39 of them never mentioning a stub, but only 2 since 2026-09-14 — one true miss, one placeholder not called a stub — so failing costs planners little. The guard rule hit 144 commands, about 60 since 2026-09-14, mostly mentions rather than prescriptions (a task testing the hook quotes the spellings it denies): too noisy to fail on.
+
+**Tightening criterion:** the guard leg becomes a finding once a signal that separates a prescribed command from a quoted mention brings its hit count on recent real plans near zero.
+
+**Supersedes:** the task reviewer as the only enforcer of `references/evidence.md`'s stub rule.
+
+```text
+budget: surface-budget.json surfaceTotal 6786
+budget: context-budget.json playbooks/planning-waves.md 80356
+budget: context-budget.json playbooks/executing-waves.md 115742
+```
+
 ## 2026-11-01 — A release closes the issues its PRs name
 
 **Decision:** `Prepare release` writes `Closes #n` lines into the `main` ← `dev` PR body, gathered by `scripts/release-closing-refs.mjs` from the PRs squashed into `dev` since the previous release. A PR names an issue it fully fixes with a closing keyword in its body; `Refs #n` keeps the issue open.

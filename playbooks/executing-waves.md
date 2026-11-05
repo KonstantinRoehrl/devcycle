@@ -100,6 +100,11 @@ exit 2 or 3 a stop.
      plugin root containing a space — never as a literal `${CLAUDE_PLUGIN_ROOT}` path, which is
      substituted at render time and expands to nothing in the implementer's shell. No check covers
      either: a sliced brief is run scratch, so both are yours to get right here.
+   - **Prescribe only what a guarded dispatch may run:** a deletion is plain `rm` and a rename plain
+     `mv`, with both paths under `**Files:**` — `scripts/task-commit.mjs` stages a deleted or
+     renamed-away Files path itself. Any other git write, `git rm --cached` included, is never a brief
+     command, and a brief never nests git in `$(…)` or backticks: `hooks/block-destructive-git.mjs`
+     denies an implementer all of them.
 3. **Dispatch devcycle:implementer** with that brief only, never accumulated session history or other
    tasks' reports, on the model `references/model-routing.md` resolves. The dispatch prompt must NEVER
    instruct the implementer to commit, stage, or push. Immediately before it, give the brief to
