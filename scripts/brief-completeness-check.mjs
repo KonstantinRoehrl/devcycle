@@ -195,7 +195,9 @@ export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cw
   }
   errors.push(...gateLineErrors(planText), ...requiredCheckErrors(planText, blocks, repoRoot));
 
-  for (const { num, text: block } of blocks) {
+  // The stub and guard legs read only a task's own brief; the other legs keep the whole-block read.
+  const ownBriefs = taskBlocks(planText, { stopAtPlanSection: true });
+  for (const [index, { num, text: block }] of blocks.entries()) {
     for (const field of REQUIRED_FIELDS) {
       const val = readField(block, field);
       if (val === null) errors.push(`Task ${num}: missing **${field}:** field`);
@@ -214,7 +216,7 @@ export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cw
         );
       }
     }
-    errors.push(...stubErrors(num, block));
+    errors.push(...stubErrors(num, ownBriefs[index].text));
   }
 
   // An incomplete Files block is not only a missing field: a brief that mandates doc growth but
@@ -244,7 +246,7 @@ export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cw
   return {
     findings: errors,
     ok: `ok -- ${blocks.length} task(s), all required fields present`,
-    notes: guardDenialNotes(blocks, { repoRoot }),
+    notes: guardDenialNotes(ownBriefs, { repoRoot }),
   };
 }
 

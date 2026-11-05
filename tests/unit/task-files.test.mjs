@@ -500,17 +500,24 @@ test("isTestPath recognizes a SwiftPM Tests/ directory and conftest.py, and stil
   for (const p of ["src/contests/x.ts", "src/myconftest.py", "scripts/conftest.mjs"]) assert.equal(isTestPath(p), false, p);
 });
 
-test("taskBlocks ends the last task's block at a trailing level-1 or level-2 heading", () => {
-  const plan = "### Task 1: A\n**Files:** `a.mjs`\n\n### Task 2: B\n**Files:** `b.mjs`\n\n## Dispatch Map\n- Wave 1: Task 1, Task 2\n\n# Appendix\nmore\n";
+test("taskBlocks by default runs the last block to the end of the plan, trailing plan-level sections included", () => {
+  const plan = "### Task 1: A\n**Files:** `a.mjs`\n\n### Task 2: B\n**Files:** `b.mjs`\n\n## Dispatch Map\n- Wave 1: Task 1, Task 2\n\n## Blast-radius overrides\n- Blast-radius override: b.mjs — x\n";
   const [, last] = taskBlocks(plan);
-  assert.ok(last.text.includes("b.mjs"));
-  assert.ok(!last.text.includes("Dispatch Map") && !last.text.includes("Appendix"), last.text);
-  assert.ok(taskBlocks("### Task 1: A\n## Notes\nx\n### Task 2: B\ny\n")[1].text.startsWith("### Task 2"));
+  assert.ok(last.text.includes("## Dispatch Map") && last.text.includes("Blast-radius override"), last.text);
+  assert.ok(taskBlocks("### Task 1: A\n## Notes\nx\n### Task 2: B\ny\n")[0].text.includes("## Notes"));
 });
 
-test("taskBlocks keeps a heading inside a code fence in the task's block", () => {
+test("taskBlocks with stopAtPlanSection ends a block at a level-1 or level-2 heading", () => {
+  const plan = "### Task 1: A\n**Files:** `a.mjs`\n\n### Task 2: B\n**Files:** `b.mjs`\n\n## Dispatch Map\n- Wave 1: Task 1, Task 2\n\n# Appendix\nmore\n";
+  const [, last] = taskBlocks(plan, { stopAtPlanSection: true });
+  assert.ok(last.text.includes("b.mjs"));
+  assert.ok(!last.text.includes("Dispatch Map") && !last.text.includes("Appendix"), last.text);
+  assert.ok(taskBlocks("### Task 1: A\n## Notes\nx\n### Task 2: B\ny\n", { stopAtPlanSection: true })[1].text.startsWith("### Task 2"));
+});
+
+test("taskBlocks with stopAtPlanSection keeps a heading inside a code fence in the task's block", () => {
   const plan = "### Task 1: A\n```markdown\n# Title\n## Section\n```\nafter the fence\n## Dispatch Map\n";
-  const [block] = taskBlocks(plan);
+  const [block] = taskBlocks(plan, { stopAtPlanSection: true });
   assert.ok(block.text.includes("## Section") && block.text.includes("after the fence"), block.text);
   assert.ok(!block.text.includes("Dispatch Map"));
 });

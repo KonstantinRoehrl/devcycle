@@ -105,6 +105,22 @@ test("an override keyed on the surface path clears both missing-fixture violatio
   assert.equal(code, 0, out);
 });
 
+const PLAYBOOK_WITH_TRAILING_OVERRIDE = `# Plan
+### Task 1: Tweak x
+**Files:**
+- Modify: \`playbooks/x.md\`
+## Dispatch Map
+- Wave 1: Task 1
+
+## Plan-check overrides
+- Budget-fixture override: playbooks/x.md — copy-only, no growth
+`;
+
+test("an override in a plan-level section after the last task clears the missing-fixture violations", () => {
+  const { code, out } = run(PLAYBOOK_WITH_TRAILING_OVERRIDE);
+  assert.equal(code, 0, out);
+});
+
 const PLAYBOOK_WITH_REASONLESS_OVERRIDE = `# Plan
 ### Task 1: Tweak x
 **Files:**

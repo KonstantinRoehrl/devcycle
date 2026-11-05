@@ -291,9 +291,8 @@ export function fieldValue(block, field) {
   return m ? m[1].trim() : null;
 }
 
-// A task's block ends at the next task heading or the next plan-level heading (`# `, `## `), so a
-// trailing "## Dispatch Map" or "## Self-review" is never read as the last task's brief. A heading
-// inside a code fence is example text (a task may carry a whole doc template), not a plan section.
+// A heading inside a code fence is example text (a task may carry a whole doc template), not a plan
+// section.
 export const FENCE_RE = /^\s*(`{3,}|~{3,})\s*([^\s`]*)/;
 const PLAN_HEADING_RE = /^#{1,2} /;
 
@@ -314,13 +313,17 @@ function planLevelEnd(text, from) {
   return text.length;
 }
 
-export function taskBlocks(planText) {
+// A block runs to the next task heading, and the last one to end of file, so the override lines a
+// plan keeps in a trailing "## Blast-radius overrides" section stay readable. `stopAtPlanSection`
+// ends it at the next plan-level heading (`# `, `## `) instead, for a reader of the task's own
+// brief that a trailing "## Self-review" must not feed.
+export function taskBlocks(planText, { stopAtPlanSection = false } = {}) {
   const headings = [...planText.matchAll(TASK_HEADING_RE)];
   const blocks = [];
   for (let i = 0; i < headings.length; i++) {
     const start = headings[i].index;
     const nextTask = i + 1 < headings.length ? headings[i + 1].index : planText.length;
-    const end = Math.min(nextTask, planLevelEnd(planText, start));
+    const end = stopAtPlanSection ? Math.min(nextTask, planLevelEnd(planText, start)) : nextTask;
     blocks.push({ num: Number(headings[i][1]), text: planText.slice(start, end) });
   }
   return blocks;
