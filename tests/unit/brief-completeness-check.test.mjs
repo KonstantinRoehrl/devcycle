@@ -2,14 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { taskFileMap } from "../../scripts/task-files.mjs";
+import { guardDenialNotes } from "../../scripts/brief-completeness-check.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/brief-completeness-check.mjs");
 
 // Runs from a scratch work tree, so the real repo's required-checks manifest never applies; `manifest`
-// writes one at that tree's root.
+// writes one at that tree's root. Both streams are kept on success too: notes go to stderr.
 function run(planText, { manifest } = {}) {
   const dir = realpathSync(makeTempDir("bcc-"));
   const plan = join(dir, "plan.md");
@@ -18,12 +19,8 @@ function run(planText, { manifest } = {}) {
     mkdirSync(join(dir, "tests/fixtures"), { recursive: true });
     writeFileSync(join(dir, "tests/fixtures/required-gate-checks.json"), manifest);
   }
-  try {
-    const stdout = execFileSync("node", [SCRIPT, plan], { encoding: "utf8", cwd: dir });
-    return { code: 0, out: stdout };
-  } catch (e) {
-    return { code: e.status, out: `${e.stdout || ""}${e.stderr || ""}` };
-  }
+  const r = spawnSync("node", [SCRIPT, plan], { encoding: "utf8", cwd: dir });
+  return { code: r.status, out: `${r.stdout}${r.stderr}` };
 }
 
 const COMPLETE = `# Plan
@@ -295,4 +292,68 @@ test("a manifest that is not a JSON array of strings fails naming the file, not 
     assert.match(r.out, /required-gate-checks\.json: (invalid JSON|must be a JSON array of command substrings)/, manifest);
     assert.doesNotMatch(r.out, /^\s+at /m);
   }
+});
+
+// --- #276: steps that prescribe a git command the dispatch guard denies, reported as notes ---
+
+const withStep = (step) => COMPLETE.replace("- [ ] step", `- [ ] ${step}`);
+const notesIn = (out) => out.split("\n").filter((line) => line.startsWith("brief-completeness-check: note: "));
+
+test("a step prescribing a git deletion passes with a note naming the task, the command and the guard's reason", () => {
+  const r = run(withStep("Run `git rm src/x.mjs`"));
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /^brief-completeness-check: note: Task 1: prescribes `git rm src\/x\.mjs`, which the dispatch guard denies an implementer — .*\(rm\)\./m);
+});
+
+test("git inside a substitution or backticks, git archive and git worktree each get one note", () => {
+  for (const [step, reason] of [
+    ["Read `$(git rev-parse --show-toplevel)/x`", /command substitution/],
+    ["Read ``echo `git rev-parse HEAD` ``", /command substitution/],
+    ["Run `git archive HEAD`", /\(archive\)/],
+    ["Run `git worktree add ../wt`", /\(worktree\)/],
+  ]) {
+    const r = run(withStep(step));
+    assert.equal(r.code, 0, `${step}\n${r.out}`);
+    assert.equal(notesIn(r.out).length, 1, `${step}\n${r.out}`);
+    assert.match(notesIn(r.out)[0], reason, step);
+  }
+});
+
+test("a line of a shell fence is a prescribed command; a line of a JS fence is not", () => {
+  const shell = run(withStep("delete it:\n```bash\ngit rm a.mjs\n```"));
+  assert.equal(shell.code, 0, shell.out);
+  assert.equal(notesIn(shell.out).length, 1, shell.out);
+  assert.match(notesIn(shell.out)[0], /`git rm a\.mjs`/);
+  const js = run(withStep('write the test:\n```js\nexecFileSync("git", ["commit", "-m", "x"]);\n// git commit -m x\n```'));
+  assert.equal(js.code, 0, js.out);
+  assert.deepEqual(notesIn(js.out), [], js.out);
+});
+
+test("an allowed git command, a repeated one and the task's own convention command add no extra note", () => {
+  const allowed = run(withStep("Run `git status --short`"));
+  assert.deepEqual(notesIn(allowed.out), [], allowed.out);
+  const twice = run(withStep("Run `git rm a.mjs`, then again `git rm a.mjs`"));
+  assert.equal(notesIn(twice.out).length, 1, twice.out);
+  const convention = run(COMPLETE.replace("**Evidence:** red-green", "**Evidence:** convention (`cat $(git rev-parse --show-toplevel)/x`)"));
+  assert.equal(convention.code, 0, convention.out);
+  assert.deepEqual(notesIn(convention.out), [], convention.out);
+});
+
+test("a plan that prescribes no git command prints no note", () => {
+  const r = run(COMPLETE);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(notesIn(r.out), []);
+});
+
+test("a guard hook that cannot answer yields a could-not-classify note, never a finding or a throw", () => {
+  const dir = realpathSync(makeTempDir("bcc-hook-"));
+  const blocks = [{ num: 3, text: "### Task 3: X\n- [ ] Run `git rm a.mjs`\n" }];
+  const garbled = join(dir, "garbled-hook.mjs");
+  writeFileSync(garbled, 'process.stdout.write("not json");\n');
+  const [garbledNote, ...rest] = guardDenialNotes(blocks, { repoRoot: dir, hookPath: garbled });
+  assert.deepEqual(rest, []);
+  assert.match(garbledNote, /^Task 3: the guard leg could not classify `git rm a\.mjs` \(unparsable hook output: not json\)/);
+  const failing = join(dir, "failing-hook.mjs");
+  writeFileSync(failing, "process.exit(2);\n");
+  assert.match(guardDenialNotes(blocks, { repoRoot: dir, hookPath: failing })[0], /could not classify `git rm a\.mjs` \(exit 2/);
 });

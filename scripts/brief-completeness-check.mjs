@@ -3,10 +3,13 @@
 // dispatch fields, the Evidence value must name a valid class, "## Dispatch Map" must list
 // every task, every pinned gate command must run the repo's required checks, and a Files block
 // that edits a budgeted file must list the size baselines that edit trips and the decisions log
-// that holds them. Modeled on wave-disjointness-check.mjs; a brief missing a field makes the
-// implementer guess. See references/evidence.md and playbooks/planning-waves.md.
+// that holds them, and a git command a step prescribes that the dispatch guard denies an
+// implementer is reported as a note, never a failure. Modeled on wave-disjointness-check.mjs; a
+// brief missing a field makes the implementer guess. See references/evidence.md and playbooks/planning-waves.md.
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import {
   taskBlocks, parseDispatchMap, filesFieldValue, fieldValue, verificationGate, verificationGateField, conventionCommand,
 } from "./task-files.mjs";
@@ -79,6 +82,82 @@ function gateLineErrors(planText) {
   return [];
 }
 
+// #276: a brief that prescribes a git command the dispatch guard denies costs the implementer a
+// round of rewrites. The guard itself is the classifier, resolved beside this script so the
+// installed plugin's own hook answers, never a second allowlist that drifts from it. The guarded
+// origins share one allowlist, so the implementer's verdict covers them all. Report-only:
+// most hits on real plans quote a denied spelling rather than prescribe it (docs/decisions/README.md).
+const GUARD_HOOK = fileURLToPath(new URL("../hooks/block-destructive-git.mjs", import.meta.url));
+const GUARDED_ORIGIN = "devcycle:implementer";
+const SHELL_FENCE_INFO = new Set(["bash", "sh", "zsh", "shell", "console"]);
+const FENCE_RE = /^\s*(`{3,}|~{3,})\s*([^\s`]*)/;
+const CODE_SPAN_RE = /(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)/g;
+const GIT_WORD_RE = /\bgit\b/;
+
+// Every inline code span, and every line of a shell fence, that names git. Other fences hold test
+// code whose git runs through execFileSync, which a Bash hook never sees. The task's convention
+// command is skipped: the capture helper runs it as its own child process, never the implementer.
+function prescribedGitCommands(block) {
+  const convention = conventionCommand(fieldValue(block, "Evidence") ?? "");
+  const found = [];
+  let fence = null;
+  for (const line of block.split("\n")) {
+    const marker = line.match(FENCE_RE);
+    if (fence) {
+      if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && !marker[2]) fence = null;
+      else if (fence.shell) {
+        const command = line.trim().replace(/^\$\s+/, "");
+        if (command && !command.startsWith("#")) found.push(command);
+      }
+      continue;
+    }
+    if (marker) {
+      fence = { char: marker[1][0], length: marker[1].length, shell: SHELL_FENCE_INFO.has(marker[2].toLowerCase()) };
+      continue;
+    }
+    for (const span of line.matchAll(CODE_SPAN_RE)) found.push(span[2].trim());
+  }
+  return [...new Set(found)].filter((command) => GIT_WORD_RE.test(command) && command !== convention);
+}
+
+function guardDenial(command, { repoRoot, hookPath = GUARD_HOOK }) {
+  const input = JSON.stringify({ agent_type: GUARDED_ORIGIN, cwd: repoRoot, tool_input: { command } });
+  const r = spawnSync(process.execPath, [hookPath], { input, encoding: "utf8", cwd: repoRoot, timeout: 10_000 });
+  if (r.error) return { denied: false, error: r.error.message };
+  if (r.status !== 0) return { denied: false, error: `exit ${r.status}${r.stderr.trim() ? `: ${r.stderr.trim().split("\n")[0]}` : ""}` };
+  const out = r.stdout.trim();
+  if (!out) return { denied: false };
+  let decision;
+  try {
+    decision = JSON.parse(out)?.hookSpecificOutput;
+  } catch {
+    return { denied: false, error: `unparsable hook output: ${out.slice(0, 80)}` };
+  }
+  if (decision?.permissionDecision !== "deny") return { denied: false };
+  // The hook echoes the command after its reason; the note already names it.
+  return { denied: true, reason: String(decision.permissionDecisionReason ?? "").replace(/ command: [\s\S]*$/, "") };
+}
+
+export function guardDenialNotes(blocks, { repoRoot, hookPath = GUARD_HOOK }) {
+  const verdicts = new Map();
+  const notes = [];
+  for (const { num, text } of blocks) {
+    for (const command of prescribedGitCommands(text)) {
+      if (!verdicts.has(command)) verdicts.set(command, guardDenial(command, { repoRoot, hookPath }));
+      const verdict = verdicts.get(command);
+      if (verdict.error) {
+        notes.push(`Task ${num}: the guard leg could not classify \`${command}\` (${verdict.error}) — check it against hooks/block-destructive-git.mjs by hand`);
+      } else if (verdict.denied) {
+        notes.push(
+          `Task ${num}: prescribes \`${command}\`, which the dispatch guard denies an implementer — ${verdict.reason} ` +
+            "Rewrite it as a command a guarded dispatch may run (playbooks/executing-waves.md step 2)",
+        );
+      }
+    }
+  }
+  return notes;
+}
+
 // repoRoot is the work tree whose required-checks manifest applies; plan-check passes its own.
 export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cwd() }, { includeBudgetFixtures = true } = {}) {
   const errors = [];
@@ -136,7 +215,7 @@ export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cw
   return {
     findings: errors,
     ok: `ok -- ${blocks.length} task(s), all required fields present`,
-    notes: [],
+    notes: guardDenialNotes(blocks, { repoRoot }),
   };
 }
 
@@ -151,7 +230,8 @@ function main() {
     process.exit(1);
   }
 
-  const { findings, ok } = briefCompletenessLeg(readFileSync(planPath, "utf8"), { planPath });
+  const { findings, ok, notes } = briefCompletenessLeg(readFileSync(planPath, "utf8"), { planPath });
+  for (const n of notes) console.error(`brief-completeness-check: note: ${n}`);
   if (findings.length > 0) {
     for (const f of findings) console.error(`brief-completeness-check: ${f}`);
     process.exit(1);

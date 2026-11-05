@@ -215,3 +215,13 @@ test("a pinned gate omitting a required-checks manifest entry trips only the bri
   assert.equal(run(gated(task(1, ["src/a.txt"]) + full), { repo: withManifest() }).status, 0);
   assert.equal(run(plan(task(1, ["src/a.txt"]) + narrow)).status, 0, "no manifest at the repo root");
 });
+
+test("a guard note alone leaves plan-check passing, counted by default and listed with --verbose", () => {
+  const p = plan(task(1, ["src/a.txt"]) + withProse(2, ["src/b.txt"], "run `git worktree add ../wt`"));
+  const quiet = run(p);
+  assert.equal(quiet.status, 0, quiet.stderr);
+  assert.match(quiet.stderr, /^plan-check: briefCompleteness: 1 note\(s\) — rerun with --verbose to list them$/m);
+  const loud = run(p, { args: ["--verbose"] });
+  assert.equal(loud.status, 0, loud.stderr);
+  assert.match(loud.stderr, /^plan-check: briefCompleteness: Task 2: prescribes `git worktree add \.\.\/wt`, which the dispatch guard denies an implementer — .*\(worktree\)\./m);
+});
