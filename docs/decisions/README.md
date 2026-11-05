@@ -5,6 +5,16 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-05 — An implementer that stops before its report is held (#404)
+
+**Decision:** `hooks/dispatch-sensor.mjs`, now the one `SubagentStop` handler, answers `decision: block` when an implementer dispatch stops while its owed report is missing, at most 3 times per dispatch record and never inside a `/devcycle:stop` window. `scripts/dispatch-health.mjs` owns the predicate and the cap, and the count lives on the dispatch record. A held stop writes no `agent-depth` row, marks nothing ended and leaves the agent open in `.devcycle/processes.jsonl`; the sensor retires it there on the stop it releases, which `hooks/process-sensor.mjs` no longer does. A long capture is waited on with `capture-evidence.mjs --await`.
+
+**Why:** an implementer that backgrounded a capture and ended its turn to wait was never woken: its dispatch ended with no report and was re-dispatched from the same brief. A spike showed a blocked stop keeps the agent, its shell and the completion notification alive (`docs/platform-notes.md` § (o)).
+
+**Rejected:** denying `run_in_background` on a capture (deferred: #404 option 2); a `stop_hook_active` guard, which allows exactly one hold.
+
+**Supersedes:** "background and wait for its completion notification" as a bounded capture wait; `hooks/process-sensor.mjs` on `SubagentStop`.
+
 ## 2026-11-05 — `observes` classifies a derived key on any vocabulary kind (#407)
 
 **Decision:** a `references/culprits.json` entry of any kind may declare `observes`, the derived `<event>:<stage>` keys it classifies; `prevents` stays win-only. Doctor resolves a key's entry by slug, then by `observes`, in one lookup the culprit table and `--issue-body` share. The first non-win user is `redispatched-task` (`friction`), which observes `re-dispatch:execution`.

@@ -391,8 +391,9 @@ branch with real settings, install the checkout through a directory-source marke
   `tool_response.{totalTokens,totalDurationMs,totalToolUseCount,resolvedModel,agentType,agentId,status}`
   only for a foreground dispatch. A background dispatch's `PostToolUse` fires at launch with
   `status: "async_launched"` and no counts.
-- `SubagentStop` fires exactly once per agent, foreground and background alike, with `agent_id`,
-  `agent_type`, `agent_transcript_path` and `cwd` in its input.
+- `SubagentStop` fires once per agent, foreground and background alike — and again on each later
+  stop when a hook blocks one (§ (o)) — with `agent_id`, `agent_type`, `agent_transcript_path`
+  and `cwd` in its input.
 - The transcript at `agent_transcript_path` ends with an assistant record carrying `message.model`
   and `message.usage`, from which the agent's final context depth is read.
 - `session_id` was not recorded.
@@ -575,3 +576,23 @@ Measured on Claude Code 2.1.316 under a zsh login shell on macOS, 2026-10-31 (#3
 | Can a leak be tied to its session? | Not reliably. The session id reaches `ps -E` only for non-platform binaries (`node`, not `sleep` or `zsh`). |
 | What does a leftover look like? | Each Bash call has its own process group, led by its shell. A leftover keeps that group id after the leader exits, with parent PID 1 and no terminal. With two deliberate leaks the signature matched four of 495 processes: both loops at about 98% CPU, and two idle helpers at 0%. |
 | Does PostToolUse `additionalContext` from a plugin hook reach the model? | Yes. A headless `claude -p` session printed a random token only the hook held. |
+
+## (o) A blocked `SubagentStop` holds the subagent
+
+**What was tried.** A spike on 2026-11-05 against Claude Code 2.1.318 (#404): `claude -p --plugin-dir` with a throwaway agent that backgrounds `sh -c 'sleep 30; echo done > report.md'` and ends its turn, under no hook, a hook that blocks once (`!stop_hook_active`), and a hook that blocks while `report.md` is missing, at most five times per `agent_id`.
+
+**Exact result.**
+
+| Run | Outcome |
+| --- | --- |
+| No hook | The subagent returned after about 4 s; `report.md` was never written. |
+| Block iff `!stop_hook_active` | One block; the agent's first wait was denied; the second stop had `stop_hook_active: true` and was released with no report. |
+| Block while the report is missing | One or two blocks; the background shell stayed alive, its completion notification arrived mid-held-turn, and the agent saw the report (41–55 s). |
+
+- A `SubagentStop` hook answering `{"decision":"block","reason":…}` keeps the subagent running in the same context; its background shell stays alive (`background_tasks[].status: "running"` at the block).
+- `stop_hook_active` is true on every stop after the first block, so a guard on it alone allows exactly one hold.
+- The input carries `background_tasks` (`id`, `type`, `status`, `description`, `command`) and `last_assistant_message`, besides `agent_id`, `agent_type`, `agent_transcript_path` and `stop_hook_active`.
+- Every `SubagentStop` hook fires on a blocked stop too.
+- A blocked stop does not set `.meta.json`'s `finished`; after a block the transcript's last message record is a `user` record with `isMeta: true` carrying the hook's feedback.
+
+**Consequence.** `hooks/dispatch-sensor.mjs` is the one `SubagentStop` handler, so nothing marks ended a stop it held: it holds an implementer whose owed report is missing, counting holds on the dispatch record (cap 3) rather than trusting `stop_hook_active`, and `scripts/dispatch-health.mjs` reads a hold newer than the transcript's last record as in flight for a minute. The CI-pinned versions (2.1.287, 2.1.292) are assumed to honour the block; where one does not, the agent ends, the `heldAt` grace lapses and the transcript classifier records the death as before.
