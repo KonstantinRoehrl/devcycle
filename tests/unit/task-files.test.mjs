@@ -13,6 +13,8 @@ import {
   conventionCommand,
   verificationGate,
   verificationGateField,
+  createdFiles,
+  isTestPath,
 } from "../../scripts/task-files.mjs";
 
 test("normalizeFileToken strips ranges, backticks, and rejects non-paths", () => {
@@ -438,4 +440,49 @@ test("after and / + a bare extensionless slash token is a path only when it cont
   // A ticked path after the conjunction is path-shaped on its own.
   assert.deepEqual([...extractFiles("- Modify: a.py and `tests/x.mjs`")], ["a.py", "tests/x.mjs"]);
   assert.deepEqual([...extractFiles("- Modify: a.py and `bin/devcycle-root`")], ["a.py", "bin/devcycle-root"]);
+});
+
+test("createdFiles reads only the paths a Create label declares, in every form extractFiles reads", () => {
+  assert.deepEqual([...createdFiles("- Create: `src/a.mjs`\n- Modify: `src/b.mjs`\n- Test: `tests/unit/a.test.mjs`")], ["src/a.mjs"]);
+  assert.deepEqual([...createdFiles("Create `a.mjs`. Test: `a.test.mjs`")], ["a.mjs"]);
+  assert.deepEqual([...createdFiles("- Create (tracked, already on disk): bin/devcycle-root")], ["bin/devcycle-root"]);
+  assert.deepEqual([...createdFiles("- Create: `src/lib/{a,b}.ts`")], ["src/lib/a.ts", "src/lib/b.ts"]);
+  assert.deepEqual([...createdFiles("- Create: `a.mjs`, `b.mjs`")], ["a.mjs", "b.mjs"]);
+  assert.deepEqual([...createdFiles("- Create:\n  scripts/a.mjs\n  scripts/b.mjs\n- Modify: scripts/c.mjs")], ["scripts/a.mjs", "scripts/b.mjs"]);
+});
+
+test("createdFiles reads a Create list that wraps onto the next line after a trailing comma", () => {
+  const block = [
+    "- Create: `playbooks/scoping-the-request.md`, `playbooks/planning-waves.md`,",
+    "  `playbooks/executing-waves.md`, `playbooks/reviewing-code.md`,",
+    "  `playbooks/auditing-a-repo.md`",
+    "- Delete: `skills/` (all 14 directories)",
+    "- Modify: `scripts/validate.mjs`, `tests/unit/validate.test.mjs`",
+  ].join("\n");
+  assert.deepEqual([...createdFiles(block)], [
+    "playbooks/scoping-the-request.md",
+    "playbooks/planning-waves.md",
+    "playbooks/executing-waves.md",
+    "playbooks/reviewing-code.md",
+    "playbooks/auditing-a-repo.md",
+  ]);
+  assert.deepEqual([...createdFiles("- Create: `a.mjs`,\n- Delete: `old.mjs`")], ["a.mjs"]);
+});
+
+test("createdFiles never reads a path under another label, or a Delete line after a Create one, as created", () => {
+  assert.deepEqual([...createdFiles("- Create: `a.mjs`\n- Delete: `old.mjs`")], ["a.mjs"]);
+  assert.deepEqual([...createdFiles("- Modify: `a.mjs`, `b.mjs`")], []);
+  // The labeled read changes nothing extractFiles returns.
+  assert.deepEqual([...extractFiles("- Create: `a.mjs`\n- Delete: `old.mjs`")], ["a.mjs", "old.mjs"]);
+  assert.deepEqual([...extractFiles("- Create:\n  scripts/a.mjs\n  scripts/b.mjs\n- Modify: scripts/c.mjs")], ["scripts/a.mjs", "scripts/b.mjs", "scripts/c.mjs"]);
+});
+
+test("isTestPath recognizes test files in any language and anything under a test directory", () => {
+  for (const p of ["a.test.mjs", "src/a.spec.ts", "tests/helper.mjs", "test/x.js", "src/__tests__/x.tsx",
+    "spec/models/user.rb", "pkg/x_test.go", "lib/x_test.py", "lib/test_x.py", "models/user_spec.rb"]) {
+    assert.equal(isTestPath(p), true, p);
+  }
+  for (const p of ["src/a.mjs", "scripts/attest.mjs", "src/contest/x.ts", "latest_x.py", "docs/testing.md"]) {
+    assert.equal(isTestPath(p), false, p);
+  }
 });
