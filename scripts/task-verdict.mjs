@@ -191,8 +191,12 @@ export function verdict(argv, cwd = process.cwd()) {
   // own: the green gate's rejection of it, the fix's dispatch — the round is closed, and reading it
   // again would hand what followed it, an unreviewed fix among them, that round's accept.
   // A dispatch that ended without its output is no action on the round's verdict: its redispatch
-  // reviews the same round.
-  const closing = later.find((e) => e.event !== DISPATCH_ENDED && !(e.event === "review-verdict" && (OWN_OUTCOMES.has(e.outcome) || isNoVerdict(e.outcome))));
+  // reviews the same round. Nor is a user's answer given before the verdict is recorded — to a stop
+  // for a green gate that could not run, say — since there was no verdict yet to decide on.
+  const recordedAt = later.findIndex((e) => e.event === "review-verdict" && !isNoVerdict(e.outcome));
+  const closing = later.find((e, i) => e.event !== DISPATCH_ENDED
+    && !(e.event === "user-decision" && (recordedAt < 0 || i < recordedAt))
+    && !(e.event === "review-verdict" && (OWN_OUTCOMES.has(e.outcome) || isNoVerdict(e.outcome))));
   // A commit call re-run once the round's accept committed: the accept stands as the ledger holds it,
   // and task-commit.mjs's own re-run adds only what the commit still lacks.
   const accept = commit && closing?.event === "committed" && later.findLast((e) => e.event === "review-verdict" && e.outcome === "accepted");
