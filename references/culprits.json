@@ -52,6 +52,14 @@
     "since": "0.13.0"
   },
   {
+    "slug": "redispatched-task",
+    "kind": "friction",
+    "phase": ["execution"],
+    "desc": "A task was dispatched again from the same brief because an earlier attempt produced nothing usable.",
+    "since": "0.30.0",
+    "observes": ["re-dispatch:execution"]
+  },
+  {
     "slug": "restated-instead-of-cited",
     "kind": "rule-violation",
     "phase": ["planning", "execution", "branch-review"],

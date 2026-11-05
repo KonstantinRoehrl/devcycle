@@ -2369,7 +2369,7 @@ test("continue discovery guard: fails when continue.md references the script but
 
 // --- check 14: observes/prevents vocabulary fields ---
 
-test("check 14 rejects observes/prevents on a non-win entry", () => {
+test("check 14 rejects prevents on a non-win entry", () => {
   const dir = makePluginFixture();
   const vocabPath = join(dir, "references", "culprits.json");
   const vocab = JSON.parse(readFileSync(vocabPath, "utf8"));
@@ -2377,6 +2377,15 @@ test("check 14 rejects observes/prevents on a non-win entry", () => {
   target.prevents = ["review-reject:execution"];
   writeFileSync(vocabPath, JSON.stringify(vocab, null, 2));
   failsWith(runValidate(dir), /"prevents" is only meaningful on a win-kind entry/);
+});
+
+test("check 14 accepts observes on a non-win entry", () => {
+  const dir = makePluginFixture();
+  const vocabPath = join(dir, "references", "culprits.json");
+  const vocab = JSON.parse(readFileSync(vocabPath, "utf8"));
+  vocab.find((e) => e.kind === "friction").observes = ["review-reject:execution"];
+  writeFileSync(vocabPath, JSON.stringify(vocab, null, 2));
+  ok(runValidate(dir));
 });
 
 test("check 14 rejects a malformed impact key and an unresolvable bare slug", () => {
