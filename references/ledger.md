@@ -80,7 +80,10 @@ flag at once; `--help` answers `action: "usage"` with the script's `required` an
   brief whose task resolves a gate ends with its `**Gate command:**` line, which cites
   `references/evidence.md` § File-backed evidence for the before/after rule. The dispatch record also
   names the session (`sessionId`), and `--capture-cmd "<cmd>"` (implementer only) ends the brief with
-  a `**Capture command:**` line and the `- Narrowing:` line a concurrent wave's capture needs.
+  a `**Capture command:**` line and the `- Narrowing:` line a concurrent wave's capture needs. It
+  refuses (exit 2, writing nothing) when the state file beside the ledger gives the waves to the
+  driver — a `drive: auto` row, or none under a recorded `executionMode=unattended` — and the
+  caller lacks that live driver's token.
 - `node "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch-health.mjs" [--record] [--stopped <task>] [--json]`
   while dispatches are in flight: one line per in-flight dispatch of this session — state, elapsed
   time, tool uses, idle time, last tool — and the next action; with `--record`, appends

@@ -123,7 +123,8 @@ At `stage: execution` one script does steps 2–4 and § Resume's depth check. R
 resolver command first, unchanged (it reads no state file), then
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/wave-setup.mjs" --state <the chosen state file> --knobs '<the knobs: line it printed>'`.
 It runs the ownership check, `resume-check`, the knob comparison, the branch check and the depth
-probe, and prints one JSON object. Every gate stays this command's; it reads their inputs there:
+probe, and prints one JSON object. Under `action: "drive"` the drive step decides and nothing is
+walked from it. Every gate stays this command's, answered first; it reads their inputs there:
 
 - `action: "stop"` → report `stopDetail` and stop; `foreign-state`, `resume-check` and `cycle-format` go to the
   user as steps 2 and 2a say.
@@ -140,9 +141,9 @@ probe, and prints one JSON object. Every gate stays this command's; it reads the
 - `state.stopped` → a recorded stop, announced below; at `manual` or `none` § Resume closes it, and the start path otherwise.
 
 `drive.action` then decides, per `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/drive.md drive-actions`.
-At `manual` or `none`, announce the position from `tasks` (each task's `position` and `next`) and
-continue through `entryLines` as § Resume says, past its depth check; the entered playbook takes
-the wave's positions and every uncommitted task's brief inputs from this object.
+Only `action: "resume"` is walked: announce the position from `tasks` (each task's `position` and
+`next`) and continue through `entryLines` as § Resume says, past its depth check; the entered
+playbook takes the wave's positions and every uncommitted task's brief inputs from this object.
 
 ## Announce the derived position
 

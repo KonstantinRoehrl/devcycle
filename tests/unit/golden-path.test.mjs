@@ -2721,3 +2721,16 @@ test("the sliced brief and the implementer both carry the report's claim-marker 
   for (const file of ["playbooks/executing-waves.md", "agents/implementer.md"])
     assert.ok(read(file).replace(/\s+/g, " ").includes(sentence), `${file} must carry the claim-marker sentence`);
 });
+
+// #412: a session that skims continue's execution resume meets the drive step before any gate, and
+// only a walk's output is walked; a session that writes a manual row re-runs wave-setup for it.
+test("continue names action: \"drive\" before its execution-resume gates and walks only action: \"resume\"", () => {
+  const section = read("commands/continue.md").split("\n## Execution resume\n")[1].split("\n## ")[0];
+  const drive = section.indexOf('Under `action: "drive"` the drive step decides and nothing is\nwalked from it.');
+  assert.ok(drive > -1, "§ Execution resume no longer says action: \"drive\" walks nothing");
+  assert.ok(drive < section.indexOf('\n- `action: "stop"`'), "action: \"drive\" comes after the gate list");
+  assert.ok(section.includes('Only `action: "resume"` is walked'), "the walk no longer reads as the exception");
+  const manual = sectionText(read("references/drive.md"), "drive-actions").split("\n").find((l) => l.startsWith("| `manual`"));
+  assert.ok(manual?.includes("re-runs `wave-setup.mjs` and takes only `tasks`, `dispatchable`, `wave` and `entryLines`"),
+    "a written manual row no longer re-runs wave-setup for its walk fields");
+});
