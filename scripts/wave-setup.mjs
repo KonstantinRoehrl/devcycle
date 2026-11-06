@@ -6,7 +6,7 @@
 // implementer dispatches — one JSON object on stdout. It never appends the run's session row: the
 // hooks module (hooks/devcycle-mod.mjs) joins a session to its run only when it sees that append as a
 // main-loop Bash call of its own, so commands/continue.md keeps it so.
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { isMain } from "./is-main.mjs";
@@ -24,7 +24,7 @@ import {
 } from "./task-ledger.mjs";
 import { ledgerSlotState } from "./ledger-slot.mjs";
 import { pendingReviewLoop, reviewLoopId } from "./review-loop.mjs";
-import { driveTokenHash, readLiveDriveLock } from "./drive-lock.mjs";
+import { holdsDriveToken, lockNamesState, readLiveDriveLock } from "./drive-lock.mjs";
 import { classifyDrive } from "./drive-result.mjs";
 import { isProtectedBranch } from "./branch-names.mjs";
 import { DISPATCH_ENDED, deathRoute, endedRole } from "./dispatch-health.mjs";
@@ -45,6 +45,7 @@ const IMPLEMENTER_NEXT = new Set(["dispatch-implementer", "redispatch-implemente
 // The stops continue's own gates compute and answer on the very call that reads the driver's result,
 // so a driver that stopped on one needs no question of its own.
 const SETTLED_REASONS = new Set(["knob-drift", "foreign-state", "resume-check", "branch", "depth-at-start", "no-driver", "not-opted-in"]);
+const NO_WALK = { wave: null, tasks: [], dispatchable: [], entryLines: [] };
 
 // The position of an outcome a retry cap bounds, or null for any other outcome.
 function cappedPosition(outcome, retries) {
@@ -137,33 +138,22 @@ const sameValues = (a, b) => {
   return [...new Set([...Object.keys(x), ...Object.keys(y)])].every((key) => x[key] === y[key]);
 };
 
-const realPath = (p) => {
-  try {
-    return realpathSync(p);
-  } catch {
-    return resolve(p);
-  }
-};
-
 // The fresh live knobs, resolved from the --knobs line; a missing or unknown value is the knob's fallback.
 const liveKnobs = (knobsLine) => resolveKnobs(knobsLine ? parseRecordedLine(knobsLine) : {}).knobs;
 
-// The reported drive status, and the live lock's token hash, which is never reported.
+// The reported drive status.
 function driveStatus(root, statePath, stateText, lines, knobsLine) {
   const row = field(stateText, "drive") ?? "";
   const model = row.match(/\bmodel=(\S+)/)?.[1];
   // A row recorded before the knob existed carries no via=, and every such row was an answer.
   const via = row.match(/\bvia=(\S+)/)?.[1] ?? (row ? "answer" : undefined);
   const live = readLiveDriveLock(root);
-  const holder = live && realPath(resolve(root, live.state ?? "")) === realPath(statePath) ? live : null;
+  const holder = live && lockNamesState(root, live, statePath) ? live : null;
   const optInLogged = lines.some((l) => l.task === "drive" && l.event === "user-decision");
   const lock = holder ? { pid: holder.pid, log: holder.log } : null;
   const { executionMode: mode, driveWatch: watch, drivePlugins: plugins } = liveKnobs(knobsLine);
-  return {
-    drive: { opted: /^auto\b/.test(row), ...(model ? { model } : {}), ...(via ? { via } : {}), lock, optInLogged, row: row.match(/^(auto|manual)\b/)?.[1] ?? null,
-      mode, watch, plugins },
-    tokenHash: holder?.tokenHash ?? null,
-  };
+  return { opted: /^auto\b/.test(row), ...(model ? { model } : {}), ...(via ? { via } : {}), lock, optInLogged, row: row.match(/^(auto|manual)\b/)?.[1] ?? null,
+    mode, watch, plugins };
 }
 
 // A recorded row decides whether the waves run unattended or are walked; with no row the live knob
@@ -326,10 +316,9 @@ function readSetup(opts) {
   // Beside a running driver nothing is acted on, so nothing is judged: not even the depth.
   const attach = !drive && driver.running;
   const depth = attach ? null : depthNow(env, cwd);
-  const status = driveStatus(root, abs, stateText, lines, knobsLine);
   const result = {
     ok: true, action: "resume", state, knobDrift: [], branch: null, depth, wave: null, tasks: [], dispatchable: [],
-    pendingDecision: null, drive: status.drive, entryLines: [], appended: [], depthBand: depth?.band ?? null,
+    pendingDecision: null, drive: driveStatus(root, abs, stateText, lines, knobsLine), entryLines: [], appended: [], depthBand: depth?.band ?? null,
     handoff: { ...parseHandoff(field(stateText, "handoff")), ask: false }, formatQuestion: null, formatReport: [],
   };
   // A stop on one task's pending decision names it, so the answer is recorded as that task's.
@@ -338,7 +327,7 @@ function readSetup(opts) {
   // A live lock is not proof enough: only a session the lock's driver started carries the token
   // whose hash the lock holds, so `--drive` typed in any other session is refused (spec 4.B.3).
   const token = env.DEVCYCLE_DRIVE_TOKEN;
-  if (drive && !(result.drive.lock && token && status.tokenHash === driveTokenHash(token)))
+  if (drive && !holdsDriveToken(root, abs, token))
     return stop("no-driver", `no live driver lock names ${abs} with this session's drive token`);
   if (drive && !result.drive.opted) return stop("not-opted-in", "the state file carries no drive: auto row");
   // A driver from before this variable existed rejects any reason its own schema lacks, and would end
@@ -377,7 +366,7 @@ function readSetup(opts) {
   const map = mapPositions(root, planText, lines, ledger);
   Object.assign(result, { overview: overviewOf(map), ledgerSlot: slot });
   const decided = (decision) => ({ ...result.drive, ...decision, result: driver });
-  if (attach) return { ...result, drive: decided({ lock: { pid: driver.pid, log: driver.log }, action: "attach", writeRow: null, confirm: null, gate: null }) };
+  if (attach) return { ...result, action: "drive", drive: decided({ lock: { pid: driver.pid, log: driver.log }, action: "attach", writeRow: null, confirm: null, gate: null }) };
   if (checked.kind === "format") return stop("cycle-format", checked.errors[0]);
   if (!checked.ok) return stop("resume-check", checked.errors.join("; "));
   if (state.stage !== "execution")
@@ -393,7 +382,10 @@ function readSetup(opts) {
     const decision = driveAction(result.drive, driver, result.pendingDecision);
     // A recorded driver end or stop asks its own question instead (references/resume.md § The state file).
     const ask = result.handoff.state === "pending" && !state.stopped && decision.action !== "gate" && !(decision.action === "start" && driver.next !== "none");
-    return { ...result, handoff: { ...result.handoff, ask }, drive: decided(decision) };
+    // Only a manual walk reads the wave. Any other action is the drive step's, so the output carries
+    // no walk fields a session could act on instead (commands/continue.md § Execution resume).
+    const walk = decision.action === "manual" ? {} : { action: "drive", ...NO_WALK };
+    return { ...result, ...walk, handoff: { ...result.handoff, ask }, drive: decided(decision) };
   }
 
   // Drive mode: every gate continue would ask about is a stop (spec 4.B.3).

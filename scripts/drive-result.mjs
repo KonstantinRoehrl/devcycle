@@ -2,10 +2,10 @@
 // .devcycle/drive-result.json as a crash when a run starts and replaces it with the run's end before
 // it releases its lock; classifyDrive turns that file, the lock and the state's stage into what the
 // next /devcycle:continue does. Nothing else decides what a driver's end means.
-import { mkdirSync, readFileSync, realpathSync, renameSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { atomicWrite } from "./atomic-write.mjs";
-import { readDriveLockHolder, readLiveDriveLock } from "./drive-lock.mjs";
+import { lockNamesState, readDriveLockHolder, readLiveDriveLock } from "./drive-lock.mjs";
 import { isLiveHolder, processStartTime } from "./file-lock.mjs";
 import { field } from "./md-field.mjs";
 
@@ -101,18 +101,6 @@ export const holderRunning = (root, holder) => holderLiveness(root, holder) !== 
 export function driverMayRun(root, statePath) {
   const holder = readDriveLockHolder(root);
   return lockNamesState(root, holder, statePath) && (holderRunning(root, holder) || readLiveDriveLock(root) !== null);
-}
-
-const real = (path) => {
-  try {
-    return realpathSync(path);
-  } catch {
-    return resolve(path);
-  }
-};
-
-export function lockNamesState(root, holder, statePath) {
-  return typeof holder?.state === "string" && real(resolve(root, holder.state)) === real(statePath);
 }
 
 function stageOf(statePath) {
