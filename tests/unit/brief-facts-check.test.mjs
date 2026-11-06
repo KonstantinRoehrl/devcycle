@@ -70,6 +70,25 @@ test("a placeholder, glob, URL, import specifier, home or absolute path and a gi
   assert.equal(r.code, 0, r.out);
 });
 
+test("a Files annotation, glob, home path or bare directory is never cited, while a real missing Files path still is", () => {
+  const annotation = "- Modify: `a.json` (drop `dispatch.toolCalls` from `required`;\n  keep `stage.path` and state.md alone)";
+  for (const entry of [annotation, "- Modify: tests/unit/*.mjs", "- Modify: `tests/*.test.mjs`", "- Modify: `~/.claude/projects/x/y.md`", "- Modify: skills/"]) {
+    const r = run(task(1, `**Files:**\n${entry}`), { files: { "a.json": "{}" } });
+    assert.equal(r.code, 0, `${entry}\n${r.out}`);
+  }
+  for (const missing of ["scripts/missing.mjs", "README-missing.md"]) {
+    const r = run(task(1, `**Files:**\n- Modify: \`${missing}\` (see \`dispatch.toolCalls\`)`));
+    assert.equal(r.code, 1, `${missing}\n${r.out}`);
+    assert.match(r.out, new RegExp(`Task 1: cites ${missing.replace(".", "\\.")} — not in the working tree`));
+    assert.doesNotMatch(r.out, /dispatch\.toolCalls/);
+  }
+});
+
+test("a Test-labelled new file stays created beside an annotated Files line", () => {
+  const files = "**Files:**\n- Modify: `a.json` (drop `dispatch.toolCalls`)\n- Test: `tests/unit/new.test.mjs`";
+  assert.equal(run(task(1, files), { files: { "a.json": "{}" } }).code, 0);
+});
+
 test("a prefixed plugin path resolves under the plugin root; a bare one only inside a grammar directory", () => {
   for (const prose of ["`${CLAUDE_PLUGIN_ROOT}/references/evidence.md`", '`"$(devcycle-root)/scripts/plan-check.mjs"`', "`references/evidence.md`"])
     assert.equal(run(task(1, prose)).code, 0, prose);

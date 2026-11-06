@@ -254,6 +254,11 @@ export function createdFiles(block) {
   return labelledFiles(block, "Create");
 }
 
+// The paths a task modifies: the ones that must already exist.
+export function modifiedFiles(block) {
+  return labelledFiles(block, "Modify");
+}
+
 // The paths a task tests. One that does not exist yet is a test file the task writes.
 export function testFiles(block) {
   return labelledFiles(block, "Test");

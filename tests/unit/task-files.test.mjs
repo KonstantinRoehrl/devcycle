@@ -15,6 +15,7 @@ import {
   verificationGateField,
   createdFiles,
   testFiles,
+  modifiedFiles,
   isTestPath,
   fencedBlocks,
   lineFences,
@@ -546,4 +547,8 @@ test("lineFences maps every line to the block holding it, fence lines included, 
 test("testFiles reads only the paths a Test label declares", () => {
   assert.deepEqual([...testFiles("- Create: `src/a.mjs`\n- Modify: `src/b.mjs`\n- Test: `tests/unit/a.test.mjs`")], ["tests/unit/a.test.mjs"]);
   assert.deepEqual([...testFiles("- Modify: `src/b.mjs`")], []);
+});
+
+test("modifiedFiles reads only the paths a Modify label declares, not an annotation behind one", () => {
+  assert.deepEqual([...modifiedFiles("- Create: `src/a.mjs`\n- Modify: `src/b.mjs` (drop `x.y` from the list)\n- Test: `tests/unit/a.test.mjs`")], ["src/b.mjs"]);
 });
