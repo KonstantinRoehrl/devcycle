@@ -2568,7 +2568,7 @@ function impactRows(summaries, vocab = [], band = [], dates = new Map()) {
   }
   return [...byKey.values()].map((agg) => {
     const slug = agreedSlug(agg.slugLists);
-    const entry = slug ? vocab.find((v) => v.slug === slug) : null;
+    const entry = vocabEntry(vocab, slug, agg.key);
     const cohorts = orderVersionProfileRows([...agg.cohorts.values()].map((c) => ({
       version: c.version, profile: c.profile,
       impact: c.measurable ? c.total : null,
@@ -3439,6 +3439,15 @@ function readVocab() {
   } catch { return []; }
 }
 
+// One lookup for a culprit's vocabulary entry, shared by the culprit table and issueBody so the two
+// cannot disagree: by slug, then by an entry whose `observes` lists the derived key.
+export function vocabEntry(vocab, slug, key = slug) {
+  const entries = vocab ?? [];
+  return entries.find((v) => v?.slug === slug)
+    ?? entries.find((v) => key != null && Array.isArray(v?.observes) && v.observes.includes(key))
+    ?? null;
+}
+
 function safePromotions() {
   try { return readPromotions(process.cwd()); } catch { return []; }
 }
@@ -3700,7 +3709,7 @@ export class StaleCulpritError extends Error {}
 // the culprit's cost are read from the tables the report rendered.
 export function issueBody(slug, summaries, tables, shape) {
   const vocab = readVocab();
-  const entry = vocab.find((v) => v.slug === slug) ?? null;
+  const entry = vocabEntry(vocab, slug);
   const named = sessionsNaming(slug, summaries ?? []);
   const row = cohortRowFor(named, tables?.versionProfile);
 
@@ -3731,10 +3740,15 @@ export function issueBody(slug, summaries, tables, shape) {
     .map((w) => `${w.win} ×${w.occurrences}`)
     .join(", ");
 
+  // A partially-stale culprit — seen inside the band but also before it — leads with a banner so the
+  // reader knows a newer release may have changed the picture; still seen on the installed version,
+  // it says so rather than "last seen X, installed X".
+  const staleBanner = !partiallyStale ? []
+    : maxVersion === installed
+      ? [`> ⚠ PARTLY STALE — first seen ${minVersion}, before the recency band; still seen on installed ${installed}, so older occurrences may describe behaviour a newer release changed`, ""]
+      : [`> ⚠ STALE — last seen ${maxVersion}, installed ${installed}`, ""];
   const L = [
-    // A partially-stale culprit — seen inside the band but also before it — leads with a banner so
-    // the reader knows the newest release may have already changed the picture.
-    ...(partiallyStale ? [`> ⚠ STALE — last seen ${maxVersion}, installed ${installed}`, ""] : []),
+    ...staleBanner,
     `Culprit: ${slug} (${culprit?.kind ?? entry?.kind ?? "unclassified"})`,
     // Unknown, never dropped: a session whose version or profile could not be extracted renders
     // under the literal `unknown` the cohort table gives it.

@@ -85,10 +85,16 @@ exit 2 or 3 a stop.
    task's steps; its `**Lessons:**` line, which `task-dispatch.mjs` fills with the matched lessons, and
    the `**Gate command:**` line it appends, neither sliced by hand; the global constraints and pinned
    interfaces that apply; the task's quality constraints
-   resolved; and one read, `"$(devcycle-root)/references/delegation.md"` § Read discipline.
+   resolved; the claim-marker sentence below; and one read,
+   `"$(devcycle-root)/references/delegation.md"` § Read discipline.
    Nothing else, and nothing restated that a named reference owns —
    `references/evidence.md` owns the evidence classes, the evidence file paths (keyed
    on the task id, which is why every brief carries it), and the report shape the implementer must produce.
+   One exception: the claim-marker sentence is restated, because the implementer needs it where it
+   writes the report and a brief does not preload `references/evidence.md`.
+   - **Carry the claim-marker sentence verbatim:** "Every `path.ext:line` reference and every count
+     in your report carries `(verified: <command>)` or `(assumption)` on the same line or an adjacent
+     one — that is what `authored-claims-check.mjs` flags."
    - **Resolve the quality constraints:** splice in verbatim, ids included, the lines of the plan's
      `## Quality Constraints` section that the task's `**Quality constraints:**` ids name — a bare `QC3`
      is unreadable to an implementer — **never the whole criteria catalog or the whole section**
@@ -100,6 +106,11 @@ exit 2 or 3 a stop.
      plugin root containing a space — never as a literal `${CLAUDE_PLUGIN_ROOT}` path, which is
      substituted at render time and expands to nothing in the implementer's shell. No check covers
      either: a sliced brief is run scratch, so both are yours to get right here.
+   - **Prescribe only what a guarded dispatch may run:** a deletion is plain `rm` and a rename plain
+     `mv`, with both paths under `**Files:**` — `scripts/task-commit.mjs` stages a deleted or
+     renamed-away Files path itself. Any other git write, `git rm --cached` included, is never a brief
+     command, and a brief never nests git in `$(…)` or backticks: `hooks/block-destructive-git.mjs`
+     denies an implementer all of them.
 3. **Dispatch devcycle:implementer** with that brief only, never accumulated session history or other
    tasks' reports, on the model `references/model-routing.md` resolves. The dispatch prompt must NEVER
    instruct the implementer to commit, stage, or push. Immediately before it, give the brief to

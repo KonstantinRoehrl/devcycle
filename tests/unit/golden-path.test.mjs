@@ -2369,8 +2369,9 @@ test("the process sensor is registered wherever a background task's id or end ap
   for (const tool of ["Agent", "Bash", "Monitor", "TaskStop"])
     assert.ok(matches(entryOf("PostToolUse")?.matcher ?? "^$", tool), `${PROCESS_SENSOR_SRC} must see ${tool} on PostToolUse`);
   // The loader and scripts/validate.mjs both pass an unknown event name, so this spelling is the check.
-  for (const event of ["Stop", "SubagentStop"])
-    assert.equal(entryOf(event)?.matcher, "*", `${PROCESS_SENSOR_SRC} must be registered on ${event}`);
+  assert.equal(entryOf("Stop")?.matcher, "*", `${PROCESS_SENSOR_SRC} must be registered on Stop`);
+  assert.equal(entryOf("SubagentStop"), undefined,
+    `${PROCESS_SENSOR_SRC} must leave SubagentStop to hooks/dispatch-sensor.mjs, which retires a subagent only on a stop it releases`);
 });
 
 test("DESIGN.md §10 no longer rejects the hooks that ship", () => {
@@ -2712,4 +2713,11 @@ test("/devcycle:continue routes every format outcome to the section that owns it
   assert.match(drive, /`cycle-format`/);
   assert.match(read("playbooks/finishing-the-cycle.md"), /format-backup-\*/);
   assert.match(read("references/config.md"), /`knob-renamed:`/);
+});
+
+test("the sliced brief and the implementer both carry the report's claim-marker sentence (#333)", () => {
+  const sentence = "Every `path.ext:line` reference and every count in your report carries `(verified: <command>)` or " +
+    "`(assumption)` on the same line or an adjacent one — that is what `authored-claims-check.mjs` flags.";
+  for (const file of ["playbooks/executing-waves.md", "agents/implementer.md"])
+    assert.ok(read(file).replace(/\s+/g, " ").includes(sentence), `${file} must carry the claim-marker sentence`);
 });

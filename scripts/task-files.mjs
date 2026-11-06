@@ -6,6 +6,15 @@ const LABELS = new Set(["Create", "Modify", "Test"]);
 // (narrow-selector detection) and blast-radius-check.mjs (which extends it with a few more).
 export const TEST_FILE_SUFFIXES = [".test.mjs", ".test.js", ".test.ts", "_test.py"];
 
+// Wider than TEST_FILE_SUFFIXES, whose readers stay as they are: a plan check that fails host-repo
+// plans must know a test file in any language, and anything under a test directory.
+const TEST_NAME_RE = /(?:\.(?:test|spec)\.[A-Za-z0-9]+|_test\.(?:go|py)|_spec\.rb)$/;
+const PY_TEST_PREFIX_RE = /(?:^|\/)test_[^/]*\.py$/;
+const TEST_DIR_RE = /(?:^|\/)(?:tests|test|__tests__|spec)\//i;
+const PY_CONFTEST_RE = /(?:^|\/)conftest\.py$/;
+export const isTestPath = (path) =>
+  TEST_NAME_RE.test(path) || PY_TEST_PREFIX_RE.test(path) || PY_CONFTEST_RE.test(path) || TEST_DIR_RE.test(path);
+
 // `trusted` skips the path-shape gate and the character denylist — used by the explicit --files CSV,
 // where the caller has already asserted every token is a file, so a top-level extensionless name
 // (Dockerfile, Makefile, LICENSE) must survive. The **Files:**-block path leaves it off, keeping the
@@ -139,7 +148,7 @@ function splitTokens(line) {
   return tokens;
 }
 
-const LABEL_TOKEN_RE = /^\**(?:Create|Modify|Test)\**:?\**$/;
+const LABEL_TOKEN_RE = /^\**(Create|Modify|Test)\**:?\**$/;
 const PARENTHETICAL_COLON_RE = /\)\**:\**$/;
 const isConjunction = (token) => token === "and" || token === "+";
 
@@ -155,9 +164,11 @@ function labelParentheticalEnd(tokens, from) {
   return -1;
 }
 
+const BULLET_RE = /^\s*-\s/;
+
 // A line the label's list may continue onto: bare paths only, no new bullet, no prose.
 function isPathOnlyLine(line, tokens) {
-  return tokens.length > 0 && !/^\s*-\s/.test(line) && tokens.every((token) =>
+  return tokens.length > 0 && !BULLET_RE.test(line) && tokens.every((token) =>
     isConjunction(token) || expandBraces(token).every((piece) => normalizeFileToken(piece, { declared: true })));
 }
 
@@ -166,22 +177,28 @@ function isPathOnlyLine(line, tokens) {
 // extends that over the path-only lines below it. After `and`/`+` a bare slash token (`bin/b`,
 // `skills/`) is still prose (`a.py and step/row`) unless the path before it was bare too -- a list
 // of one kind -- so only then does a `/` alone make it a path.
-export function extractFiles(block) {
-  const files = new Set();
+// A label reaches the lines its list continues onto -- the path-only lines below a label ending its
+// line, or a line after a trailing comma -- never the next bullet, so a `- Delete:` line after a
+// `- Create:` one declares nothing as created.
+function scanFiles(block, onFile) {
   let declared = false;
   let afterDeclaredPath = false;
   let afterConjunction = false;
   let precededByBarePath = false;
   let listOpen = false;
+  let label = null;
   for (const line of block.split("\n")) {
     const tokens = splitTokens(line);
     if (listOpen) {
       listOpen = isPathOnlyLine(line, tokens);
       declared = declared || listOpen;
     }
+    if (!declared || BULLET_RE.test(line)) label = null;
     for (let i = 0; i < tokens.length; i++) {
       const raw = tokens[i];
-      if (LABEL_TOKEN_RE.test(raw)) {
+      const labelMatch = raw.match(LABEL_TOKEN_RE);
+      if (labelMatch) {
+        label = labelMatch[1];
         declared = true;
         afterDeclaredPath = false;
         afterConjunction = false;
@@ -197,13 +214,15 @@ export function extractFiles(block) {
         afterConjunction = true;
         continue;
       }
+      // A token past the end of the declared list is prose, and so is everything after it on the line.
+      if (!declared) label = null;
       const slashAloneMakesPath = declared && !(afterConjunction && !precededByBarePath);
       let accepted = false;
       let allBare = true;
       for (const piece of expandBraces(raw)) {
         const tok = /\s/.test(piece) ? null : normalizeFileToken(piece, { declared: slashAloneMakesPath });
         if (tok) {
-          files.add(tok);
+          onFile(tok, label);
           accepted = true;
           allBare &&= !EXTENSION_RE.test(tok.slice(tok.lastIndexOf("/") + 1));
         }
@@ -214,7 +233,35 @@ export function extractFiles(block) {
       declared = declared && raw.endsWith(",");
     }
   }
+}
+
+export function extractFiles(block) {
+  const files = new Set();
+  scanFiles(block, (path) => files.add(path));
   return files;
+}
+
+function labelledFiles(block, wanted) {
+  const files = new Set();
+  scanFiles(block, (path, label) => {
+    if (label === wanted) files.add(path);
+  });
+  return files;
+}
+
+// The paths a task creates: the stub check needs them apart from what it modifies or tests.
+export function createdFiles(block) {
+  return labelledFiles(block, "Create");
+}
+
+// The paths a task modifies: the ones that must already exist.
+export function modifiedFiles(block) {
+  return labelledFiles(block, "Modify");
+}
+
+// The paths a task tests. One that does not exist yet is a test file the task writes.
+export function testFiles(block) {
+  return labelledFiles(block, "Test");
 }
 
 export function parseFileList(csv) {
@@ -258,12 +305,60 @@ export function fieldValue(block, field) {
   return m ? m[1].trim() : null;
 }
 
-export function taskBlocks(planText) {
+// A heading inside a code fence is example text (a task may carry a whole doc template), not a plan
+// section.
+export const FENCE_RE = /^\s*(`{3,}|~{3,})\s*([^\s`]*)/;
+const PLAN_HEADING_RE = /^#{1,2} /;
+
+// The one owner of fence pairing: a fence closes on the first later fence line of its character, at
+// least as long and with no info string; one never closed runs to the end of the text. `info` is
+// the opener's first info word, lowercased. Line indexes are 0-based.
+export function fencedBlocks(text) {
+  const blocks = [];
+  let open = null;
+  text.split("\n").forEach((line, i) => {
+    const marker = line.match(FENCE_RE);
+    if (!marker) return;
+    if (!open) open = { open: i, char: marker[1][0], length: marker[1].length, info: marker[2].toLowerCase() };
+    else if (marker[1][0] === open.char && marker[1].length >= open.length && !marker[2]) {
+      blocks.push({ open: open.open, close: i, info: open.info });
+      open = null;
+    }
+  });
+  if (open) blocks.push({ open: open.open, close: null, info: open.info });
+  return blocks;
+}
+
+// Per line of `text`, the fenced block holding it (its fence lines included), or null.
+export function lineFences(text) {
+  const owners = text.split("\n").map(() => null);
+  for (const block of fencedBlocks(text))
+    for (let i = block.open; i <= (block.close ?? owners.length - 1); i++) owners[i] = block;
+  return owners;
+}
+
+function planLevelEnd(text, from) {
+  const rest = text.slice(from);
+  const fences = lineFences(rest);
+  let offset = from;
+  for (const [i, line] of rest.split("\n").entries()) {
+    if (!fences[i] && i > 0 && PLAN_HEADING_RE.test(line)) return offset;
+    offset += line.length + 1;
+  }
+  return text.length;
+}
+
+// A block runs to the next task heading, and the last one to end of file, so the override lines a
+// plan keeps in a trailing "## Blast-radius overrides" section stay readable. `stopAtPlanSection`
+// ends it at the next plan-level heading (`# `, `## `) instead, for a reader of the task's own
+// brief that a trailing "## Self-review" must not feed.
+export function taskBlocks(planText, { stopAtPlanSection = false } = {}) {
   const headings = [...planText.matchAll(TASK_HEADING_RE)];
   const blocks = [];
   for (let i = 0; i < headings.length; i++) {
     const start = headings[i].index;
-    const end = i + 1 < headings.length ? headings[i + 1].index : planText.length;
+    const nextTask = i + 1 < headings.length ? headings[i + 1].index : planText.length;
+    const end = stopAtPlanSection ? Math.min(nextTask, planLevelEnd(planText, start)) : nextTask;
     blocks.push({ num: Number(headings[i][1]), text: planText.slice(start, end) });
   }
   return blocks;

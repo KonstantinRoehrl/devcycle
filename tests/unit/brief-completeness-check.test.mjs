@@ -2,14 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { taskFileMap } from "../../scripts/task-files.mjs";
+import { guardDenialNotes } from "../../scripts/brief-completeness-check.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/brief-completeness-check.mjs");
 
 // Runs from a scratch work tree, so the real repo's required-checks manifest never applies; `manifest`
-// writes one at that tree's root.
+// writes one at that tree's root. Both streams are kept on success too: notes go to stderr.
 function run(planText, { manifest } = {}) {
   const dir = realpathSync(makeTempDir("bcc-"));
   const plan = join(dir, "plan.md");
@@ -18,12 +19,8 @@ function run(planText, { manifest } = {}) {
     mkdirSync(join(dir, "tests/fixtures"), { recursive: true });
     writeFileSync(join(dir, "tests/fixtures/required-gate-checks.json"), manifest);
   }
-  try {
-    const stdout = execFileSync("node", [SCRIPT, plan], { encoding: "utf8", cwd: dir });
-    return { code: 0, out: stdout };
-  } catch (e) {
-    return { code: e.status, out: `${e.stdout || ""}${e.stderr || ""}` };
-  }
+  const r = spawnSync("node", [SCRIPT, plan], { encoding: "utf8", cwd: dir });
+  return { code: r.status, out: `${r.stdout}${r.stderr}` };
 }
 
 const COMPLETE = `# Plan
@@ -37,6 +34,7 @@ const COMPLETE = `# Plan
 **Evidence:** red-green
 **Quality constraints:** none
 **Lessons:**
+- [ ] Write a minimal stub for \`a.mjs\`
 - [ ] step
 ## Dispatch Map
 - Wave 1: Task 1 (no deps)
@@ -295,4 +293,147 @@ test("a manifest that is not a JSON array of strings fails naming the file, not 
     assert.match(r.out, /required-gate-checks\.json: (invalid JSON|must be a JSON array of command substrings)/, manifest);
     assert.doesNotMatch(r.out, /^\s+at /m);
   }
+});
+
+// --- #276: steps that prescribe a git command the dispatch guard denies, reported as notes ---
+
+const withStep = (step) => COMPLETE.replace("- [ ] step", `- [ ] ${step}`);
+const notesIn = (out) => out.split("\n").filter((line) => line.startsWith("brief-completeness-check: note: "));
+
+test("a step prescribing a git deletion passes with a note naming the task, the command and the guard's reason", () => {
+  const r = run(withStep("Run `git rm src/x.mjs`"));
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /^brief-completeness-check: note: Task 1: prescribes `git rm src\/x\.mjs`, which the dispatch guard denies an implementer — .*\(rm\)\./m);
+});
+
+test("git inside a substitution or backticks, git archive and git worktree each get one note", () => {
+  for (const [step, reason] of [
+    ["Read `$(git rev-parse --show-toplevel)/x`", /command substitution/],
+    ["Read ``echo `git rev-parse HEAD` ``", /command substitution/],
+    ["Run `git archive HEAD`", /\(archive\)/],
+    ["Run `git worktree add ../wt`", /\(worktree\)/],
+  ]) {
+    const r = run(withStep(step));
+    assert.equal(r.code, 0, `${step}\n${r.out}`);
+    assert.equal(notesIn(r.out).length, 1, `${step}\n${r.out}`);
+    assert.match(notesIn(r.out)[0], reason, step);
+  }
+});
+
+test("a line of a shell fence is a prescribed command; a line of a JS fence is not", () => {
+  const shell = run(withStep("delete it:\n```bash\ngit rm a.mjs\n```"));
+  assert.equal(shell.code, 0, shell.out);
+  assert.equal(notesIn(shell.out).length, 1, shell.out);
+  assert.match(notesIn(shell.out)[0], /`git rm a\.mjs`/);
+  const js = run(withStep('write the test:\n```js\nexecFileSync("git", ["commit", "-m", "x"]);\n// git commit -m x\n```'));
+  assert.equal(js.code, 0, js.out);
+  assert.deepEqual(notesIn(js.out), [], js.out);
+});
+
+test("an allowed git command, a repeated one and the task's own convention command add no extra note", () => {
+  const allowed = run(withStep("Run `git status --short`"));
+  assert.deepEqual(notesIn(allowed.out), [], allowed.out);
+  const twice = run(withStep("Run `git rm a.mjs`, then again `git rm a.mjs`"));
+  assert.equal(notesIn(twice.out).length, 1, twice.out);
+  const convention = run(COMPLETE.replace("**Evidence:** red-green", "**Evidence:** convention (`cat $(git rev-parse --show-toplevel)/x`)"));
+  assert.equal(convention.code, 0, convention.out);
+  assert.deepEqual(notesIn(convention.out), [], convention.out);
+});
+
+test("a plan that prescribes no git command prints no note", () => {
+  const r = run(COMPLETE);
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(notesIn(r.out), []);
+});
+
+test("a guard hook that cannot answer yields a could-not-classify note, never a finding or a throw", () => {
+  const dir = realpathSync(makeTempDir("bcc-hook-"));
+  const blocks = [{ num: 3, text: "### Task 3: X\n- [ ] Run `git rm a.mjs`\n" }];
+  const garbled = join(dir, "garbled-hook.mjs");
+  writeFileSync(garbled, 'process.stdout.write("not json");\n');
+  const [garbledNote, ...rest] = guardDenialNotes(blocks, { repoRoot: dir, hookPath: garbled });
+  assert.deepEqual(rest, []);
+  assert.match(garbledNote, /^Task 3: the guard leg could not classify `git rm a\.mjs` \(unparsable hook output: not json\)/);
+  const failing = join(dir, "failing-hook.mjs");
+  writeFileSync(failing, "process.exit(2);\n");
+  assert.match(guardDenialNotes(blocks, { repoRoot: dir, hookPath: failing })[0], /could not classify `git rm a\.mjs` \(exit 2/);
+});
+
+// --- #321: a red-green task that creates its module under test writes a stub first ---
+
+const NO_STUB = COMPLETE.replace("- [ ] Write a minimal stub for `a.mjs`\n", "");
+
+test("fails a red-green task that creates a source file and never writes a stub, naming the task and the file", () => {
+  const r = run(NO_STUB);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /Task 1: \*\*Evidence:\*\* red-green creates a\.mjs but no step writes a stub for it — .*references\/evidence\.md § The three evidence classes/);
+});
+
+test("passes the same task once any step outside Files mentions the stub", () => {
+  assert.equal(run(COMPLETE).code, 0);
+  const r = run(NO_STUB.replace("- [ ] step", "- [ ] Stub `a.mjs` with a function that returns null"));
+  assert.equal(r.code, 0, r.out);
+});
+
+test("a stub named only inside the Files field does not count", () => {
+  const r = run(NO_STUB.replace("- Create: `a.mjs`", "- Create: `a.mjs` (stub first)"));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /Task 1: .*creates a\.mjs/);
+});
+
+test("creating only test files, a doc or a fixture never needs a stub", () => {
+  for (const files of ["- Create: `a.test.mjs`", "- Create: `src/a.spec.ts`", "- Create: `tests/helper.mjs`", "- Create: `docs/a.md`", "- Create: `tests/fixtures/a.json`"]) {
+    const r = run(NO_STUB.replace("- Create: `a.mjs`", files));
+    assert.equal(r.code, 0, `${files}\n${r.out}`);
+  }
+});
+
+test("green-green and convention tasks creating a source file never need a stub", () => {
+  for (const evidence of ["green-green (behavior-preserving)", "convention (`npm test`)"]) {
+    const r = run(NO_STUB.replace("**Evidence:** red-green", `**Evidence:** ${evidence}`));
+    assert.equal(r.code, 0, `${evidence}\n${r.out}`);
+  }
+});
+
+test("a path under Modify, or on a Delete line, is never read as created", () => {
+  const r = run(NO_STUB.replace("- Create: `a.mjs`", "- Modify: `a.mjs`\n- Delete: `old.mjs`"));
+  assert.equal(r.code, 0, r.out);
+});
+
+// --- branch-review round 1: the stub and guard legs read only the task's own brief ---
+
+test("a stub named in a section after the last task does not silence the stub leg", () => {
+  const r = run(NO_STUB + "\n## Self-review\n- stub coverage checked for every task\n");
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /Task 1: .*creates a\.mjs/);
+});
+
+test("a git command in a section after the last task is not blamed on that task", () => {
+  const r = run(COMPLETE + "\n## Self-review\n- cleanup: `git rm old.mjs`\n");
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(notesIn(r.out), [], r.out);
+});
+
+test("a path in the trailing prose of a Create line is not a created source file", () => {
+  for (const files of ["- Create: `docs/a.md` (documents `scripts/x.mjs`)", "- Create: `docs/a.md`, wired into `scripts/x.mjs`"]) {
+    const r = run(NO_STUB.replace("- Create: `a.mjs`", files));
+    assert.equal(r.code, 0, `${files}\n${r.out}`);
+  }
+});
+
+test("a SwiftPM Tests/ file, a conftest.py and a .d.ts declaration file never need a stub", () => {
+  for (const file of ["Tests/AppTests/AppTests.swift", "conftest.py", "types/index.d.ts", "types/a.d.mts", "types/b.d.cts"]) {
+    const r = run(NO_STUB.replace("`a.mjs`", `\`${file}\``));
+    assert.equal(r.code, 0, `${file}\n${r.out}`);
+  }
+  assert.equal(run(NO_STUB.replace("`a.mjs`", "`src/index.ts`")).code, 1);
+});
+
+test("a convention command is skipped on the Evidence line only; a step that types it is still scanned", () => {
+  const convention = "**Evidence:** convention (`cat $(git rev-parse --show-toplevel)/x`)";
+  const plan = COMPLETE.replace("**Evidence:** red-green", convention);
+  assert.deepEqual(notesIn(run(plan).out), []);
+  const typed = run(plan.replace("- [ ] step", "- [ ] Run `cat $(git rev-parse --show-toplevel)/x` by hand"));
+  assert.equal(notesIn(typed.out).length, 1, typed.out);
+  assert.match(notesIn(typed.out)[0], /command substitution/);
 });

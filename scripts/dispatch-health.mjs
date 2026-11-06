@@ -4,7 +4,8 @@
 // findings file. This module is the one writer of the `dispatch-ended` ledger event and the owner
 // of its cap (references/resume.md § Resuming a wave's per-task position, **Retry caps**). Run as a CLI
 // by the coordinator (`playbooks/executing-waves.md` § Per-task cycle), and as a library by the
-// driver's watchdog, the drive band's progress builder and the SubagentStop sensor.
+// driver's watchdog, the drive band's progress builder and the SubagentStop sensor, which also asks it
+// whether to hold an implementer's early stop (`holdStop`, at most HOLD_CAP per dispatch record, counted in its `holds` / `heldAt`).
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWrite } from "./atomic-write.mjs";
@@ -137,7 +138,7 @@ export function readTranscript(file) {
     return true;
   });
   const mtimeMs = statSync(file).mtimeMs;
-  if (!first) return { firstStamp: null, prompt: "", toolUses: 0, lastTool: null, terminal: false, pendingSince: null, mtimeMs };
+  if (!first) return { firstStamp: null, prompt: "", toolUses: 0, lastTool: null, terminal: false, pendingSince: null, mtimeMs, lastStamp: null };
   const blocks = Array.isArray(last.message?.content) ? last.message.content : [];
   const callsTool = blocks.some((b) => b?.type === "tool_use");
   const terminal = last.toolEndsTurn === true
@@ -146,6 +147,7 @@ export function readTranscript(file) {
   return {
     firstStamp: Date.parse(first.timestamp) || null, prompt: textOf(first.message?.content), toolUses, lastTool, terminal,
     pendingSince: last.type === "assistant" && callsTool ? Date.parse(last.timestamp) || null : null, mtimeMs,
+    lastStamp: Date.parse(last.timestamp) || null,
   };
 }
 
@@ -259,7 +261,8 @@ export function inFlight({ root, ledgerPath = join(root, LEDGER_REL), sessionId,
       }).length;
       return { ...base, state: "unbound", toolUses: 0, sinceActivityMs: null, lastTool: null, liveUnknown, outputPresent: outputPresent(root, rec) };
     }
-    const state = transcriptState(t, { now, ended: Boolean(rec.record.endedAt) || metaFinished(agent.file) });
+    const ended = Boolean(rec.record.endedAt) || metaFinished(agent.file);
+    const state = !ended && heldInGrace(rec.record, t, now) ? "running" : transcriptState(t, { now, ended });
     return {
       ...base, toolUses: t.toolUses, sinceActivityMs: now - t.mtimeMs, lastTool: t.lastTool,
       state: state !== "ended" ? state : outputPresent(root, rec) ? "ended-with-output" : "ended-without-output",
@@ -367,6 +370,55 @@ export function markStopped({ root, sessionId, agentId, transcriptPath = null, e
   if (!hit) return false;
   stampEnd(root, hit, agentId, now, { stopped: new Date(now).toISOString() });
   return true;
+}
+
+export const HOLD_CAP = 3;
+export const HOLD_GRACE_MS = Number(process.env.DEVCYCLE_DISPATCH_HOLD_GRACE_MS) || 60_000;
+const CAPTURE_PHASE = /capture-evidence\.mjs\b.*--phase[= ](before|after|red)\b/;
+// A capture another task is running is not this task's to await.
+const CAPTURE_TASK = /capture-evidence\.mjs\b.*--task[= ]["']?([^\s"']+)/;
+
+// A hold the hook wrote after the transcript's last record covers the sub-second window before
+// Claude Code appends its feedback; past the grace the transcript decides, so a hold the platform
+// ignored never reads as running for ever.
+function heldInGrace(record, t, now) {
+  const heldMs = Date.parse(record?.heldAt);
+  return Number.isFinite(heldMs) && t.lastStamp !== null && heldMs >= t.lastStamp && now - heldMs < HOLD_GRACE_MS;
+}
+
+export function holdReason({ task, holds, backgroundTasks = [] }) {
+  const capture = backgroundTasks.find((b) => b?.status === "running" && typeof b.command === "string" && CAPTURE_PHASE.test(b.command)
+    && b.command.match(CAPTURE_TASK)?.[1] === task);
+  const head = `devcycle: task ${task}'s implementer stopped before writing ${owedPath(task, "implementer")} (hold ${holds} of ${HOLD_CAP}).`;
+  if (!capture) return `${head} Finish the task and write the report, or write a report whose status says why you cannot.`;
+  const phase = capture.command.match(CAPTURE_PHASE)[1];
+  return `${head} Its ${phase} capture is still running: wait for it in the foreground with ` +
+    `\`node "$(devcycle-root)/scripts/capture-evidence.mjs" --await --task ${task} --phase ${phase}\`, ` +
+    "rerun while it says still running, then finish the task and write the report.";
+}
+
+// The SubagentStop sensor's hold: an implementer stopping before its owed report is told to carry on,
+// at most HOLD_CAP times per dispatch record. The count lives on the record, so the bound survives
+// stop_hook_active staying true after the first block; setting agentId makes bindRecord's rewrite a no-op.
+export function holdStop({ root, sessionId, transcriptPath, agentId = null, backgroundTasks = [], stopWindow = false, now = Date.now() }) {
+  if (stopWindow) return { hold: false };
+  const hit = recordOfTranscript(root, sessionId, transcriptPath);
+  if (!hit || hit.rec.role !== "implementer" || outputPresent(root, hit.rec)) return { hold: false };
+  const holds = (Number.isInteger(hit.rec.record.holds) ? hit.rec.record.holds : 0) + 1;
+  if (holds > HOLD_CAP) return { hold: false };
+  atomicWrite(hit.path, JSON.stringify({
+    ...hit.rec.record, agentId: hit.rec.record.agentId ?? agentId, holds, heldAt: new Date(now).toISOString(),
+  }) + "\n");
+  return { hold: true, holds, reason: holdReason({ task: hit.rec.task, holds, backgroundTasks }) };
+}
+
+export function currentDispatchStartMs(root, task) {
+  const dir = join(root, ".devcycle/dispatch");
+  const starts = dispatchFiles(dir)
+    .filter((f) => { const m = f.match(DISPATCH_FILE); return m && m[1] === task && m[2] === "implementer"; })
+    .map((f) => Date.parse(readJson(join(dir, f))?.startedAt))
+    .filter(Number.isFinite);
+  return starts.length ? Math.max(...starts) : null;
 }
 
 const FLAGS = { "--record": "none", "--stopped": "value", "--json": "none", "--ledger": "value" };

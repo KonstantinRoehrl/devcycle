@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
 import { repoSlug, gitToplevel, hashSession } from "../../scripts/run-record.mjs";
+import { readProcesses, recordProcess } from "../../scripts/process-registry.mjs";
 
 const HOOK = new URL("../../hooks/dispatch-sensor.mjs", import.meta.url).pathname;
 const SCHEMA = JSON.parse(readFileSync(new URL("../fixtures/run-record.schema.json", import.meta.url), "utf8"));
@@ -150,7 +151,7 @@ test("importing the hook exposes depthOf without reading stdin or exiting the im
 
 test("a stopped dispatch's record is marked ended with whether its owed output exists", () => {
   const fx = fixture({ stage: "execution" });
-  writeInto(fx.repo, ".devcycle/dispatch/5-implementer-0-0.json", JSON.stringify({ startedAt: "2026-10-07T07:18:00Z", sessionId: SESSION }) + "\n");
+  writeInto(fx.repo, ".devcycle/dispatch/5-implementer-0-0.json", JSON.stringify({ startedAt: "2026-10-07T07:18:00Z", sessionId: SESSION, holds: 3 }) + "\n");
   writeFileSync(fx.transcript, [
     { type: "user", timestamp: "2026-10-07T07:18:05.680Z", message: { content: "Your brief is at .devcycle/briefs/5-implementer.md" } },
     { type: "assistant", timestamp: "2026-10-07T07:18:12.261Z", message: { model: "claude-haiku-4-5-20251001", usage: usage(100, 0, 0, 5), content: [{ type: "text", text: "done" }], stop_reason: "end_turn" } },
@@ -169,6 +170,7 @@ function endedDispatch(fx) {
     { type: "user", timestamp: "2026-10-07T07:18:05.680Z", message: { content: "Your brief is at .devcycle/briefs/5-implementer.md" } },
     { type: "assistant", timestamp: "2026-10-07T07:18:12.261Z", message: { model: "claude-haiku-4-5-20251001", usage: usage(100, 0, 0, 5), content: [{ type: "text", text: "done" }], stop_reason: "end_turn" } },
   ].map((r) => JSON.stringify(r)).join("\n") + "\n");
+  writeInto(fx.repo, ".devcycle/reports/5.md", "## Task report\n");
   assert.equal(callHook(fx).status, 0);
   return JSON.parse(readFileSync(join(fx.repo, ".devcycle/dispatch/5-implementer-0-0.json"), "utf8"));
 }
@@ -192,4 +194,99 @@ test("a broken dispatch record never stops the depth row", () => {
   writeInto(fx.repo, ".devcycle/dispatch/5-implementer-0-0.json", "{not json");
   assert.equal(callHook(fx).status, 0);
   assert.equal(rows(fx.repo, fx.runsDir).filter((r) => r.kind === "agent-depth").length, 1);
+});
+
+const IMPLEMENTER_STOP = [
+  { type: "user", timestamp: "2026-10-07T07:18:05.680Z", message: { content: "Your brief is at .devcycle/briefs/5-implementer.md" } },
+  { type: "assistant", timestamp: "2026-10-07T07:18:12.261Z", message: { model: "claude-haiku-4-5-20251001", usage: usage(100, 0, 0, 5), content: [{ type: "text", text: "waiting for the capture" }], stop_reason: "end_turn" } },
+].map((r) => JSON.stringify(r)).join("\n") + "\n";
+function implementerFixture() {
+  const fx = fixture({ stage: "execution" });
+  writeInto(fx.repo, ".devcycle/dispatch/5-implementer-0-0.json", JSON.stringify({ startedAt: "2026-10-07T07:18:00Z", sessionId: SESSION }) + "\n");
+  writeFileSync(fx.transcript, IMPLEMENTER_STOP);
+  return fx;
+}
+const recordOf = (fx) => JSON.parse(readFileSync(join(fx.repo, ".devcycle/dispatch/5-implementer-0-0.json"), "utf8"));
+
+test("an implementer that stops before its report is held three times, then released and recorded", () => {
+  const fx = implementerFixture();
+  for (let n = 1; n <= 3; n += 1) {
+    const r = callHook(fx);
+    assert.equal(r.status, 0);
+    const out = JSON.parse(r.stdout);
+    assert.equal(out.decision, "block");
+    assert.match(out.reason, new RegExp(`hold ${n} of 3`));
+    assert.equal(recordOf(fx).endedAt, undefined, `hold ${n} marks nothing ended`);
+    assert.deepEqual(rows(fx.repo, fx.runsDir), [], `hold ${n} writes no run-record row`);
+  }
+  const released = callHook(fx);
+  assert.equal(released.stdout, "");
+  assert.match(recordOf(fx).endedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(rows(fx.repo, fx.runsDir).filter((o) => o.kind === "agent-depth").length, 1);
+});
+
+test("a running background capture in the stop's input puts its await command in the hold reason", () => {
+  const fx = implementerFixture();
+  const r = callHook(fx, { background_tasks: [{ id: "b1", type: "shell", status: "running", description: "capture", command: 'node "/p/scripts/capture-evidence.mjs" --task 5 --phase before' }] });
+  assert.match(JSON.parse(r.stdout).reason, /--await --task 5 --phase before/);
+});
+
+test("inside a stop window nothing is held: the stop is stamped stopped", () => {
+  const fx = implementerFixture();
+  writeInto(fx.repo, ".devcycle/stop-request", JSON.stringify({ requestedAt: new Date().toISOString(), sessions: [] }));
+  const r = callHook(fx);
+  assert.equal(r.stdout, "");
+  assert.match(recordOf(fx).stopped ?? "", /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("a held subagent stays open in the process registry; the stop that releases it retires it", () => {
+  const fx = implementerFixture();
+  const dir = join(fx.repo, ".devcycle");
+  recordProcess(dir, { id: "a3382414bf84c15db", kind: "subagent", session: hashSession(SESSION), run: RUN, stage: "execution", startedAt: "2026-10-07T07:18:00Z" });
+  const entry = () => readProcesses(dir).find((e) => e.id === "a3382414bf84c15db");
+  callHook(fx);
+  assert.equal(entry().endedAt, undefined, "/devcycle:stop must still list a held implementer");
+  writeInto(fx.repo, ".devcycle/reports/5.md", "## Task report\n");
+  assert.equal(callHook(fx).stdout, "");
+  assert.equal(entry().endedBy, "finished");
+});
+
+test("a stop with a fresh report is released and the dispatch is marked ended", () => {
+  const fx = implementerFixture();
+  writeInto(fx.repo, ".devcycle/reports/5.md", "## Task report\n");
+  const r = callHook(fx);
+  assert.equal(r.stdout, "");
+  assert.equal(recordOf(fx).holds, undefined);
+  assert.match(recordOf(fx).endedAt, /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(recordOf(fx).outputPresent, true);
+});
+
+test("a reviewer stopping without its findings file is never held", () => {
+  const fx = fixture({ stage: "execution" });
+  writeInto(fx.repo, ".devcycle/dispatch/5-reviewer-1-0.json", JSON.stringify({ startedAt: "2026-10-07T07:18:00Z", sessionId: SESSION }) + "\n");
+  writeFileSync(fx.transcript, IMPLEMENTER_STOP.replace("5-implementer.md", "5-reviewer-round-1.md"));
+  const r = callHook(fx);
+  assert.equal(r.stdout, "");
+  const record = JSON.parse(readFileSync(join(fx.repo, ".devcycle/dispatch/5-reviewer-1-0.json"), "utf8"));
+  assert.equal(record.holds, undefined);
+  assert.match(record.endedAt, /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test("a report older than the dispatch does not release the stop: it is still held", () => {
+  const fx = implementerFixture();
+  writeInto(fx.repo, ".devcycle/reports/5.md", "## Task report\n");
+  const before = new Date(Date.parse("2026-10-07T07:18:00Z") - 60_000);
+  utimesSync(join(fx.repo, ".devcycle/reports/5.md"), before, before);
+  const r = callHook(fx);
+  assert.equal(JSON.parse(r.stdout).decision, "block");
+  assert.equal(recordOf(fx).endedAt, undefined);
+});
+
+test("a stop input with no transcript path still retires the subagent from the process registry", () => {
+  const fx = implementerFixture();
+  const dir = join(fx.repo, ".devcycle");
+  recordProcess(dir, { id: "a3382414bf84c15db", kind: "subagent", session: hashSession(SESSION), run: RUN, stage: "execution", startedAt: "2026-10-07T07:18:00Z" });
+  const r = callHook(fx, { agent_transcript_path: undefined });
+  assert.equal(r.stdout, "");
+  assert.equal(readProcesses(dir).find((e) => e.id === "a3382414bf84c15db").endedBy, "finished");
 });

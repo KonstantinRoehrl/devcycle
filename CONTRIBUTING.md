@@ -213,6 +213,14 @@ malformed title fails CI; one that slipped through would ship no release. Eviden
 behavior changes goes in the PR description; the structural checks above are the only
 merge gate.
 
+**Closing issues.** Write `Closes #n` (or `Fixes`/`Resolves`) in the PR body for each issue the PR fully
+fixes, and `Refs #n` for one it only advances. GitHub acts on a closing keyword only once it reaches
+`main`, so a feature PR into `dev` closes nothing on its own; `Prepare release` collects the keywords from
+the PRs in the release and writes them into the release PR's body, and the issues close when that PR is
+merged. A keyword inside a code span is ignored, so a PR can explain the syntax without using it.
+CI enforces the convention: a PR into `dev` fails `PR body names an issue or says there is none` unless its body has a
+closing keyword, a `Refs #n`, or a line reading `No issue`.
+
 `.github/workflows/canary.yml` runs `claude plugin validate`, the hooks tests, a real install and the golden-path suite against the latest Claude Code once a day, and reports a suspected break to one rolling issue labelled `canary`. It is not a required check. A manual run on a branch never touches the issue, and the schedule runs only from `main`, so a change to it takes effect after the next release.
 
 ## What belongs in `docs/`
@@ -255,7 +263,7 @@ a hand-written `## Unreleased` lands outside it, where the release notes stop sh
 stray heading stays in the file for good. Do not hand-write the version's subject bullet either;
 the release takes that from the PR title. `docs/decisions/README.md` records why.
 
-Prepare commits `chore(release): prepare vX.Y.Z` to `dev` and opens the `main` ← `dev` PR.
+Prepare commits `chore(release): prepare vX.Y.Z` to `dev` and opens the `main` ← `dev` PR. Its body lists `Closes #n` for every issue the release's PRs named (see § Closing issues), refreshed whenever the workflow is re-run while the PR is open.
 Squash-merge it **with that same title** once checks pass. `Release` then tags
 `devcycle--vX.Y.Z` and publishes the GitHub release from that version's CHANGELOG section.
 After every release, `main` has to be merged back into `dev`. The `Back-merge` workflow does this

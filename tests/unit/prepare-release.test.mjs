@@ -165,3 +165,30 @@ test("prepare-release: the bump commit stages the config changelog at its docs/c
     "the release commit does not stage docs/configuration/config-changelog.md — a stamped `unreleased` marker would be left uncommitted");
   assert.doesNotMatch(yaml, /references\/config-changelog\.md/, "the workflow still names the old path");
 });
+
+test("prepare-release: the release PR body carries the closing keywords gathered from the PRs in the release", () => {
+  const yaml = read(".github/workflows/prepare-release.yml");
+  const prJob = parseJobs(yaml)["open-pr"].join("\n");
+  assert.match(
+    prJob,
+    /node scripts\/release-closing-refs\.mjs --version "\$V"/,
+    "the open-pr job does not run scripts/release-closing-refs.mjs for the release version"
+  );
+  const collectIdx = prJob.indexOf("- name: Collect the issues this release closes");
+  const openIdx = prJob.indexOf("- name: Open the release PR");
+  assert.ok(collectIdx !== -1 && collectIdx < openIdx, "the closing issues are not collected before the PR is opened");
+  assert.match(prJob, /CLOSES: \$\{\{ steps\.closes\.outputs\.lines \}\}/, "the PR step does not read the collected lines");
+  assert.match(prJob, /--body "\$BODY"/, "the PR is not created from the body that holds the closing keywords");
+});
+
+test("prepare-release: an already-open release PR has its body refreshed, not left stale", () => {
+  const yaml = read(".github/workflows/prepare-release.yml");
+  assert.match(yaml, /gh pr edit "\$OPEN" --body "\$BODY"/, "an open release PR keeps the closing list from its first run");
+});
+
+test("prepare-release: the closing-issue walk checks out dev's full history at the prepared commit", () => {
+  const yaml = read(".github/workflows/prepare-release.yml");
+  const prJob = parseJobs(yaml)["open-pr"].join("\n");
+  assert.match(prJob, /ref: \$\{\{ needs\.prepare\.outputs\.sha \}\}/, "open-pr does not check out the commit prepare left dev at");
+  assert.match(prJob, /fetch-depth: 0/, "a shallow checkout cannot walk back to the previous release's prepare commit");
+});

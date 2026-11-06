@@ -116,10 +116,10 @@ devcycle/                (public GitHub repo)
 │   └── on-device-driver.md       # drives claude-in-chrome for the on-device stage; the only
 │                                 # origin the browser guard below permits
 ├── hooks/                        # L4 — the hooks that ship (docs/decisions/README.md, 2026-08-20, 2026-09-02, 2026-09-05, 2026-10-07, 2026-10-30)
-│   ├── hooks.json                # registers the guards on PreToolUse (browser, destructive-git, and stop-guard on every tool), the commit-sensor, process-sensor and leftover-sensor on PostToolUse, the depth-sensor and process-sensor on SubagentStop, process-sensor on Stop, and the hooks module under modules
+│   ├── hooks.json                # registers the guards on PreToolUse (browser, destructive-git, and stop-guard on every tool), the commit-sensor, process-sensor and leftover-sensor on PostToolUse, the depth-sensor on SubagentStop, process-sensor on Stop, and the hooks module under modules
 │   ├── block-main-thread-browser.mjs  # denies browser calls from any origin but on-device-driver
 │   ├── stop-guard.mjs                 # while a /devcycle:stop request stands, denies a listed session's tool calls but the ones that finish the stop
-│   ├── process-sensor.mjs             # PostToolUse/SubagentStop/Stop: keeps .devcycle/processes.jsonl, the registry of background work /devcycle:stop reads
+│   ├── process-sensor.mjs             # PostToolUse/Stop: keeps .devcycle/processes.jsonl, the registry of background work /devcycle:stop reads
 │   ├── leftover-sensor.mjs            # PostToolUse(Bash): reports process groups that look leaked to a joined main thread; kills nothing (#395)
 │   ├── block-destructive-git.mjs      # denies destructive git from a guarded dispatch, and git stash on the main thread mid-cycle (#165, #235); also denies a guarded dispatch an until/while loop that sleeps; also denies a live $(jobs -p) (#395)
 │   ├── lib/find-state-file.mjs        # the bounded .devcycle/state.md walk the git guard and both sensors key off
@@ -127,7 +127,7 @@ devcycle/                (public GitHub repo)
 │   ├── lib/run-scope.mjs              # which state file names an active run — node-free, shared by the depth-sensor and the hooks module
 │   ├── lib/run-context.mjs            # state file → active run → joined session, for the depth-sensor and the module's sink
 │   ├── workload-sensor.mjs       # PostToolUse(Bash) commit-sensor: re-derives the run's workload record (#139)
-│   ├── dispatch-sensor.mjs       # SubagentStop depth-sensor: one agent-depth record per finished subagent; also marks the stopped agent's dispatch record ended
+│   ├── dispatch-sensor.mjs       # SubagentStop depth-sensor: one agent-depth record per finished subagent; holds an implementer that stops before its report; on a released stop marks its dispatch record ended and retires it in the process registry
 │   ├── devcycle-mod.mjs          # the hooks module (in-process, no Node): agent-trace observer, subagentBudget limiter, stage meter, handoff notification relay, drive band
 │   └── mod-sink.mjs              # the module's Node side: the joined check and agent-trace writes
 ├── references/                   # L3 — one owner per convention; enumerated in §15.1

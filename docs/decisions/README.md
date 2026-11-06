@@ -5,6 +5,80 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-05 — Plan-check's briefFacts leg: cited paths resolve and pinned blocks say whether they ran (#334, #314)
+
+**Decision:** plan-check gains an eighth leg, `briefFacts` (`scripts/brief-facts-check.mjs`). A path a plan cites — a task's Modify path, or a code span that is a whole relative path — must exist in the working tree, under the plugin root for a plugin citation, through a task that creates it (a `Test:` path counts as created, since a new test file is listed there), or as a gitignored path; a cited line must be within its file; and every fenced block pinned in a task's brief, `text` and `markdown` aside, carries `(verified: <cmd>)` or `(unrun: <reason>)` on the nearest non-blank line above it. A `- Citation override:` line clears a path finding with a reason. A call-shaped span nothing defines is a note. `references/evidence.md` § Authored claims owns the new `(unrun:)` form, and self-review item 7 asks the author to run or prototype what a brief pins.
+
+**Why:** a brief that cites a missing path or line, or pins code nobody ran, makes every faithful implementer deviate and the reviewer judge the brief against the deviation. The gate checks the author's marker and never runs plan text itself.
+
+**Supersedes:** plan-check's seven legs.
+
+```text
+budget: surface-budget.json surfaceTotal 6803
+budget: context-budget.json playbooks/executing-waves.md 116646
+budget: context-budget.json playbooks/planning-waves.md 81825
+budget: context-budget.json playbooks/profiling-sessions.md 43208
+budget: context-budget.json playbooks/receiving-review.md 120349
+budget: context-budget.json playbooks/reviewing-code.md 97353
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 93527
+budget: context-budget.json playbooks/writing-the-findings-document.md 66039
+budget: context-budget.json references/evidence.md 14642
+```
+
+## 2026-11-05 — The claim-marker sentence travels in every brief (#333)
+
+**Decision:** every sliced implementer brief, and `agents/implementer.md` itself, carries one sentence of the authored-claims marker grammar: every `path.ext:line` reference and every count in the report carries `(verified: <command>)` or `(assumption)` on the same or an adjacent line. It is the one restatement `playbooks/executing-waves.md` step 2 allows of a rule `references/evidence.md` owns.
+
+**Why:** intake's `authored-claims-check.mjs` kept bouncing reports for unmarked line references and counts. The implementer reads `references/evidence.md` up front, but the grammar was absent where the report is written, and a brief does not preload it.
+
+**Supersedes:** step 2's "nothing restated that a named reference owns" as an exceptionless rule.
+
+```text
+budget: surface-budget.json surfaceTotal 6795
+budget: context-budget.json playbooks/executing-waves.md 116199
+```
+
+## 2026-11-05 — An implementer that stops before its report is held (#404)
+
+**Decision:** `hooks/dispatch-sensor.mjs`, now the one `SubagentStop` handler, answers `decision: block` when an implementer dispatch stops while its owed report is missing, at most 3 times per dispatch record and never inside a `/devcycle:stop` window. `scripts/dispatch-health.mjs` owns the predicate and the cap, and the count lives on the dispatch record. A held stop writes no `agent-depth` row, marks nothing ended and leaves the agent open in `.devcycle/processes.jsonl`; the sensor retires it there on the stop it releases, which `hooks/process-sensor.mjs` no longer does. A long capture is waited on with `capture-evidence.mjs --await`.
+
+**Why:** an implementer that backgrounded a capture and ended its turn to wait was never woken: its dispatch ended with no report and was re-dispatched from the same brief. A spike showed a blocked stop keeps the agent, its shell and the completion notification alive (`docs/platform-notes.md` § (o)).
+
+**Rejected:** denying `run_in_background` on a capture (deferred: #404 option 2); a `stop_hook_active` guard, which allows exactly one hold.
+
+**Supersedes:** "background and wait for its completion notification" as a bounded capture wait; `hooks/process-sensor.mjs` on `SubagentStop`.
+
+## 2026-11-05 — `observes` classifies a derived key on any vocabulary kind (#407)
+
+**Decision:** a `references/culprits.json` entry of any kind may declare `observes`, the derived `<event>:<stage>` keys it classifies; `prevents` stays win-only. Doctor resolves a key's entry by slug, then by `observes`, in one lookup the culprit table and `--issue-body` share. The first non-win user is `redispatched-task` (`friction`), which observes `re-dispatch:execution`.
+
+**Why:** `re-dispatch:execution` is derived by doctor and never attributed to a slug, so its culprit row and drafted issue read `unclassified`. A second field for the same join would have been a second owner of it.
+
+**Supersedes:** `observes` as a win-only field (`references/impact-scoring.md` § The win ledger).
+
+## 2026-11-05 — Plan-time checks for a missing stub and a guard-denied command (#321, #276)
+
+**Decision:** plan-check's `briefCompleteness` leg (`scripts/brief-completeness-check.mjs`) gains two checks. A `red-green` task whose **Files:** creates a non-test source file, and whose text outside **Files:** never mentions a stub, is a finding that fails the plan. Each distinct git-bearing command a task prescribes — an inline code span, or a line of a `bash`, `sh`, `zsh`, `shell` or `console` fence — that `hooks/block-destructive-git.mjs` denies an implementer is a note, reported and never failing. The leg asks the hook itself, run as a subprocess, so no second classifier can drift from it.
+
+**Why:** both failures surfaced only at execution, a round late: a red that passed vacuously once its module existed, and an implementer rewriting a command its own brief prescribed. A spike on 2026-11-05 over the 94 local plans (643 tasks) found 70 red-green tasks that create a non-test source file, 39 of them never mentioning a stub, but only 2 since 2026-09-14 — one true miss, one placeholder not called a stub — so failing costs planners little. The guard rule hit 144 commands, about 60 since 2026-09-14, mostly mentions rather than prescriptions (a task testing the hook quotes the spellings it denies): too noisy to fail on.
+
+**Tightening criterion:** the guard leg becomes a finding once a signal that separates a prescribed command from a quoted mention brings its hit count on recent real plans near zero.
+
+**Supersedes:** the task reviewer as the only enforcer of `references/evidence.md`'s stub rule.
+
+```text
+budget: surface-budget.json surfaceTotal 6786
+budget: context-budget.json playbooks/planning-waves.md 80356
+budget: context-budget.json playbooks/executing-waves.md 115742
+```
+
+## 2026-11-01 — A release closes the issues its PRs name
+
+**Decision:** `Prepare release` writes `Closes #n` lines into the `main` ← `dev` PR body, gathered by `scripts/release-closing-refs.mjs` from the PRs squashed into `dev` since the previous release. A PR names an issue it fully fixes with a closing keyword in its body; `Refs #n` keeps the issue open.
+**Why:** GitHub closes an issue only when a closing keyword reaches the default branch, and every PR here lands on `dev` first, so no issue ever closed on its own and each release needed a manual sweep. Closing at release rather than at the `dev` merge keeps the tracker in step with what users can install. The keyword is read from the PR body, not the squash subject, so subjects keep their bare `(#n)` form and versioning is untouched.
+**Enforcement:** a PR into `dev` must say how it relates to an issue — a closing keyword, `Refs #n`, or a `No issue` line — and CI fails it otherwise (`scripts/pr-body-check.mjs`). A skill was rejected for this: it is advisory and fires only on a description match, which is the forgetting the check exists to stop.
+**Supersedes:** The manual issue-closing step after a release.
+
 ## 2026-10-31 — Verification bounds its background helpers (#395)
 
 **Decision:** `references/evidence.md` § Background processes owns the rule, since it already owns the sibling capture-wait rule and the verdict list. `agents/implementer.md` already reads that file; `playbooks/executing-waves.md` gets one section read. No other stage reads it: the guard's denial and the live notice reach their coordinators, and each added read charges a closure budget. The prescribed form is one command per helper, narrowing the design's `(work)`, because `kill` reaches a subshell alone and leaves its running child alive. The figures below rise for that text.

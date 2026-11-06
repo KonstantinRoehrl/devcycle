@@ -4,6 +4,8 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSyn
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
+import { parseLedgerLine } from "../../scripts/task-ledger.mjs";
+import { taskPosition } from "../../scripts/wave-setup.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
 
 const SCRIPT = new URL("../../scripts/task-verdict.mjs", import.meta.url).pathname;
@@ -193,13 +195,34 @@ test("an accept that lists a blocking finding contradicts itself: refused as no 
   assert.deepEqual(rows(f), []);
 });
 
-// Once the coordinator acts on a round's verdict — the gate rejected its accept, or the next dispatch
-// went out — that round is closed: reading its verdict again would hand an unreviewed fix an accept.
+const userDecisionLine = "- [2026-10-08T10:09:00Z] task=5 event=user-decision outcome=Docker up — resume unattended ref=.devcycle/state.md\n";
+
+// An answer to a stop that came before the round's verdict was recorded — a green gate that could not
+// run, say — decides nothing about that verdict, so the round stays open for it (#405).
+test("a user decision before the round's verdict is recorded leaves the round open: the accept records and reads as accepted → commit", () => {
+  const f = fixture(2);
+  writeInto(f.repo, ".devcycle/findings/5-round-2.md", ACCEPT);
+  appendFileSync(ledgerPath(f), userDecisionLine);
+  const r = verdict(f, 2);
+  assert.equal(r.status, 0, `${r.stderr} ${JSON.stringify(r.out)}`);
+  assert.equal(r.out.action, "accepted");
+  assert.match(ledgerTail(f), / task=5 event=review-verdict outcome=accepted ref=\.devcycle\/findings\/5-round-2\.md key=5\/review-verdict\/2\/0$/);
+  const lines = readFileSync(ledgerPath(f), "utf8").split("\n").map(parseLedgerLine).filter(Boolean);
+  assert.deepEqual(taskPosition(lines), { position: "accepted", next: "commit" });
+  const linesBefore = readFileSync(ledgerPath(f), "utf8");
+  assert.equal(verdict(f, 2).out.action, "accepted", "a re-run after a crash reads the round the same way");
+  assert.equal(readFileSync(ledgerPath(f), "utf8"), linesBefore, "and appends nothing twice");
+});
+
+// Once the coordinator acts on a round's verdict — the gate rejected its accept, the next dispatch
+// went out, or the user decided on it — that round is closed: reading its verdict again would hand an
+// unreviewed fix an accept.
 test("a closed round's verdict is refused: after its green-gate rejection, or once the next round is dispatched", () => {
   for (const [name, later] of [
     ["the green gate rejected it",
       "- [2026-10-08T10:09:00Z] task=5 event=review-verdict outcome=rejected (green gate: exit 1) ref=.devcycle/evidence/5-gate.txt key=5/review-verdict/1/1\n"],
     ["round 2 is dispatched", reviewRoundLine(2, 1)],
+    ["the user decided after it", userDecisionLine],
   ]) {
     const f = fixture();
     writeInto(f.repo, ".devcycle/findings/5-round-1.md", ACCEPT);

@@ -51,6 +51,12 @@ line-reference or count claim, and a flagged claim clears by carrying a `(verifi
 report's `- Tail (…):` field, which are captured output, not prose. Superlative and uniqueness
 claims are the reviewer's judgment, not linted.
 
+A fenced code or command block that a plan pins in a task's brief takes a run marker instead, on
+the nearest non-blank line above its opening fence: `(verified: <cmd>)` when it was run or
+prototyped, or `(unrun: <reason>)` when it deliberately was not, the reason saying why. That third
+form is valid only there: it never clears a line-reference or count claim, and `(assumption)` never
+clears a block. Plan-check's `briefFacts` leg enforces it.
+
 ## Preloading a class into a brief
 
 The content a dispatching stage splices into a task's brief, per class: `red-green` at
@@ -80,9 +86,9 @@ content cannot. Evidence is never profile-conditional; only `<N>` varies.
   and the after is the report's `cmd:`, carrying the scope a `- Narrowing:` line declares (a sibling's
   uncommitted red forced a narrower after). `evidence-completeness-check.mjs <report> --task <task-id>`
   rejects any other pair, naming the half that failed, an after header that differs from `cmd:`, and a
-  `cmd:` that differs from the gate with no `- Narrowing:` line. A capture blocks until its command exits: run it in the foreground under the
-  Bash tool's `timeout: 600000`, or, when it can run longer, in the background and wait for its
-  completion notification. Never wait by polling an evidence file or its marker line.
+  `cmd:` that differs from the gate with no `- Narrowing:` line. Run a capture in the foreground under the Bash tool's
+  `timeout: 600000`; a longer one in the background, then wait with `capture-evidence.mjs --await`,
+  rerun while still running. Never end your turn on a running capture, nor poll its file.
 - A concurrent wave's brief carries a `**Capture command:**` line: both captures run that command,
   with the `- Narrowing:` line the brief supplies (identical headers, which the rule above covers).
   `node "${CLAUDE_PLUGIN_ROOT}/scripts/evidence-completeness-check.mjs" <report>` also mechanizes the narrow-selector guard — a `cmd:` naming one test file or
