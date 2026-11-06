@@ -49,7 +49,8 @@ lands, never deferred to the end. At the last wave's boundary, execution updates
 
 Each step's bookkeeping runs through one script, so a session spends one call where it used to
 spend several: `wave-setup.mjs` hands `/devcycle:continue` the wave's resume position as one JSON
-object, `task-dispatch.mjs` writes a brief and its ledger line, `task-intake.mjs` checks and lints
+object when the waves are walked rather than driven, `task-dispatch.mjs` writes a brief and its
+ledger line (refusing a driver's waves to any other session), `task-intake.mjs` checks and lints
 the implementer's report and, at `lean` and `standard`, writes the reviewer's brief too, and
 `task-verdict.mjs` records the reviewer's verdict and, on acceptance, runs `task-commit.mjs`, which
 runs the green gate and commits the task with a `Devcycle-Task:` trailer, finding an earlier commit

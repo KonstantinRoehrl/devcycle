@@ -21,7 +21,7 @@ action, answer the gates § Execution resume names first, then act on `drive.act
 | `ask` | One AskUserQuestion — how execution runs: **Start unattended** · **Walk the waves manually**. Write the row from the answer with `via=answer`, then run the start path or act as `manual`. |
 | `start` | When `drive.writeRow` is `auto`, first write the `auto` row with `via=knob`. Then, when `drive.confirm` is true and this session has not already answered a start question, ask the start confirm, ONE AskUserQuestion: **Resume unattended** · **Walk the waves manually** · **Leave it stopped**, the last two as § Answering a stopped run says. Then run the start path. |
 | `gate` | The last run stopped for a person. A settled stop with `drive.confirm` false asks nothing: write the `auto` row with `via=knob` when `drive.writeRow` is `auto`, then run the start path. Otherwise ask the stopped run's question; unless the answer left unattended, write the `auto` row first when the state file has none, then run the start path. |
-| `manual` | Write a `manual` row with `via=knob` when `drive.writeRow` is `manual`, then walk the waves in this session: the rest of § Execution resume, as without a driver. |
+| `manual` | Write a `manual` row with `via=knob` when `drive.writeRow` is `manual`. Whenever this session writes a `manual` row, here or on a **Walk the waves manually** answer, it re-runs `wave-setup.mjs` and takes only `tasks`, `dispatchable`, `wave` and `entryLines` from it, its gates already answered. Then walk the waves in this session: the rest of § Execution resume, as without a driver. |
 | `none` | A driven session (`--drive`): `commands/continue.md` § Drive mode governs, and nothing here applies. |
 
 The start path is `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/drive.md the-start-path`
@@ -44,7 +44,7 @@ row through `drive.writeRow`: a `manual` row, or an `auto` row when the knob is 
 the row: `drive.writeRow`; `ask`'s answer; an answer that starts the driver on a state file with no
 `auto` row first writes the `auto` row with `via=answer` (**Resume unattended**, **Restart
 unattended**); and **Walk the waves manually** — at a start confirm, at a stopped run, or when the
-start's sandbox approval is refused, which rewrites an `auto` row to `manual`. Write it by rewriting
+start's sandbox approval is refused or a permission check denies it, each rewriting an `auto` row to `manual`. Write it by rewriting
 the state file in full with the row added; every other rewrite carries it forward
 (`references/resume.md` § The state file). A row decides whether the waves run unattended: once it
 exists, a changed `executionMode` no longer changes that, but its live value still sets

@@ -9,10 +9,13 @@
 // reads back is this dispatch's reviewer's or none.
 // Contract: references/ledger.md § Task scripts.
 import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { atomicWrite } from "./atomic-write.mjs";
+import { holdsDriveToken } from "./drive-lock.mjs";
 import { isMain } from "./is-main.mjs";
 import { matchedLessons } from "./lesson-match.mjs";
+import { fieldText } from "./md-field.mjs";
+import { parseRecordedLine } from "./resolve-knobs.mjs";
 import { now } from "./stamp.mjs";
 import {
   UsageError, appendLedgerLine, checkIds, countFlag, ledgerKey, nextReviewRound, nextRetry, runTaskScript, taskEntries, taskFiles,
@@ -78,6 +81,28 @@ function withLessons(brief, root, ledger, task) {
   return { text, lessons: matched ? matched.split("\n").length : 0 };
 }
 
+// The state file beside the ledger records whose waves these are (references/drive.md § Drive actions):
+// an `auto` drive row, or no row under a recorded unattended knob, gives them to the driver, and
+// only a session that driver started holds its token. No state file records no mode, so nothing is
+// refused.
+function refuseDriverOwnedWaves(ledger, cwd) {
+  const statePath = join(dirname(resolve(cwd, ledger)), "state.md");
+  let stateText;
+  try {
+    stateText = readFileSync(statePath, "utf8");
+  } catch {
+    return;
+  }
+  const row = fieldText(stateText, "drive");
+  const unattended = parseRecordedLine(fieldText(stateText, "knobs")).executionMode === "unattended";
+  const recorded = /^auto\b/.test(row) ? "a drive: auto row" : !row && unattended ? "executionMode=unattended and no drive: row" : null;
+  if (!recorded || holdsDriveToken(dirname(dirname(statePath)), statePath, process.env.DEVCYCLE_DRIVE_TOKEN)) return;
+  throw new UsageError(
+    `${statePath} records ${recorded}, so its waves run under the driver, and this session holds no live driver's token: ` +
+      `run /devcycle:continue so its drive step starts or attaches to the driver, or answer "Walk the waves manually" there to record a manual walk`,
+  );
+}
+
 export function dispatch(argv, brief, cwd = process.cwd()) {
   const flags = taskFlags(argv, FLAGS, ["--run", "--task", "--role"]);
   const { "--run": run, "--task": task, "--role": role } = flags;
@@ -93,6 +118,7 @@ export function dispatch(argv, brief, cwd = process.cwd()) {
 
   const root = workTreeRoot(cwd);
   const ledger = flags["--ledger"] ?? join(root, ".devcycle/ledger.md");
+  refuseDriverOwnedWaves(ledger, cwd);
   const event = role === "implementer" ? "dispatched" : "review-round";
   if (role === "reviewer") {
     const expected = nextReviewRound(taskEntries(ledger, task));

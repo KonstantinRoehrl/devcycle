@@ -6,6 +6,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo } from "./helpers.mjs";
 import { briefPathFor } from "../../scripts/task-dispatch.mjs";
+import { acquireDriveLock, driveTokenHash, releaseDriveLock } from "../../scripts/drive-lock.mjs";
 
 const SCRIPT = new URL("../../scripts/task-dispatch.mjs", import.meta.url).pathname;
 const RUN = "0123456789abcdef";
@@ -29,8 +30,8 @@ function childEnv() {
   return env;
 }
 
-function dispatch(cwd, args, brief = "# Brief\nDo the task.\n") {
-  const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd, input: brief, encoding: "utf8", env: childEnv() });
+function dispatch(cwd, args, brief = "# Brief\nDo the task.\n", env = {}) {
+  const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd, input: brief, encoding: "utf8", env: { ...childEnv(), ...env } });
   assert.notEqual(r.stdout, "", `no JSON object on stdout — stderr: ${r.stderr}`);
   return { status: r.status, out: JSON.parse(r.stdout), stderr: r.stderr };
 }
@@ -322,4 +323,61 @@ test("--help answers with stdin left open", async () => {
 test("briefPathFor is the path dispatch writes", () => {
   assert.equal(briefPathFor("5", "implementer", 0), ".devcycle/briefs/5-implementer.md");
   assert.equal(briefPathFor("5", "reviewer", 2), ".devcycle/briefs/5-reviewer-round-2.md");
+});
+
+// #412: a cycle whose state file gives its waves to the driver dispatches only from a session that
+// driver started. The lock's holder is this test process, alive for the whole test.
+const TOKEN = "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
+const AUTO_ROW = "- drive: auto model=claude-haiku-4-5 opted=2026-11-06T09:00:00Z via=knob";
+const MANUAL_ROW = "- drive: manual chosen=2026-11-06T09:00:00Z via=answer";
+const knobs = (mode) => `- knobs: profile=standard executionMode=${mode} driveWatch=end`;
+function repoWithState(rows) {
+  const repo = repoWithLedger();
+  writeFileSync(join(repo, ".devcycle/state.md"), ["# devcycle state", "- stage: execution", `- run: ${RUN}`, ...rows].join("\n") + "\n");
+  return repo;
+}
+function withDriveLock(repo, fn, statePath = join(repo, ".devcycle/state.md")) {
+  const { lock } = acquireDriveLock(repo, { statePath, logPath: join(repo, ".devcycle/drive.log"), tokenHash: driveTokenHash(TOKEN) });
+  try {
+    return fn();
+  } finally {
+    releaseDriveLock(repo, lock);
+  }
+}
+const implementer = ["--run", RUN, "--task", "5", "--role", "implementer"];
+
+test("a dispatch of waves the driver owns is refused, writing nothing, unless this session holds the live driver's token", () => {
+  for (const rows of [[AUTO_ROW, knobs("ask")], [knobs("unattended")]]) {
+    const refusals = [
+      ["no lock", repoWithState(rows), (repo, fn) => fn(), { DEVCYCLE_DRIVE_TOKEN: TOKEN }],
+      ["a lock on another state file", repoWithState(rows), (repo, fn) => withDriveLock(repo, fn, join(repo, ".devcycle/other.md")), { DEVCYCLE_DRIVE_TOKEN: TOKEN }],
+      ["a wrong token", repoWithState(rows), withDriveLock, { DEVCYCLE_DRIVE_TOKEN: "not-the-token" }],
+      ["no token", repoWithState(rows), withDriveLock, { DEVCYCLE_DRIVE_TOKEN: "" }],
+    ];
+    for (const [why, repo, locked, env] of refusals) {
+      const r = locked(repo, () => dispatch(repo, implementer, undefined, env));
+      assert.equal(r.status, 2, `${rows.join(" ")}, ${why}: ${r.stderr}`);
+      assert.equal(r.out.action, "usage-error");
+      assert.match(r.out.error, /waves run under the driver.*\/devcycle:continue.*Walk the waves manually/);
+      assert.equal(ledgerLines(repo).length, 0, `${why}: a ledger line was written`);
+      assert.equal(existsSync(join(repo, ".devcycle/briefs")), false, `${why}: a brief was written`);
+      assert.equal(existsSync(join(repo, ".devcycle/dispatch")), false, `${why}: a dispatch record was written`);
+    }
+  }
+});
+
+test("a dispatch goes through on a manual row, the driver's own session, a walked knob or no state file", () => {
+  const passes = [
+    ["a manual row under the unattended knob", repoWithState([MANUAL_ROW, knobs("unattended")]), (repo, fn) => fn(), {}],
+    ["the live driver's token", repoWithState([AUTO_ROW, knobs("unattended")]), withDriveLock, { DEVCYCLE_DRIVE_TOKEN: TOKEN }],
+    ["no row under manual", repoWithState([knobs("manual")]), (repo, fn) => fn(), {}],
+    ["no row under ask", repoWithState([knobs("ask")]), (repo, fn) => fn(), {}],
+    ["no knobs line", repoWithState([]), (repo, fn) => fn(), {}],
+    ["no state file", repoWithLedger(), (repo, fn) => fn(), {}],
+  ];
+  for (const [why, repo, locked, env] of passes) {
+    const r = locked(repo, () => dispatch(repo, implementer, undefined, env));
+    assert.equal(r.status, 0, `${why}: ${r.stderr}`);
+    assert.deepEqual(r.out.appended, ["5/dispatched/0/0"], why);
+  }
 });

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { hostname } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { DRIVE_LOCK_REL, acquireDriveLock, driveTokenHash, readLiveDriveLock, releaseDriveLock } from "../../scripts/drive-lock.mjs";
+import { DRIVE_LOCK_REL, acquireDriveLock, driveTokenHash, holdsDriveToken, lockNamesState, readLiveDriveLock, releaseDriveLock } from "../../scripts/drive-lock.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
 
 const DRIVE_LOCK_MODULE = new URL("../../scripts/drive-lock.mjs", import.meta.url).href;
@@ -211,4 +211,33 @@ test("starters racing for a stale lock: exactly one takes it, every round", asyn
     assert.equal(results.filter((r) => r === "ok").length, 1, `round ${round}: ${results.join(", ")}`);
     assert.equal(results.filter((r) => r === "held").length, 3, `round ${round}: ${results.join(", ")}`);
   }
+});
+
+test("lockNamesState matches the holder's state file by realpath, and nothing without one", () => {
+  const dir = makeTempDir("drive-lock-names-");
+  mkdirSync(join(dir, ".devcycle"), { recursive: true });
+  writeFileSync(join(dir, ".devcycle", "state.md"), "# devcycle state\n");
+  const { statePath } = paths(dir);
+  assert.equal(lockNamesState(dir, { state: ".devcycle/state.md" }, statePath), true);
+  assert.equal(lockNamesState(dir, { state: statePath }, join(dir, ".devcycle", "..", ".devcycle", "state.md")), true);
+  assert.equal(lockNamesState(dir, { state: ".devcycle/other.md" }, statePath), false);
+  assert.equal(lockNamesState(dir, {}, statePath), false);
+  assert.equal(lockNamesState(dir, null, statePath), false);
+});
+
+test("holdsDriveToken: only the live lock's token for this state file", () => {
+  const dir = makeTempDir("drive-lock-token-");
+  const { statePath, logPath } = paths(dir);
+  assert.equal(holdsDriveToken(dir, statePath, "t0ken"), false, "no lock");
+  const { lock } = acquireDriveLock(dir, { statePath, logPath, tokenHash: driveTokenHash("t0ken") });
+  try {
+    assert.equal(holdsDriveToken(dir, statePath, "t0ken"), true);
+    assert.equal(holdsDriveToken(dir, statePath, "other"), false, "wrong token");
+    assert.equal(holdsDriveToken(dir, statePath, undefined), false, "no token");
+    assert.equal(holdsDriveToken(dir, join(dir, ".devcycle", "other.md"), "t0ken"), false, "another state file");
+  } finally {
+    releaseDriveLock(dir, lock);
+  }
+  writeLock(dir, { ...staleHolder(), state: statePath, tokenHash: driveTokenHash("t0ken") });
+  assert.equal(holdsDriveToken(dir, statePath, "t0ken"), false, "a stale lock");
 });

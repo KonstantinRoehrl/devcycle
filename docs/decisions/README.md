@@ -5,6 +5,22 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-06 — Continue acts on the drive step before walking any wave (#412)
+
+**Decision:** `scripts/wave-setup.mjs` returns `action: "drive"`, with empty `entryLines`, `tasks` and `dispatchable` and a null `wave`, whenever its drive action is `start`, `ask`, `gate` or `attach`; only a manual walk or a driven session gets `action: "resume"` and the walk fields. A session that writes a `manual` row re-runs it for the walk fields alone (`references/drive.md` § Drive actions). `scripts/task-dispatch.mjs` refuses, exit 2 and writing nothing, a dispatch of waves the state file gives to the driver unless the caller holds the live driver's token, the predicate `scripts/drive-lock.mjs` now owns. `commands/continue.md` names `action: "drive"` before its gate list, so it grows by one line and `commandMax` moves to 185; the touched passages in it, `references/drive.md` and `references/ledger.md` raise the closures below by their measured residual.
+
+**Why:** under `executionMode=unattended` a resumed session read the walk fields and the trailing walk prose as a complete instruction and walked wave 1 itself, though `drive.action` said `start`. With one answer in the output and a guard on the dispatch, a skimmed output or prose leaves nothing to walk.
+
+**Supersedes:** `wave-setup.mjs`'s `action: "resume"` beside a drive action other than `manual`.
+
+```text
+budget: surface-budget.json surfaceTotal 6809
+budget: surface-budget.json commandMax 185
+budget: context-budget.json commands/continue.md 74173
+budget: context-budget.json commands/cycle.md 86338
+budget: context-budget.json playbooks/executing-waves.md 117053
+```
+
 ## 2026-11-05 — Plan-check's briefFacts leg: cited paths resolve and pinned blocks say whether they ran (#334, #314)
 
 **Decision:** plan-check gains an eighth leg, `briefFacts` (`scripts/brief-facts-check.mjs`). A path a plan cites — a task's Modify path, or a code span that is a whole relative path — must exist in the working tree, under the plugin root for a plugin citation, through a task that creates it (a `Test:` path counts as created, since a new test file is listed there), or as a gitignored path; a cited line must be within its file; and every fenced block pinned in a task's brief, `text` and `markdown` aside, carries `(verified: <cmd>)` or `(unrun: <reason>)` on the nearest non-blank line above it. A `- Citation override:` line clears a path finding with a reason. A call-shaped span nothing defines is a note. `references/evidence.md` § Authored claims owns the new `(unrun:)` form, and self-review item 7 asks the author to run or prototype what a brief pins.
