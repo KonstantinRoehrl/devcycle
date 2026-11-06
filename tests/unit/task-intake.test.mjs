@@ -332,3 +332,20 @@ test("a brief whose constraints are in no recognised form never claims it has no
   assert.doesNotMatch(brief, /none in the implementer brief/);
   assert.match(brief, /^\*\*Constraints:\*\* none extracted — read the implementer brief for constraints$/m);
 });
+
+// #412: the reviewer dispatch --compose-review runs in-process takes task-dispatch's driver guard.
+test("--compose-review on waves the driver owns refuses the reviewer dispatch; a manual row composes it", () => {
+  const owned = planned();
+  writeInto(owned.repo, ".devcycle/state.md", "# devcycle state\n- stage: execution\n- knobs: profile=standard executionMode=unattended\n");
+  const refused = intake(owned, ["--compose-review"]);
+  assert.equal(refused.status, 2, refused.stderr);
+  assert.match(refused.out.error, /waves run under the driver/);
+  assert.doesNotMatch(ledgerText(owned), /event=review-round/);
+  assert.equal(existsSync(join(owned.repo, ".devcycle/briefs/5-reviewer-round-1.md")), false);
+  const walked = planned();
+  writeInto(walked.repo, ".devcycle/state.md",
+    "# devcycle state\n- stage: execution\n- knobs: profile=standard executionMode=unattended\n- drive: manual chosen=2026-11-06T09:00:00Z via=answer\n");
+  const composed = intake(walked, ["--compose-review"]);
+  assert.equal(composed.status, 0, composed.stderr);
+  assert.equal(composed.out.reviewBriefPath, ".devcycle/briefs/5-reviewer-round-1.md");
+});
