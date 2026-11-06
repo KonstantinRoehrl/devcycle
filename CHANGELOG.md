@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.30.1 — 2026-11-06
+
+- fix(continue): hand an opted-in unattended cycle to the driver before walking waves (#412)
+
 `/devcycle:continue` now hands an opted-in unattended cycle to its driver instead of walking the waves itself.
 
 **Drive step before the wave walk (#412).** When `wave-setup.mjs` answers `drive.action: start` (or `ask`, `gate`, `attach`) under `executionMode=unattended`, it returns `action: "drive"` with no wave, task or entry-line fields, so a manual walk has nothing to start from. `scripts/task-dispatch.mjs` also refuses to dispatch the waves of a state file a live driver owns unless the caller holds that driver's token, and `scripts/drive-lock.mjs` now owns the "lock names this state" and "holds the token" checks that `drive-result.mjs` and `drive-execution.mjs` each carried a copy of.
