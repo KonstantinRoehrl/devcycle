@@ -1,5 +1,17 @@
 # Changelog
 
+Plans and their briefs are now checked before anything is dispatched, and an implementer that stops before reporting is held instead of silently re-dispatched.
+
+**Claim markers in every brief (#333).** The `(verified: <cmd>)` / `(assumption)` / `(unrun: <reason>)` grammar is now part of the fixed text of every dispatched brief and of `agents/implementer.md`, so implementer reports stop carrying unmarked `path:line` references and counts.
+
+**`briefFacts` plan-check leg (#334, #314).** A plan fails when a task brief cites a path or `path:line` that does not exist in the working tree and that no task creates, or pins a fenced code block with no `(verified: <cmd>)` or `(unrun: <reason>)` marker on the nearest line above it. The Files-block reader skips annotations, globs, machine paths and directories, and cites root-level Delete and Rename entries. The fenced-block walker and the marker patterns are now shared by `task-files`, `authored-claims-check` and `citation-grammar`.
+
+**Stub and guard legs (#321, #276).** Plan-check fails a red-green task that creates a source module with no stub for its test to import, and notes git commands the dispatch guard would deny an implementer.
+
+**Held implementer stop (#404, #407).** A `SubagentStop` from an implementer that has not written its report is held, with the running capture it should wait on named in the reason; `capture-evidence` gains an in-flight marker and a bounded `--await`, and re-dispatch cost is attributed to the redispatched task in `doctor`.
+
+**Review rounds and CI (#402, #403).** A review round stays open for a user decision made before its verdict is recorded. A release now closes the issues its PRs name, and a PR into `dev` fails CI when its body names no issue.
+
 ## 0.29.0 — 2026-11-01
 
 - feat: add /devcycle:stop, version the cycle format, canary the latest Claude Code and stop leaked background load (#395)
