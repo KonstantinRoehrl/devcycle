@@ -3,11 +3,11 @@
 // token it hands its sessions, and the machine, boot and pid namespace it runs in. `toplevel` is
 // that checkout's root, the directory holding the state file's .devcycle/. One driver holds it at a
 // time; a holder whose process is gone, or whose pid now belongs to a process started at another
-// time, is stale and reclaimed. /devcycle:continue (through
-// wave-setup.mjs) and the git guard only ask whether a live driver holds it.
-import { linkSync, mkdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+// time, is stale and reclaimed. The git guard asks only whether a live driver holds it;
+// wave-setup.mjs and task-dispatch.mjs also ask whether the calling session holds its token.
+import { linkSync, mkdirSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { hostname, uptime } from "node:os";
 import { spawnSync } from "node:child_process";
 import { isLiveHolder, processStartTime } from "./file-lock.mjs";
@@ -187,4 +187,25 @@ export function readLiveDriveLock(toplevel) {
 // itself (scripts/drive-result.mjs), without the sysctl and ioreg calls isLive makes.
 export function readDriveLockHolder(toplevel) {
   return parseHolder(readRaw(lockPath(toplevel)));
+}
+
+const real = (path) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+};
+
+// Whether the lock `holder` names the cycle at statePath: `holder.state` resolved against `root`
+// and statePath have the same realpath.
+export function lockNamesState(root, holder, statePath) {
+  return typeof holder?.state === "string" && real(resolve(root, holder.state)) === real(statePath);
+}
+
+// Whether `token` is the one the live driver of the cycle at statePath handed its sessions: only a
+// session that driver started carries it, so a typed --drive or a walking session never does.
+export function holdsDriveToken(toplevel, statePath, token) {
+  const holder = readLiveDriveLock(toplevel);
+  return Boolean(token && holder && lockNamesState(toplevel, holder, statePath) && holder.tokenHash === driveTokenHash(token));
 }
