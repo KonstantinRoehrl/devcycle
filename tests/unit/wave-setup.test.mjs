@@ -72,7 +72,9 @@ function cycle({ ledger = null, state = [], branch = "feat/x", root = null, plan
       "Profile: `standard` (evidence tail 40 lines)", "", ...ledger, ""].join("\n"));
   return { repo, statePath, ledgerPath };
 }
-const setup = (c, opts = {}) => waveSetup({ statePath: c.statePath, cwd: c.repo, env: {}, ...opts });
+// Under the manual knob by default, so a test reads the walk fields only a manual walk carries.
+const WALK = knobsWith("manual");
+const setup = (c, opts = {}) => waveSetup({ statePath: c.statePath, cwd: c.repo, env: {}, knobsLine: WALK, ...opts });
 // A driven session: --drive, with the token the lock's driver handed it.
 const driven = (c, opts = {}) => setup(c, { drive: true, ...opts, env: { DEVCYCLE_DRIVE_TOKEN: TOKEN, DEVCYCLE_DRIVER_PLUGIN_VERSION: installedVersion(), ...opts.env } });
 function withLock(c, fn, statePath = c.statePath) {
@@ -353,11 +355,11 @@ test("manual stops: another checkout's file, a stale file; a live driver on this
   const c = cycle();
   withLock(c, (lock) => {
     const r = setup(c);
-    assert.deepEqual([r.action, r.stopReason, r.drive.action, r.drive.lock], ["resume", undefined, "attach", { pid: process.pid, log: lock.log }]);
+    assert.deepEqual([r.action, r.stopReason, r.drive.action, r.drive.lock], ["drive", undefined, "attach", { pid: process.pid, log: lock.log }]);
   });
   withLock(c, () => {
-    const r = setup(c);
-    assert.deepEqual([r.action, r.drive.action, r.drive.result.running], ["resume", "ask", false]);
+    const r = setup(c, { knobsLine: KNOBS });
+    assert.deepEqual([r.action, r.drive.action, r.drive.result.running], ["drive", "ask", false]);
   }, join(c.repo, ".devcycle", "other-state.md"));
 });
 
@@ -371,7 +373,7 @@ test("drive mode: only a session holding the live driver's token drives; not opt
       assert.deepEqual([r.action, r.stopReason], ["stop", "no-driver"], `--drive typed beside a live driver resumed with ${JSON.stringify(env)}`);
     }
     const manual = setup(typed);
-    assert.deepEqual([manual.action, manual.drive.action], ["resume", "attach"], "a manual continue beside a live driver did not attach");
+    assert.deepEqual([manual.action, manual.drive.action], ["drive", "attach"], "a manual continue beside a live driver did not attach");
     const own = driven(typed);
     assert.deepEqual([own.action, own.drive.action, own.drive.writeRow, own.drive.gate], ["resume", "none", null, null]);
   });
@@ -424,16 +426,20 @@ test("drive mode: a stop on a task's pending decision names the task, and that t
 
 // spec §1: the exhausted-unresolved question is asked once, as the stopped run's question, never
 // again as continue's own pendingDecision gate on the same call. The top-level pendingDecision still
-// names it: a walk the stopped run's answer starts takes its positions from this same object.
+// names it; a walk the stopped run's answer starts writes the manual row and takes its positions
+// from the re-run.
 test("drive.action: a gate on the task whose review loop is pending carries that decision, and only it", () => {
   const c = cycle({ state: [DRIVE_ROW], ledger: [committed(1), keyed(2, "review-verdict", "rejected", 3, 2, ".devcycle/findings/2-round-3.md")] });
   writeInto(c.repo, `.devcycle/findings/${reviewLoopId(2)}-status.md`, "status: exhausted-unresolved rounds: 3/3 residue: 2 carried-to: none\n");
   const own = setup(ended(c, runEnd("gate-stop", { code: 4, reason: "needs-user", task: "2", detail: "task 2: exhausted-unresolved" })));
   assert.deepEqual([own.drive.action, own.drive.gate.pendingDecision], ["gate", { task: "2", loopId: "task-2-review" }]);
-  assert.deepEqual([own.pendingDecision, positionOf(own.tasks[1])],
-    [{ task: "2", loopId: "task-2-review" }, { task: "2", position: "exhausted-unresolved", next: "needs-user" }], "the manual walk loses the decision");
+  assert.deepEqual([own.action, own.pendingDecision, own.tasks], ["drive", { task: "2", loopId: "task-2-review" }, []]);
   const other = setup(ended(c, runEnd("gate-stop", { code: 4, reason: "needs-user", task: "3", detail: "task 3: blocked" })));
   assert.deepEqual([other.pendingDecision, other.drive.gate.pendingDecision], [{ task: "2", loopId: "task-2-review" }, null]);
+  writeFileSync(c.statePath, stateOf(c).replace(DRIVE_ROW, MANUAL_ROW));
+  const walked = setup(c);
+  assert.deepEqual([walked.action, walked.pendingDecision, positionOf(walked.tasks[1])],
+    ["resume", { task: "2", loopId: "task-2-review" }, { task: "2", position: "exhausted-unresolved", next: "needs-user" }], "the manual walk loses the decision");
 });
 
 test("drive mode: a resumable cycle reports its opt-in, its model, its driver and whether the opt-in line is logged", () => {
@@ -457,7 +463,7 @@ test("drive.action: a live driver on this state file is attached to before knob 
   sh("git", ["checkout", "-q", "main"], { cwd: c.repo });
   withLock(c, (lock) => {
     const r = setup(c, { knobsLine: LEAN, env: overBudget(c.repo) });
-    assert.deepEqual([r.action, r.drive.action, r.drive.lock], ["resume", "attach", { pid: process.pid, log: lock.log }]);
+    assert.deepEqual([r.action, r.drive.action, r.drive.lock], ["drive", "attach", { pid: process.pid, log: lock.log }]);
     assert.deepEqual([r.drive.result.running, r.drive.gate, r.drive.writeRow], [true, null, null]);
     assert.deepEqual([r.knobDrift, r.branch, r.depth, r.depthBand, r.wave, r.tasks, r.dispatchable, r.pendingDecision, r.entryLines],
       [[], null, null, null, null, [], [], null, []]);
@@ -473,16 +479,16 @@ test("drive.action: a drive: row outranks the executionMode knob for the mode; w
     const r = setup(c, { knobsLine });
     return [r.action, r.drive.row, r.drive.mode, r.drive.action, r.drive.writeRow, r.drive.confirm];
   };
-  assert.deepEqual(decide(cycle(), KNOBS), ["resume", null, "ask", "ask", null, null]);
-  assert.deepEqual(decide(cycle(), null), ["resume", null, "ask", "ask", null, null], "no --knobs line reads as ask");
-  assert.deepEqual(decide(cycle(), KNOBS.replace("executionMode=ask", "executionMode=bogus")), ["resume", null, "ask", "ask", null, null]);
+  assert.deepEqual(decide(cycle(), KNOBS), ["drive", null, "ask", "ask", null, null]);
+  assert.deepEqual(decide(cycle(), null), ["drive", null, "ask", "ask", null, null], "no --knobs line reads as ask");
+  assert.deepEqual(decide(cycle(), KNOBS.replace("executionMode=ask", "executionMode=bogus")), ["drive", null, "ask", "ask", null, null]);
   assert.deepEqual(decide(cycle(), knobsWith("manual")), ["resume", null, "manual", "manual", "manual", null]);
-  assert.deepEqual(decide(cycle(), knobsWith("unattended")), ["resume", null, "unattended", "start", "auto", false],
+  assert.deepEqual(decide(cycle(), knobsWith("unattended")), ["drive", null, "unattended", "start", "auto", false],
     "the unattended knob starts the driver: the session writes the auto row with via=knob and asks nothing");
   assert.deepEqual(decide(cycle({ state: [MANUAL_ROW] }), knobsWith("unattended")), ["resume", "manual", "unattended", "manual", null, null]);
-  assert.deepEqual(decide(cycle({ state: [DRIVE_ROW] }), knobsWith("manual")), ["resume", "auto", "manual", "start", null, true]);
-  assert.deepEqual(decide(cycle({ state: [DRIVE_ROW] }), KNOBS), ["resume", "auto", "ask", "start", null, true]);
-  assert.deepEqual(decide(cycle({ state: [DRIVE_ROW] }), knobsWith("unattended")), ["resume", "auto", "unattended", "start", null, false],
+  assert.deepEqual(decide(cycle({ state: [DRIVE_ROW] }), knobsWith("manual")), ["drive", "auto", "manual", "start", null, true]);
+  assert.deepEqual(decide(cycle({ state: [DRIVE_ROW] }), KNOBS), ["drive", "auto", "ask", "start", null, true]);
+  assert.deepEqual(decide(cycle({ state: [DRIVE_ROW] }), knobsWith("unattended")), ["drive", "auto", "unattended", "start", null, false],
     "a recorded auto row under the unattended knob skips the start confirm");
   assert.deepEqual(setup(cycle({ state: [`- ${KNOBS}`] }), { knobsLine: knobsWith("unattended") }).knobDrift, [],
     "executionMode is live: a changed value is never knob drift");
@@ -551,7 +557,7 @@ test("drive.action: an auto style starts on no result, a resumable end or a cras
   assert.deepEqual([crashed.drive.action, crashed.drive.result.outcome, crashed.drive.result.running], ["start", "crashed", false]);
   const blocked = setup(ended(c, runEnd("gate-stop", { code: 4, reason: "needs-user", task: "2", detail: "task 2: blocked" })));
   assert.deepEqual([blocked.action, blocked.drive.action, blocked.drive.gate],
-    ["resume", "gate", { reason: "needs-user", detail: "task 2: blocked", task: "2", settled: false, pendingDecision: null }]);
+    ["drive", "gate", { reason: "needs-user", detail: "task 2: blocked", task: "2", settled: false, pendingDecision: null }]);
   const knob = setup(ended(cycle(), runEnd("stalled", { code: 5 })), { knobsLine: knobsWith("unattended") });
   assert.deepEqual([knob.drive.action, knob.drive.writeRow, knob.drive.gate.reason, knob.drive.confirm], ["gate", null, "stalled", null],
     "the row is written from the gate question's answer (references/drive.md), never from the knob");
@@ -795,7 +801,7 @@ test("cli: one JSON object on stdout; a usage error exits 2, a state file outsid
   const env = { PATH: process.env.PATH, HOME: home, CLAUDE_DOCTOR_PROJECTS: home };
   const run = (args, opts = {}) => spawnSync(process.execPath, [SCRIPT, ...args], { env, encoding: "utf8", ...opts });
   const c = cycle({ ledger: [committed(1)] });
-  const ok = run(["--state", c.statePath, "--knobs", KNOBS], { cwd: c.repo });
+  const ok = run(["--state", c.statePath, "--knobs", WALK], { cwd: c.repo });
   assert.equal(ok.status, 0, ok.stderr);
   assert.equal(ok.stdout.trim().split("\n").length, 1);
   const out = JSON.parse(ok.stdout);
@@ -1033,4 +1039,30 @@ test("format: a resume that waited while another session migrated reads the migr
   assert.equal(r.action, "resume", r.stopDetail);
   assert.equal(r.overview.committed, 1, "the ledger was read before the other session migrated it, so its tasks read as undone");
   assert.equal(r.ledgerSlot, "fresh");
+});
+
+// #412: the output carries one answer. Only a walk, manual or driven, carries the wave to walk;
+// every other drive action is the drive step's, with the walk fields empty.
+test("action: drive under start, ask, gate and attach, with no walk fields; resume only for a manual walk or a driven session", () => {
+  const ledger = [committed(1)];
+  const walkFields = (r) => [r.wave, r.tasks, r.dispatchable, r.entryLines];
+  const none = [null, [], [], []];
+  const started = setup(cycle({ ledger }), { knobsLine: knobsWith("unattended") });
+  assert.deepEqual([started.action, started.drive.action, started.drive.writeRow, ...walkFields(started)], ["drive", "start", "auto", ...none]);
+  assert.deepEqual([started.overview.nextWave, started.ledgerSlot], [1, "fresh"], "the start path still reads the overview and the ledger slot");
+  const asked = setup(cycle({ ledger }), { knobsLine: KNOBS });
+  assert.deepEqual([asked.action, asked.drive.action, ...walkFields(asked)], ["drive", "ask", ...none]);
+  const gated = setup(ended(cycle({ state: [DRIVE_ROW], ledger }), runEnd("stalled", { code: 5 })));
+  assert.deepEqual([gated.action, gated.drive.action, ...walkFields(gated)], ["drive", "gate", ...none]);
+  const attached = cycle({ state: [DRIVE_ROW], ledger });
+  withLock(attached, () => {
+    const r = setup(attached);
+    assert.deepEqual([r.action, r.drive.action, ...walkFields(r)], ["drive", "attach", ...none]);
+    const own = driven(attached);
+    assert.deepEqual([own.action, own.drive.action, own.wave, own.tasks.map((t) => t.task), own.entryLines.length > 0], ["resume", "none", 1, ["1", "2"], true]);
+  });
+  const walked = setup(cycle({ state: [MANUAL_ROW], ledger }), { knobsLine: knobsWith("unattended") });
+  assert.deepEqual([walked.action, walked.drive.action, walked.wave, walked.tasks.map((t) => t.task), walked.dispatchable.map((t) => t.task)],
+    ["resume", "manual", 1, ["1", "2"], ["2"]]);
+  assert.ok(walked.entryLines.length > 0, "a manual walk carries its entry lines");
 });
