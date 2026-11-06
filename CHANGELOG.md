@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.30.0 — 2026-11-06
+
+- feat(plan-check): check briefs for unresolved citations and unrun pinned code, and hold an implementer that stops before its report
+
 Plans and their briefs are now checked before anything is dispatched, and an implementer that stops before reporting is held instead of silently re-dispatched.
 
 **Claim markers in every brief (#333).** The `(verified: <cmd>)` / `(assumption)` / `(unrun: <reason>)` grammar is now part of the fixed text of every dispatched brief and of `agents/implementer.md`, so implementer reports stop carrying unmarked `path:line` references and counts.
