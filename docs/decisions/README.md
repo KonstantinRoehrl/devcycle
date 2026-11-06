@@ -14,11 +14,11 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 **Supersedes:** `wave-setup.mjs`'s `action: "resume"` beside a drive action other than `manual`.
 
 ```text
-budget: surface-budget.json surfaceTotal 6807
+budget: surface-budget.json surfaceTotal 6809
 budget: surface-budget.json commandMax 185
 budget: context-budget.json commands/continue.md 74173
-budget: context-budget.json commands/cycle.md 86170
-budget: context-budget.json playbooks/executing-waves.md 116885
+budget: context-budget.json commands/cycle.md 86338
+budget: context-budget.json playbooks/executing-waves.md 117053
 ```
 
 ## 2026-11-05 — Plan-check's briefFacts leg: cited paths resolve and pinned blocks say whether they ran (#334, #314)

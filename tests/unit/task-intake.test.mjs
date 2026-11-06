@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
+import { acquireDriveLock, driveTokenHash, releaseDriveLock } from "../../scripts/drive-lock.mjs";
 
 const SCRIPT = new URL("../../scripts/task-intake.mjs", import.meta.url).pathname;
 const RUN = "0123456789abcdef";
@@ -30,8 +31,8 @@ const report = (deviations = "none") =>
   "- Before: .devcycle/evidence/5-before.txt (exit 1)\n- After: .devcycle/evidence/5-after.txt (exit 0)\n" +
   `- Deviations: ${deviations}\n`;
 
-function intake({ repo, runsDir }, extra = [], status = "complete") {
-  const env = { ...process.env, DEVCYCLE_RUNS_DIR: runsDir, CLAUDE_DOCTOR_PROJECTS: makeTempDir("task-intake-projects-") };
+function intake({ repo, runsDir }, extra = [], status = "complete", extraEnv = {}) {
+  const env = { ...process.env, DEVCYCLE_RUNS_DIR: runsDir, CLAUDE_DOCTOR_PROJECTS: makeTempDir("task-intake-projects-"), ...extraEnv };
   delete env.CLAUDE_CODE_SESSION_ID;
   const r = spawnSync(process.execPath, [SCRIPT, "--run", RUN, "--task", "5", "--report", ".devcycle/reports/5.md",
     "--status", status, "--agent-type", "devcycle:implementer", "--model", "claude-sonnet-5-5", "--model-source", "explicit",
@@ -348,4 +349,20 @@ test("--compose-review on waves the driver owns refuses the reviewer dispatch; a
   const composed = intake(walked, ["--compose-review"]);
   assert.equal(composed.status, 0, composed.stderr);
   assert.equal(composed.out.reviewBriefPath, ".devcycle/briefs/5-reviewer-round-1.md");
+});
+
+test("--compose-review composes the reviewer dispatch for a session holding the live driver's token", () => {
+  const token = "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
+  const driven = planned();
+  const statePath = join(driven.repo, ".devcycle/state.md");
+  writeInto(driven.repo, ".devcycle/state.md",
+    "# devcycle state\n- stage: execution\n- knobs: profile=standard executionMode=unattended\n- drive: auto model=claude-sonnet-5-5 opted=2026-11-06T09:00:00Z via=knob\n");
+  const { lock } = acquireDriveLock(driven.repo, { statePath, logPath: join(driven.repo, ".devcycle/drive.log"), tokenHash: driveTokenHash(token) });
+  try {
+    const composed = intake(driven, ["--compose-review"], "complete", { DEVCYCLE_DRIVE_TOKEN: token });
+    assert.equal(composed.status, 0, composed.stderr);
+    assert.equal(composed.out.reviewBriefPath, ".devcycle/briefs/5-reviewer-round-1.md");
+  } finally {
+    releaseDriveLock(driven.repo, lock);
+  }
 });
