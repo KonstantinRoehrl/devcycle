@@ -91,6 +91,24 @@ test("a missing Delete or Rename path and a path outside the prose-span charset 
   }
 });
 
+test("a missing root-level Delete or Rename file is cited, but a slash-bearing word in an annotation is not", () => {
+  for (const entry of ["- Delete: old.md", "- Delete: `CHANGELOG.old.md`", "- Rename: old.md to new.md"]) {
+    const r = run(task(1, `**Files:**\n${entry}`));
+    assert.equal(r.code, 1, `${entry}\n${r.out}`);
+  }
+  for (const note of ["(set `Content-Type` to `application/json`)", "(e.g. `i/o`)", "(bump v1.2/v1.3)"]) {
+    const r = run(task(1, `**Files:**\n- Modify: \`a.json\` ${note}`), { files: { "a.json": "{}" } });
+    assert.equal(r.code, 0, `${note}\n${r.out}`);
+  }
+});
+
+test("a Files entry that is a placeholder, URL or absolute path is never cited", () => {
+  for (const entry of ["src/<name>.mjs", "a/b?.mjs", "https://x.dev/a/b.md", "/etc/a.conf"]) {
+    const r = run(task(1, `**Files:**\n- Delete: ${entry}`));
+    assert.equal(r.code, 0, `${entry}\n${r.out}`);
+  }
+});
+
 test("a Delete path in a grammar directory is a host file: the plugin root never answers for it", () => {
   const r = run(task(1, "**Files:**\n- Delete: `references/evidence.md`"));
   assert.equal(r.code, 1, r.out);

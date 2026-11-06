@@ -22,7 +22,7 @@ const PATH_SPAN_RE = /^(?!\.\.?\/)([\w.[\]-]+(?:\/[\w.[\]-]+)+\.[A-Za-z0-9]+)(?:
 // A Files entry that names no repo file: a glob or placeholder, a URL, a home or absolute path, a directory.
 // Looser than a prose span's charset on purpose: `@scope/`, `(group)`, `c++` and non-ASCII names are real
 // paths in a target repo.
-const NOT_A_FILE_RE = /[\s*?<>{}]|:\/\/|^[/~]|\/$/;
+const NOT_A_FILE_RE = /[*?<>{}]|:\/\/|^[/~]|\/$/;
 const CALL_SPAN_RE = /^(?:[A-Za-z_$][\w$]*\.)*([A-Za-z_$][\w$]*)\([^()]*\)$/;
 const OVERRIDE_START = /^\s*-\s*Citation override:/;
 const OVERRIDE_RE = /^\s*-\s*Citation override:\s*`?([^\s`]+)`?\s*—\s*(.*\S)\s*$/;
@@ -33,12 +33,17 @@ const escapeRe = (s) => s.replace(/[$]/g, "\\$&");
 const definedIn = (fencedText, name) =>
   new RegExp(String.raw`(?:\b(?:function\*?|class|const|let|var|def|fn|func)\s+${escapeRe(name)}\b|^\s*(?:async\s+)?${escapeRe(name)}\s*\([^)]*\)\s*\{)`, "m").test(fencedText);
 
-// The Files entries worth citing: a path right after a Create/Modify/Test label, or any entry with a
-// directory part (a Delete or Rename line). extractFiles also yields a token of the annotation behind a
-// path (`(drop `a.b` from ...)`), which names no file and no directory.
+// The Files entries worth citing: a path right after a Create/Modify/Test label, any entry on a Delete,
+// Rename or Move line, and any other entry with a directory part and a lettered extension. extractFiles
+// also yields tokens of the prose behind a path (`(drop `a.b` from ...)`, `application/json`, `v1.2/v1.3`),
+// which name no file.
+const REMOVAL_LINE_RE = /^\s*[-*]\s*\**(?:Delete|Rename|Move)\b.*$/gm;
+const LETTERED_EXTENSION_RE = /\.[A-Za-z][A-Za-z0-9]*$/;
 const citableFiles = (files) => {
-  const labelled = new Set([...createdFiles(files), ...modifiedFiles(files), ...testFiles(files)]);
-  return [...extractFiles(files)].filter((path) => (labelled.has(path) || path.includes("/")) && !NOT_A_FILE_RE.test(path));
+  const certain = new Set([...createdFiles(files), ...modifiedFiles(files), ...testFiles(files)]);
+  for (const [line] of files.matchAll(REMOVAL_LINE_RE)) for (const path of extractFiles(line)) certain.add(path);
+  const looksLikePath = (path) => path.includes("/") && LETTERED_EXTENSION_RE.test(path);
+  return [...extractFiles(files)].filter((path) => (certain.has(path) || looksLikePath(path)) && !NOT_A_FILE_RE.test(path));
 };
 
 // The task whose own brief holds each plan line, or null outside every task.
