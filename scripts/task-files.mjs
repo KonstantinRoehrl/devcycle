@@ -241,13 +241,27 @@ export function extractFiles(block) {
   return files;
 }
 
-// The paths a task creates: the stub check needs them apart from what it modifies or tests.
-export function createdFiles(block) {
+function labelledFiles(block, wanted) {
   const files = new Set();
   scanFiles(block, (path, label) => {
-    if (label === "Create") files.add(path);
+    if (label === wanted) files.add(path);
   });
   return files;
+}
+
+// The paths a task creates: the stub check needs them apart from what it modifies or tests.
+export function createdFiles(block) {
+  return labelledFiles(block, "Create");
+}
+
+// The paths a task modifies: the ones that must already exist.
+export function modifiedFiles(block) {
+  return labelledFiles(block, "Modify");
+}
+
+// The paths a task tests. One that does not exist yet is a test file the task writes.
+export function testFiles(block) {
+  return labelledFiles(block, "Test");
 }
 
 export function parseFileList(csv) {
@@ -296,18 +310,39 @@ export function fieldValue(block, field) {
 export const FENCE_RE = /^\s*(`{3,}|~{3,})\s*([^\s`]*)/;
 const PLAN_HEADING_RE = /^#{1,2} /;
 
-function planLevelEnd(text, from) {
-  let fence = null;
-  let offset = from;
-  for (const line of text.slice(from).split("\n")) {
+// The one owner of fence pairing: a fence closes on the first later fence line of its character, at
+// least as long and with no info string; one never closed runs to the end of the text. `info` is
+// the opener's first info word, lowercased. Line indexes are 0-based.
+export function fencedBlocks(text) {
+  const blocks = [];
+  let open = null;
+  text.split("\n").forEach((line, i) => {
     const marker = line.match(FENCE_RE);
-    if (fence) {
-      if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && !marker[2]) fence = null;
-    } else if (marker) {
-      fence = { char: marker[1][0], length: marker[1].length };
-    } else if (offset > from && PLAN_HEADING_RE.test(line)) {
-      return offset;
+    if (!marker) return;
+    if (!open) open = { open: i, char: marker[1][0], length: marker[1].length, info: marker[2].toLowerCase() };
+    else if (marker[1][0] === open.char && marker[1].length >= open.length && !marker[2]) {
+      blocks.push({ open: open.open, close: i, info: open.info });
+      open = null;
     }
+  });
+  if (open) blocks.push({ open: open.open, close: null, info: open.info });
+  return blocks;
+}
+
+// Per line of `text`, the fenced block holding it (its fence lines included), or null.
+export function lineFences(text) {
+  const owners = text.split("\n").map(() => null);
+  for (const block of fencedBlocks(text))
+    for (let i = block.open; i <= (block.close ?? owners.length - 1); i++) owners[i] = block;
+  return owners;
+}
+
+function planLevelEnd(text, from) {
+  const rest = text.slice(from);
+  const fences = lineFences(rest);
+  let offset = from;
+  for (const [i, line] of rest.split("\n").entries()) {
+    if (!fences[i] && i > 0 && PLAN_HEADING_RE.test(line)) return offset;
     offset += line.length + 1;
   }
   return text.length;

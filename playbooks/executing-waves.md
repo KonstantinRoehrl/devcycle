@@ -85,10 +85,16 @@ exit 2 or 3 a stop.
    task's steps; its `**Lessons:**` line, which `task-dispatch.mjs` fills with the matched lessons, and
    the `**Gate command:**` line it appends, neither sliced by hand; the global constraints and pinned
    interfaces that apply; the task's quality constraints
-   resolved; and one read, `"$(devcycle-root)/references/delegation.md"` § Read discipline.
+   resolved; the claim-marker sentence below; and one read,
+   `"$(devcycle-root)/references/delegation.md"` § Read discipline.
    Nothing else, and nothing restated that a named reference owns —
    `references/evidence.md` owns the evidence classes, the evidence file paths (keyed
    on the task id, which is why every brief carries it), and the report shape the implementer must produce.
+   One exception: the claim-marker sentence is restated, because the implementer needs it where it
+   writes the report and a brief does not preload `references/evidence.md`.
+   - **Carry the claim-marker sentence verbatim:** "Every `path.ext:line` reference and every count
+     in your report carries `(verified: <command>)` or `(assumption)` on the same line or an adjacent
+     one — that is what `authored-claims-check.mjs` flags."
    - **Resolve the quality constraints:** splice in verbatim, ids included, the lines of the plan's
      `## Quality Constraints` section that the task's `**Quality constraints:**` ids name — a bare `QC3`
      is unreadable to an implementer — **never the whole criteria catalog or the whole section**

@@ -6,7 +6,7 @@ import { writeFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { proseLines } from "../../scripts/authored-claims-check.mjs";
+import { proseLines, LINE_REF_RE, MARKER_RE, VERIFIED_MARKER_RE, UNRUN_MARKER_RE } from "../../scripts/authored-claims-check.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/authored-claims-check.mjs");
 
@@ -227,4 +227,24 @@ test("an unpaired fence marker inside Tail output still leaves the report fields
   assert.match(out, /:5: unverified count claim "12 files"/);
   assert.match(out, /:6: unverified count claim "4 tests"/);
   assert.doesNotMatch(out, /98 tests/);
+});
+
+test("the exported markers: verified and assumption clear a claim, unrun never does", () => {
+  assert.ok(MARKER_RE.test("(verified: wc -l a.md)") && MARKER_RE.test("(Assumption)"));
+  assert.ok(!MARKER_RE.test("(unrun: needs Task 2)"));
+  assert.ok(VERIFIED_MARKER_RE.test("x (verified: node --test → 3 pass)"));
+  assert.ok(!VERIFIED_MARKER_RE.test("(assumption)"));
+  assert.equal("(unrun: needs Task 2's export)".match(UNRUN_MARKER_RE)?.[1].trim(), "needs Task 2's export");
+  assert.equal("(unrun: )".match(UNRUN_MARKER_RE)?.[1].trim(), "");
+});
+
+test("LINE_REF_RE is the global line-reference pattern, read with matchAll", () => {
+  const refs = [..."see scripts/x.mjs:12-20 and b.md:3".matchAll(LINE_REF_RE)].map((m) => [m[1], m[2]]);
+  assert.deepEqual(refs, [["scripts/x.mjs", "12"], ["b.md", "3"]]);
+});
+
+test("a count claim marked only (unrun: …) is still flagged", () => {
+  const { code, out } = run("This touches 3 files (unrun: not a claim marker).\n");
+  assert.equal(code, 1);
+  assert.match(out, /unverified count claim "3 files"/);
 });

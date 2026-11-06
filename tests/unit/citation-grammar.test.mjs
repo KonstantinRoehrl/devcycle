@@ -17,6 +17,7 @@ import {
   referenceReaders,
   SECTION_READ,
   unparsedSectionReads,
+  PLUGIN_ROOT_PATH,
 } from "../../scripts/citation-grammar.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/citation-grammar.mjs", import.meta.url));
@@ -345,4 +346,15 @@ test("CLI: a named file that does not exist is a usage error, not a clean pass",
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("PLUGIN_ROOT_PATH reads a plugin path in either root spelling, quoted or not", () => {
+  for (const [span, path] of [
+    [`${P}/references/evidence.md`, "references/evidence.md"],
+    [`"${P}/scripts/x.mjs"`, "scripts/x.mjs"],
+    ['"$(devcycle-root)/scripts/x.mjs"', "scripts/x.mjs"],
+    ["$(devcycle-root)/references/a.md:12", "references/a.md:12"],
+  ]) assert.equal(span.match(PLUGIN_ROOT_PATH)?.[2], path, span);
+  for (const span of ["scripts/x.mjs", `"${P}/scripts/x.mjs`, "$(git rev-parse --show-toplevel)/x.md", "${HOME}/x.md"])
+    assert.equal(PLUGIN_ROOT_PATH.test(span), false, span);
 });

@@ -12,7 +12,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   taskBlocks, parseDispatchMap, filesFieldValue, fieldValue, verificationGate, verificationGateField, conventionCommand,
-  createdFiles, isTestPath, FENCE_RE,
+  createdFiles, isTestPath, lineFences,
 } from "./task-files.mjs";
 import { budgetFixtureGaps, gapRemedy } from "./budget-fixture-check.mjs";
 import { isMain } from "./is-main.mjs";
@@ -102,19 +102,14 @@ const EVIDENCE_LINE_RE = /^\*\*Evidence:\*\*/;
 function prescribedGitCommands(block) {
   const convention = conventionCommand(fieldValue(block, "Evidence") ?? "");
   const found = [];
-  let fence = null;
-  for (const line of block.split("\n")) {
-    const marker = line.match(FENCE_RE);
+  const fences = lineFences(block);
+  for (const [i, line] of block.split("\n").entries()) {
+    const fence = fences[i];
     if (fence) {
-      if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && !marker[2]) fence = null;
-      else if (fence.shell) {
+      if (i !== fence.open && i !== fence.close && SHELL_FENCE_INFO.has(fence.info)) {
         const command = line.trim().replace(/^\$\s+/, "");
         if (command && !command.startsWith("#")) found.push(command);
       }
-      continue;
-    }
-    if (marker) {
-      fence = { char: marker[1][0], length: marker[1].length, shell: SHELL_FENCE_INFO.has(marker[2].toLowerCase()) };
       continue;
     }
     const runByCapture = EVIDENCE_LINE_RE.test(line) ? convention : null;

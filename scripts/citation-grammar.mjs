@@ -12,9 +12,13 @@ import { parseFlags } from "./cli-flags.mjs";
 // stage-entry.mjs, so a path one of them recognises is a path all of them recognise.
 export const GRAMMAR_DIRS = ["commands", "playbooks", "references"];
 const NAME = "[A-Za-z0-9._-]+";
+const PLUGIN_ROOT_VAR = String.raw`\$\{CLAUDE_PLUGIN_ROOT\}`;
 export const prefixedPattern = (dirs = GRAMMAR_DIRS) =>
-  new RegExp(String.raw`\$\{CLAUDE_PLUGIN_ROOT\}\/((?:${dirs.join("|")})\/${NAME}\.md)`, "g");
+  new RegExp(String.raw`${PLUGIN_ROOT_VAR}\/((?:${dirs.join("|")})\/${NAME}\.md)`, "g");
 export const PREFIXED = prefixedPattern();
+// A whole citation of a plugin file by its root, in either spelling — the variable a playbook
+// writes or the shim a dispatch brief runs — quoted or not. Group 2 is the path under the root.
+export const PLUGIN_ROOT_PATH = new RegExp(String.raw`^(["']?)(?:${PLUGIN_ROOT_VAR}|\$\(devcycle-root\))\/([^"'\s]+)\1$`);
 // The separator between a command's words: horizontal whitespace or a single line break with any
 // indentation after it — so an invocation markdown-wraps across a line and is still one — but never a
 // line break followed by a blank line, so a paragraph break cannot join unrelated prose into a hit. A

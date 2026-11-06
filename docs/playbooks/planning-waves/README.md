@@ -28,10 +28,11 @@ ever carries a commit step, and the plan gate below runs on the finished plan.
 
 Once the plan is drafted, planning runs its own eight-item self-review — spec coverage,
 placeholder scan, type consistency, factual-claim accuracy, no count-only enumeration,
-mirrored-file parity, a manual assumed-tooling cross-check (which includes every prescribed
-command being one a guarded dispatch may run), and the plan gate last — fixing what it finds
+mirrored-file parity, a manual assumed-tooling and pinned-code cross-check (every prescribed
+command being one a guarded dispatch may run, and every pinned command or code block run or prototyped,
+then marked), and the plan gate last — fixing what it finds
 inline, with no separate re-review pass. The plan gate is one command,
-`scripts/plan-check.mjs`, running seven legs over the plan: `codeBlocks` (pasted JS/mjs code
+`scripts/plan-check.mjs`, running eight legs over the plan: `codeBlocks` (pasted JS/mjs code
 blocks parse), `briefCompleteness` (every task carries its required fields, a `red-green` task
 that creates a non-test source file mentions a stub, and the Dispatch Map lists every task; it
 also notes, without failing, each prescribed git command the dispatch guard would deny an
@@ -40,12 +41,15 @@ Files block), `contentCoupling` (no same-wave task's brief names a file another 
 edits), `budgetFixtures` (a task touching a budgeted surface — `playbooks/`, `commands/`,
 `agents/`, `references/` markdown — also touches its budget fixtures and
 `docs/decisions/README.md`, whose `budget:` lines `validate.mjs` holds the fixtures to),
-`waveDisjointness` (no two same-wave tasks list the same file), and `authoredClaims` (the
+`waveDisjointness` (no two same-wave tasks list the same file), `authoredClaims` (the
 factual-claim item's backstop: an unguarded `path.ext:line` reference or bare count claim,
-cleared by a `(verified: <cmd>)` or `(assumption)` marker). It fails closed: a plan with no
-`## Dispatch Map` is a finding before any leg runs. Three findings clear by an explicit override
-line instead of a fix — `- Blast-radius override:`, `- Content-coupling override:`, and
-`- Budget-fixture override:`, each with a reason. A non-zero exit is a hard stop, resolved by
+cleared by a `(verified: <cmd>)` or `(assumption)` marker), and `briefFacts` (every path a brief
+cites resolves, every cited line is within its file, and every fenced block pinned in a task carries a
+`(verified: <cmd>)` or `(unrun: <reason>)` run marker; it also notes a call-shaped span nothing
+defines). It fails closed: a plan with no
+`## Dispatch Map` is a finding before any leg runs. Four findings clear by an explicit override
+line instead of a fix — `- Blast-radius override:`, `- Content-coupling override:`,
+`- Budget-fixture override:`, and `- Citation override:`, each with a reason. A non-zero exit is a hard stop, resolved by
 fixing the plan or recording an override, never by handing off around it. On success the gate
 prints one ok line, with each leg's notes (such as cleared overrides) reduced to a count unless
 `--verbose` lists them; a failing run always lists them. A run in progress records a `gate-ran`
@@ -77,7 +81,7 @@ flowchart TD
     CUT --> TASK("Each task gets Files · Interfaces · Dependencies · Evidence class · Quality constraints · Lessons"):::stage
     TASK --> MAP[("Dispatch Map — tasks grouped into file-disjoint waves")]:::structural
     MAP --> SELFREVIEW("Self-review items 1–7, fixed inline as it goes"):::stage
-    SELFREVIEW --> GATE{"Item 8, last — plan-check.mjs clean (seven legs)?"}:::stage
+    SELFREVIEW --> GATE{"Item 8, last — plan-check.mjs clean (eight legs)?"}:::stage
     GATE -->|"no — fix the plan or record an override"| SELFREVIEW
     GATE -->|yes| HANDOFF("Handoff — state.md set to stage: execution, plan path recorded"):::stage
 
