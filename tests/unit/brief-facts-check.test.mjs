@@ -84,6 +84,19 @@ test("a Files annotation, glob, home path or bare directory is never cited, whil
   }
 });
 
+test("a missing Delete or Rename path and a path outside the prose-span charset are still cited", () => {
+  for (const entry of ["- Delete: `src/gone/old.mjs`", "- Delete: src/gone/old.mjs", "- Rename: src/old.mjs to src/new.mjs", "- Modify: `app/(shop)/page.tsx`", "- Modify: `packages/@scope/pkg/index.ts`", "- Modify: `docs/café.md`"]) {
+    const r = run(task(1, `**Files:**\n${entry}`));
+    assert.equal(r.code, 1, `${entry}\n${r.out}`);
+  }
+});
+
+test("a Delete path in a grammar directory is a host file: the plugin root never answers for it", () => {
+  const r = run(task(1, "**Files:**\n- Delete: `references/evidence.md`"));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, /Task 1: cites references\/evidence\.md — not in the working tree/);
+});
+
 test("a Test-labelled new file stays created beside an annotated Files line", () => {
   const files = "**Files:**\n- Modify: `a.json` (drop `dispatch.toolCalls`)\n- Test: `tests/unit/new.test.mjs`";
   assert.equal(run(task(1, files), { files: { "a.json": "{}" } }).code, 0);

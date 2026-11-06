@@ -15,14 +15,14 @@ import { isMain } from "./is-main.mjs";
 
 const PLUGIN_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SPAN_RE = /(?<!`)`([^`\n]+)`(?!`)/g;
-// Path characters only: a placeholder, glob, URL, `$` expression, `~` or absolute path, whitespace or a
-// trailing `/` never reads as a path. Prose spans and Files entries are both held to it.
-const PATH_SEGMENT = String.raw`[\w.[\]-]+`;
-const PLAIN_PATH_RE = new RegExp(String.raw`^${PATH_SEGMENT}(?:/${PATH_SEGMENT})*$`);
-const isPlainPath = (path) => PLAIN_PATH_RE.test(path);
-// A prose span also needs at least one `/` and a final `.ext`. `./` and `../` start an import specifier,
-// which resolves against its source file, not the repo root.
-const PATH_SPAN_RE = new RegExp(String.raw`^(?!\.\.?/)(${PATH_SEGMENT}(?:/${PATH_SEGMENT})+\.[A-Za-z0-9]+)(?::\d+(?:-\d+)?)?$`);
+// Path characters only, at least one `/`, a final `.ext`: a placeholder, glob, URL, `$` expression,
+// `~` or absolute path never reads as one. `./` and `../` start an import specifier, which resolves
+// against its source file, not the repo root.
+const PATH_SPAN_RE = /^(?!\.\.?\/)([\w.[\]-]+(?:\/[\w.[\]-]+)+\.[A-Za-z0-9]+)(?::\d+(?:-\d+)?)?$/;
+// A Files entry that names no repo file: a glob or placeholder, a URL, a home or absolute path, a directory.
+// Looser than a prose span's charset on purpose: `@scope/`, `(group)`, `c++` and non-ASCII names are real
+// paths in a target repo.
+const NOT_A_FILE_RE = /[\s*?<>{}]|:\/\/|^[/~]|\/$/;
 const CALL_SPAN_RE = /^(?:[A-Za-z_$][\w$]*\.)*([A-Za-z_$][\w$]*)\([^()]*\)$/;
 const OVERRIDE_START = /^\s*-\s*Citation override:/;
 const OVERRIDE_RE = /^\s*-\s*Citation override:\s*`?([^\s`]+)`?\s*—\s*(.*\S)\s*$/;
@@ -33,9 +33,13 @@ const escapeRe = (s) => s.replace(/[$]/g, "\\$&");
 const definedIn = (fencedText, name) =>
   new RegExp(String.raw`(?:\b(?:function\*?|class|const|let|var|def|fn|func)\s+${escapeRe(name)}\b|^\s*(?:async\s+)?${escapeRe(name)}\s*\([^)]*\)\s*\{)`, "m").test(fencedText);
 
-// The Files entries that sit right after a Create/Modify/Test label. extractFiles also yields a token
-// of the annotation behind a path (`(drop `a.b` from ...)`), which names no file.
-const declaredFiles = (files) => new Set([...createdFiles(files), ...modifiedFiles(files), ...testFiles(files)]);
+// The Files entries worth citing: a path right after a Create/Modify/Test label, or any entry with a
+// directory part (a Delete or Rename line). extractFiles also yields a token of the annotation behind a
+// path (`(drop `a.b` from ...)`), which names no file and no directory.
+const citableFiles = (files) => {
+  const labelled = new Set([...createdFiles(files), ...modifiedFiles(files), ...testFiles(files)]);
+  return [...extractFiles(files)].filter((path) => (labelled.has(path) || path.includes("/")) && !NOT_A_FILE_RE.test(path));
+};
 
 // The task whose own brief holds each plan line, or null outside every task.
 function taskOfLine(planText) {
@@ -111,11 +115,7 @@ export function briefFactsLeg(planText, { planPath, repoRoot = process.cwd() }) 
     const prior = cited.get(`${task}\0${path}`);
     cited.set(`${task}\0${path}`, { task, path, files: files || Boolean(prior?.files), plugin: plugin || Boolean(prior?.plugin) });
   };
-  for (const { num, text } of blocks) {
-    const files = filesFieldValue(text) ?? "";
-    const declared = declaredFiles(files);
-    for (const path of extractFiles(files)) if (declared.has(path) && isPlainPath(path)) cite(num, path, { files: true });
-  }
+  for (const { num, text } of blocks) for (const path of citableFiles(filesFieldValue(text) ?? "")) cite(num, path, { files: true });
 
   const overrides = new Map();
   const bounds = [];
