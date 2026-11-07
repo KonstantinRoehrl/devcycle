@@ -1148,14 +1148,14 @@ test("--stop keeps the stop request and says so when the driver cannot be signal
   const refusing = (code) => () => {
     throw Object.assign(new Error(`kill ${code}`), { code });
   };
-  assert.equal(stopDriver(statePathOf(root), { kill: refusing("EPERM") }), 1);
+  assert.equal(stopDriver(statePathOf(root), { kill: refusing("EPERM"), platform: "linux" }), 1);
   assert.ok(existsSync(join(root, STOP_REQUEST_REL)), "the stop request was removed while the driver may still run");
   assert.doesNotMatch(said.join("\n"), /no driver is running/);
   assert.match(said.join("\n"), new RegExp(`^drive-execution: could not signal the driver \\(pid ${process.pid}: EPERM\\)`, "m"));
   assert.match(said.join("\n"), /the stop request stays in \.devcycle\/drive-stop-request/);
 
   said.length = 0;
-  assert.equal(stopDriver(statePathOf(root), { kill: refusing("ESRCH") }), 3);
+  assert.equal(stopDriver(statePathOf(root), { kill: refusing("ESRCH"), platform: "linux" }), 3);
   assert.equal(existsSync(join(root, STOP_REQUEST_REL)), false);
   assert.deepEqual(said, [`drive-execution: no driver is running for ${statePathOf(root)}`]);
 });
@@ -1183,6 +1183,104 @@ test("--stop sends no signal when ps cannot confirm the pid is still the driver:
   assert.ok(existsSync(join(root, STOP_REQUEST_REL)), "the stop request was removed while the driver may still run");
   assert.match(said.join("\n"), new RegExp(`^drive-execution: cannot confirm pid ${process.pid} is still the driver`, "m"));
   assert.match(said.join("\n"), /the stop request stays in \.devcycle\/drive-stop-request/);
+});
+
+test("stopDriver on Windows writes the stop request and signals nothing: the driver polls for the request itself", () => {
+  const root = makeCycle();
+  writeLock(root, { pid: process.pid, startTime: processStartTime(process.pid) });
+  const said = [];
+  const signalled = [];
+  const code = stopDriver(statePathOf(root), { kill: (pid, signal) => signalled.push([pid, signal]), out: (m) => said.push(m), say: (m) => said.push(m), platform: "win32" });
+  assert.equal(code, 0, said.join("\n"));
+  assert.deepEqual(signalled, [], "a Windows stop sent a signal, which there is TerminateProcess");
+  assert.ok(existsSync(join(root, STOP_REQUEST_REL)), "no stop request was written");
+  assert.deepEqual(said, [JSON.stringify({ stopped: true, pid: process.pid })]);
+});
+
+const WINDOWS_ONLY = { skip: process.platform !== "win32" && "Windows only" };
+// kill(pid, 0) sends nothing: it only asks whether the pid still exists.
+const pidAlive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+};
+
+test("Windows: --dry-run's session prompt names the state file with a forward slash", WINDOWS_ONLY, () => {
+  const r = dryRun(makeCycle());
+  assert.equal(r.code, 0, r.out);
+  const command = JSON.parse(r.out.trim().split("\n").at(-1)).command;
+  assert.equal(command[2], "/devcycle:continue --drive .devcycle/state.md");
+});
+
+// A --stop from another process, then how long the driver takes to end after it, with its session gone.
+async function stopOnWindows(scenario, env, { settleMs = 500 } = {}) {
+  const root = makeCycle();
+  const h = harness(scenario, env);
+  const d = startDriver(root, h);
+  try {
+    await waitFor(() => calls(h).length === 1);
+    await new Promise((r) => setTimeout(r, settleMs));
+    const asked = Date.now();
+    const stop = spawnSync(process.execPath, [DRIVER, "--stop", "--state", statePathOf(root)], { cwd: root, env: h.env, encoding: "utf8" });
+    assert.equal(stop.status, 0, stop.stdout + stop.stderr);
+    assert.deepEqual(JSON.parse(stop.stdout), { stopped: true, pid: d.child.pid });
+    const ended = await Promise.race([d.result(), new Promise((res) => setTimeout(() => res(null), 15000))]);
+    assert.ok(ended, "the driver ran on past a --stop");
+    const elapsedMs = Date.now() - asked;
+    assert.equal(ended.code, 130, ended.out);
+    assert.equal(resultOf(root).outcome, "stopped");
+    assert.ok(!existsSync(lockPath(root)), "the lock outlived the driver");
+    const pid = calls(h)[0].pid;
+    await waitFor(() => !pidAlive(pid), 2000);
+    return elapsedMs;
+  } finally {
+    if (d.child.exitCode === null) d.child.kill("SIGKILL");
+    try { process.kill(calls(h)[0]?.pid); } catch { /* already gone */ }
+  }
+}
+
+test("Windows: a --stop while the session awaits a main-thread tool result ends it once the stop grace runs out", WINDOWS_ONLY, async () => {
+  const elapsedMs = await stopOnWindows([{ ledger: [line(1, "dispatched")], toolUseId: "toolu_1", hangMs: 60000 }], { DEVCYCLE_DRIVE_STOP_GRACE_MS: "1000" });
+  assert.ok(elapsedMs >= 1000, `a session with a tool call in flight was ended before the grace, after ${elapsedMs} ms`);
+  assert.ok(elapsedMs < 4000, `the driver took ${elapsedMs} ms to end`);
+});
+
+test("Windows: a --stop while the session is idle ends it within a few seconds", WINDOWS_ONLY, async () => {
+  const elapsedMs = await stopOnWindows([{ ledger: [line(1, "dispatched")], toolUseId: "toolu_1", toolResult: true, hangMs: 60000 }], {});
+  assert.ok(elapsedMs < 3000, `the driver took ${elapsedMs} ms to end`);
+});
+
+test("Windows: a --stop during a wait ends the driver within a few seconds", WINDOWS_ONLY, async () => {
+  const root = makeCycle();
+  const h = harness([{ rateLimitInSec: 3600 }], { DEVCYCLE_DRIVE_SLICE_MS: "600000" });
+  const d = startDriver(root, h);
+  try {
+    const log = join(root, ".devcycle", "drive.log");
+    await waitFor(() => existsSync(log) && /wait: usage limit/.test(readFileSync(log, "utf8")));
+    const asked = Date.now();
+    const stop = spawnSync(process.execPath, [DRIVER, "--stop", "--state", statePathOf(root)], { cwd: root, env: h.env, encoding: "utf8" });
+    assert.equal(stop.status, 0, stop.stdout + stop.stderr);
+    const ended = await Promise.race([d.result(), new Promise((res) => setTimeout(() => res(null), 15000))]);
+    assert.ok(ended, "the driver waited on past a --stop");
+    assert.ok(Date.now() - asked < 3000, `the driver took ${Date.now() - asked} ms to end`);
+    assert.equal(ended.code, 130, ended.out);
+    assert.equal(resultOf(root).outcome, "stopped");
+  } finally {
+    if (d.child.exitCode === null) d.child.kill("SIGKILL");
+  }
+});
+
+test("Windows: a driver whose PowerShell cannot read its start time refuses to start with exit 3 and takes no lock", WINDOWS_ONLY, async () => {
+  const root = makeCycle();
+  const missing = join(makeTempDir("devcycle-no-powershell-"), "powershell.exe");
+  const r = await drive(root, [{ ledger: DONE, stage: "branch-review" }], { env: { DEVCYCLE_POWERSHELL: missing } });
+  assert.equal(r.code, 3, r.out);
+  assert.match(r.out, /^drive-execution: Windows PowerShell cannot read this process's start time, so the driver cannot take its lock$/m);
+  assert.ok(!existsSync(lockPath(root)), "a driver that cannot take its lock wrote one");
+  assert.equal(r.calls.length, 0, "a refused driver started a session");
 });
 
 // What makes a stop request on disk work without the signal: the driver reads it between sessions

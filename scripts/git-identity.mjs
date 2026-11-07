@@ -10,9 +10,9 @@ import { dirname } from "node:path";
 export function gitToplevel(cwd, run = spawnSync) {
   const common = run(
     "git", ["-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-    { encoding: "utf8" });
+    { encoding: "utf8", windowsHide: true });
   if (common.status === 0 && common.stdout.trim()) return dirname(common.stdout.trim());
-  const top = run("git", ["-C", cwd, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
+  const top = run("git", ["-C", cwd, "rev-parse", "--show-toplevel"], { encoding: "utf8", windowsHide: true });
   return top.status === 0 ? top.stdout.trim() : cwd;
 }
 
