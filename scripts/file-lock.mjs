@@ -20,7 +20,10 @@ const startTimeFrom = (ps) => (ps.status === 0 && ps.stdout.trim()) || null;
 const WINDOWS = process.platform === "win32";
 // .NET counts 100 ns ticks from 0001-01-01; the Unix epoch is this many of them.
 const UNIX_EPOCH_TICKS = 621355968000000000n;
-const POWERSHELL_TIMEOUT_MS = 3000;
+// Warm, a read takes ~300 ms; a first PowerShell start on a busy or scanned machine (a CI runner with ten
+// test processes starting at once) can take more than three seconds, and a timed-out read of the driver's
+// own start time stops it from taking its lock at all. Only a hung PowerShell ever waits this long.
+const POWERSHELL_TIMEOUT_MS = 15000;
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
