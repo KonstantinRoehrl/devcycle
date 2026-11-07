@@ -88,7 +88,9 @@ function withLock(c, fn, statePath = c.statePath) {
 // A transcript root whose session for `repo` stands at 152340 tokens on a 1M window: over budget.
 function overBudget(repo) {
   const projects = makeTempDir("wave-setup-projects-");
-  const dir = join(projects, repo.replaceAll("/", "-"));
+  // A Windows path's drive colon and backslashes cannot stand in a directory name; Claude Code's slug
+  // there replaces every character that is not a letter or digit.
+  const dir = join(projects, process.platform === "win32" ? repo.replace(/[^A-Za-z0-9]/g, "-") : repo.replaceAll("/", "-"));
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "sess-1.jsonl"), JSON.stringify({ type: "assistant", timestamp: "2026-10-08T10:00:00Z", message: {
     model: "claude-opus-5", content: [],
@@ -210,7 +212,7 @@ test("the current wave is the first with uncommitted work; dispatchable tasks ca
   const fresh = setup(cycle());
   assert.equal(fresh.wave, 1);
   assert.deepEqual(fresh.dispatchable.map((d) => [d.task, d.testCmd]), [["1", "node --test tests/a.test.mjs"], ["2", "node --test tests/b.test.mjs"]]);
-  assert.match(fresh.entryLines[0], /^entry: .*playbooks\/executing-waves\.md$/);
+  assert.match(fresh.entryLines[0], /^entry: .*playbooks[\\/]executing-waves\.md$/);
 
   const first = setup(cycle({ ledger: [committed(1)] }));
   assert.deepEqual([first.ok, first.action, first.wave, first.appended], [true, "resume", 1, []]);
@@ -986,7 +988,8 @@ function unverifiableLock(c) {
   return holder;
 }
 
-test("format: a holder no check can prove dead counts as a live driver, so an interactive resume attaches and migrates nothing", () => {
+test("format: a holder no check can prove dead counts as a live driver, so an interactive resume attaches and migrates nothing",
+  { skip: process.platform === "win32" && 'POSIX-only: Windows reads start times through PowerShell, not ps, covered by "holderLiveness: on Windows a PowerShell that cannot run leaves a live pid unverified, and a finished one gone" in drive-result.test.mjs' }, () => {
   const c = cycle({ ledger: [committed(1)] });
   const holder = unverifiableLock(c);
   const before = [stateOf(c), readFileSync(c.ledgerPath, "utf8")];

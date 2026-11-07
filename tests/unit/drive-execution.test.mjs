@@ -75,6 +75,8 @@ function harness(scenario = [], env = {}, { prelude = "" } = {}) {
       ...BASE_ENV,
       PATH: [dirname(process.execPath), process.env.PATH].join(delimiter),
       HOME: home,
+      // os.homedir() reads USERPROFILE, not HOME, on Windows.
+      ...(process.platform === "win32" ? { USERPROFILE: home } : {}),
       DEVCYCLE_RUNS_DIR: join(dir, "runs"),
       STUB_CLAUDE_SCENARIO: join(dir, "scenario.json"),
       STUB_CLAUDE_CALLS: join(dir, "calls.jsonl"),
@@ -313,7 +315,7 @@ test("an effort the driver cannot use refuses the start with exit 3 naming where
   writeInto(unusable, ".claude/settings.json", JSON.stringify({ effortLevel: "turbo" }));
   const unresolvable = dryRun(unusable);
   assert.equal(unresolvable.code, 3, unresolvable.out);
-  assert.match(unresolvable.out, /^drive-execution: the effort level cannot be resolved: effortLevel in \S+\/\.claude\/settings\.json is "turbo", not one of low, medium, high, xhigh — correct it, or pass --effort <low\|medium\|high\|xhigh\|max\|default>$/m);
+  assert.match(unresolvable.out, /^drive-execution: the effort level cannot be resolved: effortLevel in \S+[\\/]\.claude[\\/]settings\.json is "turbo", not one of low, medium, high, xhigh — correct it, or pass --effort <low\|medium\|high\|xhigh\|max\|default>$/m);
 
   const overridden = dryRun(unusable, ["--effort", "low"]);
   assert.equal(overridden.code, 0, overridden.out);
@@ -586,7 +588,11 @@ test("a session stopped for silence is judged on the same progress as one that e
   assert.deepEqual(decided.records.map((x) => [x.exitReason, x.stallCount]), [["stalled", 0]]);
 });
 
-test("SIGINT stops the running session, writes its record, releases the lock and exits 130", async () => {
+// A signal Node sends a Windows process is TerminateProcess, which no handler sees: there the stop
+// arrives through the stop request file instead.
+const WINDOWS_STOP_INSTEAD = { skip: process.platform === "win32" && 'POSIX-only: a Windows driver is stopped through its request file, covered by "Windows: a --stop while the session is idle ends it within a few seconds"' };
+
+test("SIGINT stops the running session, writes its record, releases the lock and exits 130", WINDOWS_STOP_INSTEAD, async () => {
   const root = makeCycle();
   const h = harness([{ ledger: [line(1, "dispatched")], hangMs: 60000 }]);
   const d = startDriver(root, h);
@@ -624,6 +630,8 @@ test("a lock whose pid is alive but whose start time differs is a reused pid, an
 });
 
 const isDead = (pid) => { try { process.kill(pid, 0); return false; } catch { return true; } };
+// A detached driver leads its own process group on POSIX; Windows has no process groups to signal.
+const killDetached = (pid) => process.kill(process.platform === "win32" ? pid : -pid, "SIGKILL");
 
 test("--detach handles a stale result, returns once the lock names the driver it started with the log offset its run begins at, and the driver walks to branch-review on its own", async () => {
   const root = makeCycle();
@@ -642,14 +650,14 @@ test("--detach handles a stale result, returns once the lock names the driver it
     assert.notEqual(readDriveResult(root)?.outcome, "interrupted", "the earlier run's result survived into this run");
     assert.equal(JSON.parse(readFileSync(join(root, HANDLED_REL), "utf8")).outcome, "interrupted");
     // A new session's leader leads its own process group too: the caller's hangup cannot reach it.
-    assert.equal(spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim(), String(pid));
+    if (process.platform !== "win32") assert.equal(spawnSync("ps", ["-o", "pgid=", "-p", String(pid)], { encoding: "utf8" }).stdout.trim(), String(pid));
     await waitFor(() => isDead(pid), 30000);
     assert.deepEqual(records(h).map((x) => x.exitReason), ["handoff", "handoff"]);
     assert.ok(!existsSync(lockPath(root)), "the detached driver left its lock behind");
     assert.equal(readFileSync(join(root, ".devcycle", "drive.log"), "utf8").match(/execution is complete/g)?.length, 1,
       "the detached driver's log lacks the line, or holds it twice");
   } finally {
-    if (pid && !isDead(pid)) process.kill(-pid, "SIGKILL");
+    if (pid && !isDead(pid)) killDetached(pid);
   }
 
   const refused = spawnSync(process.execPath, [DRIVER, "--state", join(makeCycle({ branch: "main" }), ".devcycle", "state.md"), "--claude", h.bin, "--detach"], { env: h.env, encoding: "utf8" });
@@ -677,7 +685,8 @@ test("--detach returns only once the driver it started has handed off the previo
     '  require("node:module").syncBuiltinESMExports();',
     "}",
   ].join("\n"));
-  const env = { ...h.env, NODE_OPTIONS: `${h.env.NODE_OPTIONS ?? ""} --require "${preload}"` };
+  // NODE_OPTIONS reads a backslash inside quotes as an escape, so a Windows path goes in with forward slashes.
+  const env = { ...h.env, NODE_OPTIONS: `${h.env.NODE_OPTIONS ?? ""} --require "${preload.replaceAll("\\", "/")}"` };
   const r = spawnSync(process.execPath, [DRIVER, "--state", join(root, ".devcycle", "state.md"), "--claude", h.bin, "--detach"], { cwd: root, env, encoding: "utf8" });
   let pid = null;
   try {
@@ -687,15 +696,19 @@ test("--detach returns only once the driver it started has handed off the previo
     assert.equal(readHandledResult(root)?.outcome, "interrupted");
     await waitFor(() => isDead(pid), 30000);
   } finally {
-    if (pid && !isDead(pid)) process.kill(-pid, "SIGKILL");
+    if (pid && !isDead(pid)) killDetached(pid);
   }
 });
 
-// The fake claude notes the pid of whoever ran `plugin list`: its parent, which is the driver.
+// The fake claude notes the pid of whoever ran `plugin list`: its parent, which is the driver. On
+// Windows its parent is the cmd.exe that runs its .cmd shim, so the driver is that one's parent.
+const READER_PID = process.platform === "win32"
+  ? `Number(execFileSync("powershell.exe", ["-NoProfile", "-Command", "(Get-CimInstance Win32_Process -Filter 'ProcessId=" + process.ppid + "').ParentProcessId"], { encoding: "utf8", windowsHide: true }).trim())`
+  : "process.ppid";
 function listReaders(root, flags) {
   const readers = join(makeTempDir("devcycle-drive-plugins-"), "readers.txt");
   const h = harness([{ ledger: DONE, stage: "branch-review" }], {}, {
-    prelude: `import { appendFileSync } from "node:fs";\nif (process.argv[2] === "plugin") appendFileSync(${JSON.stringify(readers)}, process.ppid + "\\n");\n`,
+    prelude: `import { appendFileSync } from "node:fs";\nimport { execFileSync } from "node:child_process";\nif (process.argv[2] === "plugin") appendFileSync(${JSON.stringify(readers)}, ${READER_PID} + "\\n");\n`,
   });
   const r = spawnSync(process.execPath, [DRIVER, "--state", join(root, ".devcycle", "state.md"), "--claude", h.bin, ...flags], { cwd: root, env: h.env, encoding: "utf8" });
   return { r, h, reads: () => (existsSync(readers) ? readFileSync(readers, "utf8").split("\n").filter(Boolean).map(Number) : []) };
@@ -711,7 +724,7 @@ test("the plugin list is read once per driver run: a detached start reads it in 
     await waitFor(() => isDead(pid), 30000);
     assert.deepEqual(detached.reads(), [pid], "the detaching parent read the plugin list, or the driver did not");
   } finally {
-    if (pid && !isDead(pid)) process.kill(-pid, "SIGKILL");
+    if (pid && !isDead(pid)) killDetached(pid);
   }
   const dry = listReaders(makeCycle(), ["--detach", "--dry-run"]);
   assert.equal(dry.r.status, 0, dry.r.stdout + dry.r.stderr);
@@ -761,7 +774,7 @@ test("--detach waits for a slow driver until it takes the lock, with no time lim
     assert.deepEqual(records(h).map((x) => x.exitReason), ["handoff"]);
   } finally {
     const stray = pid ?? Number(out.match(/pid (\d+)/)?.[1]);
-    if (stray && !isDead(stray)) process.kill(-stray, "SIGKILL");
+    if (stray && !isDead(stray)) killDetached(stray);
   }
 });
 
@@ -909,6 +922,8 @@ test("pre-flight refuses a state without the drive row, a state off execution, a
   assert.equal(small.code, 3, small.out);
   assert.match(small.out, /over-budget band/);
 
+  // Mode bits do not stop a write into a Windows directory, so a read-only home is POSIX-only.
+  if (process.platform === "win32") return;
   const home = makeTempDir("devcycle-drive-readonly-home-");
   chmodSync(home, 0o500);
   try {
@@ -999,7 +1014,7 @@ test("a budget end records why: max-usd over the dollar cap, wait-cap past --max
   assert.equal(classifyDrive({ statePath: statePathOf(capped) }).next, "restart");
 });
 
-test("SIGINT with no stop request records interrupted, which the next continue restarts", async () => {
+test("SIGINT with no stop request records interrupted, which the next continue restarts", WINDOWS_STOP_INSTEAD, async () => {
   await withHungDriver(async ({ root, d }) => {
     d.child.kill("SIGINT");
     const r = await d.result();
@@ -1163,7 +1178,8 @@ test("--stop keeps the stop request and says so when the driver cannot be signal
 // Where ps cannot run, a live pid may be the driver or a later process that reused a dead driver's
 // pid. The watcher may trust it; a signal must not, since it would land on that other process. A
 // PATH with no ps in it stands in for such a sandbox.
-test("--stop sends no signal when ps cannot confirm the pid is still the driver: the stop request stays and it says so", (t) => {
+test("--stop sends no signal when ps cannot confirm the pid is still the driver: the stop request stays and it says so",
+  { skip: process.platform === "win32" && 'POSIX-only: a Windows stop signals nothing, covered by "stopDriver on Windows writes the stop request and signals nothing"' }, (t) => {
   const root = makeCycle();
   writeLock(root, { pid: process.pid, startTime: processStartTime(process.pid) });
   const said = [];
@@ -1463,7 +1479,7 @@ test("--dry-run writes no progress file", () => {
   assert.equal(existsSync(join(root, ".devcycle", "drive-progress.json")), false);
 });
 
-const HEALTH_FIX = (name) => new URL(`../fixtures/dispatch-health/${name}.jsonl`, import.meta.url).pathname;
+const HEALTH_FIX = (name) => fileURLToPath(new URL(`../fixtures/dispatch-health/${name}.jsonl`, import.meta.url));
 const DISPATCHED_1 = "task=1 event=dispatched outcome=model x ref=.devcycle/briefs/1-implementer.md key=1/dispatched/0/0";
 
 // Session 1's task 1 dispatch and its agent's transcript: `fixture` names the transcript's shape. The

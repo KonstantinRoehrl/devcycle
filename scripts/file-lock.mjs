@@ -144,6 +144,11 @@ const readLock = (lockPath) => {
   }
 };
 
+// Windows refuses to create a file that another process has pending delete with EPERM (or a
+// transient EBUSY/EACCES) rather than EEXIST, so there those codes mean the file is still held.
+const WINDOWS_HELD_CODES = new Set(["EEXIST", "EPERM", "EBUSY", "EACCES"]);
+const heldByAnother = (err) => (WINDOWS ? WINDOWS_HELD_CODES.has(err.code) : err.code === "EEXIST");
+
 // Removes a dead holder's lock, one reclaimer at a time. A dead holder cannot release, so under the
 // guard its file stays put once it has been read again after the judgement; a different file by then
 // means the holder released and another process took the lock. A crash inside the guard leaves it
@@ -153,7 +158,7 @@ function reclaimIfStale(lockPath, timeoutMs) {
   try {
     closeSync(openSync(guard, "wx"));
   } catch (err) {
-    if (err.code !== "EEXIST") throw err;
+    if (!heldByAnother(err)) throw err;
     if (ageMs(guard) > timeoutMs) unlinkIfPresent(guard);
     return false;
   }
@@ -170,13 +175,16 @@ function reclaimIfStale(lockPath, timeoutMs) {
 export function withFileLock(target, fn, { timeoutMs = 10000, pollMs = 25 } = {}) {
   const lockPath = `${target}.lock`;
   const deadline = Date.now() + timeoutMs;
+  // A Windows start-time read is a PowerShell launch (~300 ms, seconds on a loaded machine); it is
+  // cached, so taking it before the lock keeps it out of the time every waiter spends blocked.
+  if (WINDOWS) processStartTime(process.pid);
   let fd;
   for (;;) {
     try {
       fd = openSync(lockPath, "wx");
       break;
     } catch (err) {
-      if (err.code !== "EEXIST") throw err;
+      if (!heldByAnother(err)) throw err;
     }
     if (reclaimIfStale(lockPath, timeoutMs)) continue;
     if (Date.now() >= deadline) throw new LockTimeoutError(lockPath);

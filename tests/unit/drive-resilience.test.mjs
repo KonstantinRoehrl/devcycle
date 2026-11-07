@@ -62,7 +62,12 @@ function startClock(dir) {
   let t = Date.now();
   const write = () => {
     writeFileSync(`${path}.tmp`, String(t));
-    renameSync(`${path}.tmp`, path);
+    try {
+      renameSync(`${path}.tmp`, path);
+    } catch (err) {
+      // Windows refuses to replace a file a reader holds open; the next tick writes the later time.
+      if (process.platform !== "win32" || err.code !== "EPERM") throw err;
+    }
   };
   write();
   const timer = setInterval(() => {
@@ -86,6 +91,8 @@ async function drive(root, scenario, flags = []) {
     ...BASE_ENV,
     PATH: [dirname(process.execPath), process.env.PATH].join(delimiter),
     HOME: join(dir, "home"),
+    // os.homedir() reads USERPROFILE, not HOME, on Windows.
+    ...(process.platform === "win32" ? { USERPROFILE: join(dir, "home") } : {}),
     DEVCYCLE_RUNS_DIR: join(dir, "runs"),
     STUB_CLAUDE_SCENARIO: join(dir, "scenario.json"),
     STUB_CLAUDE_CALLS: join(dir, "calls.jsonl"),

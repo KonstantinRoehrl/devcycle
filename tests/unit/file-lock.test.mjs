@@ -13,9 +13,13 @@ const ATOMIC_MODULE = new URL("../../scripts/atomic-write.mjs", import.meta.url)
 // A pid that was alive a moment ago and is not now: the shape a killed lock holder leaves behind.
 const deadPid = () => spawnSync(process.execPath, ["-e", "0"]).pid;
 
+// Windows hands a freed pid to a new process quickly, so one dead pid can be live again by the time
+// it is read; a reading that is never null across several fresh dead pids is the bug.
 test("processStartTime: a live pid has a start time, a finished one has none", () => {
   assert.match(processStartTime(process.pid) ?? "", /\d{4}/);
-  assert.equal(processStartTime(deadPid()), null);
+  const readings = [];
+  for (let attempt = 0; attempt < 5 && readings.at(-1) !== null; attempt++) readings.push(processStartTime(deadPid()));
+  assert.equal(readings.at(-1), null, `every dead pid read a start time: ${readings.join(", ")}`);
 });
 
 test("processStartTime: one process reads the same start time whatever the caller's timezone and locale", () => {
@@ -186,6 +190,10 @@ test("withFileLock: a fresh reclaim guard leaves a stale lock alone until the wa
   const lock = `${target}.lock`;
   writeFileSync(lock, JSON.stringify({ pid: deadPid(), startTime: "Mon Jan  1 00:00:00 1990", hostname: "h" }));
   writeFileSync(`${lock}.reclaim`, "");
+  // Dated ahead, so a scheduler pause between writing the guard and the wait's start cannot age it
+  // past the 100 ms timeout before the wait gives up.
+  const ahead = Date.now() / 1000 + 60;
+  utimesSync(`${lock}.reclaim`, ahead, ahead);
   assert.throws(() => withFileLock(target, () => "ran", { timeoutMs: 100, pollMs: 10 }), LockTimeoutError);
   assert.equal(existsSync(lock), true);
 });
