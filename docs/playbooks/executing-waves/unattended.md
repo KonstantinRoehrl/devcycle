@@ -38,7 +38,10 @@ With a cycle opted in, every `/devcycle:continue` at execution start does one of
   <C> committed — next: wave <w>`, then each wave's tasks. Inside Claude Code's Bash sandbox the
   start runs outside it, through one permission prompt; refused, you get the command for a terminal
   that is not a Claude Code session, or the manual walk. Denied by a permission check, auto mode's
-  included, you get a `!` line to type, which runs the start as your own command.
+  included, you get a `!` line to type, which runs the start as your own command. On a Windows
+  machine whose PowerShell cannot read process start times the driver cannot take its lock, so
+  before anything is written you are asked one question instead, **Walk the waves manually** or
+  **Leave it stopped** (`unavailable` in `references/drive.md` § Drive actions).
 - **Watch.** It waits for the end in a background task, and relays progress as the `driveWatch`
   setting says: `end` (the default) relays nothing before the end, since the band above the prompt
   shows the run (§ Watching and stopping it); `wave` relays session starts, finished waves, waits
@@ -179,8 +182,8 @@ wait.
   carries the running driver's token. Typed by hand it stops `no-driver` and changes nothing, even
   while a driver runs.
 - **Share the checkout** — see the next section.
-- **Run on Windows**, or on a model whose window cannot hold a session start —
-  [`docs/known-issues.md`](../../known-issues.md) has both.
+- **Run on a model whose window cannot hold a session start** — the pre-flight refuses it
+  (§ What the driver does).
 
 ## Hands off the working tree while it runs
 
@@ -220,8 +223,12 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
   (`stopped`), releases the lock and exits 130; `/devcycle:continue` asks before resuming it. A
   driver another user or a sandbox started may refuse the signal, and where `ps` cannot run to
   confirm the pid is still the driver's, `--stop` sends none: either way it leaves the request on
-  disk and exits 1, and the driver stops before its next session or within a minute of a wait. A
-  bare `kill <PID>` or Ctrl-C still works and records `interrupted`, which the next
+  disk and exits 1, and the driver stops before its next session or within a minute of a wait. On
+  Windows `--stop` sends no signal at all: it writes the request and exits 0, and the driver stops
+  its session within about a second, waiting up to 10 s for a running tool call or dispatch to
+  finish; a bare `kill <PID>` there ends only the driver, so stop it with `--stop`
+  ([`docs/known-issues.md`](../../known-issues.md) § Windows). Elsewhere a bare `kill <PID>` or
+  Ctrl-C still works and records `interrupted`, which the next
   `/devcycle:continue` restarts after its start confirm. A `kill -9`, crash or reboot leaves the lock
   behind; it reads as a crash and is restarted, and the next driver on the same machine reclaims
   the lock, even when the host's name changed meanwhile. A lock the driver cannot check is never
@@ -243,7 +250,7 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
 | `--max-churn <n>` | 3 | Consecutive sessions that add ledger lines beyond a dispatch's start or recorded ending but no report, verdict or commit before the driver gives up (exit 5). |
 | `--max-backoff <minutes>` | 360 | Total time it backs off from transient failures and silent sessions before giving up (exit 6). A usage limit with a known reset is not charged. |
 | `--detach` | off | Runs the pre-flight, starts the driver as a new session's leader writing to `.devcycle/drive.log`, and returns once the driver holds its lock — however long that takes — printing `{"pid":<n>,"log":".devcycle/drive.log","logOffset":<n>}`; a driver that refuses instead has its message relayed and its exit code returned. Closing the terminal does not stop it. |
-| `--stop` | off | With `--state`: asks the running driver to stop (exit 130, result `stopped`) and prints `{"stopped":true,"pid":<n>}`; exits 3 when no driver runs for that state, and 1 when the driver cannot be signalled, leaving the request for it to find. |
+| `--stop` | off | With `--state`: asks the running driver to stop (exit 130, result `stopped`) and prints `{"stopped":true,"pid":<n>}`; exits 3 when no driver runs for that state, and 1 (POSIX only) when the driver cannot be signalled, leaving the request for it to find. |
 | `--status` | off | With `--state`: prints the run's state as JSON — running, the last run's outcome and its next step — with the log's last 40 lines. |
 | `--follow` | off | With `--state`: prints one line per reported event (session start, commit, rejected verdict, user decision, intake bounce, finished wave, wait, stop), each ending ` @<offset>`, and a `drive ended: …` line when the driver stops. `--since <bytes>` resumes from an offset. `--level <level>` (default `all`) picks the lines: `end` only driver errors and the end, `wave` adds session starts, finished waves, waits and stops, and `all` adds the rest, a task's accepted verdict and commit printed as one `task <id> committed (<n> review rounds)` line. |
 | `--wait` | off | With `--state`: blocks until no driver runs, then prints `--status`. |
@@ -257,7 +264,7 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
 | Code | Meaning |
 | --- | --- |
 | 0 | Done: the state reached `branch-review`. `/devcycle:continue` emits the branch-review handoff. |
-| 1 | Unexpected driver error, or the state left execution for a stage other than branch review. `--stop` exits 1 when the driver cannot be signalled, or `ps` cannot confirm the pid is still the driver's. |
+| 1 | Unexpected driver error, or the state left execution for a stage other than branch review. `--stop` exits 1 (POSIX only) when the driver cannot be signalled, or `ps` cannot confirm the pid is still the driver's. |
 | 2 | Usage error: an unknown flag or value, a missing `--state`, a malformed number. |
 | 3 | Environment: a pre-flight check failed — among them no `drive: auto` row, no effort level to run at, a start from a driven session, the Bash sandbox, or tracked changes a remaining task would overwrite —, another driver holds the lock, devcycle did not load in a session (another plugin's load errors do not count), authentication failed, or the API refused a request every session would make (a low credit balance, an unknown model, a key without access). The message names the check and its remedy. `--stop` exits 3 when no driver runs. |
 | 4 | Stopped for you: a session reached a gate. The reason and its detail are printed. |

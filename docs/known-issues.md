@@ -56,13 +56,29 @@ If one does, `NODE_OPTIONS=--max-old-space-size=<MB>` is the stop-gap.
 
 Limits of unattended execution, recorded with why each was left rather than fixed.
 
-### POSIX only (low)
+### Windows (low)
 
-The driver starts each session as the leader of its own process group and stops it by signalling
-that group (`killGroup` in `workflows/lib/agent-cli.js`). Windows has no process groups in that
-sense, so an interrupted driver there would leave its session running and committing. It is
-documented as a limit rather than ported: a port needs a Windows equivalent of group signalling
-that nothing in devcycle provides.
+The driver runs on Windows with these limits beside macOS and Linux.
+
+A session's process tree is ended with `taskkill /T`, which follows parent pids down from the
+session (`killTree` in `workflows/lib/agent-cli.js`), so it misses a grandchild whose own parent
+already exited, such as a server backgrounded from the session's shell. Once the session has exited
+its pid may be a stranger's, so the sweep of a survivor still holding the pipes does nothing on
+Windows. A Job Object would close both; nothing in devcycle creates one.
+
+The lock names the machine by its hostname alone: Windows has no machine id or boot id that the
+lock reads (`scripts/drive-lock.mjs`), the same as a Linux host without `/etc/machine-id`, so a
+lock left behind across a rename of the host needs removing by hand.
+
+Reading another process's start time launches PowerShell and costs ~300 ms, seconds on a loaded
+machine (`scripts/file-lock.mjs`). The git guard pays it on every main-thread Bash call while a lock
+exists, and so do the watcher and a contended file-lock reclaim. A process's own start time is
+cached; another's is read each time, since its pid may by then be a later process's.
+
+A `--stop` sends no signal, since one would end the driver and leave its session running; it only
+writes the request. The driver, polling for it, then waits up to 10 s (`SIGNAL_GRACE_MS` in
+`scripts/drive-execution.mjs`) for the session to have no tool call or dispatch running before it
+ends the session's process tree.
 
 ### Haiku 5.5 is priced at its up-to-100K tier (low)
 
