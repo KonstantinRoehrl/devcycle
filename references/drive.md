@@ -22,6 +22,7 @@ action, answer the gates § Execution resume names first, then act on `drive.act
 | `start` | When `drive.writeRow` is `auto`, first write the `auto` row with `via=knob`. Then, when `drive.confirm` is true and this session has not already answered a start question, ask the start confirm, ONE AskUserQuestion: **Resume unattended** · **Walk the waves manually** · **Leave it stopped**, the last two as § Answering a stopped run says. Then run the start path. |
 | `gate` | The last run stopped for a person. A settled stop with `drive.confirm` false asks nothing: write the `auto` row with `via=knob` when `drive.writeRow` is `auto`, then run the start path. Otherwise ask the stopped run's question; unless the answer left unattended, write the `auto` row first when the state file has none, then run the start path. |
 | `manual` | Write a `manual` row with `via=knob` when `drive.writeRow` is `manual`. Whenever this session writes a `manual` row, here or on a **Walk the waves manually** answer, it re-runs `wave-setup.mjs` and takes only `tasks`, `dispatchable`, `wave` and `entryLines` from it, its gates already answered. Then walk the waves in this session: the rest of § Execution resume, as without a driver. |
+| `unavailable` | This machine cannot take the driver's lock, so no driver can start; only Windows reports it, and `drive.reason` says why. ONE AskUserQuestion naming `drive.reason`: **Walk the waves manually** · **Leave it stopped**. **Walk the waves manually** writes the `manual` row with `via=answer` (rewriting an `auto` row), marks the result handled as § Answering a stopped run says, then acts as `manual`. **Leave it stopped** ends the session with nothing written. |
 | `none` | A driven session (`--drive`): `commands/continue.md` § Drive mode governs, and nothing here applies. |
 
 The start path is `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/drive.md the-start-path`
@@ -43,7 +44,7 @@ row through `drive.writeRow`: a `manual` row, or an `auto` row when the knob is 
 (`docs/decisions/README.md`, 2026-10-29 — The unattended knob starts the driver). Only these write
 the row: `drive.writeRow`; `ask`'s answer; an answer that starts the driver on a state file with no
 `auto` row first writes the `auto` row with `via=answer` (**Resume unattended**, **Restart
-unattended**); and **Walk the waves manually** — at a start confirm, at a stopped run, or when the
+unattended**); and **Walk the waves manually** — at a start confirm, at a stopped run, at an unavailable lock, or when the
 start's sandbox approval is refused or a permission check denies it, each rewriting an `auto` row to `manual`. Write it by rewriting
 the state file in full with the row added; every other rewrite carries it forward
 (`references/resume.md` § The state file). A row decides whether the waves run unattended: once it
@@ -131,7 +132,9 @@ In this order, never dispatching a task from this session:
    and summarise it. When the user asks to stop the run, run
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/drive-execution.mjs" --stop --state .devcycle/state.md`:
    the run ends `stopped`. Exit 1 means the signal was not delivered: report its message — the
-   driver stops before its next session.
+   driver stops before its next session. On Windows `--stop` sends no signal: the driver reads the
+   request within a second, then ends its session once no tool call or dispatch is running, or after
+   10 s.
 
 ## When the run ends
 

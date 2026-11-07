@@ -152,6 +152,15 @@ function reclaim(path, staleRaw, self) {
   return true;
 }
 
+// Windows reads a start time through PowerShell (scripts/file-lock.mjs), which can be missing or
+// refuse; then no lock can be taken, so /devcycle:continue and the driver's pre-flight say so before
+// a `drive: auto` row is written. Elsewhere the lock itself reports it: a ps that the Bash sandbox
+// cannot run says nothing about a driver started outside it.
+export function driveLockUnavailable({ platform = process.platform, startTime = () => processStartTime(process.pid) } = {}) {
+  if (platform !== "win32" || startTime() !== null) return null;
+  return "Windows PowerShell cannot read this process's start time, so the driver cannot take its lock";
+}
+
 export function acquireDriveLock(toplevel, { statePath, logPath, tokenHash = null }) {
   const path = lockPath(toplevel);
   const startTime = processStartTime(process.pid);

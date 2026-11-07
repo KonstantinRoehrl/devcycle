@@ -3,8 +3,9 @@
 // start, it walks the execution stage one fresh `claude -p` session per wave — the session a manual
 // /clear + /devcycle:continue would start — and stands in for the user at the wave → wave boundary
 // only (docs/decisions/README.md, 2026-10-13). Every other gate stops it: a driven session writes .devcycle/drive-stop.json
-// through scripts/drive-signal.mjs, and the driver exits 4 with that reason. POSIX only: a signal
-// reaches a session through its process group.
+// through scripts/drive-signal.mjs, and the driver exits 4 with that reason. A signal reaches a session
+// through its process group on POSIX; Windows has none, so there a `--stop` is a request file the
+// driver polls, and the session's process tree is ended with taskkill.
 import { appendFileSync, closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { randomBytes } from "node:crypto";
@@ -18,7 +19,7 @@ import { parseFlags, requireCount, requireValue } from "./cli-flags.mjs";
 import { contextDepth, OVER_BUDGET, windowFor } from "./depth-bands.mjs";
 import { DISPATCH_ENDED, dispatchHealth, recordDeath, sessionSlugDir } from "./dispatch-health.mjs";
 import { costUSD, provisionalCostUSD } from "./doctor.mjs";
-import { acquireDriveLock, DRIVE_LOCK_REL, driveTokenHash, lockNamesState, readDriveLockHolder, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
+import { acquireDriveLock, DRIVE_LOCK_REL, driveLockUnavailable, driveTokenHash, lockNamesState, readDriveLockHolder, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
 import { buildProgress, removeProgress, writeProgress } from "./drive-progress.mjs";
 import { holderLiveness, LOG_REL, markResultHandled, noProgressEndsAfter, RESULT_REL, STOP_REQUEST_REL, writeCrashedResult, writeDriveResult } from "./drive-result.mjs";
 import { readPluginList, surfaceArgs } from "./drive-surface.mjs";
@@ -58,6 +59,14 @@ const WATCHDOG_GRACE_MS = Number(process.env.DEVCYCLE_DRIVE_WATCHDOG_GRACE_MS) |
 const DEAD_STATES = new Set(["ended-without-output", "quiet"]);
 const DEFAULT_BACKOFF_MS = 5 * 60_000;
 export const SIGNAL_GRACE_MS = 10_000;
+const WINDOWS = process.platform === "win32";
+// Windows has no signal a --stop can send (process.kill there is TerminateProcess, which would leave the
+// session running), so the driver reads the stop request itself this often, in a session and a wait alike.
+const STOP_POLL_MS = 1000;
+// How long a Windows stop waits for the session to go idle before it ends the session's process tree.
+// DEVCYCLE_DRIVE_STOP_GRACE_MS shortens it for tests.
+const STOP_GRACE_MS = Number(process.env.DEVCYCLE_DRIVE_STOP_GRACE_MS) || SIGNAL_GRACE_MS;
+const IDLE_POLL_MS = 250;
 const DETACH_POLL_MS = 50;
 // The plugin version this driver started on. A running process keeps its code across an update, so
 // each session it starts compares this with its own (scripts/wave-setup.mjs). A version this driver
@@ -239,12 +248,12 @@ export function classifyTrackedChanges(planText, entries, paths) {
 }
 
 function git(root, args) {
-  const r = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+  const r = spawnSync("git", ["-C", root, ...args], { encoding: "utf8", windowsHide: true });
   return r.status === 0 ? r.stdout.trim() : null;
 }
 
 function trackedChanges(root) {
-  const r = spawnSync("git", ["-C", root, "status", "--porcelain=v1", "-z", "--untracked-files=no"], { encoding: "utf8" });
+  const r = spawnSync("git", ["-C", root, "status", "--porcelain=v1", "-z", "--untracked-files=no"], { encoding: "utf8", windowsHide: true });
   if (r.status !== 0) throw new Exit(3, `git status failed in ${root}: ${(r.stderr ?? "").trim()}`);
   const tokens = r.stdout.split("\0").filter(Boolean);
   const paths = [];
@@ -329,6 +338,8 @@ function checkEnvironment(root, state, opts) {
   const refusal = modelRefusal(model);
   if (refusal) throw new Exit(3, refusal);
   const effort = driveEffort(root, state, opts, model);
+  const unavailable = driveLockUnavailable();
+  if (unavailable) throw new Exit(3, unavailable);
   if (sandboxed()) throw new Exit(3, SANDBOX_REFUSAL);
   return { model, effort, planText, plan: state.plan, run: state.run, leftAlone };
 }
@@ -337,6 +348,10 @@ function release(ctx) {
   if (ctx.lock) releaseDriveLock(ctx.root, ctx.lock);
   ctx.lock = null;
 }
+
+// The path goes into each session's prompt, which a driven session pastes unquoted into Git Bash, where
+// a backslash is an escape; lockNamesState resolves either form.
+const driveStatePath = (root, statePath) => (WINDOWS ? relative(root, statePath).replaceAll("\\", "/") : relative(root, statePath));
 
 // Fail closed: every refusal exits 3 and leaves no lock behind — and leaves the last run's result and
 // a stop request where they are, since only a run that starts supersedes them. The checks come
@@ -352,7 +367,7 @@ function preflight(opts, { readList = true } = {}) {
   const root = dirname(dirname(statePath));
   // The token proves to wave-setup.mjs that a session was started by this driver; the lock keeps
   // only its hash, and only the sessions this driver starts are handed the token itself.
-  const ctx = { root, statePath, stateRel: relative(root, statePath), lock: null, session: null, progressed: false, token: randomBytes(16).toString("hex") };
+  const ctx = { root, statePath, stateRel: driveStatePath(root, statePath), lock: null, session: null, progressed: false, token: randomBytes(16).toString("hex") };
   const holder = readLiveDriveLock(root);
   if (holder) throw new Exit(3, heldBy(holder));
   Object.assign(ctx, checkEnvironment(root, readState(statePath), opts));
@@ -587,7 +602,13 @@ function runSession(ctx, bin, args, log, n) {
       }
     };
     let startError = null;
-    handle = spawnStreaming(bin, args, { cwd: ctx.root, env: childEnv(ctx), onStdoutLine, onStderrLine: armIdle });
+    try {
+      handle = spawnStreaming(bin, args, { cwd: ctx.root, env: childEnv(ctx), onStdoutLine, onStderrLine: armIdle });
+    } catch (err) {
+      s.environment = `cannot run ${bin}: ${err.message}`;
+      settle(finalize(s, ctx.model));
+      return;
+    }
     ctx.session = handle;
     ctx.live = { s, handle, n, deadSince: null };
     handle.child.once("error", (err) => {
@@ -733,16 +754,34 @@ function writeRecord(ctx, s, r, n) {
   appendRunRecordOnce({ toplevel: gitToplevel(ctx.root), run: ctx.run, kind: "drive", fields, matchKeys: ["sessionHash"] });
 }
 
+// Idle: no main-thread tool call awaits its result and no dispatch of the session is running
+// (scripts/dispatch-health.mjs), so ending it now cuts short no commit and no task that could finish.
+function sessionIdle(ctx) {
+  const live = ctx.live;
+  if (!live) return true;
+  if (live.s.pending.size) return false;
+  if (!live.s.sessionId) return true;
+  try {
+    return !dispatchHealth({ root: ctx.root, sessionId: live.s.sessionId, now: clockNow() }).some((d) => d.state === "running");
+  } catch {
+    return true; // the grace still bounds the wait; an unreadable tracker only ends it sooner
+  }
+}
+
 function trapSignals(ctx) {
   const trap = { interrupted: false, wake: () => {} };
+  const interrupt = () => {
+    if (trap.interrupted) return false;
+    trap.interrupted = true;
+    trap.wake();
+    return true;
+  };
   const onSignal = (sig) => {
     const handle = ctx.session;
-    if (trap.interrupted) {
+    if (!interrupt()) {
       stopSession(handle);
       return;
     }
-    trap.interrupted = true;
-    trap.wake();
     if (!handle) return;
     try {
       process.kill(-handle.child.pid, sig);
@@ -753,10 +792,28 @@ function trapSignals(ctx) {
       if (ctx.session === handle) stopSession(handle);
     }, SIGNAL_GRACE_MS).unref();
   };
+  // Windows: the stop request on disk is the stop. A running session is ended once it is idle, or when
+  // the grace runs out.
+  const onStopRequest = () => {
+    if (!stopRequested(ctx.root) || !interrupt()) return;
+    const handle = ctx.session;
+    if (!handle) return;
+    const deadline = Date.now() + STOP_GRACE_MS;
+    const check = setInterval(() => {
+      if (ctx.session !== handle) clearInterval(check);
+      else if (sessionIdle(ctx) || Date.now() >= deadline) {
+        clearInterval(check);
+        stopSession(handle);
+      }
+    }, IDLE_POLL_MS);
+  };
+  const poll = WINDOWS ? setInterval(onStopRequest, STOP_POLL_MS) : null;
+  poll?.unref();
   const names = ["SIGINT", "SIGTERM", "SIGHUP"];
   for (const name of names) process.on(name, onSignal);
   trap.dispose = () => {
     for (const name of names) process.off(name, onSignal);
+    clearInterval(poll);
   };
   return trap;
 }
@@ -1005,7 +1062,9 @@ function relayRefusal(root, logOffset) {
 }
 
 // Runs the pre-flight here, so a refusal still exits 3 in the caller's terminal, then starts the
-// driver again without --detach as a new session's leader (`detached: true` calls setsid on POSIX):
+// driver again without --detach as a new session's leader (`detached: true` calls setsid on POSIX;
+// on Windows it starts the driver with no console, so every process on the driver path passes windowsHide or
+// would open a window of its own):
 // no terminal's hangup reaches it, unlike a `nohup … &` child of the caller's session. It returns
 // only once the child holds the lock and has handed off the last run's result, so a watch armed next
 // never reads a run not yet begun as ended; however long that takes, since a driver left running
@@ -1028,6 +1087,7 @@ async function detach(opts, argv) {
   const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...argv.filter((a) => a !== "--detach")], {
     detached: true,
     stdio: ["ignore", log, log],
+    windowsHide: true,
   });
   closeSync(log);
   let exited = null;
@@ -1051,7 +1111,7 @@ async function detach(opts, argv) {
 // The way to stop a driver on purpose: the request on disk is what makes its 130 read as stopped,
 // which /devcycle:continue never restarts unasked. out and say take what it says, for a caller whose
 // own stdout is one JSON object (scripts/stop-cycle.mjs).
-export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, signal), out = console.log, say = console.error } = {}) {
+export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, signal), out = console.log, say = console.error, platform = process.platform } = {}) {
   const statePath = resolve(state);
   const root = dirname(dirname(statePath));
   const request = join(root, STOP_REQUEST_REL);
@@ -1060,12 +1120,18 @@ export function stopDriver(state, { kill = (pid, signal) => process.kill(pid, si
     say(`drive-execution: no driver is running for ${state}`);
     return 3;
   };
-  const requestStays = `the stop request stays in ${STOP_REQUEST_REL}, so the driver stops before its next session or within a minute of a wait`;
+  const requestStays = `the stop request stays in ${STOP_REQUEST_REL}, so the driver stops before its next session or within a minute of a wait (within a second on Windows)`;
   // The watcher's liveness (scripts/drive-result.mjs): a sandbox that runs no ps still finds the driver.
   const holder = readDriveLockHolder(root);
   const liveness = holder && lockNamesState(root, holder, statePath) ? holderLiveness(root, holder) : "gone";
   if (liveness === "gone") return notRunning();
   atomicWrite(request, `${now()}\n`);
+  // Windows: process.kill would be TerminateProcess, which ends the driver and leaves its session
+  // running, so the request alone is the stop; the driver polls for it (trapSignals).
+  if (platform === "win32") {
+    out(JSON.stringify({ stopped: true, pid: holder.pid }));
+    return 0;
+  }
   // A pid ps cannot vouch for may be a later process that reused a dead driver's pid: never signal it.
   if (liveness === "unverified") {
     say(`drive-execution: cannot confirm pid ${holder.pid} is still the driver, because ps does not run here, so it was not signalled — ` +

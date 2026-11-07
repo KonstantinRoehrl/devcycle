@@ -10,7 +10,7 @@ export const INTEGRATION_BRANCHES = ["dev", "develop", "development", "integrati
 // that may be the default is returned, so an unresolved default protects each candidate instead of
 // guessing one. Empty when no candidate exists.
 export function defaultBranches(cwd) {
-  const git = (...args) => spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
+  const git = (...args) => spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", windowsHide: true });
   const remoteHead = git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD");
   if (remoteHead.status === 0 && remoteHead.stdout.trim()) return [remoteHead.stdout.trim().replace(/^origin\//, "")];
   const configured = git("config", "--get", "init.defaultBranch").stdout.trim();

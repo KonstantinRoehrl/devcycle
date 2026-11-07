@@ -24,7 +24,7 @@ import {
 } from "./task-ledger.mjs";
 import { ledgerSlotState } from "./ledger-slot.mjs";
 import { pendingReviewLoop, reviewLoopId } from "./review-loop.mjs";
-import { holdsDriveToken, lockNamesState, readLiveDriveLock } from "./drive-lock.mjs";
+import { driveLockUnavailable, holdsDriveToken, lockNamesState, readLiveDriveLock } from "./drive-lock.mjs";
 import { classifyDrive } from "./drive-result.mjs";
 import { isProtectedBranch } from "./branch-names.mjs";
 import { DISPATCH_ENDED, deathRoute, endedRole } from "./dispatch-health.mjs";
@@ -46,6 +46,7 @@ const IMPLEMENTER_NEXT = new Set(["dispatch-implementer", "redispatch-implemente
 // so a driver that stopped on one needs no question of its own.
 const SETTLED_REASONS = new Set(["knob-drift", "foreign-state", "resume-check", "branch", "depth-at-start", "no-driver", "not-opted-in"]);
 const NO_WALK = { wave: null, tasks: [], dispatchable: [], entryLines: [] };
+const DRIVER_STARTS = new Set(["start", "gate", "ask"]);
 
 // The position of an outcome a retry cap bounds, or null for any other outcome.
 function cappedPosition(outcome, retries) {
@@ -288,7 +289,8 @@ const stateTextAt = (path) => {
 // `settle(checked)` is the format settle (see waveSetup): given the state's resume-check verdict it
 // returns scripts/cycle-format.mjs's settleFormat result, and null skips it.
 function readSetup(opts) {
-  const { statePath, drive = false, knobsLine = null, ledgerPath = null, env = process.env, cwd = process.cwd(), pluginVersion = installedVersion(), settle = null } = opts;
+  const { statePath, drive = false, knobsLine = null, ledgerPath = null, env = process.env, cwd = process.cwd(), pluginVersion = installedVersion(), settle = null,
+    lockUnavailable = driveLockUnavailable } = opts;
   const abs = resolve(cwd, statePath);
   let stateText;
   try {
@@ -379,7 +381,11 @@ function readSetup(opts) {
   result.branch = branchVerdict(root, field(stateText, "branch"));
   Object.assign(result, wavePosition(root, planText, map, lines));
   if (!drive) {
-    const decision = driveAction(result.drive, driver, result.pendingDecision);
+    let decision = driveAction(result.drive, driver, result.pendingDecision);
+    // Windows only (scripts/drive-lock.mjs): a lock this machine cannot take would fail the start after
+    // the row is written (#417), so the session asks before writing anything.
+    const reason = DRIVER_STARTS.has(decision.action) ? lockUnavailable() : null;
+    if (reason) decision = { action: "unavailable", writeRow: null, confirm: null, gate: null, reason };
     // A recorded driver end or stop asks its own question instead (references/resume.md § The state file).
     const ask = result.handoff.state === "pending" && !state.stopped && decision.action !== "gate" && !(decision.action === "start" && driver.next !== "none");
     // Only a manual walk reads the wave. Any other action is the drive step's, so the output carries

@@ -88,7 +88,9 @@ function withLock(c, fn, statePath = c.statePath) {
 // A transcript root whose session for `repo` stands at 152340 tokens on a 1M window: over budget.
 function overBudget(repo) {
   const projects = makeTempDir("wave-setup-projects-");
-  const dir = join(projects, repo.replaceAll("/", "-"));
+  // A Windows path's drive colon and backslashes cannot stand in a directory name; Claude Code's slug
+  // there replaces every character that is not a letter or digit.
+  const dir = join(projects, process.platform === "win32" ? repo.replace(/[^A-Za-z0-9]/g, "-") : repo.replaceAll("/", "-"));
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "sess-1.jsonl"), JSON.stringify({ type: "assistant", timestamp: "2026-10-08T10:00:00Z", message: {
     model: "claude-opus-5", content: [],
@@ -210,7 +212,7 @@ test("the current wave is the first with uncommitted work; dispatchable tasks ca
   const fresh = setup(cycle());
   assert.equal(fresh.wave, 1);
   assert.deepEqual(fresh.dispatchable.map((d) => [d.task, d.testCmd]), [["1", "node --test tests/a.test.mjs"], ["2", "node --test tests/b.test.mjs"]]);
-  assert.match(fresh.entryLines[0], /^entry: .*playbooks\/executing-waves\.md$/);
+  assert.match(fresh.entryLines[0], /^entry: .*playbooks[\\/]executing-waves\.md$/);
 
   const first = setup(cycle({ ledger: [committed(1)] }));
   assert.deepEqual([first.ok, first.action, first.wave, first.appended], [true, "resume", 1, []]);
@@ -986,7 +988,8 @@ function unverifiableLock(c) {
   return holder;
 }
 
-test("format: a holder no check can prove dead counts as a live driver, so an interactive resume attaches and migrates nothing", () => {
+test("format: a holder no check can prove dead counts as a live driver, so an interactive resume attaches and migrates nothing",
+  { skip: process.platform === "win32" && 'POSIX-only: Windows reads start times through PowerShell, not ps, covered by "holderLiveness: on Windows a PowerShell that cannot run leaves a live pid unverified, and a finished one gone" in drive-result.test.mjs' }, () => {
   const c = cycle({ ledger: [committed(1)] });
   const holder = unverifiableLock(c);
   const before = [stateOf(c), readFileSync(c.ledgerPath, "utf8")];
@@ -1065,4 +1068,50 @@ test("action: drive under start, ask, gate and attach, with no walk fields; resu
   assert.deepEqual([walked.action, walked.drive.action, walked.wave, walked.tasks.map((t) => t.task), walked.dispatchable.map((t) => t.task)],
     ["resume", "manual", 1, ["1", "2"], ["2"]]);
   assert.ok(walked.entryLines.length > 0, "a manual walk carries its entry lines");
+});
+
+// #417: a lock this machine cannot take is reported before any row is written, so a start never
+// fails after the auto row is down.
+test("drive.action unavailable: a start, a recorded auto row, an ask or a gate becomes unavailable when lockUnavailable names a reason", () => {
+  const ledger = [committed(1)];
+  const noLock = () => "no lock here";
+  const cases = {
+    start: setup(cycle({ ledger }), { knobsLine: knobsWith("unattended"), lockUnavailable: noLock }),
+    auto: setup(cycle({ state: [DRIVE_ROW], ledger }), { lockUnavailable: noLock }),
+    ask: setup(cycle({ ledger }), { knobsLine: KNOBS, lockUnavailable: noLock }),
+    gate: setup(ended(cycle({ state: [DRIVE_ROW], ledger }), runEnd("stalled", { code: 5 })), { lockUnavailable: noLock }),
+  };
+  for (const [name, r] of Object.entries(cases)) {
+    const { action, writeRow, confirm, gate, reason } = r.drive;
+    assert.deepEqual([r.action, action, writeRow, confirm, gate, reason, r.wave, r.tasks, r.dispatchable],
+      ["drive", "unavailable", null, null, null, "no lock here", null, [], []], name);
+  }
+});
+
+test("drive.action unavailable: a manual row and a running driver never consult lockUnavailable", () => {
+  let calls = 0;
+  const counted = () => (calls++, "no lock here");
+  const ledger = [committed(1)];
+  const walked = setup(cycle({ state: [MANUAL_ROW], ledger }), { knobsLine: knobsWith("unattended"), lockUnavailable: counted });
+  assert.equal(walked.drive.action, "manual");
+  const attached = cycle({ state: [DRIVE_ROW], ledger });
+  withLock(attached, () => assert.equal(setup(attached, { lockUnavailable: counted }).drive.action, "attach"));
+  assert.equal(calls, 0, "lockUnavailable was called for manual or attach");
+});
+
+test("drive.action: lockUnavailable returning null leaves start, auto, ask, gate and manual as they were", () => {
+  const ledger = [committed(1)];
+  const decide = (c, opts) => {
+    const r = setup(c, { ...opts, lockUnavailable: () => null });
+    return [r.action, r.drive.action, r.drive.writeRow];
+  };
+  assert.deepEqual(decide(cycle({ ledger }), { knobsLine: knobsWith("unattended") }), ["drive", "start", "auto"]);
+  assert.deepEqual(decide(cycle({ state: [DRIVE_ROW], ledger }), {}), ["drive", "start", null]);
+  assert.deepEqual(decide(cycle({ ledger }), { knobsLine: KNOBS }), ["drive", "ask", null]);
+  assert.deepEqual(decide(ended(cycle({ state: [DRIVE_ROW], ledger }), runEnd("stalled", { code: 5 })), {}), ["drive", "gate", null]);
+  assert.deepEqual(decide(cycle({ state: [MANUAL_ROW], ledger }), {}), ["resume", "manual", null]);
+});
+
+test("references/drive.md's Drive actions table has an unavailable row", () => {
+  assert.match(readFileSync(join(ROOT, "references/drive.md"), "utf8"), /^\| `unavailable` \| /m);
 });
