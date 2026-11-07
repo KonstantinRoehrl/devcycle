@@ -3,11 +3,12 @@ import assert from "node:assert/strict";
 import { readFileSync, realpathSync, existsSync } from "node:fs";
 import { join, dirname, delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawn, spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import agentCli from "../../workflows/lib/agent-cli.js";
 import { makeFakeBin } from "./helpers.mjs";
 
-const { run, claudeStructured, makeLogger } = agentCli;
+const { run, claudeStructured, makeLogger, spawnSpec, quoteCmdShimArg, killGroup, spawnStreaming } = agentCli;
 
 // A PATH with no `claude` on it anywhere. Prepending a deliberately broken fake
 // does NOT work: PATH lookup skips a non-executable file and falls through to
@@ -62,7 +63,7 @@ test("run surfaces a missing binary as spawnError instead of rejecting", async (
   assert.equal(res.code, null);
 });
 
-test("run kills a child that outlives timeoutMs and reports timedOut", async () => {
+test("run kills a child that outlives timeoutMs and reports timedOut", { skip: process.platform === "win32" && "Windows: outside the driver path (#419)" }, async () => {
   const bin = makeFakeBin("sleeper", `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);`);
   const res = await run(join(bin, "sleeper"), [], { timeoutMs: 100 });
   assert.equal(res.timedOut, true);
@@ -88,7 +89,7 @@ test("run() completes normally under the cap with no overflow flag", async () =>
   assert.equal(res.stdout, "hello");
 });
 
-test("claudeStructured pins --tools with the equals form and plumbs cwd, model and permission mode", async () => {
+test("claudeStructured pins --tools with the equals form and plumbs cwd, model and permission mode", { skip: process.platform === "win32" && "Windows: outside the driver path (#419)" }, async () => {
   const argvLog = join(makeTempDir("devcycle-agent-cli-"), "argv.json");
   const bin = makeFakeBin(
     "claude",
@@ -123,7 +124,7 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: { ok: 
   assert.equal(realpathSync(seen.cwd), realpathSync(cwd), "the subagent runs in the cwd it was given");
 });
 
-test("claudeStructured makes exactly `attempts` calls and labels the failure with the caller's vocabulary", async () => {
+test("claudeStructured makes exactly `attempts` calls and labels the failure with the caller's vocabulary", { skip: process.platform === "win32" && "Windows: outside the driver path (#419)" }, async () => {
   const tries = join(makeTempDir("devcycle-agent-cli-tries-"), "tries.log");
   const bin = makeFakeBin(
     "claude",
@@ -161,7 +162,7 @@ test("claudeStructured reports an unreachable CLI with the shared not-runnable m
   assert.match(res.error, /^claude CLI not runnable: .*ENOENT/);
 });
 
-test("claudeStructured reports an agent that outlives its timeout in the caller's vocabulary", async () => {
+test("claudeStructured reports an agent that outlives its timeout in the caller's vocabulary", { skip: process.platform === "win32" && "Windows: outside the driver path (#419)" }, async () => {
   const bin = await makeStalledClaude();
   const res = await withPath(isolatedPath([bin]), () =>
     withShortAgentTimeout(50, () =>
@@ -185,7 +186,7 @@ test("claudeStructured reports an agent that outlives its timeout in the caller'
 // margin is deliberately ~30x that baseline rather than a snug one: a loaded
 // runner that misses the window makes a correct retry loop fail the count. The
 // cost of that headroom is ~3s of suite time, two attempts of 1500ms each.
-test("claudeStructured retries a timed-out agent and reports the timeout after the last attempt", async () => {
+test("claudeStructured retries a timed-out agent and reports the timeout after the last attempt", { skip: process.platform === "win32" && "Windows: outside the driver path (#419)" }, async () => {
   const tries = join(makeTempDir("devcycle-agent-cli-timeout-tries-"), "tries.log");
   const bin = await makeStalledClaude(`require("node:fs").appendFileSync(${JSON.stringify(tries)}, "x");`);
   const res = await withPath(isolatedPath([bin]), () =>
@@ -204,7 +205,7 @@ test("claudeStructured retries a timed-out agent and reports the timeout after t
   assert.equal(readFileSync(tries, "utf8").length, 2, "a timeout is retried, and only the last attempt returns the error");
 });
 
-test("claudeStructured surfaces total_cost_usd from the envelope as cost", async () => {
+test("claudeStructured surfaces total_cost_usd from the envelope as cost", { skip: process.platform === "win32" && "Windows: outside the driver path (#419)" }, async () => {
   const bin = makeFakeBin(
     "claude",
     `process.stdout.write(JSON.stringify({ is_error: false, structured_output: { ok: true }, total_cost_usd: 0.0123 }));`
@@ -262,7 +263,7 @@ const BACKGROUNDS_A_GRANDCHILD = "sleep 10 & echo $!; exit 0";
 // surviving grandchild kept the PARENT's event loop alive on the still-ref'd pipe handles — the
 // engine wrote its report and then hung until the grandchild died. Asserting that the promise
 // settled passes against that bug; only the parent's own exit discriminates it.
-test("the parent process exits promptly once run() settles, even with a grandchild still holding the pipes", async () => {
+test("the parent process exits promptly once run() settles, even with a grandchild still holding the pipes", { skip: process.platform === "win32" && "Windows: outside the driver path (#419)" }, async () => {
   const agentCliPath = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "workflows", "lib", "agent-cli.js");
   const runner = `
 const { run } = require(${JSON.stringify(agentCliPath)});
@@ -291,7 +292,7 @@ run("/bin/sh", ["-c", ${JSON.stringify(BACKGROUNDS_A_GRANDCHILD)}]).then((res) =
   assert.ok(exited, `the parent was still running ${elapsed}ms after run() settled: settling must release the child instead of leaving a grandchild holding the parent's event loop open`);
 });
 
-test("run() leaves nothing alive in the child's group once it has settled, and still returns the buffered output", async () => {
+test("run() leaves nothing alive in the child's group once it has settled, and still returns the buffered output", { skip: process.platform === "win32" && "Windows: outside the driver path (#419)" }, async () => {
   const res = await run("/bin/sh", ["-c", BACKGROUNDS_A_GRANDCHILD]);
   const pid = Number(res.stdout.trim());
   try {
@@ -376,7 +377,7 @@ test("run() does not escalate to a group SIGKILL when a cleanly exited child's p
   );
 });
 
-test("run() still kills the group at settle while a grandchild is holding it open", async () => {
+test("run() still kills the group at settle while a grandchild is holding it open", { skip: process.platform === "win32" && "Windows: outside the driver path (#419)" }, async () => {
   let res;
   const calls = await recordKills(async () => {
     res = await run("/bin/sh", ["-c", BACKGROUNDS_A_GRANDCHILD]);
@@ -396,7 +397,7 @@ test("run() still kills the group at settle while a grandchild is holding it ope
 // The timeout timer used to be cleared only inside settle, so a child that exited on its own but
 // whose `close` was delayed into the drain window had the timeout fire mid-drain and flip the
 // resolved value to timedOut: true — a timeout reported for a child that exited cleanly.
-test("a child that exits cleanly is never reported as timedOut when its timeout falls inside the drain window", async () => {
+test("a child that exits cleanly is never reported as timedOut when its timeout falls inside the drain window", { skip: process.platform === "win32" && "Windows: outside the driver path (#419)" }, async () => {
   const timeoutMs = agentCli.DRAIN_GRACE_MS - 300;
   const res = await run("/bin/sh", ["-c", BACKGROUNDS_A_GRANDCHILD], { timeoutMs });
   const pid = Number(res.stdout.trim());
@@ -411,7 +412,7 @@ test("a child that exits cleanly is never reported as timedOut when its timeout 
 // A detached child no longer receives the terminal's Ctrl-C, so the parent's own SIGTERM must reach
 // every live group before the parent dies — otherwise a killed panel leaves claude subprocesses
 // orphaned. The runner is a separate node process so the signal can be sent for real.
-test("a parent taking SIGTERM kills every live child group before exiting", async () => {
+test("a parent taking SIGTERM kills every live child group before exiting", { skip: process.platform === "win32" && "Windows: outside the driver path (#419)" }, async () => {
   const pidFile = join(makeTempDir("devcycle-agent-cli-signal-"), "child.pid");
   const runner = `
 const { run } = require(${JSON.stringify(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "workflows", "lib", "agent-cli.js"))});
@@ -431,7 +432,7 @@ run(process.execPath, ["-e", 'require("node:fs").writeFileSync(${JSON.stringify(
 // Audit 2026-09-05 L3: a `structured_output: null` envelope came back { ok: true, value: null } and the
 // panel reconciler dereferenced it. Every schema both engines pass is an object schema, so a
 // non-object is a validation failure and takes the retry path.
-test("claudeStructured rejects a null structured_output as a validation failure after the last attempt", async () => {
+test("claudeStructured rejects a null structured_output as a validation failure after the last attempt", { skip: process.platform === "win32" && "Windows: outside the driver path (#419)" }, async () => {
   const tries = join(makeTempDir("devcycle-agent-cli-null-"), "tries.log");
   const bin = makeFakeBin(
     "claude",
@@ -447,7 +448,7 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: null }
   assert.equal(readFileSync(tries, "utf8").length, 2, "a non-object output is retried like any validation failure");
 });
 
-test("claudeStructured rejects array and primitive structured_output the same way, and keeps accepting objects", async () => {
+test("claudeStructured rejects array and primitive structured_output the same way, and keeps accepting objects", { skip: process.platform === "win32" && "Windows: outside the driver path (#419)" }, async () => {
   for (const bad of ["[1,2]", '"text"', "42"]) {
     const bin = makeFakeBin("claude", `process.stdout.write(JSON.stringify({ is_error: false, structured_output: ${bad} }));`);
     const res = await withPath(isolatedPath([bin]), () =>
@@ -482,7 +483,7 @@ test("makeLogger tags every line with its engine's name", () => {
 // Its exit code and stderr shape are pinned end to end by the fatal test in
 // tests/unit/mechanical-sweep.test.mjs.
 
-test("claudeStructured marks its claude child as devcycle's own; run() leaves every other child's environment alone", async () => {
+test("claudeStructured marks its claude child as devcycle's own; run() leaves every other child's environment alone", { skip: process.platform === "win32" && "Windows: outside the driver path (#419)" }, async () => {
   const envLog = join(makeTempDir("devcycle-agent-cli-env-"), "env.json");
   const bin = makeFakeBin(
     "claude",
@@ -569,7 +570,7 @@ test("spawnStreaming installs no signal handlers", async () => {
   assert.deepEqual(counts(), before);
 });
 
-test("spawnStreaming's child leads its own process group, and the exported killGroup ends it with its grandchild", async () => {
+test("spawnStreaming's child leads its own process group, and the exported killGroup ends it with its grandchild", { skip: process.platform === "win32" && "POSIX process groups; the Windows tree kill is tested below" }, async () => {
   const child = `
 const { spawn } = require("node:child_process");
 const g = spawn(process.execPath, ["-e", "setTimeout(() => {}, 10000)"], { stdio: "inherit" });
@@ -591,4 +592,75 @@ setTimeout(() => {}, 10000);
 test("spawnStreaming resolves a binary that cannot start as code and signal both null", async () => {
   const { done } = agentCli.spawnStreaming("devcycle-no-such-binary", []);
   assert.deepEqual(await done, { code: null, signal: null });
+});
+
+test("quoteCmdShimArg quotes for the C runtime, then escapes every cmd.exe metacharacter twice: once for cmd /c, once for the shim's %*", () => {
+  assert.equal(quoteCmdShimArg("plain"), '^^^"plain^^^"');
+  assert.equal(quoteCmdShimArg("a b"), '^^^"a^^^ b^^^"');
+  assert.equal(quoteCmdShimArg('{"mcpServers":{}}'), '^^^"{\\^^^"mcpServers\\^^^":{}}^^^"');
+  assert.equal(quoteCmdShimArg("back\\slash\\"), '^^^"back\\slash\\\\^^^"');
+  assert.equal(quoteCmdShimArg(""), '^^^"^^^"');
+});
+
+test("spawnSpec leaves a command as given off Windows", { skip: process.platform === "win32" && "the Windows branch is tested below" }, () => {
+  assert.deepEqual(spawnSpec("claude", ["-p", "x"]), { file: "claude", args: ["-p", "x"], options: {} });
+});
+
+// npm installs claude on Windows as a claude.cmd shim, which re-parses its arguments through cmd.exe's
+// `%*`; each list must reach the program unchanged, by explicit path and by a bare name on PATH.
+test("spawnSpec hands a .cmd shim every argument unchanged, by path and by bare name on PATH", { skip: process.platform !== "win32" && "Windows only" }, () => {
+  const dir = makeFakeBin("claude", "process.stdout.write(JSON.stringify(process.argv.slice(2)))");
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toUpperCase() !== "PATH"));
+  env.PATH = dir;
+  const lists = [
+    ["-p", "/devcycle:continue --drive .devcycle/state.md", "--model", "claude-opus-5-5"],
+    ["--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}'],
+    ["--settings", JSON.stringify({ enabledPlugins: { "a@b": false, "c@d e": false } })],
+    ["", "a b", 'q"uote', "back\\slash\\", 'tr\\"icky', "%PATH%", "^caret", "a&b", "a|b", "<x>", "(paren)", "!bang!", "semi;colon", "com,ma", "C:\\Program Files\\x"],
+  ];
+  for (const cmd of [join(dir, "claude"), "claude"]) {
+    for (const args of lists) {
+      const spec = spawnSpec(cmd, args, env);
+      assert.match(spec.file, /cmd\.exe$/i, `${cmd} must run through cmd.exe`);
+      const r = spawnSync(spec.file, spec.args, { ...spec.options, env, encoding: "utf8", windowsHide: true });
+      assert.equal(r.status, 0, `${cmd} ${JSON.stringify(args)}: ${r.error ?? r.stderr}`);
+      assert.deepEqual(JSON.parse(r.stdout), args, `${cmd} must receive ${JSON.stringify(args)}`);
+    }
+  }
+});
+
+// The grandchild is detached because node puts a plain child in a kill-on-close job, which would end
+// it with its parent and pass this test even if killGroup ended the child alone.
+test("killGroup on Windows ends an unreaped child and the grandchild it started", { skip: process.platform !== "win32" && "Windows only" }, async () => {
+  const script = `
+const { spawn } = require("node:child_process");
+const g = spawn(process.execPath, ["-e", "setTimeout(() => {}, 10000)"], { stdio: "ignore", detached: true, windowsHide: true });
+process.stdout.write(String(g.pid) + "\\n");
+setTimeout(() => {}, 10000);
+`;
+  const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+  const grandchild = await new Promise((resolve) => {
+    let out = "";
+    child.stdout.on("data", (d) => {
+      out += d;
+      if (out.includes("\n")) resolve(Number(out.trim()));
+    });
+  });
+  assert.ok(Number.isInteger(grandchild) && grandchild > 0, `the grandchild's pid must arrive on stdout, got ${grandchild}`);
+  killGroup(child);
+  try {
+    assert.equal(await waitForExit(child.pid, 2000), true, "the child must die");
+    assert.equal(await waitForExit(grandchild, 2000), true, "the grandchild must die with it");
+  } finally {
+    try { process.kill(grandchild, "SIGKILL"); } catch { /* already gone */ }
+    try { child.kill("SIGKILL"); } catch { /* already gone */ }
+  }
+});
+
+test("spawnStreaming on Windows starts a .cmd shim, streams its stdout lines and resolves with code 0", { skip: process.platform !== "win32" && "Windows only" }, async () => {
+  const dir = makeFakeBin("claude", 'for (const arg of process.argv.slice(2)) console.log(arg);');
+  const out = [];
+  const { done } = spawnStreaming(join(dir, "claude"), ["first line", 'second "line"'], { onStdoutLine: (line) => out.push(line.replace(/\r$/, "")) });
+  assert.deepEqual(await done, { code: 0, signal: null });
+  assert.deepEqual(out, ["first line", 'second "line"']);
 });

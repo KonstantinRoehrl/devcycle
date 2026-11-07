@@ -4,6 +4,9 @@
 // drop the user's permissions and devcycle's enablement with it.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import agentCli from "../workflows/lib/agent-cli.js";
+
+const { spawnSpec } = agentCli;
 
 // devcycle's manifest depends on superpowers: without it devcycle fails to load.
 export const KEEP_PLUGINS = ["devcycle", "superpowers"];
@@ -17,9 +20,10 @@ const nameOf = (id) => id.split("@")[0];
 export function readPluginList({ env = process.env, bin, cwd }) {
   let parsed;
   try {
+    const spec = spawnSpec(bin, ["plugin", "list", "--json"], env);
     const text = env.DEVCYCLE_DRIVE_PLUGIN_LIST
       ? readFileSync(env.DEVCYCLE_DRIVE_PLUGIN_LIST, "utf8")
-      : execFileSync(bin, ["plugin", "list", "--json"], { cwd, env, encoding: "utf8", timeout: 15000, stdio: ["ignore", "pipe", "ignore"] });
+      : execFileSync(spec.file, spec.args, { cwd, env, encoding: "utf8", timeout: 15000, stdio: ["ignore", "pipe", "ignore"], windowsHide: true, ...spec.options });
     parsed = JSON.parse(text);
   } catch {
     return { ok: false };
