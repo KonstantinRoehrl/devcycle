@@ -21,7 +21,7 @@ const ENV = { CLAUDE_CODE_SESSION_ID: ME };
 const OLD = "2026-10-30T09:00:00Z";
 
 function cycle({ stage = "planning", run = RUN, root: recordedRoot } = {}) {
-  const root = realpathSync(makeTempDir("stop-cycle-"));
+  const root = realpathSync.native(makeTempDir("stop-cycle-"));
   execFileSync("git", ["init", "-q", root]);
   mkdirSync(join(root, ".devcycle"));
   const state = join(root, ".devcycle/state.md");
