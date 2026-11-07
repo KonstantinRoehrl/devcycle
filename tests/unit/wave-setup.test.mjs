@@ -1066,3 +1066,49 @@ test("action: drive under start, ask, gate and attach, with no walk fields; resu
     ["resume", "manual", 1, ["1", "2"], ["2"]]);
   assert.ok(walked.entryLines.length > 0, "a manual walk carries its entry lines");
 });
+
+// #417: a lock this machine cannot take is reported before any row is written, so a start never
+// fails after the auto row is down.
+test("drive.action unavailable: a start, a recorded auto row, an ask or a gate becomes unavailable when lockUnavailable names a reason", () => {
+  const ledger = [committed(1)];
+  const noLock = () => "no lock here";
+  const cases = {
+    start: setup(cycle({ ledger }), { knobsLine: knobsWith("unattended"), lockUnavailable: noLock }),
+    auto: setup(cycle({ state: [DRIVE_ROW], ledger }), { lockUnavailable: noLock }),
+    ask: setup(cycle({ ledger }), { knobsLine: KNOBS, lockUnavailable: noLock }),
+    gate: setup(ended(cycle({ state: [DRIVE_ROW], ledger }), runEnd("stalled", { code: 5 })), { lockUnavailable: noLock }),
+  };
+  for (const [name, r] of Object.entries(cases)) {
+    const { action, writeRow, confirm, gate, reason } = r.drive;
+    assert.deepEqual([r.action, action, writeRow, confirm, gate, reason, r.wave, r.tasks, r.dispatchable],
+      ["drive", "unavailable", null, null, null, "no lock here", null, [], []], name);
+  }
+});
+
+test("drive.action unavailable: a manual row and a running driver never consult lockUnavailable", () => {
+  let calls = 0;
+  const counted = () => (calls++, "no lock here");
+  const ledger = [committed(1)];
+  const walked = setup(cycle({ state: [MANUAL_ROW], ledger }), { knobsLine: knobsWith("unattended"), lockUnavailable: counted });
+  assert.equal(walked.drive.action, "manual");
+  const attached = cycle({ state: [DRIVE_ROW], ledger });
+  withLock(attached, () => assert.equal(setup(attached, { lockUnavailable: counted }).drive.action, "attach"));
+  assert.equal(calls, 0, "lockUnavailable was called for manual or attach");
+});
+
+test("drive.action: lockUnavailable returning null leaves start, auto, ask, gate and manual as they were", () => {
+  const ledger = [committed(1)];
+  const decide = (c, opts) => {
+    const r = setup(c, { ...opts, lockUnavailable: () => null });
+    return [r.action, r.drive.action, r.drive.writeRow];
+  };
+  assert.deepEqual(decide(cycle({ ledger }), { knobsLine: knobsWith("unattended") }), ["drive", "start", "auto"]);
+  assert.deepEqual(decide(cycle({ state: [DRIVE_ROW], ledger }), {}), ["drive", "start", null]);
+  assert.deepEqual(decide(cycle({ ledger }), { knobsLine: KNOBS }), ["drive", "ask", null]);
+  assert.deepEqual(decide(ended(cycle({ state: [DRIVE_ROW], ledger }), runEnd("stalled", { code: 5 })), {}), ["drive", "gate", null]);
+  assert.deepEqual(decide(cycle({ state: [MANUAL_ROW], ledger }), {}), ["resume", "manual", null]);
+});
+
+test("references/drive.md's Drive actions table has an unavailable row", () => {
+  assert.match(readFileSync(join(ROOT, "references/drive.md"), "utf8"), /^\| `unavailable` \| /m);
+});

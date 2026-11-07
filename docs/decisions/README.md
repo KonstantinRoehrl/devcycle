@@ -5,6 +5,19 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-07 — Unattended execution runs on Windows (#417)
+
+**Decision:** The driver runs on Windows. Every Windows behaviour is selected by `process.platform === "win32"`, and macOS and Linux run today's code. `scripts/file-lock.mjs` reads a process's start time through Windows PowerShell 5.1 (`Get-Process`, UTC ticks printed in the `ps -o lstart=` shape), caching a process's own, and judges liveness as two questions: whether the pid exists (`kill(pid, 0)`), and whether its start time is the recorded one, where an unreadable start time reads as live. `workflows/lib/agent-cli.js` resolves a command along PATH and PATHEXT, spawns a `.cmd` shim (npm's `claude.cmd`) through `cmd.exe` with double-escaped arguments, and ends a session's process tree with `taskkill /T /F` only while the child is unreaped. A `--stop` writes the request and sends no signal; the driver polls for it once a second, during a session and a wait, and ends the session once it has no tool call or dispatch running, or after `SIGNAL_GRACE_MS`. Every spawn on the driver path passes `windowsHide`. `scripts/wave-setup.mjs` returns `drive.action: "unavailable"` when the lock cannot be taken (Windows only), so `/devcycle:continue` offers **Walk the waves manually** before any `auto` row is written. A Windows CI job runs the driver-path test files, and `.gitattributes` keeps every checkout LF. The rest of the suite on Windows is #419.
+
+**Why:** Under Git Bash the `ps` on PATH rejects `-o`, so the start time read as null and `acquireDriveLock` threw after the `drive: auto` row was written. A port of the lock alone would still have left a stop that hard-kills the driver and leaves its session committing, and a `claude.cmd` that Node cannot spawn.
+
+**Supersedes:** the "POSIX only" limit in `docs/known-issues.md`; it extends the 2026-10-30 entry on `ps` liveness.
+
+```text
+budget: surface-budget.json surfaceTotal 6812
+budget: context-budget.json commands/continue.md 74844
+```
+
 ## 2026-11-06 — Continue acts on the drive step before walking any wave (#412)
 
 **Decision:** `scripts/wave-setup.mjs` returns `action: "drive"`, with empty `entryLines`, `tasks` and `dispatchable` and a null `wave`, whenever its drive action is `start`, `ask`, `gate` or `attach`; only a manual walk or a driven session gets `action: "resume"` and the walk fields. A session that writes a `manual` row re-runs it for the walk fields alone (`references/drive.md` § Drive actions). `scripts/task-dispatch.mjs` refuses, exit 2 and writing nothing, a dispatch of waves the state file gives to the driver unless the caller holds the live driver's token, the predicate `scripts/drive-lock.mjs` now owns. `commands/continue.md` names `action: "drive"` before its gate list, so it grows by one line and `commandMax` moves to 185; the touched passages in it, `references/drive.md` and `references/ledger.md` raise the closures below by their measured residual.
