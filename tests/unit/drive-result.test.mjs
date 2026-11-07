@@ -5,12 +5,12 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
 import { acquireDriveLock, DRIVE_LOCK_REL, readDriveLockHolder } from "../../scripts/drive-lock.mjs";
 import {
-  classifyDrive, driverMayRun, HANDLED_REL, holderRunning, markResultHandled, noProgressEndsAfter, readDriveResult,
+  classifyDrive, driverMayRun, HANDLED_REL, holderLiveness, holderRunning, markResultHandled, noProgressEndsAfter, readDriveResult,
   readHandledResult, RESULT_REL, RESUMABLE, writeCrashedResult, writeDriveResult,
 } from "../../scripts/drive-result.mjs";
 
@@ -108,9 +108,25 @@ test("holderRunning: a lock that carries its holder's start in clock ticks is ju
   assert.equal(holderRunning(root, holder), false);
 });
 
+// A spawned child's pid, never this process's: a process's own start is cached after its first read.
+test("holderLiveness: on Windows a PowerShell that cannot run leaves a live pid unverified, and a finished one gone", { skip: process.platform !== "win32" && "Windows only" }, () => {
+  const { root } = cycle();
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore", windowsHide: true });
+  const powershell = process.env.DEVCYCLE_POWERSHELL;
+  process.env.DEVCYCLE_POWERSHELL = join(makeTempDir("drive-result-no-powershell-"), "powershell.exe");
+  try {
+    assert.equal(holderLiveness(root, { pid: child.pid, startTime: "Mon Jan  1 00:00:00 1990" }), "unverified");
+    assert.equal(holderLiveness(root, dead()), "gone");
+  } finally {
+    if (powershell === undefined) delete process.env.DEVCYCLE_POWERSHELL;
+    else process.env.DEVCYCLE_POWERSHELL = powershell;
+    child.kill();
+  }
+});
+
 // A PATH with no ps in it stands in for a sandbox that cannot run ps. The hand-written locks carry no
 // machine or boot id, so judging them spawns nothing else either.
-test("holderRunning: where ps cannot run it trusts a live pid, unless the lock's clock ticks can judge it", () => {
+test("holderRunning: where ps cannot run it trusts a live pid, unless the lock's clock ticks can judge it", { skip: process.platform === "win32" && "Windows reads start times through PowerShell, which the PATH does not hide; the Windows case is the test above" }, () => {
   const { root } = cycle();
   const ticked = { ...live(), ticks: "1" };
   writeLock(root, ticked);

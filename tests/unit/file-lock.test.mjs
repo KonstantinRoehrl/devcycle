@@ -5,7 +5,7 @@ import { join } from "node:path";
 import childProcess, { spawn, spawnSync } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { LockTimeoutError, processStartTime, isLiveHolder, withFileLock } from "../../scripts/file-lock.mjs";
+import { LockTimeoutError, lstartFromTicks, processStartTime, isLiveHolder, startedAsRecorded, withFileLock } from "../../scripts/file-lock.mjs";
 
 const LOCK_MODULE = new URL("../../scripts/file-lock.mjs", import.meta.url).href;
 const ATOMIC_MODULE = new URL("../../scripts/atomic-write.mjs", import.meta.url).href;
@@ -45,6 +45,38 @@ test("isLiveHolder: a start time within two seconds of the recorded one is the s
   assert.equal(isLiveHolder({ pid: process.pid, startTime: lstart(started - 2000) }), true);
   assert.equal(isLiveHolder({ pid: process.pid, startTime: lstart(started + 5000) }), false);
   assert.equal(isLiveHolder({ pid: process.pid, startTime: "not a date" }), false);
+});
+
+test("lstartFromTicks prints a .NET UTC tick count the way ps -o lstart= prints it under LC_ALL=C TZ=UTC", () => {
+  assert.equal(lstartFromTicks("639296411612124206"), "Sat Nov  7 09:39:21 2026");
+  assert.equal(lstartFromTicks("639305535090000000"), "Tue Nov 17 23:05:09 2026");
+});
+
+test("startedAsRecorded: no recorded start is the holder; equal or within two seconds is the same process", () => {
+  assert.equal(startedAsRecorded("Sat Nov  7 09:39:21 2026", null), true);
+  assert.equal(startedAsRecorded("Sat Nov  7 09:39:21 2026", "Sat Nov  7 09:39:21 2026"), true);
+  assert.equal(startedAsRecorded("Sat Nov  7 09:39:21 2026", "Sat Nov  7 09:39:23 2026"), true);
+  assert.equal(startedAsRecorded("Sat Nov  7 09:39:21 2026", "Sat Nov  7 09:39:26 2026"), false);
+  assert.equal(startedAsRecorded("Sat Nov  7 09:39:21 2026", "not a date"), false);
+});
+
+// A fresh process, because a process's own start is cached after the first read and the parent has
+// read its own already.
+test("on Windows a PowerShell that cannot run leaves no start time, so a live pid reads as live and only a gone pid as dead", { skip: process.platform !== "win32" && "Windows only" }, () => {
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore", windowsHide: true });
+  try {
+    const probe = `import { processStartTime, isLiveHolder } from ${JSON.stringify(LOCK_MODULE)};
+      process.stdout.write(JSON.stringify({
+        own: processStartTime(process.pid),
+        live: isLiveHolder({ pid: ${child.pid}, startTime: "Mon Jan  1 00:00:00 1990" }),
+        gone: isLiveHolder({ pid: ${deadPid()}, startTime: null }),
+      }));`;
+    const env = { ...process.env, DEVCYCLE_POWERSHELL: join(makeTempDir("file-lock-no-powershell-"), "powershell.exe") };
+    const r = spawnSync(process.execPath, ["--input-type=module", "-e", probe], { env, encoding: "utf8", windowsHide: true });
+    assert.deepEqual(JSON.parse(r.stdout), { own: null, live: true, gone: false }, r.stderr);
+  } finally {
+    child.kill();
+  }
 });
 
 test("withFileLock: holds <target>.lock naming this process while fn runs, returns fn's value, removes it after", () => {
@@ -108,7 +140,7 @@ test("withFileLock: concurrent read-modify-write cycles in separate processes lo
 });
 
 // A holder that releases and exits leaves a waiter's reading of it out of date: the next holder's
-// lock is already at the path by the time `ps` says the old one is gone.
+// lock is already at the path by the time `ps` (kill(pid, 0) on Windows) says the old one is gone.
 test("withFileLock: a lock taken over while its old holder is judged dead is not removed", () => {
   const target = join(makeTempDir("file-lock-"), "ledger.md");
   const lock = `${target}.lock`;
@@ -121,11 +153,18 @@ test("withFileLock: a lock taken over while its old holder is judged dead is not
     return realSpawnSync(cmd, args, opts);
   };
   syncBuiltinESMExports();
+  // Windows asks kill(pid, 0) whether the old holder is gone, and runs nothing for a dead pid.
+  const realKill = process.kill;
+  process.kill = (pid, signal) => {
+    if (pid === dead) writeFileSync(lock, next);
+    return realKill.call(process, pid, signal);
+  };
   try {
     assert.throws(() => withFileLock(target, () => "ran", { timeoutMs: 150, pollMs: 10 }), LockTimeoutError);
   } finally {
     childProcess.spawnSync = realSpawnSync;
     syncBuiltinESMExports();
+    process.kill = realKill;
   }
   assert.equal(readFileSync(lock, "utf8"), next);
   assert.equal(existsSync(`${lock}.reclaim`), false);
@@ -151,7 +190,7 @@ test("withFileLock: a fresh reclaim guard leaves a stale lock alone until the wa
   assert.equal(existsSync(lock), true);
 });
 
-test("isLiveHolder: a holder is not called dead when ps cannot run or its own start time went unrecorded", () => {
+test("isLiveHolder: a holder is not called dead when ps cannot run or its own start time went unrecorded", { skip: process.platform === "win32" && "Windows reads start times through PowerShell, which the PATH does not hide; the Windows case is the test above" }, () => {
   const dead = { pid: deadPid(), startTime: "Mon Jan  1 00:00:00 1990" };
   assert.equal(isLiveHolder({ pid: process.pid, startTime: null }), true);
   assert.equal(isLiveHolder({ ...dead, startTime: null }), false);
