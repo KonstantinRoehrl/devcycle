@@ -753,6 +753,20 @@ test("append: review-depth is an event value and carries the engine branch revie
   assert.match(unresolved.stderr, /"reviewDepth" value "auto" is not one of single \| panel/);
 });
 
+test("append: review-depth also records the knob that allowed the engine and the consent answer", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/demo-review-consent");
+  const ev = (...extra) => run(["append", "--run", runId, "--repo", "/tmp/demo-review-consent", "--kind", "event",
+    "--event", "review-depth", "--stage", "branch-review", "--reviewDepth", "panel", ...extra], runs);
+  assert.strictEqual(ev("--depthKnob", "auto", "--consent", "panel").status, 0);
+  const line = lastLine("/tmp/demo-review-consent", runId);
+  assert.deepStrictEqual([line.reviewDepth, line.depthKnob, line.consent], ["panel", "auto", "panel"]);
+  const bad = ev("--depthKnob", "profile", "--consent", "none");
+  assert.notStrictEqual(bad.status, 0, "profile is resolved before any review sees it");
+  assert.match(bad.stderr, /"depthKnob" value "profile" is not one of auto \| single \| panel/);
+  assert.match(ev("--depthKnob", "single", "--consent", "maybe").stderr, /"consent" value "maybe" is not one of none \| panel \| single/);
+});
+
 const TRACE = {
   kind: "agent-trace", runId: "0f1e2d3c4b5a6978", stage: "execution", agentId: "a27cbd72da7b3b62f",
   agentType: "devcycle:implementer", requestedModel: null, resolvedModel: "claude-sonnet-5-5", parentAgentId: null,

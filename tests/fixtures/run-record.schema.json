@@ -136,6 +136,8 @@
         "attributedBy": { "enum": ["coordinator", "distillation"] },
         "result": { "enum": ["pass", "fail"] },
         "reviewDepth": { "enum": ["single", "panel"] },
+        "depthKnob": { "enum": ["auto", "single", "panel"] },
+        "consent": { "enum": ["none", "panel", "single"] },
         "ts": { "type": "string", "format": "date-time" }
       },
       "required": ["kind", "runId", "event", "stage", "ts"],
