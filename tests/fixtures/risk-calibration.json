@@ -1,5 +1,5 @@
 {
-  "signalsSha256": "7c08e4f2cceb052e3ce4e32523f55144674efa86de69441ecfe276b39925fedf",
+  "signalsSha256": "ae243d2c10bda7b21d90e010cab3cfde77aee3d7ef05fe5333b3285b2840442b",
   "bar": 0.25,
   "ceiling": 0.3,
   "limit": 60,
@@ -637,6 +637,14 @@
       "askRate": 0.283,
       "branches": [
         {
+          "sha": "e6c45f1",
+          "signals": []
+        },
+        {
+          "sha": "f4beb0e",
+          "signals": []
+        },
+        {
           "sha": "bb45ec7",
           "signals": [
             "data-migrations"
@@ -910,14 +918,6 @@
         },
         {
           "sha": "dfa0dc3",
-          "signals": []
-        },
-        {
-          "sha": "f8856a7",
-          "signals": []
-        },
-        {
-          "sha": "a8662f5",
           "signals": []
         }
       ]

@@ -67,6 +67,9 @@ const NARROWED = {
     [file("scripts/clean.sh", { added: ["rm -rf build"] }), file("tests/unit/clean.test.mjs", { added: ["assert.match(out, /rm -rf build/);"] })],
     [file("src/run.mjs", { added: ['  execSync("ls");'] }), file("src/run.mjs", { added: ["// execSync(\"ls\") is gone"] })],
     [file("src/view.ts", { added: ["  el.innerHTML = html;"] }), file("src/view.spec.ts", { added: ["  el.innerHTML = html;"] })],
+    [file("main.go", { added: ['  out, err := exec.Command("ls").Output()'] }), file("main.go", { added: ["  // exec.Command is documented here"] })],
+    [file("lib/run.rb", { added: ['  system("ls")'] }), file("lib/fs.rb", { added: ['  filesystem("x")', "  ecosystem(1)", "  def system(cmd)", "  disk.system(1)"] })],
+    [file("src/run.php", { added: ["  shell_exec($c);"] }), file("src/run.php", { added: ["  my_shell_exec($c);"] })],
   ],
   "test-weakening": [
     [file("tests/test_a.py", { status: "D" }), file("docs/specs/a.md", { status: "D" })],

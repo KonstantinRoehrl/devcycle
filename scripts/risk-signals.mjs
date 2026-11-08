@@ -79,9 +79,10 @@ export const BUILTIN_SIGNALS = Object.freeze([
   {
     id: "dangerous-calls",
     label: "process execution, eval, destructive shell and raw HTML sinks",
-    // A bare exec( is a call only when no dot precedes it: re.exec( and menu.exec( are not process execution.
+    // A bare exec( or system( is a call only when no dot or word character precedes it and it is not a definition:
+    // re.exec( and menu.exec( are not process execution, nor are filesystem( or foo.system(. exec.Command( is Go's own form.
     matchers: [
-      { on: "gained", glob: CODE, notGlob: TESTS, pattern: /^(?!\s*(?:#|\/\/|\*)).*(?:(?<![.\w`])(?<!\b(?:def|function)\s+)(?:spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\s*\(|\b(?:child_?process|cp)\.(?:spawn|exec|fork)\w*\s*\(|\bos\.(?:system|popen|exec\w*|spawn\w*)\s*\(|\bgetRuntime\(\)\.exec\s*\(|\bsubprocess\.\w+\s*\(|\beval\s*\(|\bnew\s+Function\s*\()/ },
+      { on: "gained", glob: CODE, notGlob: TESTS, pattern: /^(?!\s*(?:#|\/\/|\*)).*(?:(?<![.\w`])(?<!\b(?:def|function|func)\s+)(?:spawn|spawnSync|exec|execSync|execFile|execFileSync|fork|system|shell_exec)\s*\(|\bexec\.Command(?:Context)?\s*\(|\b(?:child_?process|cp)\.(?:spawn|exec|fork)\w*\s*\(|\bos\.(?:system|popen|exec\w*|spawn\w*)\s*\(|\bgetRuntime\(\)\.exec\s*\(|\bsubprocess\.\w+\s*\(|\beval\s*\(|\bnew\s+Function\s*\()/ },
       { on: "gained", glob: SHELL, notGlob: TESTS, pattern: /\brm\s+-[a-zA-Z]*(?:rf|fr)\b|\bgit\s+push\b[^\n]*(?:\s-f\b|--force\b)|\bchmod\s+[0-7]{3,4}\b|\bsudo\s+/ },
       { on: "gained", glob: CODE, notGlob: TESTS, pattern: /\binnerHTML\s*=|\bouterHTML\s*=|dangerouslySetInnerHTML|\bv-html\b|\bdocument\.write\s*\(|\bhtml_safe\b/ },
     ],
@@ -90,6 +91,7 @@ export const BUILTIN_SIGNALS = Object.freeze([
     id: "test-weakening",
     label: "weakened tests",
     // Lost assertions count only assertion-API calls: a bare assert or expect( line leaves with every routine test refactor.
+    // Calibrated over past branches, a bare assert took one repo to the ask-rate ceiling and expect( took another past it, so pytest and jest removals are a known gap.
     matchers: [
       ...testMatchers({ on: "path", deleted: true }),
       ...testMatchers({ on: "added", pattern: /\b(?:it|test|describe)\.(?:skip|only|todo)\s*\(|\b(?:xit|xdescribe|xtest)\s*\(|\{\s*(?:skip|todo)\s*:\s*true/ }),
