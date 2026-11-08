@@ -84,7 +84,7 @@ carry the same keys; without it the copies drift one release at a time.
 | `profile` | § The profile, below | `standard` |
 | `gitPolicy` | `playbooks/finishing-the-cycle.md` | `local-commits-only` |
 | `docTrackingPolicy` | § Doc tracking, below | `standard` |
-| `reviewDepth` | `playbooks/reviewing-the-branch.md` | `auto` — sized per `playbooks/reviewing-code.md` § 3 |
+| `reviewDepth` | `playbooks/reviewing-the-branch.md` | `auto` — risk-based, asks before a panel, per `playbooks/reviewing-code.md` § 3 |
 | `crossModelReview` | `playbooks/reviewing-the-branch.md` | `false` |
 | `onDeviceGate` | `playbooks/verifying-on-device.md` | `auto` — agent first, per `playbooks/verifying-on-device.md` § The gate, where an in-session delegation overrides it for the cycle |
 | `implementerModel` | `playbooks/executing-waves.md` | `auto` — `references/model-routing.md` derives it per task |
@@ -102,6 +102,7 @@ carry the same keys; without it the copies drift one release at a time.
 
 An unset knob renders as a literal `${user_config...}` placeholder, empty, or `auto`; the
 resolution order above owns what "unset" then resolves to, and this column only names the endpoint.
+`.claude/devcycle-risk.json`, the repo's tracked risk-signal additions and quiets, has its format owned by `scripts/review-depth.mjs` and documented in `docs/configuration/README.md`.
 
 ## The state file's `configured:` line
 

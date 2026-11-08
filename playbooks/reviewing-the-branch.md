@@ -46,13 +46,13 @@ bracketed id. A match that comes back empty adds no such block.
 Invoke it with `scope: {ref: "<base>..<branch>"}`, the spec path as `specPath`, and this
 stage's criteria — what the spec requires and forbids, plus the default criteria set — plus, on the
 panel, the `resultDir` § Findings loop's step 1 names, and
-record the engine line it returns **verbatim** in the report below, with its depth line. The
-depth is picked once, in round 1, over the whole branch; rounds 2..N re-run that engine. In
+record the engine line it returns **verbatim** in the report below, with its depth line. Round 1
+runs § 3's `select` over the whole branch with `--caller cycle`, which rewrites `.devcycle/review/decision.json`; rounds 2..N reuse that record's engine and never ask again. In
 cycle (the state file names a `run:`), append what the first round to finish ran once its engine returns —
 `single` after a `panel→single` degradation:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs" append --run <state.run> --kind event --event review-depth --stage branch-review --reviewDepth <single|panel>
+node "${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs" append --run <state.run> --kind event --event review-depth --stage branch-review --reviewDepth <single|panel> --depthKnob <auto|single|panel> --consent <none|panel|single>
 ```
 
 **Dirty-tree backstop.** The reviewers this stage dispatches are read-only; snapshot `git status
@@ -148,7 +148,8 @@ unconditional — it holds at every profile, and the cap's own value never softe
 ```markdown
 ## Branch review report
 - Engine: <single | single + user-run code-review | panel | panel [+ cross-model lens] | panel→single (panel unavailable: <reason>)>
-- Depth: <auto → <depth> (<why>) | single (set) | panel (set)>
+- Depth: <the depth line `playbooks/reviewing-code.md` § 4 names>
+- Signals: <the select call's note, or none>
 - Branch: <base>..<branch>
 - Spec: <path>
 - Rounds: <n> of <cap>

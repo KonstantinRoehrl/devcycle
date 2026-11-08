@@ -1019,23 +1019,36 @@ test("branch review skips on-device only when no checklist exists and nothing re
   );
 });
 
-test("reviewing-code § 3 owns reviewDepth: auto measures a ref range, and branch review records what ran", () => {
+test("reviewing-code § 3 binds reviewDepth through review-depth.mjs, and branch review records knob, consent and engine", () => {
   const code = read("playbooks/reviewing-code.md");
   const engine = code.slice(code.indexOf("## 3. Engine selection"), code.indexOf("## 4. "));
-  assert.ok(engine.includes('node "${CLAUDE_PLUGIN_ROOT}/scripts/review-depth.mjs" --base "$base" --branch "$branch" --profile <profile>'),
-    "§ 3 no longer measures an auto ref-range review through review-depth.mjs");
-  assert.match(engine, /`auto` at `repo` or `files` scope has no diff to measure, so it takes the profile's\s+branch-review row/);
-  assert.match(engine, /A failed measurement \(the script exits 1\) takes the profile's branch-review row too/);
-  assert.ok(code.includes("`Depth: auto → panel (612 changed lines > 400; profile standard)`"), "§ 4 lost the depth line's example");
+  assert.ok(engine.includes('node "${CLAUDE_PLUGIN_ROOT}/scripts/review-depth.mjs" select --reviewDepth <knob> --scope <branch|files|repo> --profile <profile> --caller <cycle|standalone>'),
+    "§ 3 no longer selects the engine through review-depth.mjs select");
+  assert.ok(engine.includes('node "${CLAUDE_PLUGIN_ROOT}/scripts/review-depth.mjs" consent --answer <panel|single> --caller <cycle|standalone>'),
+    "§ 3 lost the consent write");
+  assert.ok(engine.includes('"decisionPath":"<recordPath>"'), "the panel invocation lost its decision record");
+  assert.ok(engine.includes('"maxChunks":<maxChunks>'), "the panel no longer takes the script's chunk ceiling");
+  assert.match(engine, /can be expensive/, "the consent question lost its cost warning");
+  assert.match(engine, /`\[review-panel\] REFUSED:`/, "§ 3 no longer tells a refusal from the panel→single degradation");
+  assert.doesNotMatch(engine, /changed[- ]lines?|threshold|`thorough` always `panel`|profile's branch-review row/, "§ 3 still sizes the engine by volume or by profile");
+  for (const form of ["Depth: single (set)", "Depth: panel (set)", "Depth: auto → single (no risk signal)",
+    "Depth: auto → single (whole-repo scope; reviewDepth=panel available)", "Depth: auto → single (declined; signals: <labels>)",
+    "Depth: auto → panel (approved; signals: <labels>)", "Depth: auto → single (scan failed: <why>)", "Depth: single (launcher refused: <why>)"])
+    assert.ok(code.includes("`" + form + "`"), `§ 4 lost the depth-line form ${form}`);
   const branch = read("playbooks/reviewing-the-branch.md");
   assert.ok(!branch.includes("- `reviewDepth` — `single` | `panel`"), "§ Configuration still enumerates what § 3 owns");
   assert.match(branch, /- `reviewDepth` — [^\n]*`playbooks\/reviewing-code\.md` § 3/);
-  assert.ok(branch.includes("- Depth: <auto → <depth> (<why>) | single (set) | panel (set)>"), "the report template has no depth line");
-  assert.ok(branch.includes("--kind event --event review-depth --stage branch-review --reviewDepth <single|panel>"),
-    "branch review no longer records the engine that ran");
+  assert.ok(branch.includes("- Depth: <the depth line `playbooks/reviewing-code.md` § 4 names>"), "the report template has no depth line");
+  assert.ok(branch.includes("- Signals: <the select call's note, or none>"), "the report template has no signals line");
+  assert.ok(branch.includes("--kind event --event review-depth --stage branch-review --reviewDepth <single|panel> --depthKnob <auto|single|panel> --consent <none|panel|single>"),
+    "branch review no longer records the knob, the consent and the engine that ran");
+  assert.ok(branch.includes("`.devcycle/review/decision.json`"), "branch review no longer names the cycle's decision record");
+  assert.ok(read("playbooks/verifying-on-device.md").includes("`.devcycle/review/decision.json`"), "the on-device fix round no longer passes the decision record");
   const row = read("references/ledger.md").split("\n").find((l) => l.startsWith("| `event` |"));
-  assert.match(row, /`review-depth` once per in-cycle branch review/);
+  assert.match(row, /`review-depth` once per in-cycle branch review.*`depthKnob: auto\|single\|panel`.*`consent: none\|panel\|single`/);
   assert.match(row, /`playbooks\/reviewing-the-branch\.md` \(`review-depth`\) \|$/);
+  assert.match(read("references/config.md"), /\| `reviewDepth` \| `playbooks\/reviewing-the-branch\.md` \| `auto` — risk-based, asks before a panel, per `playbooks\/reviewing-code\.md` § 3 \|/);
+  assert.match(read("references/config.md"), /`\.claude\/devcycle-risk\.json`[^\n]*`scripts\/review-depth\.mjs`/);
 });
 
 test("harvested: scoping-interview/batched-questions — research precedes the batch, and the fallback keeps its shape", () => {
@@ -1443,6 +1456,9 @@ const DESCRIBES_NOT_GATES = [
   // step 3, its named reference implementation, carries the real AskUserQuestion. This table owns
   // what each policy commits, not a gate of its own.
   "references/config.md § ## Doc tracking — what each policy commits",
+  // Names `reviewDepth`'s default ("asks before a panel"); the question itself runs in
+  // `playbooks/reviewing-code.md` § 3, which cites the write site. This table only lists knobs.
+  "references/config.md § ## The knob roster",
   // A descriptive review criterion — the judgment method a maintenance/review lens runs over
   // evidence — not a cycle-run gate with a write site. Its outcome vocabulary trips the gate
   // matcher, but nothing in a run writes against it; the section states as much ("No dedicated

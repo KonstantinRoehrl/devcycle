@@ -190,7 +190,7 @@ Each `toFix` item goes to a fresh `devcycle:implementer` dispatch with task id
 the spec path and an `**Evidence:**` class line, and never asks it to commit. Commit each fix on
 receipt, following `references/commit-convention.md`, then review `<pre-fix HEAD>..<fix commit>` with the engine and depth that
 `.devcycle/reports/branch-review.md`'s `Engine:` and `Depth:` lines record (`single` when the file
-is missing), fixing a blocking finding inside the same round. Relaunch the app (step 1's `stop`,
+is missing) — a panel passes `.devcycle/review/decision.json` as its `decisionPath` and never asks again, fixing a blocking finding inside the same round. Relaunch the app (step 1's `stop`,
 `start`, `ready`) and re-walk only the fixed items, under the same gate as the first walk; each keeps
 its report line, now `passed (re-walk, round <round>)`, still plain `FAILED` (the round lives in
 the ledger, not the line), or, under `auto-ok` or a delegated walk, `unverified (re-walk, round
