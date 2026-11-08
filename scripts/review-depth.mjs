@@ -53,7 +53,8 @@ export const MAX_SIGNAL_PATHS = 3;
 export class RiskFileError extends Error {}
 
 // The patch is read hunk by hunk, so a removed line that itself starts with "-- " is content, never
-// a header. The prefixes are passed explicitly because a user's diff.noprefix would drop them. A path
+// a header. The prefixes are passed explicitly because a user's diff.noprefix would drop them. git ends
+// a header line with a TAB when the path contains a space, so the lookup drops one trailing TAB. A path
 // git still quotes (a tab, a newline, a double quote) keeps its path signals but not its line signals.
 export function rangeChanges({ base, branch, cwd = process.cwd() }) {
   const from = resolveRef(base, cwd);
@@ -71,12 +72,13 @@ export function rangeChanges({ base, branch, cwd = process.cwd() }) {
   }
   const patch = git(["-c", "core.quotePath=false", "diff", "-U0", "--no-color", "--no-ext-diff", "-M",
     "--src-prefix=a/", "--dst-prefix=b/", mergeBase, to], cwd, { maxBuffer: Infinity });
+  const headerPath = (line) => line.slice(6).replace(/\t$/, "");
   let current = null, oldPath = null, inHeader = false;
   for (const line of patch.split("\n")) {
     if (line.startsWith("diff --git ")) { current = null; oldPath = null; inHeader = true; continue; }
     if (inHeader) {
-      if (line.startsWith("--- ")) oldPath = line === "--- /dev/null" ? null : line.slice(6);
-      else if (line.startsWith("+++ ")) current = files.get(line === "+++ /dev/null" ? oldPath : line.slice(6)) ?? null;
+      if (line.startsWith("--- ")) oldPath = line === "--- /dev/null" ? null : headerPath(line);
+      else if (line.startsWith("+++ ")) current = files.get(line === "+++ /dev/null" ? oldPath : headerPath(line)) ?? null;
       else if (line.startsWith("@@")) inHeader = false;
       continue;
     }

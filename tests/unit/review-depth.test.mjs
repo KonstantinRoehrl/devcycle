@@ -195,6 +195,24 @@ test("rangeChanges: a -U0 patch over spawnSync's default 1 MB buffer is read, no
   assert.equal(big.added[29999], `${"x".repeat(40)} 29999`);
 });
 
+// git appends a TAB to the ---/+++ header of a path containing a space, so the path must be read without it.
+test("rangeChanges and select auto: a changed file whose path contains a space keeps its content signals", () => {
+  const dir = makeRepo();
+  writeInto(dir, "my dir/old name.js", lines(30));
+  commitAll(dir, "base");
+  sh("git", ["checkout", "-qb", "topic"], { cwd: dir });
+  writeInto(dir, "my dir/run script.js", "execSync(cmd);\n");
+  sh("git", ["mv", "my dir/old name.js", "my dir/new name.js"], { cwd: dir });
+  commitAll(dir, "topic work");
+  sh("git", ["checkout", "-q", "main"], { cwd: dir });
+  const changes = rangeChanges({ base: "main", branch: "topic", cwd: dir });
+  assert.deepEqual(changes.map((c) => [c.path, c.status, c.added.length]).sort(),
+    [["my dir/new name.js", "R", 0], ["my dir/run script.js", "A", 1]]);
+  const out = json(select(dir, "--reviewDepth", "auto"));
+  assert.equal(out.verdict, "ask");
+  assert.deepEqual(out.signals.map((s) => [s.id, s.paths]), [["dangerous-calls", ["my dir/run script.js"]]]);
+});
+
 test("select: a valid ref name that does not resolve is a single verdict with the reason and a record, never an exit", () => {
   for (const knob of ["auto", "single"]) {
     const dir = branchRepo({ "src/a.js": lines(3) });
