@@ -115,27 +115,36 @@ lens, and its Abstraction section applies when that criterion is confirmed.
 
 ## 3. Engine selection
 
-Keyed to the `knobs:` line's `reviewDepth`, by this rule, which every caller of the engine follows:
+`reviewDepth` on the `knobs:` line decides the engine, and a script enforces it. Every caller runs it
+once, before any engine, passing `--caller cycle --run <state.run>` when a state file's `run:` is in
+hand and `--caller standalone` otherwise:
 
-- `single` or `panel` runs that engine. `profile` arrives already resolved to one of them.
-- `auto` at `branch` scope measures the diff and runs the engine it prints:
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/review-depth.mjs" select --reviewDepth <knob> --scope <branch|files|repo> --profile <profile> --caller <cycle|standalone> [--run <id>] --lenses <lens count> [--base "$base" --branch "$branch" | --paths <path>…]
+```
 
-  ```bash
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/review-depth.mjs" --base "$base" --branch "$branch" --profile <profile>
-  ```
+It prints one JSON object and writes the decision record at its `recordPath`. `single` and `panel`
+run that engine whatever the change holds; under `single` a `note` names any matched risk signal, and
+the report states it without acting on it. `auto` scans the changed paths and added lines for risk
+signals, never their size. The script owns the built-in list, and a repo extends or quiets it in
+`.claude/devcycle-risk.json`. No match, a whole-repo scope or a failed scan is `single`. A match is
+`ask`: before any engine, ask one question that names each entry of `signals` with its `paths`, says
+panel mode can be expensive, gives `estimate` labelled as an estimate (`lowUsd`–`highUsd` for
+`chunks` × `lenses` lens jobs) and how many chunks `unreviewedChunks` leaves unreviewed, and offers
+**Panel** and **Single**, neither recommended. An Other answer is Panel only when it plainly
+chooses the panel, and it appends `user-correction-at-gate` inside a cycle run (`references/ledger.md` owns that condition). Record the answer before any engine runs:
 
-  `lean` always gets `single` and `thorough` always `panel`. `standard` gets `panel` past the
-  script's changed-line or changed-file threshold and `single` below it; the script owns both
-  thresholds and the lockfiles and generated files it leaves out.
-- `auto` at `repo` or `files` scope has no diff to measure, so it takes the profile's
-  branch-review row (`references/config.md` § The profile).
-- A failed measurement (the script exits 1) takes the profile's branch-review row too, and the
-  depth line (§ 4) says why.
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/review-depth.mjs" consent --answer <panel|single> --caller <cycle|standalone>
+```
+
+Driven, `ask` is a `needs-user` stop. A non-zero exit from either call means `single`, and its stderr
+goes in the depth line.
 
 **`panel`** runs the constructed lenses through the workflow:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/workflows/review-panel.js" '{"scope":{"ref":"<base>..<branch>"},"specPath":"<path>","lenses":[{"key":"<key>","charter":"<charter>"}],"crossModel":<crossModelReview>,"maxChunks":<profile ceiling>}'
+node "${CLAUDE_PLUGIN_ROOT}/workflows/review-panel.js" '{"scope":{"ref":"<base>..<branch>"},"specPath":"<path>","lenses":[{"key":"<key>","charter":"<charter>"}],"crossModel":<crossModelReview>,"maxChunks":<maxChunks>,"decisionPath":"<recordPath>"}'
 ```
 
 One JSON argv: `scope` carries exactly one of `ref` or `paths`, `specPath` is omitted when no spec
@@ -146,17 +155,10 @@ there as it resolves, and a rerun over that directory runs only what has no resu
 `{"resultDir":"<dir>"}` alone, does so with the arguments the directory saved. The JSON report is stdout ONLY — progress goes to stderr. When
 `branchReviewModel` resolves to an explicit id per `${CLAUDE_PLUGIN_ROOT}/references/model-routing.md`,
 export it (`DEVCYCLE_PANEL_MODEL=<id> node ...`) or
-the CLI's default silently replaces the user's binding choice; on the session tier omit it.
+the CLI's default silently replaces the user's binding choice; on the session tier omit it. `decisionPath` is `select`'s `recordPath`, and the panel saves it with the other arguments.
 
-`maxChunks` is the profile's Frontier ceiling on how many diff chunks the panel reviews; past it
+`maxChunks` is `select`'s `maxChunks`, the profile's ceiling on how many diff chunks the panel reviews; past it
 the panel reviews the highest-churn chunks and names the deferred files in its `COVERAGE WARNING`.
-The playbook reads `profile` from the `knobs:` line and passes the matching ceiling:
-
-| `profile` | `maxChunks` |
-| --- | --- |
-| `lean` | 2 |
-| `standard` | 4 |
-| `thorough` | 8 |
 
 The panel splits an oversize diff at file — and, for a lone file past the cap, `@@` hunk —
 boundaries into chunks each within the cap and runs every lens over every chunk, so the whole diff
@@ -190,7 +192,7 @@ clean tree.
 **`panel→single` degradation is a first-class path, not an apology.** A missing or non-zero
 `review-panel.js` means the panel is unavailable: **exit 1 means the panel failed, never that findings
 exist, and is never a review verdict.** Fall back to `single` and disclose it in the engine line — a
-fallback presented as a panel run makes the review unauditable.
+fallback presented as a panel run makes the review unauditable. Exit 3 with a `[review-panel] REFUSED:` line is not that path: the decision record does not allow a panel, so run `single` and give its reason in the depth line.
 
 ## 4. Fresh context, verify → dedup → rank, and what this returns
 
@@ -228,10 +230,12 @@ dependency in the finding itself; the findings document carries it into its orde
 playbook: findings in `references/findings.md`'s shape plus an **engine line** naming what ran —
 `single`, `single + user-run code-review`, `panel`, `panel [+ cross-model lens]` when the
 cross-model lens ran, or `panel→single (panel unavailable: <reason>)` — recorded verbatim, no
-variants — and a **depth line** saying how that engine was picked: `Depth: auto → ` followed by
-the script's line, e.g. `Depth: auto → panel (612 changed lines > 400; profile standard)`;
-`Depth: auto → <single | panel> (profile row; <why it was not measured>)`; or
-`Depth: <single | panel> (set)`. An audit run states the same line in its coverage statement.
+variants — and a **depth line**, the `depthLine` the last `review-depth.mjs` call printed, verbatim:
+`Depth: single (set)`, `Depth: panel (set)`, `Depth: auto → single (no risk signal)`,
+`Depth: auto → single (whole-repo scope; reviewDepth=panel available)`,
+`Depth: auto → single (declined; signals: <labels>)`, `Depth: auto → panel (approved; signals: <labels>)`
+or `Depth: auto → single (scan failed: <why>)`; or `Depth: single (launcher refused: <why>)` when the
+panel refused its record. An audit run states the same line in its coverage statement.
 The rounds-and-cap loop, spec-requirement enumeration, the ledger cross-check and every
 state-file and handoff duty belong to that stage. An audit run or a `/devcycle:maintain` pass then
 reads `${CLAUDE_PLUGIN_ROOT}/playbooks/writing-the-findings-document.md`, at every scope.

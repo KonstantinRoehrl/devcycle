@@ -21,7 +21,7 @@ const ENV = { CLAUDE_CODE_SESSION_ID: ME };
 const OLD = "2026-10-30T09:00:00Z";
 
 function cycle({ stage = "planning", run = RUN, root: recordedRoot } = {}) {
-  const root = realpathSync(makeTempDir("stop-cycle-"));
+  const root = realpathSync.native(makeTempDir("stop-cycle-"));
   execFileSync("git", ["init", "-q", root]);
   mkdirSync(join(root, ".devcycle"));
   const state = join(root, ".devcycle/state.md");
@@ -139,6 +139,11 @@ const driveRow = (root, ...sessions) => {
 const DRIVEN = "session-driven";
 // A kill that ends the driver the way a real one does: its lock goes.
 const killDriver = (root) => () => execFileSync("rm", [join(root, ".devcycle/drive.lock")]);
+// A Windows driver is sent no signal: it finds the stop request itself and exits, which a wait that
+// clears its lock stands in for.
+const endDriver = (root) => (process.platform === "win32"
+  ? { sleep: async () => rmSync(join(root, ".devcycle/drive.lock"), { force: true }) }
+  : { kill: killDriver(root) });
 
 test("a stop that ended the driver stamps the driven session's open dispatches stopped instead of listing them, and keeps another session's listed", async () => {
   const { root, state, dir } = cycle({ stage: "execution" });
@@ -147,7 +152,7 @@ test("a stop that ended the driver stamps the driven session's open dispatches s
   writeLock(root, { pid: process.pid, startTime: processStartTime(process.pid) });
   dispatched(dir, "3", { session: DRIVEN, agentId: "adriven" });
   dispatched(dir, "4", { agentId: "afg" });
-  const requested = await requestStop({ state, env: ENV, kill: killDriver(root), ...fakeTime() });
+  const requested = await requestStop({ state, env: ENV, ...fakeTime(), ...endDriver(root) });
   assert.equal(requested.driver.exit, 0);
   assert.deepEqual(requested.otherSessions.map(({ id }) => id), ["task 4 implementer (agent afg)"]);
 
@@ -232,11 +237,14 @@ test("finalize carries resume: hold while a subagent, shell, monitor or workflow
   const refuse = () => { throw Object.assign(new Error("no"), { code: "EPERM" }); };
   await requestStop({ state, env: ENV, kill: refuse, ...fakeTime() });
   const named = await finalizeStop({ state, env: ENV, ...fakeTime() });
-  assert.deepEqual(named.left.map(({ kind }) => kind).sort(), ["app", "driver", "tabs"]);
+  // A Windows stop sends no signal, so no refused one leaves the driver behind there.
+  assert.deepEqual(named.left.map(({ kind }) => kind).sort(), process.platform === "win32" ? ["app", "tabs"] : ["app", "driver", "tabs"]);
   assert.equal(named.resume, "name");
 });
 
-test("request signals a live driver and waits for its lock to clear before it returns", async () => {
+const WINDOWS_SENDS_NO_SIGNAL = { skip: process.platform === "win32" && 'POSIX-only: a Windows stop signals nothing, covered by "stopDriver on Windows writes the stop request and signals nothing" in drive-execution.test.mjs' };
+
+test("request signals a live driver and waits for its lock to clear before it returns", WINDOWS_SENDS_NO_SIGNAL, async () => {
   const { root, state } = cycle();
   writeLock(root, { pid: process.pid, startTime: processStartTime(process.pid) });
   const signalled = [];
@@ -265,7 +273,7 @@ test("request bounds the wait for a driver that never exits, and reports it", as
   assert.match(result.driver.detail, /had not exited after 15 s/);
 });
 
-test("a driver that refuses the signal is reported with its manual advice and no machine path", async () => {
+test("a driver that refuses the signal is reported with its manual advice and no machine path", WINDOWS_SENDS_NO_SIGNAL, async () => {
   const { root, state } = cycle();
   writeLock(root, { pid: process.pid, startTime: processStartTime(process.pid) });
   const refuse = () => { throw Object.assign(new Error("no"), { code: "EPERM" }); };
@@ -275,7 +283,7 @@ test("a driver that refuses the signal is reported with its manual advice and no
   assert.ok(!result.driver.detail.includes(root), "the detail carries a machine path");
 });
 
-test("request stops the launched on-device app and reports a broken launch record instead of failing", async () => {
+test("request stops the launched on-device app and reports a broken launch record instead of failing", { skip: process.platform === "win32" && "Windows: outside the driver path (#419)" }, async () => {
   const { root, state } = cycle();
   startProcess({ cmd: "sleep 30", dir: root });
   const { pid } = readRecord(root).processes[0];
@@ -312,7 +320,7 @@ test("an unreadable or corrupt launch record reaches the report and the record w
 });
 
 test("a launch record the file mode denies keeps its full path out of the report and the record", {
-  skip: process.getuid?.() === 0 ? "runs as root, where mode 0 does not deny access" : false,
+  skip: (process.platform === "win32" && "Windows: outside the driver path (#419)") || (process.getuid?.() === 0 ? "runs as root, where mode 0 does not deny access" : false),
 }, async () => {
   const { root, state, dir } = cycle();
   writeFileSync(join(dir, "on-device-launch.json"), "{}");

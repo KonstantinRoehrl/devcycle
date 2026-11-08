@@ -87,6 +87,30 @@ jobs:
           echo "${GITLEAKS_SHA256}  ${asset}" | sha256sum -c -
           tar -xzf "$asset" gitleaks
           ./gitleaks git --no-banner --redact --exit-code 1 .
+  windows-driver:
+    name: Unattended-driver tests pass on Windows
+    # The unattended driver works on Windows (#417): these are the files that cover its path — the
+    # file and drive locks, the session spawn, the tree kill, the stop and the up-front lock check.
+    # The rest of the unit suite does not pass on Windows yet (#419); a test in these files that fails
+    # there for a reason outside the driver path is skipped on win32 with a reason naming that issue.
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ".nvmrc"
+      - name: Driver-path unit tests on Windows (stubbed CLIs — no model call, no API key)
+        shell: bash
+        run: >-
+          node --test
+          tests/unit/file-lock.test.mjs tests/unit/drive-lock.test.mjs tests/unit/drive-result.test.mjs
+          tests/unit/drive-watch.test.mjs tests/unit/drive-execution.test.mjs tests/unit/drive-resilience.test.mjs
+          tests/unit/drive-surface.test.mjs tests/unit/agent-cli.test.mjs tests/unit/wave-setup.test.mjs
+          tests/unit/stop-cycle.test.mjs
   plugin-load:
     name: Plugin loads under Claude Code ${{ matrix.cli }}'s real validator and its hooks module passes its tests
     # scripts/validate.mjs is a HOMEGROWN approximation of the plugin loader — it only rejects

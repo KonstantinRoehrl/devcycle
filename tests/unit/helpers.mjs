@@ -37,6 +37,9 @@ export function makeFakeBin(name, body) {
   const p = join(dir, name);
   writeFileSync(p, `#!/usr/bin/env node\n${body}`);
   chmodSync(p, 0o755);
+  // Node cannot spawn a shebang script on Windows: a .cmd beside it runs the same file with this node,
+  // the shape npm gives a global CLI.
+  if (process.platform === "win32") writeFileSync(`${p}.cmd`, `@"${process.execPath}" "%~dp0${name}" %*\r\n`);
   return dir;
 }
 

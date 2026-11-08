@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { hostname } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { DRIVE_LOCK_REL, acquireDriveLock, driveTokenHash, holdsDriveToken, lockNamesState, readLiveDriveLock, releaseDriveLock } from "../../scripts/drive-lock.mjs";
+import { DRIVE_LOCK_REL, acquireDriveLock, driveLockUnavailable, driveTokenHash, holdsDriveToken, lockNamesState, readLiveDriveLock, releaseDriveLock } from "../../scripts/drive-lock.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
 
 const DRIVE_LOCK_MODULE = new URL("../../scripts/drive-lock.mjs", import.meta.url).href;
@@ -92,7 +92,7 @@ test("an unreadable lock file is stale; another host's lock counts as live", () 
 
 // macOS renames a host with the network it joins, so a lock a crash left before a reboot can carry
 // another hostname than this machine now reports; the machine id it also records does not drift.
-test("a dead holder on this machine is stale even after the hostname drifted; another machine's lock stays live", () => {
+test("a dead holder on this machine is stale even after the hostname drifted; another machine's lock stays live", { skip: process.platform === "win32" && "Windows records no machine id or boot id, so its lock is judged by hostname and pid" }, () => {
   const probe = makeTempDir("drive-lock-");
   const own = acquireDriveLock(probe, paths(probe));
   releaseDriveLock(probe, own.lock);
@@ -131,7 +131,7 @@ test("a holder in another pid namespace of this machine and boot counts as live,
 
 // Another boot of the same machine id is this machine rebooted since, or a clone of it running
 // beside it. Only a process that started before this boot can belong to the former.
-test("a lock from another boot of this machine is stale when its process predates this boot, and live otherwise", () => {
+test("a lock from another boot of this machine is stale when its process predates this boot, and live otherwise", { skip: process.platform === "win32" && "Windows records no machine id or boot id, so its lock is judged by hostname and pid" }, () => {
   const own = ownIdentity();
   assert.match(own.boot ?? "", /^[0-9a-f]{64}$/, "the lock records no boot id");
   const rebooted = makeTempDir("drive-lock-");
@@ -240,4 +240,12 @@ test("holdsDriveToken: only the live lock's token for this state file", () => {
   }
   writeLock(dir, { ...staleHolder(), state: statePath, tokenHash: driveTokenHash("t0ken") });
   assert.equal(holdsDriveToken(dir, statePath, "t0ken"), false, "a stale lock");
+});
+
+test("driveLockUnavailable names the reason on Windows only, and only when the start time cannot be read", () => {
+  const reason = "Windows PowerShell cannot read this process's start time, so the driver cannot take its lock";
+  assert.equal(driveLockUnavailable({ platform: "win32", startTime: () => null }), reason);
+  assert.equal(driveLockUnavailable({ platform: "win32", startTime: () => "Sat Nov  7 09:39:21 2026" }), null);
+  assert.equal(driveLockUnavailable({ platform: "linux", startTime: () => null }), null);
+  assert.equal(driveLockUnavailable({ platform: "darwin", startTime: () => null }), null);
 });

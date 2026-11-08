@@ -86,7 +86,7 @@ export function checkState(statePath) {
     // Not a repo, or no git at all: a precondition the guard could not confirm never blocks a
     // legitimate resume — the same posture VALID_STAGES takes toward an unreadable enum.
     if (git.status === 0) {
-      const real = (p) => { try { return realpathSync(p); } catch { return p; } };
+      const real = (p) => { try { return realpathSync.native(p); } catch { return p; } };
       const actualRoot = real(git.stdout.trim());
       if (real(recordedRoot) !== actualRoot)
         return { ok: false, kind: "foreign", recordedRoot: real(recordedRoot), actualRoot, request: field(text, "request") ?? "(none recorded)" };

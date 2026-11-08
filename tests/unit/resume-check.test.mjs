@@ -113,8 +113,8 @@ test("a state file whose root: names another checkout exits non-zero naming both
     const r = run(state);
     assert.notEqual(r.status, 0);
     const out = r.stdout + r.stderr;
-    assert.ok(out.includes(realpathSync(foreign)), `recorded root missing from:\n${out}`);
-    assert.ok(out.includes(realpathSync(repo)), `actual root missing from:\n${out}`);
+    assert.ok(out.includes(realpathSync.native(foreign)), `recorded root missing from:\n${out}`);
+    assert.ok(out.includes(realpathSync.native(repo)), `actual root missing from:\n${out}`);
     assert.match(out, /build the thing/);
   } finally {
     rmSync(repo, { recursive: true, force: true });
@@ -131,6 +131,39 @@ test("a matching root: passes, even when it is written in unresolved symlink for
       state,
       "# devcycle state\n" +
         ["- stage: planning", `- root: ${repo}`, "- spec: none", "- plan: none", "- checklist: none"].join("\n") +
+        "\n",
+      "utf8"
+    );
+    const r = run(state);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// The 8.3 short spelling of a directory (RUNNER~1 for runneradmin), or null where the volume has none.
+function windowsShortPath(dir) {
+  const script = `(New-Object -ComObject Scripting.FileSystemObject).GetFolder($env:SHORTEN_DIR).ShortPath`;
+  const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script],
+    { encoding: "utf8", windowsHide: true, env: { ...process.env, SHORTEN_DIR: dir } });
+  const short = r.status === 0 ? r.stdout.trim() : "";
+  return short && short.toLowerCase() !== dir.toLowerCase() ? short : null;
+}
+
+test("a matching root: passes when it is written in Windows 8.3 short form, which git prints in full", (t) => {
+  if (process.platform !== "win32") return t.skip("Windows only: 8.3 short names exist nowhere else");
+  const repo = makeRepo();
+  try {
+    const long = join(realpathSync.native(repo), "a-directory-name-longer-than-eight-characters");
+    mkdirSync(join(long, ".devcycle"), { recursive: true });
+    sh("git", ["init", "-q"], { cwd: long });
+    const short = windowsShortPath(long);
+    if (short === null) return t.skip("this volume has 8.3 short names disabled");
+    const state = join(long, ".devcycle", "state.md");
+    writeFileSync(
+      state,
+      "# devcycle state\n" +
+        ["- stage: planning", `- root: ${short}`, "- spec: none", "- plan: none", "- checklist: none"].join("\n") +
         "\n",
       "utf8"
     );

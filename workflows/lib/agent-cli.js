@@ -13,9 +13,12 @@
 
 "use strict";
 
-const { spawn } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
+const { statSync } = require("node:fs");
+const path = require("node:path");
 
 const AGENT_TIMEOUT_MS = 15 * 60 * 1000;
+const WINDOWS = process.platform === "win32";
 
 // Tagged stderr logging. Each engine makes its own pair so its lines stay
 // attributable: makeLogger("review-panel"), makeLogger("mechanical-sweep").
@@ -65,6 +68,10 @@ function hookSignals() {
 // becoming its own group leader; after the reap its pid is no safer a target than its pgid, so the
 // fallback stays on the unreaped side of the same rule.
 function killGroup(child) {
+  if (WINDOWS) {
+    if (child.exitCode === null && child.signalCode === null) killTree(child);
+    return;
+  }
   try {
     process.kill(-child.pid, "SIGKILL");
   } catch {
@@ -160,15 +167,81 @@ function lineReader(stream, onLine) {
   };
 }
 
+// cmd.exe's metacharacters. ^ escapes one outside quotes, and a ^-escaped quote does not open one, so
+// escaping every one of them leaves cmd nothing to interpret.
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
+
+// A copied env object is no longer case-insensitive the way process.env is on Windows.
+const envValue = (env, name) => env[Object.keys(env).find((key) => key.toUpperCase() === name) ?? name];
+const systemRoot = (env) => envValue(env, "SYSTEMROOT") || "C:\\Windows";
+
+const isFile = (p) => {
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
+};
+
+// The file cmd.exe would run for `cmd`: a name with a directory is looked up beside it, a bare name
+// along PATH, each with every PATHEXT extension when it has none. The current directory is never
+// searched, so a checkout cannot plant its own `claude.cmd`.
+function resolveWindowsCommand(cmd, env) {
+  const exts = (envValue(env, "PATHEXT") || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean);
+  const named = (base) => (path.win32.extname(base) ? [base] : exts.map((ext) => base + ext));
+  const dirs = /[\\/]/.test(cmd) ? [""] : (envValue(env, "PATH") || "").split(";").filter(Boolean);
+  for (const dir of dirs) for (const candidate of named(dir ? path.win32.join(dir, cmd) : cmd)) if (isFile(candidate)) return candidate;
+  return null;
+}
+
+// C-runtime quoting — backslashes doubled before a quote and at the end — then every metacharacter
+// escaped twice: cmd /c strips one level, and the shim's `%*` is parsed again (npm's claude.cmd ends in
+// `"…\claude.exe" %*`).
+function quoteCmdShimArg(arg) {
+  const quoted = `"${String(arg).replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, "$1$1")}"`;
+  return quoted.replace(CMD_META, "^$1").replace(CMD_META, "^$1");
+}
+
+// How to start `cmd`: as given off Windows. On Windows a .exe or .com runs by its resolved path, and a
+// .cmd or .bat — which Node refuses to spawn without a shell (EINVAL) — through cmd.exe.
+function spawnSpec(cmd, args, env = process.env) {
+  if (!WINDOWS) return { file: cmd, args, options: {} };
+  const resolved = resolveWindowsCommand(cmd, env);
+  if (!resolved) return { file: cmd, args, options: {} };
+  if (!/\.(cmd|bat)$/i.test(resolved)) return { file: resolved, args, options: {} };
+  const line = [resolved.replace(CMD_META, "^$1"), ...args.map(quoteCmdShimArg)].join(" ");
+  return {
+    file: path.win32.join(systemRoot(env), "System32", "cmd.exe"),
+    args: ["/d", "/s", "/c", `"${line}"`],
+    options: { windowsVerbatimArguments: true },
+  };
+}
+
+// Windows has no process groups: taskkill /T follows parent pids down from the child. Only while the
+// child is unreaped, the same evidence rule as the POSIX branch, since afterwards its pid may be a
+// stranger's. A grandchild whose own parent already exited is missed (docs/known-issues.md).
+function killTree(child, env = process.env) {
+  if (!child.pid) return;
+  const r = spawnSync(path.win32.join(systemRoot(env), "System32", "taskkill.exe"), ["/PID", String(child.pid), "/T", "/F"],
+    { windowsHide: true, stdio: "ignore", timeout: 10_000 });
+  if (r.error) {
+    try { child.kill(); } catch { /* already exited */ }
+  }
+}
+
 // Spawn a long-running child — the unattended driver's `claude -p` session — as the leader of its
-// own process group and stream its output line by line. Unlike run() there is no timeout, no output
-// cap and no signal hook: a caller that lives for hours installs its own SIGINT/SIGTERM/SIGHUP
-// handlers and ends the child through killGroup. `env` is passed through exactly as given. `done`
-// settles the way run() does — on `close`, or DRAIN_GRACE_MS after `exit` with a sweep of a group a
-// survivor still holds — and resolves { code, signal }; both are null only when the binary never
-// started, because a process that ran always exits with one or the other.
+// own process group and stream its output line by line. On Windows, which has no process groups, it
+// is spawned attached instead: a detached child gets no console, so every console program it starts
+// would open a window of its own, while an attached one with windowsHide gets a hidden console its
+// descendants inherit. killGroup then ends it through its process tree. Unlike run() there is no
+// timeout, no output cap and no signal hook: a caller that lives for hours installs its own
+// SIGINT/SIGTERM/SIGHUP handlers and ends the child through killGroup. `env` is passed through exactly
+// as given. `done` settles the way run() does — on `close`, or DRAIN_GRACE_MS after `exit` with a
+// sweep of a group a survivor still holds — and resolves { code, signal }; both are null only when the
+// binary never started, because a process that ran always exits with one or the other.
 function spawnStreaming(cmd, args, { cwd, env, onStdoutLine, onStderrLine } = {}) {
-  const child = spawn(cmd, args, { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: true });
+  const spec = spawnSpec(cmd, args, env ?? process.env);
+  const child = spawn(spec.file, spec.args, { cwd, env, stdio: ["ignore", "pipe", "pipe"], detached: !WINDOWS, windowsHide: true, ...spec.options });
   const flushes = [lineReader(child.stdout, onStdoutLine), lineReader(child.stderr, onStderrLine)];
   const done = new Promise((resolve) => {
     let settled = false;
@@ -265,4 +338,4 @@ async function claudeStructured({ prompt, tools, schema, model, cwd, permissionM
   return { ok: false, error: "unreachable" };
 }
 
-module.exports = { makeLogger, run, spawnStreaming, killGroup, claudeStructured, DRAIN_GRACE_MS };
+module.exports = { makeLogger, run, spawnStreaming, spawnSpec, quoteCmdShimArg, killGroup, claudeStructured, DRAIN_GRACE_MS };

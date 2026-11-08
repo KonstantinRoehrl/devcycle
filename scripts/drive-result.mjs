@@ -6,7 +6,7 @@ import { mkdirSync, readFileSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { atomicWrite } from "./atomic-write.mjs";
 import { lockNamesState, readDriveLockHolder, readLiveDriveLock } from "./drive-lock.mjs";
-import { isLiveHolder, processStartTime } from "./file-lock.mjs";
+import { processStartTime, startedAsRecorded } from "./file-lock.mjs";
 import { field } from "./md-field.mjs";
 
 export const LOG_REL = ".devcycle/drive.log";
@@ -72,8 +72,9 @@ export function writeCrashedResult(root, { startedAt, progressed }) {
 
 // kill(pid, 0) says whether the pid exists. A lock that carries its holder's start in clock ticks
 // (Linux) is judged by the lock module, which needs no ps: a clock step moves the start time ps
-// prints, never the ticks. Otherwise the start time, where ps can read it, says whether the pid is
-// still the process that wrote the lock; where ps cannot run, that stays "unverified".
+// prints, never the ticks. Otherwise the start time, where ps (PowerShell on Windows) can read it,
+// says whether the pid is still the process that wrote the lock; where ps cannot run, that stays
+// "unverified".
 export function holderLiveness(root, holder) {
   // kill() reads a pid of 0 or below as a process group.
   if (!holder || !(holder.pid > 0)) return "gone";
@@ -86,8 +87,9 @@ export function holderLiveness(root, holder) {
     const live = readLiveDriveLock(root);
     return live?.pid === holder.pid && live.startTime === holder.startTime ? "running" : "gone";
   }
-  if (processStartTime(holder.pid) === null) return "unverified";
-  return isLiveHolder(holder) ? "running" : "gone";
+  const started = processStartTime(holder.pid);
+  if (started === null) return "unverified";
+  return startedAsRecorded(started, holder.startTime) ? "running" : "gone";
 }
 
 // A watcher whose sandbox runs no ps trusts the pid alone.

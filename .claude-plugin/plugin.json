@@ -1,6 +1,6 @@
 {
   "name": "devcycle",
-  "version": "0.30.1",
+  "version": "0.31.0",
   "description": "Opinionated pipeline from a feature, bug, or refactor description to a verified, publish-ready implementation: scoped interview, wave-based plan, parallelized subagent execution, cross-model branch review, on-device UI verification via claude-in-chrome, and GitHub reconcile — layered on the superpowers skill set, with a doctor/learn loop that benchmarks and improves the pipeline from session to session.",
   "author": {
     "name": "Konstantin Röhrl",
@@ -84,7 +84,7 @@
         "single",
         "panel"
       ],
-      "description": "Branch review engine. auto (default) sizes it from the branch's diff: always single at lean, always panel at thorough, and at standard panel only for a large diff; a review of the whole repo or of paths takes the profile's row. profile → the profile's branch-review row (single at lean and standard, panel at thorough). single (the review's criteria lenses run as inline read-only reviewers plus a per-finding refutation pass) or panel (multi-lens review panel workflow) → that engine, verbatim. One of: auto, profile, single, panel. Default: auto."
+      "description": "Branch review engine. auto (default) is risk-based: single unless the change touches a sensitive area (auth and security, hooks, CI and release, migrations, secrets, dependencies, process execution, weakened tests), and then it asks before running the panel, with a cost estimate; never by diff size, at every profile. profile → the profile's branch-review row (single at lean and standard, panel at thorough). single or panel → that engine, verbatim; single never runs a panel. One of: auto, profile, single, panel. Default: auto."
     },
     "crossModelReview": {
       "type": "boolean",

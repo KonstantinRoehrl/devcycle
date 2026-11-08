@@ -5,6 +5,68 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-08 — reviewDepth binds through a script: risk-based auto asks before a panel, and the launcher refuses one the knob never allowed
+
+**Decision:** `scripts/review-depth.mjs` decides the review engine and writes a decision record,
+and `workflows/review-panel.js` refuses to start without a record that allows a panel.
+`reviewDepth: auto` is risk-based at every profile: `single` unless the changed paths or added
+lines match a risk signal, and then the user is asked, with a cost estimate, before any panel runs.
+`single` and `panel` are enforced as written. A failed scan, an invalid repo risk file and a
+whole-repo scope end at `single` with the reason disclosed, never at a panel. `profile` still
+resolves to its row before any review sees it.
+
+**Why:** 5 of 33 single-knob runs ran a panel anyway, and one round cost about $12. The knob was a
+prose-only rule a model could talk its way past, and `auto` sized the choice from diff volume, so a
+large harmless change paid for a panel while a small sensitive one did not.
+
+**Supersedes:** the 2026-10-24 entry's sizing rule, `reviewDepth: auto` sizes a ref-range review
+from its diff, and its `thorough` → panel row. `playbooks/reviewing-code.md` § 3 no longer carries
+a profile fallback for `auto`.
+
+**Budgets:** `playbooks/reviewing-code.md` § 3 now carries the `select` and `consent` calls, the
+consent question and the refusal path, and § 4 the eight depth-line forms; the measurement block,
+the size wording and the `maxChunks` table are gone, since the script owns `MAX_CHUNKS`. Branch
+review's engine section, report template and `review-depth` append gain the record and the
+`--depthKnob` and `--consent` flags. `references/config.md` gains the risk-file line and the
+ledger gains the two event fields. The residual raises the two review playbooks, `references/config.md`
+and every closure that cites them, plus six runtime-surface lines.
+
+```text
+budget: surface-budget.json surfaceTotal 6818
+budget: context-budget.json commands/continue.md 74974
+budget: context-budget.json commands/cycle.md 86753
+budget: context-budget.json commands/learn.md 17381
+budget: context-budget.json commands/maintain.md 18560
+budget: context-budget.json commands/onboard.md 17669
+budget: context-budget.json commands/reconcile.md 25106
+budget: context-budget.json commands/review.md 25736
+budget: context-budget.json commands/verify.md 24834
+budget: context-budget.json playbooks/executing-waves.md 117394
+budget: context-budget.json playbooks/finishing-the-cycle.md 50715
+budget: context-budget.json playbooks/learning-from-sessions.md 65104
+budget: context-budget.json playbooks/maintaining-the-repo.md 65726
+budget: context-budget.json playbooks/onboarding-a-repo.md 31328
+budget: context-budget.json playbooks/planning-waves.md 82036
+budget: context-budget.json playbooks/receiving-review.md 120560
+budget: context-budget.json playbooks/reviewing-code.md 98770
+budget: context-budget.json playbooks/reviewing-the-branch.md 59513
+budget: context-budget.json playbooks/verifying-on-device.md 65966
+budget: context-budget.json references/config.md 14855
+```
+
+## 2026-11-07 — Unattended execution runs on Windows (#417)
+
+**Decision:** The driver runs on Windows. Every Windows behaviour is selected by `process.platform === "win32"`, and macOS and Linux run today's code. `scripts/file-lock.mjs` reads a process's start time through Windows PowerShell 5.1 (`Get-Process`, UTC ticks printed in the `ps -o lstart=` shape), caching a process's own, and judges liveness as two questions: whether the pid exists (`kill(pid, 0)`), and whether its start time is the recorded one, where an unreadable start time reads as live. `workflows/lib/agent-cli.js` resolves a command along PATH and PATHEXT, spawns a `.cmd` shim (npm's `claude.cmd`) through `cmd.exe` with double-escaped arguments, and ends a session's process tree with `taskkill /T /F` only while the child is unreaped. A `--stop` writes the request and sends no signal; the driver polls for it once a second, during a session and a wait, and ends the session once it has no tool call or dispatch running, or after `SIGNAL_GRACE_MS`. Every spawn on the driver path passes `windowsHide`. `scripts/wave-setup.mjs` returns `drive.action: "unavailable"` when the lock cannot be taken (Windows only), so `/devcycle:continue` offers **Walk the waves manually** before any `auto` row is written. A Windows CI job runs the driver-path test files, and `.gitattributes` keeps every checkout LF. The rest of the suite on Windows is #419.
+
+**Why:** Under Git Bash the `ps` on PATH rejects `-o`, so the start time read as null and `acquireDriveLock` threw after the `drive: auto` row was written. A port of the lock alone would still have left a stop that hard-kills the driver and leaves its session committing, and a `claude.cmd` that Node cannot spawn.
+
+**Supersedes:** the "POSIX only" limit in `docs/known-issues.md`; it extends the 2026-10-30 entry on `ps` liveness.
+
+```text
+budget: surface-budget.json surfaceTotal 6812
+budget: context-budget.json commands/continue.md 74844
+```
+
 ## 2026-11-06 — Continue acts on the drive step before walking any wave (#412)
 
 **Decision:** `scripts/wave-setup.mjs` returns `action: "drive"`, with empty `entryLines`, `tasks` and `dispatchable` and a null `wave`, whenever its drive action is `start`, `ask`, `gate` or `attach`; only a manual walk or a driven session gets `action: "resume"` and the walk fields. A session that writes a `manual` row re-runs it for the walk fields alone (`references/drive.md` § Drive actions). `scripts/task-dispatch.mjs` refuses, exit 2 and writing nothing, a dispatch of waves the state file gives to the driver unless the caller holds the live driver's token, the predicate `scripts/drive-lock.mjs` now owns. `commands/continue.md` names `action: "drive"` before its gate list, so it grows by one line and `commandMax` moves to 185; the touched passages in it, `references/drive.md` and `references/ledger.md` raise the closures below by their measured residual.

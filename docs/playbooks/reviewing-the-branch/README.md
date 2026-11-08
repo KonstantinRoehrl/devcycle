@@ -5,8 +5,8 @@ everything the branch does against the spec that ordered it, before on-device ve
 
 This stage takes just three inputs from the execution handoff — the branch, the spec path, and
 the ledger path — and delegates engine choice in full to `reviewing-code` (below): which of
-`panel` or `single` runs (under `reviewDepth: auto`, the default, sized from the branch diff by
-that playbook's § 3), how an oversize diff is chunked, and the `panel→single` degradation are
+`panel` or `single` runs (under `reviewDepth: auto`, the default, `single` unless the change
+matches a risk signal and you approve a panel, per that playbook's § 3), how an oversize diff is chunked, and the `panel→single` degradation are
 all that engine's rules, restated nowhere here. The report's `Depth:` line says which engine was
 picked and why, and in a cycle the stage records the engine that actually ran in the run record,
 so doctor can compare single and panel runs. What this stage owns instead is its own

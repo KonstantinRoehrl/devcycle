@@ -69,7 +69,7 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
 6. **Depth-gated criteria → the engine.** Confirmed criteria = existing criteria always; **standard**
    adds **abstraction** — read `${CLAUDE_PLUGIN_ROOT}/references/abstraction-and-strengths.md` for
    its method; **thorough** additionally carries **history** evidence. Follow
-   `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` at `repo` scope, handing it the confirmed
+   `${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` at `repo` scope — where `reviewDepth: auto` is `single`, with a note that `reviewDepth=panel` is available — handing it the confirmed
    criteria, the **hotspot file list** (which scopes its `--match … --files` call rather than the
    whole tree), and the **digest** (its optional orientation input). The engine owns the panel
    dispatch and dedup-and-rank; `playbooks/writing-the-findings-document.md` writes the ranked

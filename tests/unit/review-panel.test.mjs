@@ -11,6 +11,17 @@ import { makeRepo, commitAll, makeFakeBin, runScript } from "./helpers.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(here, "..", "..", "workflows", "review-panel.js");
 
+const ALLOWING = { version: 1, caller: "standalone", run: null, knob: "panel", scope: "branch", verdict: "panel",
+  engine: "panel", consent: "none", signals: [], depthLine: "Depth: panel (set)", at: "2026-11-08T00:00:00Z" };
+function decisionFile(record = ALLOWING) {
+  const path = join(makeTempDir("panel-decision-"), "decision.json");
+  writeFileSync(path, typeof record === "string" ? record : JSON.stringify(record));
+  return path;
+}
+// Every launch below is a panel the caller chose; the guard's own tests pass decisionPath themselves.
+const runPanel = (args, opts) =>
+  runScript(SCRIPT, args.scope === undefined || "decisionPath" in args ? args : { decisionPath: decisionFile(), ...args }, opts);
+
 // ---------- pure helpers ----------
 
 test("dedupRaw merges same file+claim, keeps higher severity, records both lenses", () => {
@@ -291,7 +302,7 @@ process.stdout.write(JSON.stringify({ is_error: false, structured_output: out })
 `
   );
 
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, specPath: "spec.md" }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { ref: "HEAD" }, specPath: "spec.md" }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   const report = JSON.parse(res.stdout);
   // three lenses reported the identical claim -> dedup collapses to one
@@ -346,7 +357,7 @@ test("panel fans out over a multi-chunk diff: all findings merge, correctly attr
   for (const n of names) writeFileSync(join(repo, "src", n), "// x\n".repeat(3_800));
 
   const bin = makeFakeBin("claude", multiChunkClaude);
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { ref: "HEAD" }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   const report = JSON.parse(res.stdout);
 
@@ -374,7 +385,7 @@ test("panel caps stage-1 fan-out at maxChunks and discloses the deferred chunks 
   for (const n of names) writeFileSync(join(repo, "src", n), "// x\n".repeat(3_800));
 
   const bin = makeFakeBin("claude", multiChunkClaude);
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: ["correctness"], maxChunks: 1 }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { ref: "HEAD" }, lenses: ["correctness"], maxChunks: 1 }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   const report = JSON.parse(res.stdout);
 
@@ -391,7 +402,7 @@ test("panel exits 1 when every lens reviewer fails (unusable CLI output)", () =>
   commitAll(repo, "base");
 
   const bin = makeFakeBin("claude", `process.stdout.write("this is not json");`);
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, specPath: "spec.md" }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { ref: "HEAD" }, specPath: "spec.md" }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 1);
   assert.match(res.stderr, /all lens reviewers failed/);
 });
@@ -422,7 +433,7 @@ test("scope {paths} reviews a file list with no spec and no diff", () => {
   commitAll(repo, "base");
 
   const bin = makeFakeBin("claude", echoingClaude);
-  const res = runScript(SCRIPT, { scope: { paths: ["src/a.js"] }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { paths: ["src/a.js"] }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   const report = JSON.parse(res.stdout);
   assert.equal(report.findings.length, 1);
@@ -438,8 +449,7 @@ test("a custom {key, charter} lens runs alongside a built-in key", () => {
   commitAll(repo, "base");
 
   const bin = makeFakeBin("claude", echoingClaude);
-  const res = runScript(
-    SCRIPT,
+  const res = runPanel(
     { scope: { paths: ["src/a.js"] }, lenses: [{ key: "conventions", charter: "CUSTOM-CHARTER-TOKEN: check repo conventions." }] },
     { cwd: repo, binDirs: [bin] }
   );
@@ -451,28 +461,28 @@ test("a custom {key, charter} lens runs alongside a built-in key", () => {
 
 test("scope rejects carrying both ref and paths", () => {
   const repo = makeRepo();
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD", paths: ["a.js"] } }, { cwd: repo });
+  const res = runPanel({ scope: { ref: "HEAD", paths: ["a.js"] } }, { cwd: repo });
   assert.equal(res.status, 1);
   assert.match(res.stderr, /exactly one of ref .* or paths/);
 });
 
 test("scope rejects carrying neither ref nor paths", () => {
   const repo = makeRepo();
-  const res = runScript(SCRIPT, { scope: {} }, { cwd: repo });
+  const res = runPanel({ scope: {} }, { cwd: repo });
   assert.equal(res.status, 1);
   assert.match(res.stderr, /exactly one of ref .* or paths/);
 });
 
 test("the spec lens is unselectable without a specPath", () => {
   const repo = makeRepo();
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: ["spec"] }, { cwd: repo });
+  const res = runPanel({ scope: { ref: "HEAD" }, lenses: ["spec"] }, { cwd: repo });
   assert.equal(res.status, 1);
   assert.match(res.stderr, /"spec" lens requires args\.specPath/);
 });
 
 test("an explicit lens list naming spec without a specPath still fails, even beside other lenses", () => {
   const repo = makeRepo();
-  const res = runScript(SCRIPT, { scope: { paths: ["a.js"] }, lenses: ["correctness", "spec"] }, { cwd: repo });
+  const res = runPanel({ scope: { paths: ["a.js"] }, lenses: ["correctness", "spec"] }, { cwd: repo });
   assert.equal(res.status, 1);
   assert.match(res.stderr, /"spec" lens requires args\.specPath/);
 });
@@ -484,7 +494,7 @@ test("with lenses omitted and no specPath, the spec lens is dropped and the othe
   commitAll(repo, "base");
 
   const bin = makeFakeBin("claude", echoingClaude);
-  const res = runScript(SCRIPT, { scope: { paths: ["src/a.js"] } }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { paths: ["src/a.js"] } }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   const report = JSON.parse(res.stdout);
   // Signal the drop off the report's own coverage note (not a per-lens stderr line, which F6 removed):
@@ -518,7 +528,7 @@ test("dropping the spec lens from a defaulted set is disclosed as a note that re
   commitAll(repo, "base");
 
   const bin = makeFakeBin("claude", noteEchoingClaude);
-  const res = runScript(SCRIPT, { scope: { paths: ["src/a.js"] } }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { paths: ["src/a.js"] } }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   const report = JSON.parse(res.stdout);
   assert.match(report.summary, /spec lens skipped: no specPath given/);
@@ -551,7 +561,7 @@ test("a truncated diff is disclosed in the panel's own output, not only in the r
   writeFileSync(join(repo, "src", "a.js"), "// x\n".repeat(30_000));
 
   const bin = makeFakeBin("claude", echoingClaude);
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { ref: "HEAD" }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   const report = JSON.parse(res.stdout);
   // The stubbed reconciler returns its own summary, so a disclosure that depends on the
@@ -576,7 +586,7 @@ test("an untruncated panel run carries no coverage warning", () => {
   writeFileSync(join(repo, "src", "a.js"), "// changed\n");
 
   const bin = makeFakeBin("claude", echoingClaude);
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { ref: "HEAD" }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   const report = JSON.parse(res.stdout);
   assert.doesNotMatch(report.summary, /COVERAGE WARNING/);
@@ -605,7 +615,7 @@ test("a finding with no integer line round-trips as line: null, and no line reac
   commitAll(repo, "base");
 
   const bin = makeFakeBin("claude", linelessClaude);
-  const res = runScript(SCRIPT, { scope: { paths: ["src/a.js"] }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { paths: ["src/a.js"] }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   const report = JSON.parse(res.stdout);
   assert.ok("line" in report.findings[0], "the line key is emitted, per references/findings.md");
@@ -656,7 +666,7 @@ if (prompt.includes("You are one lens")) {
   );
 
   const lenses = Array.from({ length: 8 }, (_, i) => ({ key: `l${i}`, charter: `Charter ${i}.` }));
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { ref: "HEAD" }, lenses }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
 
   const events = readFileSync(eventLog, "utf8").trim().split("\n");
@@ -690,7 +700,7 @@ test("stage 1 hands its limiter LENS_CONCURRENCY, independent of the job count (
 process.stdout.write(JSON.stringify({ is_error: false, structured_output: { findings: [], summary: "none" } }));
 `);
     const lenses = Array.from({ length: lensCount }, (_, i) => ({ key: `l${i}`, charter: `Charter ${i}.` }));
-    const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses }, { cwd: repo, binDirs: [bin] });
+    const res = runPanel({ scope: { ref: "HEAD" }, lenses }, { cwd: repo, binDirs: [bin] });
     assert.equal(res.status, 0, `stderr: ${res.stderr}`);
     const m = res.stderr.match(/stage 1: .*job\(s\), cap (\d+)/);
     assert.ok(m, `stage 1's limiter did not report its limit; stderr: ${res.stderr}`);
@@ -725,7 +735,7 @@ if (prompt.includes("You are one lens")) {
 else out = { summary: "one finding" };
 process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
 `);
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, specPath: "spec.md" }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { ref: "HEAD" }, specPath: "spec.md" }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `panel must survive malformed envelopes; stderr: ${res.stderr}`);
   const report = JSON.parse(res.stdout);
   assert.equal(report.findings.length, 1, "the one healthy lens's finding survives");
@@ -753,7 +763,7 @@ if (prompt.includes("You are one lens")) {
 else out = { summary: "ok" };
 process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
 `);
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" } }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { ref: "HEAD" } }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, res.stderr);
   const report = JSON.parse(res.stdout);
   assert.equal(report.strengths.length, 1, "strength surfaces in its own array");
@@ -783,7 +793,7 @@ if (prompt.includes("You are one lens")) {
 } else out = { summary: "ok" };
 process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
 `);
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" } }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { ref: "HEAD" } }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, res.stderr);
   const report = JSON.parse(res.stdout);
   assert.equal(report.findings.length, 1);
@@ -812,7 +822,7 @@ if (prompt.includes("You are one lens")) {
 else out = { summary: "ok" };
 process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
 `);
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, specPath: "spec.md" }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { ref: "HEAD" }, specPath: "spec.md" }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, res.stderr);
   const report = JSON.parse(res.stdout);
   const claims = report.findings.map((f) => f.claim);
@@ -837,7 +847,7 @@ else if (prompt.includes("You are one lens")) out = { findings: [{ file: "src/a.
 else out = { summary: "done" };
 process.stdout.write(JSON.stringify({ is_error: false, structured_output: out, total_cost_usd: 0.01 }));`
   );
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { ref: "HEAD" }, lenses: ["correctness"] }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   const report = JSON.parse(res.stdout);
   assert.ok(Array.isArray(report.costByLens), "costByLens is present");
@@ -866,8 +876,7 @@ if (prompt.includes("You are one lens")) {
 else out = { summary: "ok" };
 process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
 `);
-  const res = runScript(
-    SCRIPT,
+  const res = runPanel(
     { scope: { ref: "HEAD" }, specPath: "spec.md", lenses: [{ key: "spec", charter: "CUSTOMSPECLENS_MARKER: audit against the spec" }] },
     { cwd: repo, binDirs: [bin] },
   );
@@ -900,7 +909,7 @@ test("a dash-prefixed scope.ref is rejected before any git runs", () => {
   const repo = makeRepo();
   const log = join(makeTempDir("devcycle-panel-git-"), "git-argv.log");
   const claude = makeFakeBin("claude", `process.stdout.write(JSON.stringify({ is_error: false, structured_output: { findings: [] } }));`);
-  const res = runScript(SCRIPT, { scope: { ref: "--output=/tmp/devcycle-panel-should-not-exist" } }, { cwd: repo, binDirs: [claude, loggingGit(log)] });
+  const res = runPanel({ scope: { ref: "--output=/tmp/devcycle-panel-should-not-exist" } }, { cwd: repo, binDirs: [claude, loggingGit(log)] });
   assert.equal(res.status, 1);
   assert.match(res.stderr, /args\.scope\.ref must not start with "-"/);
   assert.ok(!existsSync(log), "no git call may run before the ref is validated");
@@ -913,7 +922,7 @@ test("both diff calls pass --end-of-options immediately before the ref", () => {
   writeFileSync(join(repo, "a.js"), "module.exports = 2;\n");
   const log = join(makeTempDir("devcycle-panel-git-"), "git-argv.log");
   const claude = makeFakeBin("claude", `process.stdout.write(JSON.stringify({ is_error: false, structured_output: { findings: [] } }));`);
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" } }, { cwd: repo, binDirs: [claude, loggingGit(log)] });
+  const res = runPanel({ scope: { ref: "HEAD" } }, { cwd: repo, binDirs: [claude, loggingGit(log)] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   const diffCalls = readFileSync(log, "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((a) => a[0] === "diff");
   assert.equal(diffCalls.length, 2, `expected the full diff and the --name-only diff, got ${JSON.stringify(diffCalls)}`);
@@ -941,7 +950,7 @@ else out = null;
 process.stdout.write(JSON.stringify({ is_error: false, structured_output: out }));
 `
   );
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" } }, { cwd: repo, binDirs: [claude] });
+  const res = runPanel({ scope: { ref: "HEAD" } }, { cwd: repo, binDirs: [claude] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   const report = JSON.parse(res.stdout);
   assert.ok(report.summary.length > 0, "a fallback summary must be produced, not a crash");
@@ -986,7 +995,7 @@ const threeLenses = ["alpha", "beta", "gamma"].map((key) => ({ key, charter: `${
 
 test("with no resultDir the panel writes nothing", () => {
   const { repo, bin } = resultDirFixture();
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: threeLenses }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { ref: "HEAD" }, lenses: threeLenses }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   assert.equal(existsSync(join(repo, ".devcycle")), false);
 });
@@ -1003,7 +1012,7 @@ test("a lens's result file lands as the lens resolves, not when the panel ends",
     }
   }`);
   const args = { scope: { ref: "HEAD" }, lenses: threeLenses, resultDir: ROUND_DIR };
-  const res = runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] });
+  const res = runPanel(args, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   assert.deepEqual(JSON.parse(res.stdout).notes, []);
   for (const key of ["alpha", "beta", "gamma"]) assert.ok(existsSync(join(repo, ROUND_DIR, `${key}.json`)), key);
@@ -1016,7 +1025,7 @@ test("a rerun over the same directory runs only the lens with no result file", (
   if (lens === "gamma" && !fs.existsSync("gamma-may-pass")) process.exit(1);`);
   const args = { scope: { ref: "HEAD" }, lenses: threeLenses, resultDir: ROUND_DIR };
 
-  const first = runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] });
+  const first = runPanel(args, { cwd: repo, binDirs: [bin] });
   assert.equal(first.status, 0, `stderr: ${first.stderr}`);
   assert.ok(existsSync(join(repo, ROUND_DIR, "alpha.json")));
   assert.ok(existsSync(join(repo, ROUND_DIR, "beta.json")));
@@ -1024,7 +1033,7 @@ test("a rerun over the same directory runs only the lens with no result file", (
   const before = calls();
 
   writeFileSync(join(repo, "gamma-may-pass"), "");
-  const second = runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] });
+  const second = runPanel(args, { cwd: repo, binDirs: [bin] });
   assert.equal(second.status, 0, `stderr: ${second.stderr}`);
   const added = calls().slice(before.length);
   assert.deepEqual(added.filter((c) => c.startsWith("lens")), ["lens gamma"]);
@@ -1040,11 +1049,11 @@ test("a rerun over the same directory runs only the lens with no result file", (
 
 test("a finished round replays with no lens and no verifier, from its directory alone", () => {
   const { repo, bin, calls } = resultDirFixture();
-  const first = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: threeLenses, resultDir: ROUND_DIR }, { cwd: repo, binDirs: [bin] });
+  const first = runPanel({ scope: { ref: "HEAD" }, lenses: threeLenses, resultDir: ROUND_DIR }, { cwd: repo, binDirs: [bin] });
   assert.equal(first.status, 0, `stderr: ${first.stderr}`);
   const before = calls().length;
 
-  const second = runScript(SCRIPT, { resultDir: ROUND_DIR }, { cwd: repo, binDirs: [bin] });
+  const second = runPanel({ resultDir: ROUND_DIR }, { cwd: repo, binDirs: [bin] });
   assert.equal(second.status, 0, `stderr: ${second.stderr}`);
   assert.equal(calls().length, before, "nothing re-ran");
   assert.deepEqual(JSON.parse(second.stdout).findings, JSON.parse(first.stdout).findings);
@@ -1053,7 +1062,7 @@ test("a finished round replays with no lens and no verifier, from its directory 
 
 test("a directory with no saved arguments is a fatal error naming the file", () => {
   const { repo, bin } = resultDirFixture();
-  const res = runScript(SCRIPT, { resultDir: ROUND_DIR }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ resultDir: ROUND_DIR }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 1);
   assert.match(res.stderr, /no saved arguments at \.devcycle\/review\/round-1\/_args\.json/);
 });
@@ -1061,11 +1070,11 @@ test("a directory with no saved arguments is a fatal error naming the file", () 
 test("a moved diff re-runs its lenses and verifiers instead of replaying them", () => {
   const { repo, bin, calls } = resultDirFixture();
   const args = { scope: { ref: "HEAD" }, lenses: threeLenses, resultDir: ROUND_DIR };
-  assert.equal(runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] }).status, 0);
+  assert.equal(runPanel(args, { cwd: repo, binDirs: [bin] }).status, 0);
   const before = calls().length;
 
   writeFileSync(join(repo, "src", "a.js"), "module.exports = 4;\n");
-  const res = runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] });
+  const res = runPanel(args, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   const added = calls().slice(before);
   assert.equal(added.filter((c) => c.startsWith("lens")).length, 3);
@@ -1095,12 +1104,12 @@ if (prompt.includes("You are one lens")) {
 }
 `);
   const args = { scope: { ref: "HEAD" }, lenses: [{ key: "alpha", charter: "alpha review." }], resultDir: ROUND_DIR };
-  assert.equal(runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] }).status, 0);
+  assert.equal(runPanel(args, { cwd: repo, binDirs: [bin] }).status, 0);
   const before = readFileSync(callLog, "utf8").trim().split("\n");
   assert.ok(before.includes("other"), "the fixture needs a chunk without f4");
 
   writeFileSync(join(repo, "f4-may-pass"), "");
-  assert.equal(runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] }).status, 0);
+  assert.equal(runPanel(args, { cwd: repo, binDirs: [bin] }).status, 0);
   const added = readFileSync(callLog, "utf8").trim().split("\n").slice(before.length);
   assert.deepEqual(added, ["f4"]);
 });
@@ -1128,13 +1137,13 @@ if (prompt.includes("You are one lens")) {
 }
 `);
   const args = { scope: { ref: "HEAD" }, lenses: [{ key: "alpha", charter: "alpha review." }], resultDir: ROUND_DIR };
-  const first = runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] });
+  const first = runPanel(args, { cwd: repo, binDirs: [bin] });
   assert.equal(first.status, 0, `stderr: ${first.stderr}`);
   assert.equal(JSON.parse(first.stdout).findings.find((f) => f.claim === "finding two").verified, false);
   const before = readFileSync(callLog, "utf8").trim().split("\n").length;
 
   writeFileSync(join(repo, "two-may-pass"), "");
-  const second = runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] });
+  const second = runPanel(args, { cwd: repo, binDirs: [bin] });
   assert.equal(second.status, 0, `stderr: ${second.stderr}`);
   assert.deepEqual(readFileSync(callLog, "utf8").trim().split("\n").slice(before), ["two"]);
   assert.ok(JSON.parse(second.stdout).findings.every((f) => f.verified));
@@ -1143,7 +1152,7 @@ if (prompt.includes("You are one lens")) {
 test("resultDir outside .devcycle/review/ is rejected before anything is written", () => {
   const { repo, bin } = resultDirFixture();
   for (const resultDir of ["src", ".devcycle/review", ".devcycle/review/a/b", ".devcycle/review/../../src", ""]) {
-    const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: threeLenses, resultDir }, { cwd: repo, binDirs: [bin] });
+    const res = runPanel({ scope: { ref: "HEAD" }, lenses: threeLenses, resultDir }, { cwd: repo, binDirs: [bin] });
     assert.equal(res.status, 1, JSON.stringify(resultDir));
     assert.match(res.stderr, /directly under \.devcycle\/review\//);
   }
@@ -1154,7 +1163,7 @@ test("a caller-supplied lens key cannot leave the result directory", () => {
   assert.equal(panel.lensResultFile("../../escape"), "..%2F..%2Fescape.json");
   assert.equal(panel.lensResultFile(".."), "...json");
   const { repo, bin } = resultDirFixture();
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: [{ key: "../../escape", charter: "escape review." }], resultDir: ROUND_DIR }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { ref: "HEAD" }, lenses: [{ key: "../../escape", charter: "escape review." }], resultDir: ROUND_DIR }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   assert.ok(existsSync(join(repo, ROUND_DIR, "..%2F..%2Fescape.json")));
   assert.equal(existsSync(join(repo, ".devcycle", "escape.json")), false);
@@ -1164,8 +1173,68 @@ test("a result file that cannot be written leaves the review intact", () => {
   const { repo, bin } = resultDirFixture();
   mkdirSync(join(repo, ".devcycle"));
   writeFileSync(join(repo, ".devcycle", "review"), "a file where the directory belongs");
-  const res = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: threeLenses, resultDir: ROUND_DIR }, { cwd: repo, binDirs: [bin] });
+  const res = runPanel({ scope: { ref: "HEAD" }, lenses: threeLenses, resultDir: ROUND_DIR }, { cwd: repo, binDirs: [bin] });
   assert.equal(res.status, 0, `stderr: ${res.stderr}`);
   assert.equal(JSON.parse(res.stdout).findings.length, 3);
   assert.match(res.stderr, /result file \S+ not written/);
+});
+
+// ---------- the launcher guard ----------
+
+function guardRepo({ run = "0123456789abcdef", knobs = "reviewDepth=auto" } = {}) {
+  const { repo, bin, calls } = resultDirFixture();
+  mkdirSync(join(repo, ".devcycle"), { recursive: true });
+  writeFileSync(join(repo, ".devcycle", "state.md"), `# devcycle state\n- run: ${run}\n- knobs: profile=standard ${knobs}\n`);
+  return { repo, bin, calls };
+}
+const cycleRecord = (fields = {}) => ({ ...ALLOWING, caller: "cycle", run: "0123456789abcdef", knob: "auto", consent: "panel", ...fields });
+
+const REFUSALS = [
+  ["no decisionPath", () => undefined, /^\[review-panel\] ERROR: args\.decisionPath \(string\) is required/m, 1],
+  ["a missing record", () => "/nonexistent/decision.json", /^\[review-panel\] REFUSED: no decision record at \/nonexistent\/decision\.json/m, 3],
+  ["an unparseable record", () => decisionFile("{nope"), /^\[review-panel\] REFUSED: the decision record .* does not parse/m, 3],
+  ["an engine other than panel", () => decisionFile({ ...ALLOWING, engine: "single" }), /^\[review-panel\] REFUSED: the decision record's engine is "single", not panel/m, 3],
+  ["an ask never answered", () => decisionFile({ ...ALLOWING, verdict: "ask", engine: "ask" }), /^\[review-panel\] REFUSED: the decision record's engine is "ask", not panel/m, 3],
+  ["a foreign run id", () => decisionFile(cycleRecord({ run: "ffffffffffffffff" })), /^\[review-panel\] REFUSED: the decision record is for run ffffffffffffffff, and the state file's run is 0123456789abcdef/m, 3],
+  ["a single knob", () => decisionFile(cycleRecord({ knob: "single" })), /^\[review-panel\] REFUSED: the state file's knobs: line has reviewDepth=single/m, 3, { knobs: "reviewDepth=single" }],
+  ["auto without a panel consent", () => decisionFile(cycleRecord({ consent: "none" })), /^\[review-panel\] REFUSED: reviewDepth=auto and the recorded consent is none, not panel/m, 3],
+];
+
+for (const [name, path, stderr, status, state] of REFUSALS)
+  test(`the guard refuses ${name}, before any child is spawned`, () => {
+    const { repo, bin, calls } = guardRepo(state);
+    const decisionPath = path();
+    const args = { scope: { ref: "HEAD" }, lenses: threeLenses, ...(decisionPath === undefined ? {} : { decisionPath }) };
+    const res = runScript(SCRIPT, args, { cwd: repo, binDirs: [bin] });
+    assert.equal(res.status, status, res.stderr);
+    assert.match(res.stderr, stderr);
+    assert.deepEqual(calls(), [], "a refused panel spawns nothing");
+    assert.equal(res.stdout, "");
+  });
+
+test("the guard starts a cycle's approved panel, and a standalone panel next to a single state file", () => {
+  const approved = guardRepo();
+  const ok = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: threeLenses, decisionPath: decisionFile(cycleRecord()) }, { cwd: approved.repo, binDirs: [approved.bin] });
+  assert.equal(ok.status, 0, ok.stderr);
+  const paused = guardRepo({ knobs: "reviewDepth=single" });
+  const standalone = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: threeLenses, decisionPath: decisionFile() }, { cwd: paused.repo, binDirs: [paused.bin] });
+  assert.equal(standalone.status, 0, `a paused single cycle must not block a standalone panel: ${standalone.stderr}`);
+});
+
+test("a resume through _args.json re-checks the saved decision record", () => {
+  const { repo, bin } = guardRepo();
+  const record = decisionFile(cycleRecord());
+  const first = runScript(SCRIPT, { scope: { ref: "HEAD" }, lenses: threeLenses, resultDir: ROUND_DIR, decisionPath: record }, { cwd: repo, binDirs: [bin] });
+  assert.equal(first.status, 0, first.stderr);
+  assert.equal(JSON.parse(readFileSync(join(repo, ROUND_DIR, "_args.json"), "utf8")).decisionPath, record);
+  writeFileSync(record, JSON.stringify(cycleRecord({ consent: "single", engine: "single" })));
+  const resumed = runScript(SCRIPT, { resultDir: ROUND_DIR }, { cwd: repo, binDirs: [bin] });
+  assert.equal(resumed.status, 3);
+  assert.match(resumed.stderr, /^\[review-panel\] REFUSED: the decision record's engine is "single"/m);
+});
+
+test("checkDecision and DIFF_CHAR_CAP are exported for the engine-selection script and the tests", async () => {
+  assert.equal(panel.DIFF_CHAR_CAP, 60_000);
+  assert.equal(panel.DECISION_REFUSED_EXIT, 3);
+  assert.deepEqual(await panel.checkDecision(decisionFile()), { ok: true });
 });

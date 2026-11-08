@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.31.0 — 2026-11-08
+
+- feat(review-depth): make reviewDepth binding and gate the auto panel on risk and consent (#422)
+
+`reviewDepth: single` now binds: the review panel refuses to start without a decision record that allows it, so a prose rule can no longer be skipped. `reviewDepth: auto`, the default, is now risk-based at every profile, with no size threshold and no special case for `profile=thorough`: it stays `single` unless the change matches a built-in risk signal (authentication and security code, hooks and guards, CI and release definitions, schema and migration files, secrets and credential material, dependency changes, process execution and destructive shell, weakened tests), and then it asks one question naming the signals, with a cost estimate, before any panel runs. A failed scan ends at `single` with the reason shown. A repo tunes the signals with `.claude/devcycle-risk.json`, adding its own and quieting built-in ones with a stated reason, and `/devcycle:doctor` lists every run where a panel ran that the knob did not allow. Measured over each repo's last 60 squash-merged branches with the built-in signals alone, `auto` asks on 26.7% of devcycle's branches (16 of 60), 20.0% of `private-1`'s (12 of 60) and 28.3% of `private-2`'s (17 of 60).
+
 ## 0.30.1 — 2026-11-06
 
 - fix(continue): hand an opted-in unattended cycle to the driver before walking waves (#412)
