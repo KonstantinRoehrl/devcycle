@@ -178,7 +178,7 @@ marker with the version the change lands in, since only the release computes tha
   key: drivePlugins
   default: none
   note: "which plugins an unattended run's sessions load besides devcycle and superpowers: none, all (every plugin and MCP server), or a comma-separated list of plugin names; live, read at each start; profile-independent, so it takes no auto"
-- version: "unreleased"
+- version: "0.31.0"
   change: added
   key: reviewDepth
   values: [auto, profile, single, panel]
