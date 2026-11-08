@@ -18,16 +18,15 @@ and stamped by the release step.
 engines the stages use, how deep the review goes, how much evidence reports carry — so you don't
 tune options one at a time to say "cheaper" or "be thorough". `lean` is the cheapest pass,
 `standard` is the default, and `thorough` is the most rigorous: it swaps in the upstream planning
-and execution overlays, runs the branch review as a panel, and carries the longest evidence
-tails. The dimension-by-dimension matrix — every stage dimension against all three profiles —
+and execution overlays, allows more review rounds, and carries the longest evidence tails. The dimension-by-dimension matrix — every stage dimension against all three profiles —
 lives in [`references/config.md`](../../references/config.md) § The profile, which owns it.
 
 Resolution order, in one rule: **an option you configured explicitly wins verbatim, always;
 an option left at its default never pins anything the profile governs.** The profile sets the
 stage dimensions in the matrix `references/config.md` owns, and `reviewDepth`'s default, `auto`,
-sizes the branch review within the profile's bounds — switch to `thorough` and the branch review
-becomes `panel` on its own, unless you pinned `reviewDepth: single` yourself, in which case your
-value stands and the profile never moves it. A `profile` that is unset or set to anything outside
+decides the branch review by risk at every profile — switching to `thorough` does not turn it into
+a `panel`, and a value you pinned, such as `reviewDepth: single`, stands and the profile never
+moves it. A `profile` that is unset or set to anything outside
 the three reads as `standard`.
 
 What the profile never touches: the state file, handoff blocks, evidence classes, the
@@ -54,8 +53,8 @@ first.) Hand `reviewDepth` back to the profile's row by setting it to `profile`:
 claude plugin install devcycle@devcycle --config reviewDepth=profile
 ```
 
-`profile` takes the profile's branch-review row as it is; `auto`, the default, sizes the review
-from the branch diff within the profile's bounds instead. Either is a value, not a deletion, so
+`profile` takes the profile's branch-review row as it is; `auto`, the default, decides by risk
+signals at every profile instead. Either is a value, not a deletion, so
 the option stays visible in `/plugin configure` and you can pin it again later.
 
 To spot a shadowing option, read the `explicit:` line the entry command prints next to
@@ -90,7 +89,7 @@ and silently runs every knob at its fallback. [`docs/platform-notes.md`](../plat
 | `profile` | Cost against rigor, across every stage at once | `lean` / `standard` / `thorough` | `standard` |
 | `gitPolicy` | What the finish stage may do with git | `local-commits-only` / `push-allowed` / `open-pr` | `local-commits-only` |
 | `docTrackingPolicy` | What devcycle attempts to commit (the repo's `.gitignore` still decides what lands) | `standard` / `all-local` / `all-tracked` | `standard` |
-| `reviewDepth` | How the branch review runs | `auto` / `profile` / `single` / `panel` | `auto` (sized from the branch diff within the profile's bounds; `profile` takes the profile's row) |
+| `reviewDepth` | How the branch review runs | `auto` / `profile` / `single` / `panel` | `auto` (risk-based at every profile: `single` unless a risk signal matches, then it asks before a panel; `profile` takes the profile's row) |
 | `crossModelReview` | Adds a second-model lens to the panel | `true` / `false` | `false` |
 | `onDeviceGate` | Who settles the on-device checklist | `auto` / `human-required` / `auto-ok` | `auto` (the agent checks first; you judge the rest) |
 | `implementerModel` | Model for implementer subagents | `auto` / model id / comma-separated pool | `auto` (derived per task; set a model id to pin) |
@@ -122,12 +121,18 @@ repo's default branch (direct pushes there are never allowed) — and falls back
 `local-commits-only` behavior for that run if either is true, stating why in the finish
 stage's output. `local-commits-only` is unaffected either way; it never pushes.
 
-**`reviewDepth`** picks the branch-review engine. `auto`, the default, sizes it from the
-branch diff: always `single` at `lean`, always `panel` at `thorough`, and at `standard` `panel`
-once the diff passes the size thresholds `scripts/review-depth.mjs` names (lockfiles and
-generated files left out), `single` otherwise. A review with no diff to measure — a repo audit,
-`/devcycle:maintain`, a path review — takes the profile's row, and so does `profile`, set
-explicitly; `single` and `panel` pin the engine. [`playbooks/reviewing-code.md`](../../playbooks/reviewing-code.md)
+**`reviewDepth`** picks the branch-review engine. `auto`, the default, is risk-based at every
+profile. It is `single` unless the change matches a risk signal in one of eight classes:
+authentication and security code; hooks and guards; CI, release and deploy definitions; schema
+and migration files; secrets and credential material; dependency changes; process execution, eval,
+destructive shell and raw HTML sinks; weakened tests. On a match it asks one question naming the
+signals, warning that panel mode can be expensive, with an estimate; your answer holds for the rest
+of the cycle's branch review. A whole-repo review under `auto` is `single`, with a note that
+`reviewDepth=panel` is available. Size never picks the panel, and neither does `profile=thorough`.
+`profile` takes the profile's branch-review row, and `panel` pins the panel. `single` never runs a
+panel: the panel refuses to start without a decision record that allows it, and under `single`
+matched signals are named in the report and never escalate. Doctor lists every run where a panel
+ran that the knob did not allow. [`playbooks/reviewing-code.md`](../../playbooks/reviewing-code.md)
 § 3 owns the rule, and the review report's `Depth:` line says which engine was picked and why.
 `single` runs the review's two to five criteria lenses as inline read-only
 reviewers, then re-verifies each finding against the code — a complete review in its own
@@ -141,6 +146,26 @@ repo's own conventions), whose findings are adversarially re-verified against th
 merged into one report — slower and more expensive, harder to fool. With
 `crossModelReview: true` the panel adds one more lens run by a non-Claude model via the
 `codex` CLI, if installed — a hedge against blind spots one model family might share.
+
+### The risk file: `.claude/devcycle-risk.json`
+
+Under `reviewDepth: auto`, a repo tunes the risk signals with an optional tracked file:
+
+```json
+{
+  "paths": [{ "glob": "src/billing/**", "label": "billing" }],
+  "content": [{ "pattern": "stripe\\.", "label": "payment calls" }],
+  "quiet": [{ "signal": "hooks-guards", "reason": "hooks are this repo's core; every branch touches them" }]
+}
+```
+
+`paths` and `content` add signals with ids prefixed `repo:`. `quiet` stops a built-in signal (one
+of the eight ids `auth-security`, `hooks-guards`, `ci-release`, `data-migrations`,
+`secrets-config`, `dependencies`, `dangerous-calls`, `test-weakening`) from asking in this repo;
+each entry needs a non-empty `reason`, and a quieted signal that matched still shows in the report
+as `quieted: <label> — <reason>`. A missing file is fine. A file that does not parse or validate
+makes the scan fail, which means `single` with the file named. The file is tracked, and a repo
+that ignores `.claude/` needs a `!.claude/devcycle-risk.json` re-include in `.gitignore`.
 
 **`onDeviceGate`** governs the last verification. The stage launches the app itself, and every
 checklist item is tagged by what can settle it: `structural` (DOM, CSS values, exact text), which

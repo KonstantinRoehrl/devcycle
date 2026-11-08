@@ -5,3 +5,7 @@ useDefault = true
 [[allowlists]]
 description = "Synthetic drive token in tests/unit/wave-setup.test.mjs — a fixture, not a credential"
 regexes = ['''0f1e2d3c4b5a69788796a5b4c3d2e1f0''']
+
+[[allowlists]]
+description = "Synthetic apiKey in tests/unit/risk-signals.test.mjs — a fixture for the secrets-config signal, not a credential"
+regexes = ['''abcdefgh12345678''']

@@ -1,0 +1,926 @@
+{
+  "signalsSha256": "ae243d2c10bda7b21d90e010cab3cfde77aee3d7ef05fe5333b3285b2840442b",
+  "bar": 0.25,
+  "ceiling": 0.3,
+  "limit": 60,
+  "repos": [
+    {
+      "label": "devcycle",
+      "ref": "origin/dev",
+      "asked": 16,
+      "total": 60,
+      "askRate": 0.267,
+      "branches": [
+        {
+          "sha": "566537a",
+          "subject": "fix(drive): run the unattended driver on Windows (#417) (#420)",
+          "signals": [
+            "ci-release",
+            "dangerous-calls"
+          ]
+        },
+        {
+          "sha": "d3ad27f",
+          "subject": "chore: merge the release back into dev",
+          "signals": []
+        },
+        {
+          "sha": "75d39af",
+          "subject": "chore(release): run the required checks on the v0.30.1 release PR",
+          "signals": []
+        },
+        {
+          "sha": "5ed9a3c",
+          "subject": "chore(release): prepare v0.30.1",
+          "signals": []
+        },
+        {
+          "sha": "93b76cd",
+          "subject": "docs(changelog): draft the 0.30.1 release notes",
+          "signals": []
+        },
+        {
+          "sha": "fc96a2d",
+          "subject": "fix(continue): hand an opted-in unattended cycle to the driver before walking waves (#412) (#415)",
+          "signals": []
+        },
+        {
+          "sha": "4c097f0",
+          "subject": "chore: merge the release back into dev",
+          "signals": []
+        },
+        {
+          "sha": "b4fa5dd",
+          "subject": "chore(release): prepare v0.30.0",
+          "signals": []
+        },
+        {
+          "sha": "8b82957",
+          "subject": "docs(changelog): draft the 0.30.0 release notes",
+          "signals": []
+        },
+        {
+          "sha": "44fd54b",
+          "subject": "fix(plan-check): carry the claim-marker grammar in briefs and fail plans whose briefs cite unresolved paths or unrun pinned code (#333, #334, #314)",
+          "signals": [
+            "auth-security",
+            "dangerous-calls"
+          ]
+        },
+        {
+          "sha": "6ac69bc",
+          "subject": "fix(dispatch-health): hold an implementer that stops before its report and attribute re-dispatch cost (#404, #407) (#411)",
+          "signals": [
+            "hooks-guards"
+          ]
+        },
+        {
+          "sha": "5b877cf",
+          "subject": "feat(plan-check): fail a red-green task that creates a source module with no stub, note guard-denied git (#321, #276) (#409)",
+          "signals": [
+            "dangerous-calls"
+          ]
+        },
+        {
+          "sha": "fb2f517",
+          "subject": "fix: keep a review round open for a user decision made before its verdict (#408)",
+          "signals": []
+        },
+        {
+          "sha": "b0dcbe9",
+          "subject": "ci: fail a PR into dev whose body names no issue (#403)",
+          "signals": [
+            "ci-release"
+          ]
+        },
+        {
+          "sha": "966be23",
+          "subject": "ci(release): close the issues a release's PRs name (#402)",
+          "signals": [
+            "ci-release",
+            "dangerous-calls"
+          ]
+        },
+        {
+          "sha": "f96af96",
+          "subject": "chore: merge the release back into dev",
+          "signals": []
+        },
+        {
+          "sha": "640f1f7",
+          "subject": "ci: run the required checks on the v0.29.0 release PR",
+          "signals": []
+        },
+        {
+          "sha": "0f5987d",
+          "subject": "chore(release): prepare v0.29.0",
+          "signals": []
+        },
+        {
+          "sha": "0d0e55e",
+          "subject": "docs(changelog): draft the 0.29.0 release notes",
+          "signals": []
+        },
+        {
+          "sha": "3aa6fc5",
+          "subject": "fix(guard): stop execution leaving orphaned background load (#395) (#400)",
+          "signals": [
+            "hooks-guards",
+            "dangerous-calls"
+          ]
+        },
+        {
+          "sha": "9c80dc4",
+          "subject": "feat(upgrades): version the cycle format and canary the latest Claude Code (#399)",
+          "signals": [
+            "ci-release",
+            "dangerous-calls"
+          ]
+        },
+        {
+          "sha": "ad950ca",
+          "subject": "feat(stop): add /devcycle:stop to stop a cycle and resume it exactly (#397)",
+          "signals": [
+            "hooks-guards",
+            "dangerous-calls"
+          ]
+        },
+        {
+          "sha": "ecc42d0",
+          "subject": "chore: merge the release back into dev",
+          "signals": []
+        },
+        {
+          "sha": "6127f10",
+          "subject": "ci: run the required checks on the v0.28.3 release PR",
+          "signals": []
+        },
+        {
+          "sha": "dd00385",
+          "subject": "chore(release): prepare v0.28.3",
+          "signals": []
+        },
+        {
+          "sha": "2b40bfb",
+          "subject": "docs(changelog): draft the release notes for the unattended-start, checker and learn-tooling fixes",
+          "signals": []
+        },
+        {
+          "sha": "2d351c4",
+          "subject": "fix(learn): fix four learn-tooling bugs in dream.mjs and the learn playbooks (#245, #246, #294, #277) (#394)",
+          "signals": []
+        },
+        {
+          "sha": "4622aa0",
+          "subject": "fix(task-scripts): stop the intake and verdict checkers bouncing valid work (#382, #390, #391, #275) (#393)",
+          "signals": []
+        },
+        {
+          "sha": "148cd40",
+          "subject": "fix(on-device): route FAILED items and start the unattended driver without a question (#384, #383, #381) (#392)",
+          "signals": []
+        },
+        {
+          "sha": "4fecbc9",
+          "subject": "chore: merge the release back into dev",
+          "signals": []
+        },
+        {
+          "sha": "44562f9",
+          "subject": "ci: run the required checks on the v0.28.2 release PR",
+          "signals": []
+        },
+        {
+          "sha": "902788b",
+          "subject": "chore(release): prepare v0.28.2",
+          "signals": []
+        },
+        {
+          "sha": "601ef28",
+          "subject": "docs(changelog): draft the 0.28.2 release notes",
+          "signals": []
+        },
+        {
+          "sha": "409a0ed",
+          "subject": "fix(dispatch): detect a dead dispatch and bound the waits on it (#385, #330, #380)",
+          "signals": [
+            "hooks-guards"
+          ]
+        },
+        {
+          "sha": "342d670",
+          "subject": "chore: merge the release back into dev",
+          "signals": []
+        },
+        {
+          "sha": "2213c4e",
+          "subject": "ci: run the required checks on the v0.28.1 release PR",
+          "signals": []
+        },
+        {
+          "sha": "5e73f81",
+          "subject": "chore(release): prepare v0.28.1",
+          "signals": []
+        },
+        {
+          "sha": "7e6aa97",
+          "subject": "docs(changelog): draft the 0.28.1 release notes",
+          "signals": []
+        },
+        {
+          "sha": "bf7692a",
+          "subject": "fix(pricing): price claude-haiku-5-5 and count observed inherited-model dispatches (#363, #273, #379)",
+          "signals": []
+        },
+        {
+          "sha": "7f4b53b",
+          "subject": "chore: merge the release back into dev",
+          "signals": []
+        },
+        {
+          "sha": "6898c4b",
+          "subject": "ci: run the required checks on the v0.28.0 release PR",
+          "signals": []
+        },
+        {
+          "sha": "c149447",
+          "subject": "chore(release): prepare v0.28.0",
+          "signals": []
+        },
+        {
+          "sha": "18c3761",
+          "subject": "docs(changelog): itemize the driven-run economy entry for the next release (#372, #373, #375, #374)",
+          "signals": []
+        },
+        {
+          "sha": "2d890d2",
+          "subject": "feat(drive): cut driven-run cost with a lean surface, explicit effort and a drive band (#372, #373, #375, #374) (#376)",
+          "signals": [
+            "hooks-guards",
+            "dangerous-calls"
+          ]
+        },
+        {
+          "sha": "a4848b1",
+          "subject": "chore: merge the release back into dev",
+          "signals": []
+        },
+        {
+          "sha": "4d59f95",
+          "subject": "ci: run the required checks on the v0.27.0 release PR",
+          "signals": []
+        },
+        {
+          "sha": "4db40ca",
+          "subject": "chore(release): prepare v0.27.0",
+          "signals": []
+        },
+        {
+          "sha": "369805e",
+          "subject": "docs(changelog): itemize the Files-block path grammar entry for the next release (#354, #285)",
+          "signals": []
+        },
+        {
+          "sha": "db9ec39",
+          "subject": "feat(verify): run the driver first and skip on-device when nothing renders (#368, #367, #323, #338, #296) (#370)",
+          "signals": [
+            "dangerous-calls"
+          ]
+        },
+        {
+          "sha": "5a33f73",
+          "subject": "fix(scripts): refuse unknown and valueless flags in run-record, bump-version, dream and plan-check (#369)",
+          "signals": []
+        },
+        {
+          "sha": "80f9d09",
+          "subject": "fix(scripts): prove each task commit green in a scratch worktree (#324, #336) (#366)",
+          "signals": [
+            "hooks-guards",
+            "dangerous-calls",
+            "test-weakening"
+          ]
+        },
+        {
+          "sha": "95c3566",
+          "subject": "fix(scripts): expand brace lists and reject prose tokens in Files-block paths (#354, #285) (#365)",
+          "signals": []
+        },
+        {
+          "sha": "77aa3b7",
+          "subject": "docs(maintenance): record the 2026-10-23 pass's findings (#364)",
+          "signals": []
+        },
+        {
+          "sha": "aa95690",
+          "subject": "chore: merge the release back into dev",
+          "signals": []
+        },
+        {
+          "sha": "d28389a",
+          "subject": "docs(changelog): itemize the 0.26.0 spec review and handoff readiness entries (#304, #355, #357)",
+          "signals": []
+        },
+        {
+          "sha": "ecd39fc",
+          "subject": "chore(release): prepare v0.26.0",
+          "signals": []
+        },
+        {
+          "sha": "a0451a4",
+          "subject": "fix(drive): confirm unattended starts in the session and gate handoffs on readiness (#357, #355) (#359)",
+          "signals": [
+            "hooks-guards"
+          ]
+        },
+        {
+          "sha": "65b22a4",
+          "subject": "feat(cycle): review a spec's repo claims against live code before approval (#304) (#358)",
+          "signals": [
+            "hooks-guards"
+          ]
+        },
+        {
+          "sha": "b368006",
+          "subject": "chore: merge the release back into dev",
+          "signals": [
+            "ci-release"
+          ]
+        },
+        {
+          "sha": "95ed151",
+          "subject": "chore: merge the release back into dev",
+          "signals": []
+        }
+      ]
+    },
+    {
+      "label": "private-1",
+      "ref": "dev",
+      "asked": 12,
+      "total": 60,
+      "askRate": 0.2,
+      "branches": [
+        {
+          "sha": "0fa1c21",
+          "signals": []
+        },
+        {
+          "sha": "ac37ff7",
+          "signals": [
+            "ci-release"
+          ]
+        },
+        {
+          "sha": "8d9d48c",
+          "signals": [
+            "dangerous-calls"
+          ]
+        },
+        {
+          "sha": "3507158",
+          "signals": []
+        },
+        {
+          "sha": "91f4ed5",
+          "signals": []
+        },
+        {
+          "sha": "8082040",
+          "signals": []
+        },
+        {
+          "sha": "9ffa856",
+          "signals": []
+        },
+        {
+          "sha": "9f2fec9",
+          "signals": []
+        },
+        {
+          "sha": "004d520",
+          "signals": [
+            "test-weakening"
+          ]
+        },
+        {
+          "sha": "ce93e69",
+          "signals": []
+        },
+        {
+          "sha": "139bfab",
+          "signals": [
+            "ci-release"
+          ]
+        },
+        {
+          "sha": "db1728e",
+          "signals": []
+        },
+        {
+          "sha": "be3d05c",
+          "signals": []
+        },
+        {
+          "sha": "64c5089",
+          "signals": []
+        },
+        {
+          "sha": "9b4e442",
+          "signals": []
+        },
+        {
+          "sha": "4ba00d4",
+          "signals": []
+        },
+        {
+          "sha": "b2f991f",
+          "signals": [
+            "ci-release"
+          ]
+        },
+        {
+          "sha": "7f81837",
+          "signals": []
+        },
+        {
+          "sha": "30173c8",
+          "signals": []
+        },
+        {
+          "sha": "2ca2c57",
+          "signals": []
+        },
+        {
+          "sha": "dc79044",
+          "signals": []
+        },
+        {
+          "sha": "cf48eeb",
+          "signals": []
+        },
+        {
+          "sha": "4ed1511",
+          "signals": []
+        },
+        {
+          "sha": "dceec37",
+          "signals": [
+            "ci-release",
+            "dangerous-calls"
+          ]
+        },
+        {
+          "sha": "7f221b9",
+          "signals": []
+        },
+        {
+          "sha": "dbc94c4",
+          "signals": []
+        },
+        {
+          "sha": "08e000e",
+          "signals": [
+            "ci-release"
+          ]
+        },
+        {
+          "sha": "3b925e6",
+          "signals": []
+        },
+        {
+          "sha": "0055ce5",
+          "signals": []
+        },
+        {
+          "sha": "c05245f",
+          "signals": []
+        },
+        {
+          "sha": "e577da8",
+          "signals": []
+        },
+        {
+          "sha": "8d4bdc4",
+          "signals": []
+        },
+        {
+          "sha": "00ec5d9",
+          "signals": []
+        },
+        {
+          "sha": "24c31b6",
+          "signals": []
+        },
+        {
+          "sha": "49a0bec",
+          "signals": []
+        },
+        {
+          "sha": "71a1763",
+          "signals": []
+        },
+        {
+          "sha": "c17fd51",
+          "signals": []
+        },
+        {
+          "sha": "e1ce377",
+          "signals": [
+            "test-weakening"
+          ]
+        },
+        {
+          "sha": "029ea57",
+          "signals": []
+        },
+        {
+          "sha": "af29728",
+          "signals": []
+        },
+        {
+          "sha": "2d94e72",
+          "signals": []
+        },
+        {
+          "sha": "21aa55d",
+          "signals": []
+        },
+        {
+          "sha": "5ba92fe",
+          "signals": []
+        },
+        {
+          "sha": "826d122",
+          "signals": []
+        },
+        {
+          "sha": "76f2561",
+          "signals": []
+        },
+        {
+          "sha": "d62639e",
+          "signals": []
+        },
+        {
+          "sha": "8d183a8",
+          "signals": []
+        },
+        {
+          "sha": "c24203c",
+          "signals": []
+        },
+        {
+          "sha": "51b43eb",
+          "signals": []
+        },
+        {
+          "sha": "77be8d6",
+          "signals": []
+        },
+        {
+          "sha": "2e6643d",
+          "signals": []
+        },
+        {
+          "sha": "0f6efdb",
+          "signals": []
+        },
+        {
+          "sha": "0e16392",
+          "signals": []
+        },
+        {
+          "sha": "9f1cf21",
+          "signals": [
+            "test-weakening"
+          ]
+        },
+        {
+          "sha": "b58238b",
+          "signals": []
+        },
+        {
+          "sha": "4f01bca",
+          "signals": [
+            "dangerous-calls"
+          ]
+        },
+        {
+          "sha": "d9a7ca7",
+          "signals": [
+            "ci-release"
+          ]
+        },
+        {
+          "sha": "f7453a0",
+          "signals": [
+            "ci-release",
+            "dangerous-calls"
+          ]
+        },
+        {
+          "sha": "c62ee27",
+          "signals": []
+        },
+        {
+          "sha": "8b3e619",
+          "signals": []
+        }
+      ]
+    },
+    {
+      "label": "private-2",
+      "ref": "dev",
+      "asked": 17,
+      "total": 60,
+      "askRate": 0.283,
+      "branches": [
+        {
+          "sha": "e6c45f1",
+          "signals": []
+        },
+        {
+          "sha": "f4beb0e",
+          "signals": []
+        },
+        {
+          "sha": "bb45ec7",
+          "signals": [
+            "data-migrations"
+          ]
+        },
+        {
+          "sha": "e57c07f",
+          "signals": []
+        },
+        {
+          "sha": "277d9ed",
+          "signals": [
+            "ci-release"
+          ]
+        },
+        {
+          "sha": "7410dd9",
+          "signals": []
+        },
+        {
+          "sha": "f30a78b",
+          "signals": [
+            "ci-release",
+            "data-migrations"
+          ]
+        },
+        {
+          "sha": "fd94fef",
+          "signals": []
+        },
+        {
+          "sha": "b318e48",
+          "signals": []
+        },
+        {
+          "sha": "8d2476e",
+          "signals": []
+        },
+        {
+          "sha": "f0d0b8d",
+          "signals": []
+        },
+        {
+          "sha": "6fea351",
+          "signals": []
+        },
+        {
+          "sha": "3b383fc",
+          "signals": []
+        },
+        {
+          "sha": "83b1e0a",
+          "signals": []
+        },
+        {
+          "sha": "6c58f90",
+          "signals": []
+        },
+        {
+          "sha": "f6a0935",
+          "signals": []
+        },
+        {
+          "sha": "d4645fe",
+          "signals": []
+        },
+        {
+          "sha": "504d011",
+          "signals": []
+        },
+        {
+          "sha": "5168b15",
+          "signals": []
+        },
+        {
+          "sha": "23c8019",
+          "signals": []
+        },
+        {
+          "sha": "31da1d0",
+          "signals": [
+            "ci-release"
+          ]
+        },
+        {
+          "sha": "02f281d",
+          "signals": []
+        },
+        {
+          "sha": "30b13ca",
+          "signals": []
+        },
+        {
+          "sha": "ae4758c",
+          "signals": []
+        },
+        {
+          "sha": "4204359",
+          "signals": []
+        },
+        {
+          "sha": "6502c95",
+          "signals": []
+        },
+        {
+          "sha": "187dcd1",
+          "signals": [
+            "ci-release",
+            "data-migrations",
+            "test-weakening"
+          ]
+        },
+        {
+          "sha": "fd18e90",
+          "signals": []
+        },
+        {
+          "sha": "2b536d3",
+          "signals": []
+        },
+        {
+          "sha": "126e0f6",
+          "signals": [
+            "ci-release"
+          ]
+        },
+        {
+          "sha": "3a8c27a",
+          "signals": []
+        },
+        {
+          "sha": "c9f7cd4",
+          "signals": [
+            "dependencies"
+          ]
+        },
+        {
+          "sha": "9fbfbf5",
+          "signals": []
+        },
+        {
+          "sha": "109132f",
+          "signals": []
+        },
+        {
+          "sha": "b2e4003",
+          "signals": []
+        },
+        {
+          "sha": "3a900a2",
+          "signals": []
+        },
+        {
+          "sha": "d3af61f",
+          "signals": [
+            "auth-security",
+            "ci-release",
+            "data-migrations",
+            "dependencies",
+            "test-weakening"
+          ]
+        },
+        {
+          "sha": "02157f8",
+          "signals": []
+        },
+        {
+          "sha": "65819b8",
+          "signals": []
+        },
+        {
+          "sha": "184e386",
+          "signals": [
+            "ci-release"
+          ]
+        },
+        {
+          "sha": "1259fc0",
+          "signals": []
+        },
+        {
+          "sha": "6d35012",
+          "signals": []
+        },
+        {
+          "sha": "1220c5e",
+          "signals": [
+            "test-weakening"
+          ]
+        },
+        {
+          "sha": "3f406d2",
+          "signals": []
+        },
+        {
+          "sha": "5eff7fd",
+          "signals": [
+            "ci-release",
+            "data-migrations",
+            "dependencies"
+          ]
+        },
+        {
+          "sha": "3b22fd6",
+          "signals": [
+            "test-weakening"
+          ]
+        },
+        {
+          "sha": "065c140",
+          "signals": [
+            "dependencies"
+          ]
+        },
+        {
+          "sha": "3dbdcd7",
+          "signals": [
+            "dependencies"
+          ]
+        },
+        {
+          "sha": "0cb53bd",
+          "signals": [
+            "ci-release"
+          ]
+        },
+        {
+          "sha": "20cfcfd",
+          "signals": [
+            "dependencies",
+            "dangerous-calls"
+          ]
+        },
+        {
+          "sha": "4b3ee40",
+          "signals": [
+            "ci-release"
+          ]
+        },
+        {
+          "sha": "0b7d5e1",
+          "signals": []
+        },
+        {
+          "sha": "b9af77a",
+          "signals": []
+        },
+        {
+          "sha": "26ecd32",
+          "signals": []
+        },
+        {
+          "sha": "5e46edc",
+          "signals": []
+        },
+        {
+          "sha": "bb037a3",
+          "signals": []
+        },
+        {
+          "sha": "5e0530b",
+          "signals": []
+        },
+        {
+          "sha": "4078df4",
+          "signals": []
+        },
+        {
+          "sha": "7723614",
+          "signals": []
+        },
+        {
+          "sha": "dfa0dc3",
+          "signals": []
+        }
+      ]
+    }
+  ]
+}

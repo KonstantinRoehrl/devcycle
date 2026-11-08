@@ -273,9 +273,10 @@ gated by `userConfig.crossModelReview`.
   plan-observable attributes and logs the derivation in the ledger. An explicitly configured
   model id is binding — used verbatim, never overridden.
 - `reviewDepth` and `onDeviceGate` ship `auto` as their default, and since 2026-10-24 it means
-  "pick for me", as on the model options: `reviewDepth: auto` measures a branch diff and picks
-  `single` or `panel` within the profile's bounds (`playbooks/reviewing-code.md` § 3), and
-  `onDeviceGate: auto` runs the browser driver first, leaving the human the batch of proposed
+  "pick for me", as on the model options. For `reviewDepth` that pick is risk-based at every
+  profile since 2026-11-08: `single` unless the change matches a risk signal, then one question
+  with a cost estimate before any panel, and the panel's launcher refuses to start without a
+  decision record that allows it (`playbooks/reviewing-code.md` § 3). `onDeviceGate: auto` runs the browser driver first, leaving the human the batch of proposed
   verdicts and the `needs-eyes` items (`playbooks/verifying-on-device.md` § The gate).
   `reviewDepth: profile` keeps the profile's branch-review row; `onDeviceGate` has no profile
   row (decision log, 2026-10-24).

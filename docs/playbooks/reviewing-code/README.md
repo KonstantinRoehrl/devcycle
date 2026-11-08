@@ -17,9 +17,9 @@ document.
 Internally, the confirmed criteria are grouped into **2–5 lens charters by kind, not by
 count** — related criteria share a charter so each reviewer holds something it can actually
 hold, and a lens is never one criterion wide. `reviewDepth` then picks the engine (under `auto`,
-the default, a `branch`-scope review is sized from its diff by `scripts/review-depth.mjs` within
-the profile's bounds and any other scope takes the profile's row; the playbook's § 3 owns the
-rule, and the report's `Depth:` line shows the pick): `panel`
+the default, a review is `single` unless `scripts/review-depth.mjs` finds a risk signal in the
+change, and then you are asked before any panel runs; a whole-repo review is always `single`;
+the playbook's § 3 owns the rule, and the report's `Depth:` line shows the pick): `panel`
 dispatches every charter through `workflows/review-panel.js` as one JSON argument (`scope`,
 `specPath`, a `lenses` array of `{key, charter}` objects, a `crossModel` flag that adds a
 non-Claude lens via the `codex` CLI, and, from branch review, a `resultDir` under `.devcycle/review/`

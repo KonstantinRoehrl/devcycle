@@ -41,7 +41,7 @@ answer matches its default, nothing is written. The five:
 - `docTrackingPolicy` — what devcycle attempts to commit in a host repo (`standard`
   recommended · `all-local` · `all-tracked`); the repo's own `.gitignore` always wins.
   Outside the profile matrix, like `gitPolicy`.
-- `reviewDepth` — branch review engine (`auto` recommended — sized from the diff ·
+- `reviewDepth` — branch review engine (`auto` recommended — risk-based: it offers the panel only when the branch touches a sensitive area, and asks first ·
   `profile` · `single` · `panel`).
 - `crossModelReview` — add a cross-model lens to the review panel (`false` recommended ·
   `true`).

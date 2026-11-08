@@ -178,6 +178,11 @@ marker with the version the change lands in, since only the release computes tha
   key: drivePlugins
   default: none
   note: "which plugins an unattended run's sessions load besides devcycle and superpowers: none, all (every plugin and MCP server), or a comma-separated list of plugin names; live, read at each start; profile-independent, so it takes no auto"
+- version: "unreleased"
+  change: added
+  key: reviewDepth
+  values: [auto, profile, single, panel]
+  note: "auto changes meaning, not a new value: it is risk-based at every profile, single unless the change matches a risk signal, and then the user is asked before any panel runs; diff size and profile thorough no longer pick the panel. single is now enforced: the panel launcher refuses without a decision record that allows it"
 ```
 
 ## Root cause — `devcycle:continue` cost regression at 0.12.0 (#82)

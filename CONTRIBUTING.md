@@ -112,6 +112,7 @@ node scripts/stop-cycle.mjs list      # the cycles /devcycle:stop can stop, each
 node scripts/stage-log.mjs read --state .devcycle/state.md --stage <stage>   # what a stage logged as finished, which is what a resume skips — local
 node scripts/citation-grammar.mjs     # the citation grammar's worklist (back-edge, owner-sentence, bare-read, bare-exists; --references: references nothing reads); exits 1 while any remain — local
 node scripts/context-report.mjs       # per command and playbook: refs-only and all-hops closure words; --diff <ref> lists citations that lost their prefix; --diff <ref> --markdown prints per-entry-point byte deltas (CI writes them to every PR run's job summary, even when Validate fails) — local
+node scripts/risk-calibration.mjs --repo <label>,<ref>,<path>…   # the built-in risk signals' ask-rate per repo; --write regenerates tests/fixtures/risk-calibration.json, required after any scripts/risk-signals.mjs edit — local
 node --test tests/unit/*.test.mjs     # the whole unit suite, golden path included (stubbed CLIs, keyless) — CI
 claude plugin validate . --strict     # the plugin under Claude Code's real loader (CI also validates .claude-plugin/plugin.json) — CI, on the floor and current pins
 claude plugin test .                  # the hooks module's TypeScript tests under tests/mod/ — CI, on the floor and current pins

@@ -15,7 +15,7 @@ import {
   compareVersions, versionCohorts, isInFlight, IN_FLIGHT_MS, formatCandidate,
   cohortTable, readRunRecords, attributeFromRecord, costBand, buildJsonReport,
   emitComplianceCandidates, complianceCandidatesOf, qualitySignals, corpusDirectionOfTravel, toolCallsForDispatch,
-  reviewDepthCohortTable, deriveEvents, attributedCost, impactScores,
+  reviewDepthCohortTable, reviewDepthMismatches, deriveEvents, attributedCost, impactScores,
   bandFor, recencyBand, inBand, runAggregates, versionProfileTable, culpritTable, lifecycle,
   renderReport, complianceIssueBody, COMPLIANCE_TYPES, NoComplianceCandidateError,
   formatComplianceCandidate, parseDraftedMarkers, complianceType, COMPLIANCE_TITLES,
@@ -2030,6 +2030,51 @@ test("readRunRecords carries a run's last review-depth event onto every session 
   assert.strictEqual(records.get(hashC).resolvedReviewDepth, null, "a run with no review-depth event resolves none");
 });
 
+test("readRunRecords carries the last review-depth event's depthKnob and consent, null for an old event", () => {
+  const dir = makeTempDir("runs-review-consent-");
+  const slug = join(dir, "repo");
+  mkdirSync(slug);
+  const [hashA, hashB] = ["sess-consent-a", "sess-consent-b"].map((s) => createHash("sha256").update(s).digest("hex"));
+  writeFileSync(join(slug, "abc.jsonl"), reviewDepthLines([
+    { kind: "run", runId: "abc", schemaVersion: 1, pluginVersion: "0.31.0", knobs: { reviewDepth: "auto" } },
+    { kind: "session", runId: "abc", sessionHash: hashA },
+    { ...reviewDepthEvent("abc", "panel", "2026-11-08T10:00:00Z"), depthKnob: "auto", consent: "panel" },
+  ]));
+  writeFileSync(join(slug, "def.jsonl"), reviewDepthLines([
+    { kind: "run", runId: "def", schemaVersion: 1, pluginVersion: "0.27.0", knobs: { reviewDepth: "single" } },
+    { kind: "session", runId: "def", sessionHash: hashB },
+    reviewDepthEvent("def", "panel", "2026-10-24T10:00:00Z"),
+  ]));
+  const records = readRunRecords(dir);
+  assert.deepStrictEqual([records.get(hashA).resolvedDepthKnob, records.get(hashA).resolvedConsent], ["auto", "panel"]);
+  assert.deepStrictEqual([records.get(hashB).resolvedDepthKnob, records.get(hashB).resolvedConsent], [null, null]);
+});
+
+test("reviewDepthMismatches flags a panel under single and an auto panel without consent, old and new events alike", () => {
+  const s = (runId, fields) => ({ runId, inFlight: false, resolvedReviewDepth: "panel", resolvedDepthKnob: null, resolvedConsent: null, knobs: {}, ...fields });
+  const rows = reviewDepthMismatches([
+    s("r1", { knobs: { reviewDepth: "single" } }),
+    s("r1", { knobs: { reviewDepth: "single" } }),
+    s("r2", { knobs: { reviewDepth: "auto" } }),
+    s("r3", { resolvedDepthKnob: "auto", resolvedConsent: "panel", knobs: { reviewDepth: "auto" } }),
+    s("r4", { resolvedDepthKnob: "single", resolvedConsent: "none", knobs: { reviewDepth: "auto" } }),
+    s("r5", { knobs: { reviewDepth: "panel" } }),
+    s("r6", { resolvedReviewDepth: "single", knobs: { reviewDepth: "single" } }),
+    { runId: null, resolvedReviewDepth: "panel", knobs: { reviewDepth: "single" } },
+  ]);
+  assert.deepStrictEqual(rows, [
+    { runId: "r1", knob: "single", consent: "none", ran: "panel" },
+    { runId: "r2", knob: "auto", consent: "none", ran: "panel" },
+    { runId: "r4", knob: "single", consent: "none", ran: "panel" },
+  ]);
+});
+
+test("formatReport lists the review-depth mismatches, or none", () => {
+  const flagged = formatReport([summarizeSession("sess-abcdef123456", [turn({})])]).split("\n");
+  assert.ok(flagged.includes("Review-depth mismatches (a panel ran that the knob did not allow):"));
+  assert.ok(flagged.includes("  none"));
+});
+
 test("readRunRecords keeps resolvedReviewDepth through a session-hash collision, whichever file is read first", () => {
   const dir = makeTempDir("runs-review-depth-collision-");
   const slug = join(dir, "repo");
@@ -3281,7 +3326,7 @@ test("cli: --depth and --drift print neither the Overview nor the Trend summary"
 // buildJsonReport).
 const PRE_OVERVIEW_JSON_KEYS = [
   "window", "totals", "pricesAsOf", "sessions", "candidates", "version_cohorts", "review_depth_cohorts",
-  "direction_of_travel", "inFlight", "cost_band", "version_profile_cohorts", "stage_by_version", "stage_window",
+  "review_depth_mismatches", "direction_of_travel", "inFlight", "cost_band", "version_profile_cohorts", "stage_by_version", "stage_window",
   "culprits", "wins", "outer_loop", "verification", "compiled_knowledge", "cycles", "revert_skipped",
 ];
 

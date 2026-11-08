@@ -20,14 +20,17 @@ how many rounds the findings loop gets.
 
 | profile | default `reviewDepth` | engine | upstream guidance in play | round cap |
 | --- | --- | --- | --- | --- |
-| `lean` | `auto` → `single` | this skill's spec-compliance layer + upstream reviewer guidance | yes | 2 |
-| `standard` | `auto` → `single`, or `panel` on a large diff | same, or `workflows/review-panel.js` | yes, on the `single` path | 3 |
-| `thorough` | `auto` → `panel` | `workflows/review-panel.js` | only if the panel degrades to `single` | 5 |
+| `lean` | `auto` → `single`, or `panel` once you approve it on a risk signal | this skill's spec-compliance layer + upstream reviewer guidance, or `workflows/review-panel.js` | yes, on the `single` path | 2 |
+| `standard` | same | same | same | 3 |
+| `thorough` | same | same | same | 5 |
 
-Since 2026-10-24 the default `auto` sizes the review from the branch diff within the profile's
-bounds (`playbooks/reviewing-code.md` § 3 owns the rule), and `reviewDepth: profile` takes the
-profile's row, as the unset knob used to. An explicitly configured `single` or `panel` wins
-verbatim, so a `lean` run can be pinned to `panel` and a `thorough` run to `single`. Resolution
+Since 2026-11-08 the default `auto` is risk-based at every profile (`playbooks/reviewing-code.md`
+§ 3 owns the rule): `single` unless the change matches a risk signal, then a question with a cost
+estimate before any panel; size never picks it, and neither does the profile. `reviewDepth:
+profile` takes the profile's row, as the unset knob used to. An explicitly configured `single`
+or `panel` wins verbatim, so a `lean` run can be pinned to `panel` and a `thorough` run to
+`single`; `single` is binding, since the panel refuses to start without a decision record that
+allows it. Resolution
 order comes from `references/config.md`, the model tiers from `references/model-routing.md`.
 
 ## (a) Upstream's share — referenced, never restated (at every profile)
@@ -48,7 +51,7 @@ order comes from `references/config.md`, the model tiers from `references/model-
 
 That content is exactly what a single fresh-dispatch review needs, so the skill names
 `superpowers:requesting-code-review` for it and does not restate it — on the `single` path
-at any profile, and on a `panel→single` fallback at `thorough`.
+at any profile, and on a `panel→single` fallback.
 
 ## (b) Our delta
 
