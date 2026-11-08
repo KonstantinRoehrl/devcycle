@@ -44,6 +44,43 @@ test("test-weakening also catches skip markers and removed assertions", () => {
   assert.ok(ids([file("tests/unit/b.test.mjs", { removed: ["  assert.ok(x);", "  assert.ok(y);"], added: ["  assert.ok(x);"] })]).includes("test-weakening"));
 });
 
+// Narrowed after calibrating against past branches: each pair is a change that asks, then one that must not.
+const NARROWED = {
+  "auth-security": [
+    [file("src/sessions/store.ts"), file("src/core/session_store.py")],
+    [file("src/login.ts"), file("src/login.test.ts")],
+  ],
+  "ci-release": [[file("scripts/release.sh"), file("tests/test_release_notes.py")]],
+  "data-migrations": [[file("db/schema.sql"), file("supabase/tests/access_test.sql")]],
+  "secrets-config": [
+    [file(".env"), file(".env.example")],
+    [file("src/cfg.ts", { added: ['  apiKey: "abcdefgh12345678",'] }), file("src/cfg.ts", { added: ['  apiKey: "env(API_KEY_VALUE)",'] })],
+  ],
+  "dependencies": [
+    [file("Cargo.toml", { added: ['serde = "1.0"'] }), file("pyproject.toml", { added: ['requires-python = ">=3.12"'] })],
+    [file("package.json", { removed: ['    "left-pad": "^1.3.0",'] }), file("package.json", { added: ['    "left-pad": "^1.3.1",'], removed: ['    "left-pad": "^1.3.0",'] })],
+    [file("package.json", { added: ['    "left-pad": "^1.3.1",', '    "is-odd": "^3.0.0",'], removed: ['    "left-pad": "^1.3.0",'] }), file("package.json", { added: ['    "node": ">=26",'] })],
+  ],
+  "dangerous-calls": [
+    [file("src/run.js", { added: ['  child_process.exec(cmd);'] }), file("src/run.js", { added: ["  const m = PATTERN.exec(text);"] })],
+    [file("src/run.py", { added: ["  subprocess.run(cmd)"] }), file("src/ui.py", { added: ["  menu.exec(point)", "  def exec(self):"] })],
+    [file("scripts/clean.sh", { added: ["rm -rf build"] }), file("tests/unit/clean.test.mjs", { added: ["assert.match(out, /rm -rf build/);"] })],
+    [file("src/run.mjs", { added: ['  execSync("ls");'] }), file("src/run.mjs", { added: ["// execSync(\"ls\") is gone"] })],
+    [file("src/view.ts", { added: ["  el.innerHTML = html;"] }), file("src/view.spec.ts", { added: ["  el.innerHTML = html;"] })],
+  ],
+  "test-weakening": [
+    [file("tests/test_a.py", { status: "D" }), file("docs/specs/a.md", { status: "D" })],
+    [file("tests/unit/a.test.mjs", { removed: ["  assert.equal(a, 1);"] }), file("tests/unit/a.test.mjs", { removed: ["  expect(a).toBe(1);", "  assert a == 2"] })],
+  ],
+};
+
+for (const [id, pairs] of Object.entries(NARROWED))
+  pairs.forEach(([hit, miss], i) =>
+    test(`signal ${id} after calibration, case ${i + 1}: asks on ${hit.path} and not on ${miss.path}`, () => {
+      assert.ok(ids([hit]).includes(id), `${id} missed ${hit.path}`);
+      assert.ok(!ids([miss]).includes(id), `${id} matched ${miss.path}`);
+    }));
+
 test("matchSignals reports at most three paths per signal and keeps quieted signals visible", () => {
   const files = ["hooks/a.mjs", "hooks/b.mjs", "hooks/c.mjs", "hooks/d.mjs"].map((p) => file(p));
   const { matched } = matchSignals(files);

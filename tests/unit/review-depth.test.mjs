@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { commitAll, makeRepo, sh, writeInto } from "./helpers.mjs";
-import { DECISION_FILES, MAX_CHUNKS, PANEL_USD_PER_LENS_JOB, decide, estimate, isExcluded } from "../../scripts/review-depth.mjs";
+import { DECISION_FILES, MAX_CHUNKS, PANEL_USD_PER_LENS_JOB, decide, estimate, isExcluded, rangeChanges } from "../../scripts/review-depth.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/review-depth.mjs");
 const run = (args, cwd) => spawnSync("node", [SCRIPT, ...args], { cwd, encoding: "utf8" });
@@ -178,6 +178,21 @@ test("select auto: a branch whose diff exceeds 1 MB still asks instead of failin
   assert.equal(out.verdict, "ask");
   assert.ok(out.estimate.chunks > 1, "the 2 MB diff is more than one chunk");
   assert.equal(record(dir).engine, "ask");
+});
+
+test("rangeChanges: a -U0 patch over spawnSync's default 1 MB buffer is read, not thrown away", () => {
+  const dir = makeRepo();
+  writeInto(dir, "README.md", "base\n");
+  commitAll(dir, "base");
+  sh("git", ["checkout", "-qb", "topic"], { cwd: dir });
+  writeInto(dir, "src/big.js", Array.from({ length: 30000 }, (_, i) => `${"x".repeat(40)} ${i}`).join("\n") + "\n");
+  commitAll(dir, "topic work");
+  sh("git", ["checkout", "-q", "main"], { cwd: dir });
+  const [big, ...rest] = rangeChanges({ base: "main", branch: "topic", cwd: dir });
+  assert.equal(rest.length, 0);
+  assert.equal(big.path, "src/big.js");
+  assert.equal(big.added.length, 30000);
+  assert.equal(big.added[29999], `${"x".repeat(40)} 29999`);
 });
 
 test("select: a valid ref name that does not resolve is a single verdict with the reason and a record, never an exit", () => {

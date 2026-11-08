@@ -70,7 +70,7 @@ export function rangeChanges({ base, branch, cwd = process.cwd() }) {
     if (!isExcluded(path)) files.set(path, { path, status: renamed ? "R" : code[0], added: [], removed: [] });
   }
   const patch = git(["-c", "core.quotePath=false", "diff", "-U0", "--no-color", "--no-ext-diff", "-M",
-    "--src-prefix=a/", "--dst-prefix=b/", mergeBase, to], cwd);
+    "--src-prefix=a/", "--dst-prefix=b/", mergeBase, to], cwd, { maxBuffer: Infinity });
   let current = null, oldPath = null, inHeader = false;
   for (const line of patch.split("\n")) {
     if (line.startsWith("diff --git ")) { current = null; oldPath = null; inHeader = true; continue; }
