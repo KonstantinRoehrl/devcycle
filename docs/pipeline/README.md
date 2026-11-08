@@ -167,8 +167,8 @@ see `docs/design/`.
    is committed.
 7. **Branch review** — a fresh reviewer (no memory of the implementation) reviews the whole
    branch against the spec: everything the spec asked for is there, nothing it didn't ask
-   for crept in. By default the review is sized from the diff: one reviewer, or a panel —
-   always at `thorough`, and at `standard` for a large branch (see `docs/configuration/`).
+   for crept in. By default the review is one reviewer, and a panel only when the change
+   touches something risky and you approve it first (see `docs/configuration/`).
    Once it passes, it decides whether on-device applies: a branch with no checklist whose diff
    renders nothing goes straight to finish.
 8. **On-device verification** — for changes a human can see: a checklist of outcomes to
