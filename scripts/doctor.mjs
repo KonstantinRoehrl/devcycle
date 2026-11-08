@@ -649,6 +649,20 @@ export function reviewDepthCohortTable(summaries) {
   });
 }
 
+// Runs whose branch review ran a panel the knob did not allow: knob single, or auto with no recorded
+// panel consent. An event from before depthKnob/consent falls back to the run's minted knob and to no
+// consent, as reviewDepthCohortTable falls back, so the old runs that ran a panel under single show too.
+export function reviewDepthMismatches(summaries) {
+  const byRun = new Map();
+  for (const s of summaries) {
+    if (!s.runId || byRun.has(s.runId) || s.resolvedReviewDepth !== "panel") continue;
+    const knob = s.resolvedDepthKnob ?? s.knobs?.reviewDepth ?? null;
+    const consent = s.resolvedConsent ?? "none";
+    if (knob === "single" || (knob === "auto" && consent !== "panel")) byRun.set(s.runId, { runId: s.runId, knob, consent, ran: "panel" });
+  }
+  return [...byRun.values()].sort((a, b) => a.runId.localeCompare(b.runId));
+}
+
 const DIRECTION_MIN_COHORT = 3; // below this the confidence column flags a version unreliable (#127)
 
 // Normalized like every other cross-version figure (issue #127): hold profile|requestKind|
@@ -1068,9 +1082,11 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
       // firstSeen/lastSeen as dead fields). The run line's runId/pluginVersion/profile/knobs/
       // schemaMismatch are file-scoped, not window-scoped: they apply to every window in the
       // file and do not reset on a `session` line. So is resolvedReviewDepth, the last
-      // `review-depth` event's engine, whichever window that event fell in.
+      // `review-depth` event's engine, whichever window that event fell in. So are resolvedDepthKnob
+      // and resolvedConsent, from the same event; an event from before them leaves both null.
       let runId = null, pluginVersion = null, profile = null, knobs = null, schemaMismatch, triage = null;
       let resolvedReviewDepth = null;
+      let resolvedDepthKnob = null, resolvedConsent = null;
       let current = null;
       // The driver appends its `drive` row after the session it ran has ended, so the row is run-scoped
       // like `triage`, not window-scoped.
@@ -1093,7 +1109,11 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         else if (o.kind === "dispatch") { if (current) windows.get(current).dispatches.push(o); }
         else if (o.kind === "verdict") { if (current) windows.get(current).verdicts.push(o); }
         else if (o.kind === "event") {
-          if (o.event === "review-depth") resolvedReviewDepth = o.reviewDepth ?? resolvedReviewDepth;
+          if (o.event === "review-depth") {
+            resolvedReviewDepth = o.reviewDepth ?? resolvedReviewDepth;
+            resolvedDepthKnob = o.depthKnob ?? resolvedDepthKnob;
+            resolvedConsent = o.consent ?? resolvedConsent;
+          }
           if (current) windows.get(current).events.push(o);
         }
         else if (o.kind === "workload") { if (current) windows.get(current).workloads.push(o); }
@@ -1126,7 +1146,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
       for (const [h, w] of windows) {
         // The run's workload is the last workload line written for the session (a rerun overwrites
         // an earlier estimate); null when the run wrote none (GC3 — workload-unknown, not zero).
-        const rec = { runId, pluginVersion, profile, knobs, resolvedReviewDepth, schemaMismatch, triage, ...w,
+        const rec = { runId, pluginVersion, profile, knobs, resolvedReviewDepth, resolvedDepthKnob, resolvedConsent, schemaMismatch, triage, ...w,
           workload: w.workloads.at(-1) ?? null, planningRuns: h === planningWindow ? [planningRun] : [],
           traceRuns: h === firstWindow ? [traceRun] : [],
           drive: drives.length ? "auto" : "manual", driveRuns: h === firstWindow ? [{ runId, rows: drives }] : [] };
@@ -1148,6 +1168,8 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
               drive: prior.drive === "auto" || rec.drive === "auto" ? "auto" : "manual",
               triage: rec.triage ?? prior.triage ?? null,
               resolvedReviewDepth: rec.resolvedReviewDepth ?? prior.resolvedReviewDepth ?? null,
+              resolvedDepthKnob: rec.resolvedDepthKnob ?? prior.resolvedDepthKnob ?? null,
+              resolvedConsent: rec.resolvedConsent ?? prior.resolvedConsent ?? null,
               workload: rec.workload ?? prior.workload ?? null }
           : rec);
       }
@@ -1430,6 +1452,8 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     // The engine the run's branch review ran (readRunRecords' resolvedReviewDepth); null before
     // the review-depth event existed, so the cohort falls back to the knob above.
     resolvedReviewDepth: record?.resolvedReviewDepth ?? null,
+    resolvedDepthKnob: record?.resolvedDepthKnob ?? null,
+    resolvedConsent: record?.resolvedConsent ?? null,
     // The full session id is still in hand here and the record is already resolved; a summary
     // carries only `id: sessionId.slice(0, 8)`, so nothing downstream could redo this join.
     runId: record?.runId ?? null,
@@ -1763,6 +1787,10 @@ export function formatReport(summaries) {
       `quality: ${qualityText(r.quality)}` +
       (r.reviewDepth === "unknown" ? "   (inferred: no reviewDepth knob recorded)" : "")
     );
+  lines.push("", "Review-depth mismatches (a panel ran that the knob did not allow):");
+  const mismatches = reviewDepthMismatches(summaries);
+  if (!mismatches.length) lines.push("  none");
+  for (const m of mismatches) lines.push(`  ${m.runId}  knob=${m.knob}  consent=${m.consent}  ran=${m.ran}`);
   lines.push("");
   for (const c of emitCandidates(summaries)) lines.push(formatCandidate(c));
   for (const c of complianceCandidatesOf(summaries)) lines.push(formatComplianceCandidate(c));
@@ -1836,6 +1864,7 @@ export function buildJsonReport(summaries, ctx = {}) {
     candidates: [...emitCandidates(summaries), ...complianceCandidatesOf(summaries)],
     version_cohorts: cohortTable(summaries),
     review_depth_cohorts: reviewDepthCohortTable(summaries),
+    review_depth_mismatches: reviewDepthMismatches(summaries),
     direction_of_travel: corpusDirectionOfTravel(runAggregates(summaries.filter((s) => !s.inFlight))),
     inFlight: {
       excluded: summaries.filter((s) => s.inFlight).length,
