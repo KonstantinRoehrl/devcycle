@@ -12,6 +12,7 @@
 //     specPath?: string,
 //     lenses?: (string | {key: string, charter: string})[],
 //     crossModel?: boolean,
+//     decisionPath: string,  // the decision record engine selection wrote; see "Launcher guard"
 //     resultDir?: string }  // a directory directly under .devcycle/review/, see "Result files"
 // Output (stdout, JSON):
 //   { findings: [{ file, line: integer|null, claim,
@@ -54,7 +55,14 @@
 // Optional env: DEVCYCLE_PANEL_MODEL sets --model for the claude subagents
 // (unset -> the CLI's configured default model).
 //
-// Exit codes: 0 = report on stdout; 1 = fatal error (message on stderr).
+// Launcher guard: before any child is spawned, the decision record at `decisionPath` must allow a
+// panel: engine "panel"; for a cycle's record, the same run as the working-tree root's
+// .devcycle/state.md, whose knobs: line is not reviewDepth=single, and under reviewDepth=auto a
+// recorded "panel" consent. A standalone record is never checked against a state file. The guard
+// cannot stop a session that writes a fake consent; it stops a panel the knob never allowed.
+//
+// Exit codes: 0 = report on stdout; 1 = fatal error (message on stderr); 3 = refused by the
+// launcher guard ("[review-panel] REFUSED: <why>" on stderr), which is not a panel failure.
 //
 // Smoke-tested (sandbox git repo with a planted spec deviation):
 //   node "${CLAUDE_PLUGIN_ROOT}/workflows/review-panel.js" \
@@ -79,6 +87,7 @@ const LENS_CONCURRENCY = 4;
 const SEVERITIES = ["critical", "high", "medium", "low"];
 const RESULT_DIR_SHAPE = /(^|\/)\.devcycle\/review\/[^/]+$/;
 const SAVED_ARGS_FILE = "_args.json";
+const DECISION_REFUSED_EXIT = 3;
 const REFUTATION_FILE = "_refutation.json";
 const LENS_CHARTERS = {
   spec:
@@ -174,7 +183,7 @@ function parseArgs() {
   try {
     args = JSON.parse(process.argv[2] ?? "");
   } catch {
-    fatal("argv[2] must be a JSON object: { scope, specPath?, lenses?, crossModel? }");
+    fatal("argv[2] must be a JSON object: { scope, specPath?, lenses?, crossModel?, decisionPath }");
   }
   if (args.resultDir !== undefined) {
     if (typeof args.resultDir !== "string" || !RESULT_DIR_SHAPE.test(resolve(args.resultDir))) {
@@ -211,6 +220,9 @@ function parseArgs() {
   }
   if (args.maxChunks !== undefined && (!Number.isInteger(args.maxChunks) || args.maxChunks < 1)) {
     fatal("args.maxChunks, when given, must be a positive integer");
+  }
+  if (typeof args.decisionPath !== "string" || !args.decisionPath) {
+    fatal("args.decisionPath (string) is required: the decision record engine selection wrote (playbooks/reviewing-code.md § 3)");
   }
   const defaulted = args.lenses === undefined;
   const requested = defaulted ? Object.keys(LENS_CHARTERS) : args.lenses;
@@ -249,9 +261,37 @@ function parseArgs() {
     specLensDropped,
     crossModel: args.crossModel === true,
     maxChunks: Number.isInteger(args.maxChunks) ? args.maxChunks : null,
+    decisionPath: args.decisionPath,
     resultDir: resultDir ?? null,
     reviewArgs,
   };
+}
+
+async function checkDecision(decisionPath, cwd = process.cwd()) {
+  const refuse = (why) => ({ ok: false, why });
+  const file = resolve(cwd, decisionPath);
+  if (!existsSync(file)) return refuse(`no decision record at ${decisionPath}`);
+  let record;
+  try {
+    record = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    return refuse(`the decision record ${decisionPath} does not parse`);
+  }
+  if (!record || typeof record !== "object" || Array.isArray(record)) return refuse(`the decision record ${decisionPath} does not parse`);
+  if (record.engine !== "panel") return refuse(`the decision record's engine is ${JSON.stringify(record.engine ?? null)}, not panel`);
+  if (record.caller === "standalone") return { ok: true };
+  if (record.caller !== "cycle") return refuse(`the decision record names no caller (cycle or standalone)`);
+  const top = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8" }).trim();
+  const statePath = join(top, ".devcycle", "state.md");
+  if (!existsSync(statePath)) return refuse(`the decision record is a cycle's, and there is no ${statePath}`);
+  const { field } = await import("../scripts/md-field.mjs");
+  const state = readFileSync(statePath, "utf8");
+  const run = field(state, "run")?.split(/\s+/)[0] || null;
+  if (record.run !== run) return refuse(`the decision record is for run ${record.run}, and the state file's run is ${run}`);
+  const knob = (field(state, "knobs") ?? "").match(/(?:^|\s)reviewDepth=(\S+)/)?.[1] ?? null;
+  if (knob === "single") return refuse("the state file's knobs: line has reviewDepth=single");
+  if (knob === "auto" && record.consent !== "panel") return refuse(`reviewDepth=auto and the recorded consent is ${record.consent ?? "none"}, not panel`);
+  return { ok: true };
 }
 
 function gitReadOnly(argv) {
@@ -791,6 +831,12 @@ async function main() {
 
   gitReadOnly(["rev-parse", "--git-dir"]); // fail fast outside a git repo
 
+  const decision = await checkDecision(args.decisionPath);
+  if (!decision.ok) {
+    process.stderr.write(`[review-panel] REFUSED: ${decision.why}\n`);
+    process.exit(DECISION_REFUSED_EXIT);
+  }
+
   // A dynamic import: this file is CommonJS, and the plugin does not pin the Node that runs it.
   const store = args.resultDir
     ? createResultStore(args.resultDir, (await import("../scripts/atomic-write.mjs")).atomicWrite)
@@ -950,4 +996,5 @@ if (require.main === module) {
 module.exports = {
   dedupRaw, dedupStrengths, rankFindings, truncate, chunkDiff, selectChunksByChurn, buildLensJobs, fallbackSummary, mapLimit, loadRedTeamCharter,
   SEVERITIES, LENS_CONCURRENCY, verifierTools, aggregateLensCosts, lensResultFile,
+  DIFF_CHAR_CAP, DECISION_REFUSED_EXIT, checkDecision,
 };
