@@ -2806,7 +2806,8 @@ const near = (actual, expected) =>
 test("costUSD: cache reads are priced per model, not at a flat 0.1x input", () => {
   const read = { cache_read_input_tokens: 1_000_000 };
   near(costUSD(read, "claude-opus-5-5"), 0.2);   // listed $0.20/M — a flat 0.1x would say $0.40
-  near(costUSD(read, "claude-sonnet-5-5"), 0.2);
+  near(costUSD(read, "claude-sonnet-5-5"), 0.1); // listed — a flat 0.1x of $2 would say $0.20
+  near(costUSD(read, "claude-fable-5-2"), 0.2);  // listed — a flat 0.1x would say $0.80
   near(costUSD(read, "claude-fable-5-1"), 0.25); // listed — a flat 0.1x would say $1.00
   near(costUSD(read, "claude-fable-5"), 1.0);    // unlisted, assumed 0.1x input
   near(costUSD(read, "claude-opus-5"), 0.5);     // unlisted, unchanged
