@@ -8,7 +8,8 @@
 // is the planner's wider, advisory pass over the same walk. See playbooks/planning-waves.md.
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, basename, extname, relative, sep } from "node:path";
-import { taskBlocks, taskFileMap, TEST_FILE_SUFFIXES, normalizeFileToken } from "./task-files.mjs";
+import { taskBlocks, taskFileMap, TEST_FILE_SUFFIXES, normalizeFileToken, isTestPath } from "./task-files.mjs";
+import { parseFlags } from "./cli-flags.mjs";
 import { isMain } from "./is-main.mjs";
 
 const TEST_SUFFIXES = [...TEST_FILE_SUFFIXES, ".test.jsx", ".test.tsx", ".spec.ts", ".spec.js"];
@@ -124,10 +125,164 @@ export function blastRadiusLeg(planText, { planPath, repoRoot }) {
   };
 }
 
+// --scan: the planner's pass while deriving a task's Files block (playbooks/planning-waves.md task
+// template). Wider than the gate on purpose -- any text code file, declared symbols as well as the
+// basename -- and advisory: it exits 0 whatever it finds, and the gate stays the authority at merge.
+export const SCAN_CODE_EXT = new Set([
+  ...CODE_EXT, ".cjs", ".cs", ".java", ".kt", ".kts", ".go", ".rs", ".rb", ".php", ".swift", ".scala",
+  ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh", ".m", ".mm", ".dart", ".vue", ".svelte", ".fs", ".ex", ".exs", ".lua",
+]);
+
+// An auto-extracted name this short or this common matches half of any repo, so it is listed as
+// skipped instead of searched. An explicit --symbol is never skipped.
+export const SCAN_MIN_SYMBOL = 4;
+export const SCAN_STOPLIST = new Set([
+  "main", "Main", "init", "test", "Test", "Tests", "self", "this", "that", "class", "type", "enum",
+  "value", "name", "data", "item", "index", "default", "constructor", "toString", "equals", "hashCode",
+  "setup", "teardown", "start", "stop", "close", "open", "load", "save", "parse", "apply", "call",
+  "render", "update", "handle", "string", "number", "boolean", "object", "void",
+]);
+export const isStoplisted = (name) => name.length < SCAN_MIN_SYMBOL || SCAN_STOPLIST.has(name);
+
+// Line-anchored, so a keyword in a comment or in prose ("// a class that ...") declares nothing.
+// Modifiers cover the languages SCAN_CODE_EXT names; a name these miss is passed with --symbol.
+const IDENT = "[A-Za-z_$][\\w$]*";
+const MODIFIERS =
+  "(?:(?:export|default|declare|public|private|protected|internal|abstract|sealed|static|final|open|data|" +
+  "inline|async|partial|readonly|unsafe|override|virtual|extern|const|pub(?:\\([^)]*\\))?)\\s+)*";
+const DECLARATION_RES = [
+  new RegExp(`^[ \\t]*${MODIFIERS}(?:class|interface|struct|enum|record|trait|type|protocol|object|module)\\s+(${IDENT})`, "gm"),
+  new RegExp(`^[ \\t]*${MODIFIERS}(?:def|fun|fn|sub|function\\*?|func(?:\\s*\\([^)]*\\))?)\\s+(${IDENT})`, "gm"),
+  new RegExp(`^[ \\t]*export\\s+(?:default\\s+)?(?:const|let|var)\\s+(${IDENT})`, "gm"),
+  new RegExp(
+    `^[ \\t]*(?:\\w+\\s+)*?public\\s+(?:(?:static|final|abstract|virtual|override|async|readonly|sealed|partial|const|new|required)\\s+)*` +
+      `(?:[\\w$.<>\\[\\],?]+\\s+)?(${IDENT})\\s*[({=;]`,
+    "gm"
+  ),
+];
+
+// In an ES module only what it exports -- on the declaration or in an `export { a, b as c }` list --
+// can be referenced from another file; its other declarations are file-local and would match every
+// unrelated file with a helper of the same name.
+const ES_EXPORT_RE = /^[ \t]*export\s/m;
+const EXPORT_LIST_RE = /^[ \t]*export\s*\{([^}]*)\}/gm;
+
+export function extractSymbols(text) {
+  const esModule = ES_EXPORT_RE.test(text);
+  const listed = new Set(
+    [...text.matchAll(EXPORT_LIST_RE)].flatMap((m) => m[1].split(",").map((entry) => entry.trim().split(/\s+as\s+/)[0]))
+  );
+  const names = new Set();
+  for (const re of DECLARATION_RES)
+    for (const m of text.matchAll(re)) if (!esModule || ES_EXPORT_RE.test(m[0]) || listed.has(m[1])) names.add(m[1]);
+  return [...names];
+}
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const symbolRe = (name) => new RegExp(`(?<![\\w$])${escapeRe(name)}(?![\\w$])`);
+// An inheritance marker right after a declared type's name -- `extends`/`implements`/`inherits`, a
+// C#/Kotlin/Swift/C++ `:`, a Python `(` or a Ruby `<` -- with the name before the body opens, so a
+// `Print(Shape s)` parameter or an `x: Shape` annotation is a consumer, not a subclass.
+const inheritsRe = (name) =>
+  new RegExp(
+    `\\b(?:class|struct|interface|record|object|protocol|trait|enum)\\s+[\\w$]+(?:\\s*<[^>\\n]*>)?\\s*` +
+      `(?:\\(|:|<|\\bextends\\b|\\binherits\\b|\\bimplements\\b)[^{\\n]*?(?<![\\w$])${escapeRe(name)}(?![\\w$])`,
+    "m"
+  );
+
+function classify(path, content, inherits) {
+  if (isTestPath(path)) return "test";
+  if (inherits?.test(content)) return "subclass";
+  return "consumer";
+}
+
+// One entry per changed file, in argument order: the names searched, the auto-extracted names
+// skipped, and per name or basename the referencers that matched it, each tagged test, subclass or
+// consumer. A changed file that does not exist yet (a task creates it) is matched by name only.
+export function scanReferencers({ changed, symbols = [], repoRoot }) {
+  const codeFiles = walk(repoRoot)
+    .map((p) => relative(repoRoot, p).split(sep).join("/"))
+    .filter((p) => SCAN_CODE_EXT.has(extname(p)))
+    .sort();
+  const contents = new Map();
+  const read = (path) => {
+    if (!contents.has(path)) {
+      let text = null;
+      try {
+        text = readFileSync(join(repoRoot, path), "utf8");
+      } catch {}
+      contents.set(path, text);
+    }
+    return contents.get(path);
+  };
+  return changed.map((file) => {
+    const own = SCAN_CODE_EXT.has(extname(file)) && existsSync(join(repoRoot, file)) ? extractSymbols(read(file) ?? "") : [];
+    const skipped = own.filter(isStoplisted);
+    const names = [...new Set([...own.filter((n) => !isStoplisted(n)), ...symbols])];
+    const base = basename(file);
+    const stem = base.slice(0, base.length - extname(base).length);
+    const matchers = names.map((name) => ({ match: name, re: symbolRe(name), inherits: inheritsRe(name) }));
+    // The gate's basename match, plus the stem as the last segment of a quoted path: `from './foo'`
+    // names foo.ts. Being path-shaped, the stem skips only the stoplist, not the length rule.
+    matchers.push({ match: base, re: new RegExp(`[/.'"\`]${escapeRe(base)}\\b`), inherits: null });
+    if (stem && stem !== base) {
+      if (SCAN_STOPLIST.has(stem)) skipped.push(stem);
+      else matchers.push({ match: stem, re: new RegExp(`/${escapeRe(stem)}['"\`]`), inherits: null });
+    }
+    const groups = [];
+    for (const { match, re, inherits } of matchers) {
+      const referencers = [];
+      for (const path of codeFiles) {
+        if (path === file) continue;
+        const content = read(path);
+        if (content !== null && re.test(content)) referencers.push({ path, kind: classify(path, content, inherits) });
+      }
+      if (referencers.length) groups.push({ match, referencers });
+    }
+    return { file, symbols: names, skipped, groups };
+  });
+}
+
+export function formatScan(results) {
+  const lines = ["blast-radius-check: scan (advisory) -- put every referencer below in the task's Files block, or record a Blast-radius override with a reason"];
+  for (const { file, symbols, skipped, groups } of results) {
+    lines.push(file);
+    lines.push(`  symbols: ${symbols.join(", ") || "(none)"}${skipped.length ? ` (skipped: ${skipped.join(", ")})` : ""}`);
+    if (groups.length === 0) lines.push("  no referencers found");
+    for (const { match, referencers } of groups) {
+      lines.push(`  ${match}`);
+      for (const { path, kind } of referencers) lines.push(`    ${path} (${kind})`);
+    }
+  }
+  return lines.join("\n");
+}
+
+const SCAN_FLAGS = { "--scan": "none", "--symbol": "repeat", "--root": "value" };
+const SCAN_USAGE = "usage: node scripts/blast-radius-check.mjs --scan <changed-file>... [--symbol <name>]... [--root <repo-root>]";
+
+function scanMain(argv) {
+  let parsed;
+  try {
+    parsed = parseFlags(argv, SCAN_FLAGS, { allowPositionals: true, requireValues: "nonEmpty" });
+  } catch (e) {
+    console.error(`blast-radius-check: ${e.message}\n${SCAN_USAGE}`);
+    process.exit(1);
+  }
+  const { flags, positionals } = parsed;
+  if (positionals.length === 0) {
+    console.error(`blast-radius-check: --scan needs at least one changed file\n${SCAN_USAGE}`);
+    process.exit(1);
+  }
+  const results = scanReferencers({ changed: positionals, symbols: flags["--symbol"] ?? [], repoRoot: flags["--root"] ?? process.cwd() });
+  console.log(formatScan(results));
+  process.exit(0);
+}
+
 function main() {
+  if (process.argv.includes("--scan")) scanMain(process.argv.slice(2));
   const [, , planPath, repoRootArg] = process.argv;
   if (!planPath) {
-    console.error("usage: node scripts/blast-radius-check.mjs <plan-file> [repo-root]");
+    console.error(`usage: node scripts/blast-radius-check.mjs <plan-file> [repo-root]\n${SCAN_USAGE}`);
     process.exit(1);
   }
   if (!existsSync(planPath)) {
