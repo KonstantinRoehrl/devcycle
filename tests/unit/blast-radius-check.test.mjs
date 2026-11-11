@@ -609,3 +609,49 @@ test("--scan compares the stoplist case-insensitively and still searches a disti
   assert.match(r.out, / {2}Frobnicate\n {4}src\/Other\.cs \(consumer\)/);
   assert.doesNotMatch(r.out, / {2}(Name|Value|Update|Start)\n/);
 });
+
+test("--scan finds a TS importer of a file whose stem is a plausible class name like result", () => {
+  const repo = makeRepo({
+    "lib/result.ts": "export function ok(v: number) { return v; }\n",
+    "src/use.ts": "import { ok } from './result';\n",
+  });
+  const r = scan(repo, "lib/result.ts");
+  assert.equal(r.code, 0);
+  assert.match(r.out, /\n {2}result\n {4}src\/use\.ts \(consumer\)/);
+  assert.doesNotMatch(r.out, /no referencers found/);
+});
+
+test("--scan finds a Java importer of Message.java and lists no name twice as skipped", () => {
+  const repo = makeRepo({
+    "src/com/x/Message.java": "package com.x;\npublic class Message {\n}\n",
+    "src/App.java": "import com.x.Message;\nclass App {}\n",
+  });
+  const r = scan(repo, "src/com/x/Message.java");
+  assert.equal(r.code, 0);
+  assert.match(r.out, /src\/App\.java \(consumer\)/);
+  assert.doesNotMatch(r.out, /no referencers found/);
+  const skippedNote = r.out.match(/\(skipped: ([^)]*)\)/);
+  if (skippedNote) {
+    const names = skippedNote[1].split(", ");
+    assert.equal(new Set(names).size, names.length, `skipped names are unique: ${skippedNote[1]}`);
+  }
+});
+
+test("--scan still finds a stem importer when a symbol is stoplisted, and a zero-referencer scan with skipped names says so", () => {
+  const found = scan(
+    makeRepo({
+      "src/update.ts": "export class Update {}\n",
+      "src/app.ts": "import { Update } from './update';\n",
+    }),
+    "src/update.ts"
+  );
+  assert.equal(found.code, 0);
+  assert.match(found.out, /symbols: \(none\) \(skipped: Update\)/);
+  assert.match(found.out, /\n {2}update\n {4}src\/app\.ts \(consumer\)/);
+
+  const none = scan(makeRepo({ "src/lonely.ts": "export class Update {}\n" }), "src/lonely.ts");
+  assert.equal(none.code, 0);
+  assert.match(none.out, /symbols: \(none\) \(skipped: Update\)/);
+  assert.doesNotMatch(none.out, /^ {2}no referencers found$/m);
+  assert.match(none.out, /^ {2}no referencers found; skipped names were not searched -- pass --symbol <name> to search one$/m);
+});

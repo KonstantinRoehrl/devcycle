@@ -142,7 +142,6 @@ export const SCAN_STOPLIST = new Set([
   "value", "name", "data", "item", "index", "default", "constructor", "tostring", "equals", "hashcode",
   "setup", "teardown", "start", "stop", "close", "open", "load", "save", "parse", "apply", "call",
   "render", "update", "handle", "string", "number", "boolean", "object", "void",
-  "count", "result", "message", "text", "key", "id",
 ]);
 const onStoplist = (name) => SCAN_STOPLIST.has(name.toLowerCase());
 export const isStoplisted = (name) => name.length < SCAN_MIN_SYMBOL || onStoplist(name);
@@ -232,20 +231,17 @@ export function scanReferencers({ changed, symbols = [], repoRoot }) {
     const onDisk = existsSync(join(repoRoot, file));
     const parsed = SCAN_CODE_EXT.has(extname(file));
     const own = parsed && onDisk ? extractSymbols(read(file) ?? "") : [];
-    const skipped = own.filter(isStoplisted);
+    const skipped = [...new Set(own.filter(isStoplisted))];
     const names = [...new Set([...own.filter((n) => !isStoplisted(n)), ...symbols])];
     const base = basename(file);
     const stem = base.slice(0, base.length - extname(base).length);
     const matchers = names.map((name) => ({ match: name, re: symbolRe(name), inherits: inheritsRe(name) }));
     // The gate's basename match, plus the stem two ways: as the last segment of a quoted path
     // (`from './foo'` names foo.ts), and as an identifier or path segment on a line that opens with an
-    // import keyword (`import './foo.js'`, `from pkg import foo`, `require 'foo'`). Being path-shaped,
-    // the stem skips only the stoplist, not the length rule.
+    // import keyword (`import './foo.js'`, `from pkg import foo`, `require 'foo'`). Both are
+    // path-shaped, so neither the stoplist nor the length rule applies to the stem.
     matchers.push({ match: base, re: new RegExp(`[/.'"\`]${escapeRe(base)}\\b`), inherits: null });
-    if (stem && stem !== base) {
-      if (onStoplist(stem)) skipped.push(stem);
-      else matchers.push({ match: stem, re: stemRe(stem), inherits: null });
-    }
+    if (stem && stem !== base) matchers.push({ match: stem, re: stemRe(stem), inherits: null });
     const groups = [];
     for (const { match, re, inherits } of matchers) {
       const referencers = [];
@@ -274,7 +270,13 @@ export function formatScan(results) {
       lines.push(`  no symbols extracted from ${ext ? `a ${ext} file` : "a file with no extension"} -- referencers matched by file name only`);
     }
     lines.push(`  symbols: ${symbols.join(", ") || "(none)"}${skipped.length ? ` (skipped: ${skipped.join(", ")})` : ""}`);
-    if (groups.length === 0) lines.push("  no referencers found");
+    if (groups.length === 0) {
+      lines.push(
+        skipped.length
+          ? "  no referencers found; skipped names were not searched -- pass --symbol <name> to search one"
+          : "  no referencers found"
+      );
+    }
     for (const { match, referencers } of groups) {
       lines.push(`  ${match}`);
       for (const { path, kind } of referencers) lines.push(`    ${path} (${kind})`);
