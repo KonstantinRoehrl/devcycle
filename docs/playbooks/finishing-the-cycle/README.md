@@ -44,12 +44,14 @@ commit during the run, and the last-wins join makes this closing write harmless.
 final write to `.devcycle/state.md` sets `stage: done`.
 
 Before offering any cleanup, the stage unconditionally copies this cycle's audit trail —
-`ledger.md` plus the `briefs/`, `evidence/`, `findings/`, and `reports/` directories — into
+`ledger.md` plus the `briefs/`, `evidence/`, `findings/`, `reports/`, `research/`, and
+`plan-work/<run id>/` directories — into
 `.devcycle/archive-<date>-<branch-slug>/`, first moving any superseded findings-loop status
 files into that same archive. Only then does it offer, in one question, to delete the ephemeral
 set that only ever existed to pass content between this cycle's dispatches
-(`.devcycle/reports/*`, `.devcycle/evidence/*`, `.devcycle/findings/*`, sweep-argument/report
-files, generated per-task briefs); anything short of an explicit yes leaves every file in
+(`.devcycle/reports/*`, `.devcycle/evidence/*`, `.devcycle/findings/*`,
+`.devcycle/plan-work/<run id>/*`, `.devcycle/research/*`, sweep-argument/report files, generated
+per-task briefs); anything short of an explicit yes leaves every file in
 place, and the state file, ledger, scope, spec, plan, checklist, and on-device results — plus
 anything git-tracked — are never removed regardless of the answer.
 
@@ -85,7 +87,7 @@ flowchart TD
     REDACT{"redaction-check.mjs: --advisory-identity over .devcycle/, hard gate over the run-record dir — exit 0?"}:::stage
     REDACT -->|"no"| STOP[("stage stops — surface the finding")]:::structural
     REDACT -->|"yes"| RECORD("Append the workload signature via run-record.mjs"):::stage
-    RECORD --> ARCHIVE[("Archive ledger, briefs, evidence, findings, reports into .devcycle/archive-&lt;date&gt;-&lt;branch-slug&gt;/")]:::structural
+    RECORD --> ARCHIVE[("Archive ledger, briefs, evidence, findings, reports, research, plan-work into .devcycle/archive-&lt;date&gt;-&lt;branch-slug&gt;/")]:::structural
     ARCHIVE --> CLEAN("Offer to delete the ephemeral set — one question, removes only on explicit yes"):::stage
     CLEAN --> DONE("stage: done — handoff"):::stage
 

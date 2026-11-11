@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Pre-flight check for a devcycle plan: every "### Task N" block must carry the required
 // dispatch fields, the Evidence value must name a valid class, a red-green task that creates a
-// non-test source file must carry a stub step, "## Dispatch Map" must list every task, every
+// non-test source file must carry a stub step, an interface-pinned task must say why and still pin
+// its failing test code, "## Dispatch Map" must list every task, every
 // pinned gate command must run the repo's required checks, and a Files block that edits a budgeted file must list the size baselines that edit trips and the decisions log
 // that holds them, and a git command a step prescribes that the dispatch guard denies an
 // implementer is reported as a note, never a failure. Modeled on wave-disjointness-check.mjs; a
@@ -12,7 +13,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   taskBlocks, parseDispatchMap, filesFieldValue, fieldValue, verificationGate, verificationGateField, conventionCommand,
-  createdFiles, isTestPath, lineFences,
+  createdFiles, isTestPath, lineFences, fencedBlocks,
 } from "./task-files.mjs";
 import { budgetFixtureGaps, gapRemedy } from "./budget-fixture-check.mjs";
 import { isMain } from "./is-main.mjs";
@@ -181,6 +182,32 @@ function stubErrors(num, block) {
   ];
 }
 
+// #331: `**Detail:** interface-pinned — <reason>` lets a red-green task describe its implementation
+// in prose, provided its interfaces, failing test code and gate commands stay pinned
+// (playbooks/planning-waves.md § No placeholders). This checks the declaration and that some code
+// is still pinned; the task reviewer judges behaviour the tests leave open. Only a line that opens
+// with the label declares it: a brief that quotes the form mid-sentence, as a plan about this very
+// check does, declares nothing.
+export const DETAIL_VALUES = ["interface-pinned"];
+const DETAIL_LINE_RE = /^\*\*Detail:\*\*[ \t]*(.*)$/m;
+const DETAIL_RE = /^(\S+)(?:\s+(?:—|--|-)\s*(.*))?$/;
+
+function detailErrors(num, block) {
+  const line = block.match(DETAIL_LINE_RE);
+  if (line === null) return [];
+  const detail = line[1].trim();
+  const m = detail.match(DETAIL_RE);
+  if (!m || !DETAIL_VALUES.includes(m[1]))
+    return [`Task ${num}: **Detail:** must be \`interface-pinned — <reason>\`, got: ${detail || "(empty)"}`];
+  const errors = [];
+  if (!m[2]?.trim()) errors.push(`Task ${num}: **Detail:** interface-pinned needs a reason after the dash, e.g. \`interface-pinned — new interception layer, design-heavy\``);
+  if ((fieldValue(block, "Evidence") ?? "").split(/\s+/)[0] !== "red-green")
+    errors.push(`Task ${num}: **Detail:** interface-pinned is allowed only on a red-green task, whose failing test pins the behaviour`);
+  if (fencedBlocks(block).length === 0)
+    errors.push(`Task ${num}: **Detail:** interface-pinned still pins the complete failing test code in a fenced block, and this brief has none`);
+  return errors;
+}
+
 // repoRoot is the work tree whose required-checks manifest applies; plan-check passes its own.
 export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cwd() }, { includeBudgetFixtures = true } = {}) {
   const errors = [];
@@ -211,7 +238,7 @@ export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cw
         );
       }
     }
-    errors.push(...stubErrors(num, ownBriefs[index].text));
+    errors.push(...stubErrors(num, ownBriefs[index].text), ...detailErrors(num, ownBriefs[index].text));
   }
 
   // An incomplete Files block is not only a missing field: a brief that mandates doc growth but
