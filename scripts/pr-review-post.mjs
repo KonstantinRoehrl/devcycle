@@ -36,15 +36,20 @@ export function withFooter(body, login) {
   return String(body ?? "").replace(/\s*$/, "") + footer(login);
 }
 
-export function alreadyPosted(existingReplies, commentId) {
-  return (existingReplies ?? []).some(
-    (r) => r?.in_reply_to_id === commentId && String(r?.body ?? "").includes(FOOTER_MARKER)
-  );
+// A retry of the same reply is skipped; a different reply to the same thread is not. Bodies are
+// compared normalized, so whitespace drift between the stored and the new reply still matches.
+export function alreadyPosted(existingReplies, commentId, stampedBody) {
+  const wanted = djb2(normalizeBody(stampedBody));
+  return (existingReplies ?? []).some((r) => {
+    const body = String(r?.body ?? "");
+    return r?.in_reply_to_id === commentId && body.includes(FOOTER_MARKER)
+      && djb2(normalizeBody(body)) === wanted;
+  });
 }
 
-// Audit-only correctness note carries to this sibling too: a pr-level reply has no comment_id to
-// key an in_reply_to_id match against, so idempotency here is an exact stamped-body match instead
-// -- withFooter is deterministic for the same (body, login) pair, so this is sufficient.
+// A pr-level reply has no comment_id to key an in_reply_to_id match against, so idempotency here
+// rests on the stamped body alone, matched exactly -- withFooter is deterministic for the same
+// (body, login) pair, so this is sufficient.
 export function alreadyPostedPrLevel(existingComments, stampedBody) {
   return (existingComments ?? []).some((c) => c?.body === stampedBody);
 }
@@ -121,11 +126,11 @@ export function runReply({ repo, pr, commentId, body, login, prLevel = false, ru
   const stamped = withFooter(body, actor);
   if (prLevel) {
     const existing = runner.listPrLevelComments(repo, pr);
-    if (alreadyPostedPrLevel(existing, stamped)) return { status: "skipped", reason: "already-posted" };
+    if (alreadyPostedPrLevel(existing, stamped)) return { status: "skipped", reason: "identical-reply-posted" };
     runner.postPrLevel(repo, pr, stamped);
   } else {
     const existing = runner.listReplies(repo, pr);
-    if (alreadyPosted(existing, id)) return { status: "skipped", reason: "already-posted" };
+    if (alreadyPosted(existing, id, stamped)) return { status: "skipped", reason: "identical-reply-posted" };
     runner.postReply(repo, pr, id, stamped);
   }
   return { status: "posted", replyHash: djb2(normalizeBody(stamped)) };
@@ -191,7 +196,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         login: requireValue(flags, "--login", "a github login"),
         prLevel,
       });
-      console.log(r.status === "posted" ? `posted ${r.replyHash}` : `skipped: ${r.reason}`);
+      console.log(r.status === "posted" ? `posted ${r.replyHash}` : "skipped: identical reply already posted");
     } else if (sub === "resolve") {
       runResolve({ repo, threadId: must("--thread-id", "a PRRT_ node id") });
       console.log("resolved");

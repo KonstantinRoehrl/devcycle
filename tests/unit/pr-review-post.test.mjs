@@ -11,13 +11,14 @@ import {
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/pr-review-post.mjs", import.meta.url));
 
-// Spawn the real CLI dispatch path with a fake `gh` on PATH so no network is touched — the fake
-// exits 0 and prints `[]` (a valid empty listReplies payload). This exercises the argument gate
-// exactly as an operator would, which is the surface the unit tests calling runReply directly miss.
-function runCli(args) {
+// Spawn the real CLI dispatch path with a fake `gh` on PATH so no network is touched — by default
+// the fake exits 0 and prints `[]` (a valid empty listReplies payload); a test that needs other gh
+// output passes its own shell body. This exercises the argument gate exactly as an operator would,
+// which is the surface the unit tests calling runReply directly miss.
+function runCli(args, ghScript = "echo '[]'") {
   const ghDir = makeTempDir("fakegh-");
   const ghPath = join(ghDir, "gh");
-  writeFileSync(ghPath, "#!/bin/sh\necho '[]'\nexit 0\n");
+  writeFileSync(ghPath, `#!/bin/sh\n${ghScript}\nexit 0\n`);
   chmodSync(ghPath, 0o755);
   const bodyFile = join(makeTempDir("prbody-"), "body.md");
   writeFileSync(bodyFile, "Fixed in abc123: intake now carries thread_id.");
@@ -41,11 +42,13 @@ test("footer/withFooter carry the marker and login", () => {
   assert.ok(b.startsWith("Fixed in abc123"));
 });
 
-test("alreadyPosted matches marker on the same comment only", () => {
-  const replies = [{ in_reply_to_id: 5, body: `done\n\n---\n${FOOTER_MARKER} @x` }];
-  assert.equal(alreadyPosted(replies, 5), true);
-  assert.equal(alreadyPosted(replies, 6), false);
-  assert.equal(alreadyPosted([{ in_reply_to_id: 5, body: "plain human reply" }], 5), false);
+test("alreadyPosted matches an identical stamped body on the same comment only", () => {
+  const stamped = withFooter("done", "x");
+  const replies = [{ in_reply_to_id: 5, body: stamped }];
+  assert.equal(alreadyPosted(replies, 5, stamped), true);
+  assert.equal(alreadyPosted(replies, 5, withFooter("a different reply", "x")), false);
+  assert.equal(alreadyPosted(replies, 6, stamped), false);
+  assert.equal(alreadyPosted([{ in_reply_to_id: 5, body: "plain human reply" }], 5, "plain human reply"), false);
 });
 
 test("runReply refuses when the derived login is empty", () => {
@@ -103,14 +106,27 @@ test("runReply posts a footer-stamped body to the replies endpoint", () => {
   assert.ok(calls[0][4].includes(FOOTER_MARKER));
 });
 
-test("runReply skips when an identical-marker reply already exists", () => {
+test("runReply posts a different reply to a thread that already carries a stamped reply", () => {
+  const posted = [];
   const runner = {
-    listReplies: () => [{ in_reply_to_id: 5, body: `x\n\n---\n${FOOTER_MARKER} @octocat` }],
+    listReplies: () => [{ in_reply_to_id: 5, body: withFooter("Looking into it.", "octocat") }],
+    postReply: (repo, pr, commentId, body) => posted.push(body),
+    whoami: () => "octocat",
+  };
+  const r = runReply({ repo: "o/n", pr: 7, commentId: 5, body: "Fixed in abc.", login: "octocat", runner });
+  assert.equal(r.status, "posted");
+  assert.equal(posted.length, 1);
+  assert.ok(posted[0].startsWith("Fixed in abc."));
+});
+
+test("runReply skips an identical stamped reply that differs only in whitespace", () => {
+  const runner = {
+    listReplies: () => [{ in_reply_to_id: 5, body: `Fixed  in\r\nabc.\n\n---\n${FOOTER_MARKER} @octocat\n` }],
     postReply: () => { throw new Error("must not post"); },
     whoami: () => "octocat",
   };
   const r = runReply({ repo: "o/n", pr: 7, commentId: 5, body: "Fixed in abc.", login: "octocat", runner });
-  assert.deepEqual(r, { status: "skipped", reason: "already-posted" });
+  assert.deepEqual(r, { status: "skipped", reason: "identical-reply-posted" });
 });
 
 test("runResolve issues the resolveReviewThread mutation for the node id", () => {
@@ -128,6 +144,18 @@ test("CLI reply --pr-level posts without a --comment-id", () => {
   assert.doesNotMatch(res.stderr ?? "", /--comment-id is required/, res.stderr);
   assert.equal(res.status, 0, res.stderr);
   assert.match(res.stdout, /^posted /);
+});
+
+test("CLI reply reports a skipped identical reply in words, not as a hash", () => {
+  const stored = JSON.stringify([
+    { in_reply_to_id: 5, body: withFooter("Fixed in abc123: intake now carries thread_id.", "octocat") },
+  ]);
+  const ghScript = `if [ "$2" = user ]; then echo octocat; else cat <<'JSON'\n${stored}\nJSON\nfi`;
+  const res = runCli([
+    "reply", "--repo", "o/n", "--pr", "7", "--comment-id", "5", "--body-file", "@body",
+  ], ghScript);
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.stdout, "skipped: identical reply already posted\n");
 });
 
 test("CLI reply without --pr-level still requires --comment-id", () => {
@@ -272,7 +300,7 @@ test("runReply (pr-level) skips when an identical-marker top-level comment alrea
     whoami: () => "octocat",
   };
   const r = runReply({ repo: "o/n", pr: 7, body: "Fixed in abc.", login: "octocat", prLevel: true, runner });
-  assert.deepEqual(r, { status: "skipped", reason: "already-posted" });
+  assert.deepEqual(r, { status: "skipped", reason: "identical-reply-posted" });
 });
 
 test("runReply (pr-level) posts when no matching top-level comment exists", () => {

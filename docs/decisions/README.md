@@ -5,6 +5,26 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-11 — A reply is skipped only when an identical body is already posted under the footer marker
+
+**Decision:** `pr-review-post.mjs` skips a threaded reply only when a reply to the same comment
+carries the attribution-footer marker and the same normalized body; a different reply to the same
+thread is posted. Both skip paths report `identical-reply-posted`, and `references/review-comments.md`
+says so in its reply contract and its Attribution-footer pinned constant.
+
+**Why:** the marker alone matched any earlier stamped reply on the thread, so a second, different
+reply was silently dropped and the CLI still exited 0 (#307).
+
+**Budgets:** the reworded contract and pinned constant grow `references/review-comments.md` by
+73 bytes and the surface by two lines; both playbooks that cite it carry the closure growth. The
+figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6915
+budget: context-budget.json playbooks/receiving-review.md 121456
+budget: context-budget.json playbooks/writing-the-findings-document.md 66341
+```
+
 ## 2026-11-11 — The duty bullet gets a location bound, the thorough carve-out names every section it depends on, and result-file dispatches get an envelope
 
 **Decision:** The coordinator-duty bullet in `references/delegation.md` bounds a persisted result to
