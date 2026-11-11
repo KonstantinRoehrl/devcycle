@@ -317,3 +317,46 @@ test(".worktrees is not walked", () => {
   const { code } = run(planChanging("scripts/x.mjs"), repo);
   assert.equal(code, 0);
 });
+
+// --- F6: a finding names the task whose Files block declares the changed file ---
+
+test("a finding opens with the task that declares the changed file", () => {
+  const repo = makeRepo({
+    "src/widget.mjs": "export function widget() {}",
+    "src/consumer.mjs": "import { widget } from './widget.mjs';",
+  });
+  const r = run(PLAN, repo);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /blast-radius-check: Task 1: src\/consumer\.mjs \(non-test\) references src\/widget\.mjs but is in no task's Files block/);
+});
+
+test("a changed file two tasks declare names both tasks", () => {
+  // Joined from an array so that no line of this test opens with a heading: a plan quoting this
+  // test in a fenced block would otherwise split into extra tasks.
+  const plan = [
+    "# Plan",
+    "### Task 2: Change widget",
+    "**Files:**",
+    "- Modify: `src/widget.mjs`",
+    "### Task 3: Change widget again",
+    "**Files:**",
+    "- Modify: `src/widget.mjs`",
+    "## Dispatch Map",
+    "- Wave 1: Task 2",
+    "- Wave 2: Task 3",
+  ].join("\n") + "\n";
+  const repo = makeRepo({
+    "src/widget.mjs": "export function widget() {}",
+    "src/consumer.mjs": "import { widget } from './widget.mjs';",
+  });
+  const r = run(plan, repo);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /blast-radius-check: Tasks 2\+3: src\/consumer\.mjs \(non-test\) references src\/widget\.mjs/);
+});
+
+test("the ok line states the gate's real coverage", () => {
+  const repo = makeRepo({ "src/widget.mjs": "export function widget() {}" });
+  const r = run(PLAN, repo);
+  assert.equal(r.code, 0);
+  assert.match(r.out, /ok -- every JS\/TS\/Python referencer of a changed file is in a Files block or overridden/);
+});

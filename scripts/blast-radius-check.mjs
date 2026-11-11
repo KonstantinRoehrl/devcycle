@@ -2,8 +2,10 @@
 // Pre-flight check for a devcycle plan: for each non-test file a task modifies, find repo code
 // files that reference it (by module basename) but appear in no task's Files block. Any such
 // referencer -- test or non-test -- is a hard failure (it almost certainly needs updating), cleared
-// only by adding it to a Files block or recording an override. Language-agnostic; conservative.
-// See playbooks/planning-waves.md.
+// only by adding it to a Files block or recording an override. The gate walks only JS/TS/Python
+// files (CODE_EXT) and matches the changed file's basename with its extension, so a referencer in
+// any other language, or one that imports `./foo` without the extension, is never seen. `--scan`
+// is the planner's wider, advisory pass over the same walk. See playbooks/planning-waves.md.
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, basename, extname, relative, sep } from "node:path";
 import { taskBlocks, taskFileMap, TEST_FILE_SUFFIXES, normalizeFileToken } from "./task-files.mjs";
@@ -36,6 +38,12 @@ const OVERRIDE_START = /^\s*-\s*Blast-radius override:/;
 const OVERRIDE_RE = /^\s*-\s*Blast-radius override:\s*(\S+?)(?:\s*→\s*(\S+))?\s*—\s*(.*\S)\s*$/;
 
 const failed = (finding) => ({ findings: [finding], ok: "", notes: [] });
+
+// A finding opens with the task(s) whose Files block declares the changed file, so a delegated
+// merge can route it back to the drafter that wrote that block.
+export const owningTasks = (filesByTask, file) =>
+  [...filesByTask].filter(([, files]) => files.has(file)).map(([num]) => num);
+export const taskLabel = (nums) => (nums.length === 1 ? `Task ${nums[0]}` : `Tasks ${nums.join("+")}`);
 
 export function blastRadiusLeg(planText, { planPath, repoRoot }) {
   const blocks = taskBlocks(planText);
@@ -102,14 +110,16 @@ export function blastRadiusLeg(planText, { planPath, repoRoot }) {
         notes.push(`override -- ${cand} references ${chg}, cleared: ${ov.reason}`);
       } else {
         const kind = isTestFile(cand) ? "test" : "non-test";
-        findings.push(`${cand} (${kind}) references ${chg} but is in no task's Files block -- add it or record an override`);
+        findings.push(
+          `${taskLabel(owningTasks(filesByTask, chg))}: ${cand} (${kind}) references ${chg} but is in no task's Files block -- add it or record an override`
+        );
       }
     }
   }
 
   return {
     findings,
-    ok: "ok -- every referencer of a changed file is in a Files block or overridden",
+    ok: "ok -- every JS/TS/Python referencer of a changed file is in a Files block or overridden",
     notes,
   };
 }
