@@ -5,6 +5,41 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-11 — The duty bullet gets a location bound, the thorough carve-out names every section it depends on, and result-file dispatches get an envelope
+
+**Decision:** The coordinator-duty bullet in `references/delegation.md` bounds a persisted result to
+`.devcycle/` and the plan splice to the plan file the planning stage names. A plan merged from
+dispatch-written drafts is presented by path with its body unread. `references/delegation.md` §
+Return envelopes gains one shape for a dispatch that writes a single result file (spike, drafter,
+plan checker), which `references/delegated-planning.md` names instead of wording its own. The
+`thorough` carve-out in `playbooks/planning-waves.md` now names the Derive each Files block
+paragraph and self-review items 7 and 8 beside the task template and No placeholders.
+
+**Why:** the unbounded bullet read as permission to write a returned result anywhere, the generic
+plan-under-approval exemption contradicted the unread merged plan, the checker's envelope cited a
+section that did not define it, and a `thorough` planner or drafter never reached the `--scan`
+command, the run-marker rule or the plan gate the override list depends on.
+
+**Budgets:** the new envelope shape, the bound and the carve-out grow `references/delegation.md` by
+330 bytes and the surface by 8 lines; every playbook that cites it carries the closure growth. The
+figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6913
+budget: context-budget.json playbooks/executing-waves.md 118217
+budget: context-budget.json playbooks/learning-from-sessions.md 65927
+budget: context-budget.json playbooks/maintaining-the-repo.md 66549
+budget: context-budget.json playbooks/planning-waves.md 88928
+budget: context-budget.json playbooks/profiling-sessions.md 43437
+budget: context-budget.json playbooks/receiving-review.md 121383
+budget: context-budget.json playbooks/reviewing-code.md 99593
+budget: context-budget.json playbooks/scoping-the-request.md 36226
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 94350
+budget: context-budget.json playbooks/taking-the-fast-path.md 53537
+budget: context-budget.json playbooks/writing-the-findings-document.md 66268
+budget: context-budget.json references/delegation.md 12286
+```
+
 ## 2026-11-11 — Delegated merge checker writes a findings file, and the merge keeps the plan body unread
 
 **Decision:** The delegated merge's checker dispatch writes its findings to

@@ -21,8 +21,8 @@ Evidence: <what was run or read; each claim marked per references/evidence.md §
 Design impact: <what the plan must do differently, or none>
 ```
 
-Its envelope names the file, repeats the `Answer:` line, and says whether `Design impact:` is `none`
-or non-empty. The coordinator reads the `Answer:` lines, and the `Design impact:` section alone of a
+Its envelope is the result-file shape (`references/delegation.md` § Return envelopes): the file,
+the `Answer:` line, and whether `Design impact:` is `none` or non-empty. The coordinator reads the `Answer:` lines, and the `Design impact:` section alone of a
 spike whose impact is non-empty, before the task cut, then logs `feasibility-verdict`. A NO-GO, or an
 answer that changes a mechanism the spec names, goes to the user under planning's feasibility gate.
 
@@ -35,13 +35,14 @@ section.
 ## Drafters — 5+ tasks
 
 One dispatch per task, in parallel. Its brief carries paths, never content: the spec, the relevant
-spike files, and the installed `playbooks/planning-waves.md` for the task template and the No
-placeholders rule, which it reads whichever engine the coordinator runs. Inline it carries only the verdict, its own task's pinned Interfaces and its
+spike files, and the installed `playbooks/planning-waves.md` for the task template, the Derive each Files block
+paragraph, the No placeholders rule and self-review items 7 and 8, which it reads whichever engine
+the coordinator runs. Inline it carries only the verdict, its own task's pinned Interfaces and its
 dependencies' Produces. The drafter writes the whole `### Task <n>` block to `drafts/task-<n>.md`,
 having derived its Files block with the template's `--scan`, marked every load-bearing claim it
 makes, and prototyped and marked every fenced block it pins. Before returning it scans its own draft
 for placeholders (TBD, "write tests for the above") and back-references to another task ("similar to
-Task N"). Its envelope names the file and lists any `Blast-radius override` it wrote.
+Task N"). Its envelope is the result-file shape, with any `Blast-radius override` it wrote as the summary.
 
 ## The merge
 
@@ -50,8 +51,7 @@ The coordinator splices by shell concatenation, never by reading a draft: its ow
 spec coverage, type consistency, no count-only enumeration, mirrored-file parity, and a scan of the
 merged plan for placeholders and cross-task back-references — run as one `general-purpose` checker
 dispatch over the merged plan's path. The checker writes its findings to
-`.devcycle/plan-work/<run id>/merge-findings.md` and returns an envelope of that path and a count
-(`references/delegation.md` § Return envelopes); the coordinator reads the file only when
+`.devcycle/plan-work/<run id>/merge-findings.md` and returns the result-file shape, its summary the finding count; the coordinator reads the file only when
 the count is above zero. It reads `plan-check`'s output, runs the plan gate once, and presents the
 plan to the user by path with `plan-check`'s result and the findings count; it does not read the plan
 body on this path. A finding that opens

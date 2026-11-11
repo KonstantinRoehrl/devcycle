@@ -71,8 +71,8 @@ trips, read `${CLAUDE_PLUGIN_ROOT}/references/delegated-planning.md` and follow 
 
 ## Plan mechanics — the native engine (`lean` / `standard`)
 
-Skip this section at `thorough`, except the task template and the No placeholders paragraph the
-override list names, which every engine follows; the sub-skill supplies the rest there. **Where the plan goes:**
+Skip this section at `thorough`, except the task template, the No placeholders paragraph, the Derive each Files block paragraph and
+self-review items 7 (run markers) and 8 (plan gate), which the override list names and every engine follows; the sub-skill supplies the rest there. **Where the plan goes:**
 `docs/superpowers/plans/YYYY-MM-DD-<topic>.md`, unless the user prefers another location. A spec
 covering multiple independent subsystems should have been split into sub-project specs during
 brainstorming; if it wasn't, suggest one plan per subsystem, each producing working, testable
