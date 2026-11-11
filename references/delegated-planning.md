@@ -38,13 +38,18 @@ spike files, and the installed `playbooks/planning-waves.md` for the task templa
 placeholders rule. Inline it carries only the verdict, its own task's pinned Interfaces and its
 dependencies' Produces. The drafter writes the whole `### Task <n>` block to `drafts/task-<n>.md`,
 having derived its Files block with the template's `--scan`, marked every load-bearing claim it
-makes, and prototyped and marked every fenced block it pins. Its envelope names the file and lists
-any `Blast-radius override` it wrote.
+makes, and prototyped and marked every fenced block it pins. Before returning it scans its own draft
+for placeholders (TBD, "write tests for the above") and back-references to another task ("similar to
+Task N"). Its envelope names the file and lists any `Blast-radius override` it wrote.
 
 ## The merge
 
-The coordinator splices the plan header, the drafts in task order and the Dispatch Map into the plan.
-It runs the cross-task self-review checks on the merged plan — spec coverage, type consistency, no
-count-only enumeration and mirrored-file parity — then the plan gate once. A finding that opens
+The coordinator splices by shell concatenation, never by reading a draft: its own plan header, then
+`drafts/task-<n>.md` in task order, then its own Dispatch Map. The cross-task self-review checks —
+spec coverage, type consistency, no count-only enumeration, mirrored-file parity, and a scan of the
+merged plan for placeholders and cross-task back-references — run as one `general-purpose` checker
+dispatch over the merged plan's path, which returns findings only. The coordinator reads `plan-check`'s
+output and those findings, then runs the plan gate once; where the plan goes to the user for approval,
+`references/delegation.md`'s exemption for a plan under approval applies. A finding that opens
 `Task <n>:` goes back to that task's drafter as a fresh dispatch carrying the finding and the draft's
 path; any other finding is the coordinator's to fix.

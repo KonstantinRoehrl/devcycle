@@ -5,6 +5,39 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-11 — Delegated planning merges without reading drafts, and finish archives the work files
+
+**Decision:** Delegated planning's merge is a shell concatenation of the coordinator's header, the
+drafts and its Dispatch Map, and its cross-task self-review runs as one checker dispatch that
+returns findings only. Drafters and that checker scan for placeholders and cross-task
+back-references. `references/delegation.md`'s coordinator duty list gains one bullet for writes
+that persist a dispatch's result or splice dispatch-written files without reading them. Finish
+archives and offers to remove `.devcycle/research/` beside `plan-work/<run id>/`.
+
+**Why:** the merge as first written read every draft body into the coordinator's window, the
+placeholder scan ran nowhere on the delegated path, two coordinator writes contradicted the closed
+duty list, and finish's archive and ephemeral sets omitted two directories the planning change
+began writing.
+
+**Budgets:** the duty bullet grows `references/delegation.md` and every closure that reads it, and
+the `research/` entries grow `playbooks/finishing-the-cycle.md`; the merge and drafter prose in
+`references/delegated-planning.md` grows only `playbooks/planning-waves.md`'s closure, which
+reads it whole. The figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6898
+budget: context-budget.json playbooks/executing-waves.md 117887
+budget: context-budget.json playbooks/finishing-the-cycle.md 50809
+budget: context-budget.json playbooks/learning-from-sessions.md 65597
+budget: context-budget.json playbooks/maintaining-the-repo.md 66219
+budget: context-budget.json playbooks/planning-waves.md 87684
+budget: context-budget.json playbooks/receiving-review.md 121053
+budget: context-budget.json playbooks/reviewing-code.md 99263
+budget: context-budget.json playbooks/scoping-the-request.md 35896
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 94020
+budget: context-budget.json references/delegation.md 11956
+```
+
 ## 2026-11-11 — Planning delegates large plans, lets a task pin interfaces instead of code, and derives Files blocks with a scan (#331, #329, #335)
 
 **Decision:** A `red-green` task may declare `**Detail:** interface-pinned — <reason>` and write its

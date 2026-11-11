@@ -30,11 +30,13 @@ Three rules hold under both engines. A planner derives each task's `Files` block
 `scripts/blast-radius-check.mjs --scan` on the files the task modifies: an advisory pass over every
 text code file, not only JS/TS/Python, that matches the symbols each file declares (plus any
 `--symbol` given) and its basename with or without the extension, and tags each referencer `test`,
-`subclass` or `consumer`. A `red-green` task may declare `**Detail:** interface-pinned — <reason>` and
+`subclass` or `consumer`, and prints which extensions it read and which files are not on disk. A `red-green` task may declare `**Detail:** interface-pinned — <reason>` and
 describe its implementation in prose, as long as its interfaces, its complete failing test code and
 its gate commands stay pinned verbatim. And a large plan is delegated: 3+ independent feasibility
 unknowns run as parallel spikes, and 5+ tasks as parallel per-task drafters, each writing a file under
-`.devcycle/plan-work/<run id>/` that the coordinator merges, per
+`.devcycle/plan-work/<run id>/` that the coordinator splices into the plan by shell concatenation without reading the drafts, then
+checks across tasks (including a scan for placeholders and cross-task back-references) in one checker
+dispatch that returns findings only, per
 [`references/delegated-planning.md`](../../../references/delegated-planning.md). Below both
 thresholds planning runs inline, and the finished plan looks the same either way.
 

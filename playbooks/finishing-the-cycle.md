@@ -149,7 +149,7 @@ verdict the run superseded into `.devcycle/archive-<YYYY-MM-DD>-<branch-slug>/`,
 verdicts for one loop is a defect, not a record.
 
 Then copy into `.devcycle/archive-<YYYY-MM-DD>-<branch-slug>/`: `ledger.md`, and
-the `briefs/`, `evidence/`, `findings/`, `reports/` and `plan-work/<run id>/` directories; move `format-backup-*` there. Use the cycle's own branch name,
+the `briefs/`, `evidence/`, `findings/`, `reports/`, `research/` and `plan-work/<run id>/` directories; move `format-backup-*` there. Use the cycle's own branch name,
 slugified, and today's UTC date. The step asks nothing: it only
 duplicates files this stage already declines to delete, or moves a backup, so it cannot
 lose work or change the finish verdict. A failed copy is reported and the stage continues.
@@ -160,7 +160,7 @@ After the state file is closed above and before the handoff block below, offer t
 files whose only purpose was to pass content between this cycle's dispatches.
 
 1. **Enumerate.** The ephemeral set is exactly: `.devcycle/reports/*`, `.devcycle/evidence/*`,
-   `.devcycle/findings/*`, `.devcycle/plan-work/<run id>/*`, `.devcycle/sweep-args-*.json`, `.devcycle/sweep-report*.json`, and
+   `.devcycle/findings/*`, `.devcycle/plan-work/<run id>/*`, `.devcycle/research/*`, `.devcycle/sweep-args-*.json`, `.devcycle/sweep-report*.json`, and
    any generated per-task brief files. Nothing else is a candidate.
 2. **Show and ask.** Present the list and what it totals — file count and size — and ask for
    confirmation in one question, answered inside a cycle run: an Other answer appends

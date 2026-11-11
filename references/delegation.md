@@ -15,6 +15,8 @@ The coordinator does exactly these things itself, and delegates everything else 
 - append the ledger;
 - append the run record, always via `${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append`;
 - update `.devcycle/state.md`;
+- write files under `.devcycle/` that persist a dispatch's returned result, or that splice
+  dispatch-written files into the plan by shell concatenation without reading them;
 - emit handoff blocks.
 
 The list is positive and closed, so "is this micro-work?" is never a judgment call. Anything
