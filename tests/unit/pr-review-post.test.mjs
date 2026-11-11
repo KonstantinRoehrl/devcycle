@@ -1,13 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { writeFileSync, chmodSync, existsSync } from "node:fs";
+import { writeFileSync, chmodSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import {
   FOOTER_MARKER, footer, withFooter, alreadyPosted, runReply, runResolve, runReview,
+  parkProblems, toSnapshot, compareRestored, runRestorePending, SNAPSHOT_DIR,
 } from "../../scripts/pr-review-post.mjs";
+import { makeRepo, makeFakeBin } from "./helpers.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/pr-review-post.mjs", import.meta.url));
 
@@ -387,4 +389,361 @@ test("runReview's returned commentCount does not throw when comments is nullish 
     login: "octocat", mergeInto: "PRR_z", runner,
   });
   assert.deepEqual(r, { status: "submitted", merged: true, commentCount: 0 });
+});
+
+// --- park and restore-pending -------------------------------------------------------------------
+
+// A normalized pending review as readPendingReview returns it: a line comment and a file comment,
+// both lone top-level comments of `id` on the review's commit.
+function draftReview(id = "PRR_z") {
+  const own = (body) => ({ body, reviewId: id, isReply: false, originalCommitOid: "c0ffee" });
+  return {
+    reviewId: id, pullRequestId: "PR_1", body: "My draft summary.", commitOid: "c0ffee",
+    commentCount: 2, threadsTruncated: false,
+    threads: [
+      { path: "a.js", line: 3, startLine: 1, side: "RIGHT", startSide: "RIGHT", subjectType: "LINE",
+        comments: [own("Rename this.")] },
+      { path: "docs/b.md", line: null, startLine: null, side: "RIGHT", startSide: null, subjectType: "FILE",
+        comments: [own("@team 123")] },
+    ],
+  };
+}
+
+// A temp git repo that ignores .devcycle/, so park may write its snapshot there.
+function ignoringRepo() {
+  const dir = makeRepo();
+  writeFileSync(join(dir, ".gitignore"), ".devcycle/\n");
+  return dir;
+}
+
+const snapshotsIn = (repoDir) => {
+  const dir = join(repoDir, SNAPSHOT_DIR);
+  return existsSync(dir) ? readdirSync(dir).map((n) => join(dir, n)) : [];
+};
+
+// Records every runner call by name. The original review reads back as `review`; the restored one
+// (any other id) as `restored(id)`. `fail` names the calls that throw.
+function parkRunner({ review = draftReview(), restored = draftReview, fail = [], pending = "PRR_z" } = {}) {
+  const calls = [];
+  const call = (name, fn) => (...args) => {
+    calls.push(name);
+    if (fail.includes(name)) throw new Error(`${name} exploded`);
+    return fn(...args);
+  };
+  return {
+    calls,
+    whoami: () => "octocat",
+    findPendingReview: call("findPendingReview", () => pending),
+    readPendingReview: call("readPendingReview", (_repo, _pr, id) => (id === review.reviewId ? review : restored(id))),
+    deletePendingReview: call("deletePendingReview", () => {}),
+    createReview: call("createReview", () => {}),
+    createPendingReview: call("createPendingReview", () => "PRR_new"),
+    addPendingThread: call("addPendingThread", () => {}),
+    addReviewThread: call("addReviewThread", () => {}),
+    submitReview: call("submitReview", () => {}),
+  };
+}
+
+const WRITES = ["deletePendingReview", "createReview", "createPendingReview", "addPendingThread",
+  "addReviewThread", "submitReview"];
+
+const parkArgs = (runner, cwd, extra = {}) => ({
+  repo: "o/n", pr: 7, commitId: "abc123", event: "COMMENT", body: "Summary.",
+  comments: [{ path: "a.js", line: 3, side: "RIGHT", body: "fix this" }],
+  login: "octocat", park: "PRR_z", cwd, runner, ...extra,
+});
+
+test("parkProblems passes a review of lone top-level comments on its own commit", () => {
+  assert.deepEqual(parkProblems(draftReview()), []);
+  assert.deepEqual(parkProblems({ ...draftReview(), threads: [], commentCount: 0 }), []);
+});
+
+test("parkProblems names every shape the restore cannot recreate", () => {
+  const r = draftReview();
+  const [line, file] = r.threads;
+  const reply = { ...line.comments[0], isReply: true };
+  const foreign = { body: "theirs", reviewId: "PRR_other", isReply: false, originalCommitOid: "c0ffee" };
+  const cases = [
+    [{ threads: [{ ...line, comments: [reply] }, file] }, /a reply inside an existing thread on a\.js/],
+    [{ threads: [{ ...line, comments: [foreign, line.comments[0]] }, file] }, /another review's comments/],
+    [{ threads: [{ ...line, comments: [line.comments[0], line.comments[0]] }, file], commentCount: 3 },
+      /2 comments of this review in one thread on a\.js/],
+    [{ threads: [{ ...line, comments: [{ ...line.comments[0], originalCommitOid: "deadbe" }] }, file] },
+      /different commit/],
+    [{ threads: [{ ...line, line: null }, file] }, /a line comment on a\.js with no line/],
+    [{ threadsTruncated: true }, /more review threads/],
+    [{ commentCount: 3 }, /holds 3 comment\(s\) but 2 could be read/],
+  ];
+  for (const [patch, reason] of cases) assert.match(parkProblems({ ...r, ...patch }).join("\n"), reason);
+});
+
+test("compareRestored accepts a faithful restore and ignores whitespace-only body changes", () => {
+  const snapshot = toSnapshot(draftReview(), { repo: "o/n", pr: 7 });
+  const restored = draftReview("PRR_new");
+  restored.threads[0].comments[0].body = "  Rename   this.\n";
+  assert.deepEqual(compareRestored(snapshot, restored), []);
+});
+
+test("compareRestored names a count mismatch, then body, path and line mismatches in order", () => {
+  const snapshot = toSnapshot(draftReview(), { repo: "o/n", pr: 7 });
+  const short = { ...draftReview("PRR_new"), commentCount: 1 };
+  short.threads = short.threads.slice(0, 1);
+  assert.match(compareRestored(snapshot, short)[0], /restored 1 comment\(s\).*holds 2/);
+  const moved = draftReview("PRR_new");
+  moved.threads[0] = { ...moved.threads[0], line: 4, comments: [{ ...moved.threads[0].comments[0], body: "Other." }] };
+  assert.deepEqual(compareRestored(snapshot, moved), [
+    "comment 1 (a.js): body differs",
+    "comment 1 (a.js): restored on line 4, expected 3",
+  ]);
+});
+
+test("park snapshots, deletes, posts, restores and compares in that order, then removes the snapshot", () => {
+  const cwd = ignoringRepo();
+  const runner = parkRunner();
+  const added = [];
+  runner.addPendingThread = (id, c) => { runner.calls.push("addPendingThread"); added.push([id, c]); };
+  const r = runReview(parkArgs(runner, cwd));
+  assert.deepEqual(r, { status: "submitted", parked: true, commentCount: 1 });
+  assert.deepEqual(runner.calls, [
+    "findPendingReview", "readPendingReview", "deletePendingReview", "createReview",
+    "createPendingReview", "addPendingThread", "addPendingThread", "readPendingReview",
+  ]);
+  assert.deepEqual(added.map(([id, c]) => [id, c.path, c.line, c.startLine, c.subjectType]), [
+    ["PRR_new", "a.js", 3, 1, "LINE"],
+    ["PRR_new", "docs/b.md", null, null, "FILE"],
+  ]);
+  assert.deepEqual(snapshotsIn(cwd), []);
+});
+
+test("park with an id other than the found pending review is refused with no writes", () => {
+  for (const pending of ["PRR_other", null]) {
+    const cwd = ignoringRepo();
+    const runner = parkRunner({ pending });
+    assert.throws(() => runReview(parkArgs(runner, cwd)), /refusing to park PRR_z/);
+    assert.deepEqual(runner.calls, ["findPendingReview"]);
+    assert.deepEqual(snapshotsIn(cwd), []);
+  }
+});
+
+test("park with --merge-into is refused before any runner call", () => {
+  const runner = parkRunner();
+  runner.whoami = () => { throw new Error("must not be called"); };
+  assert.throws(() => runReview(parkArgs(runner, ignoringRepo(), { mergeInto: "PRR_z" })), /mutually exclusive/);
+  assert.deepEqual(runner.calls, []);
+});
+
+test("park is refused with no writes where .devcycle/ is not ignored", () => {
+  const cwd = makeRepo();
+  const runner = parkRunner();
+  assert.throws(() => runReview(parkArgs(runner, cwd)), /add \.devcycle\/ to \.gitignore/);
+  assert.equal(runner.calls.some((c) => WRITES.includes(c) || c === "readPendingReview"), false);
+  assert.equal(existsSync(join(cwd, ".devcycle")), false);
+});
+
+test("park is refused while a kept snapshot for the same PR exists", () => {
+  const cwd = ignoringRepo();
+  mkdirSync(join(cwd, SNAPSHOT_DIR), { recursive: true });
+  const kept = join(cwd, SNAPSHOT_DIR, "PRR_old-1.json");
+  writeFileSync(kept, JSON.stringify(toSnapshot(draftReview("PRR_old"), { repo: "o/n", pr: 7 })));
+  const runner = parkRunner();
+  assert.throws(() => runReview(parkArgs(runner, cwd)), /a kept snapshot for o\/n#7 exists/);
+  assert.equal(runner.calls.some((c) => WRITES.includes(c)), false);
+  assert.deepEqual(snapshotsIn(cwd), [kept]);
+});
+
+test("park refuses an unrestorable comment shape before deleting anything", () => {
+  const cwd = ignoringRepo();
+  const review = draftReview();
+  review.threads[0].comments[0].isReply = true;
+  const runner = parkRunner({ review });
+  assert.throws(() => runReview(parkArgs(runner, cwd)), /refusing to park PRR_z[\s\S]*a reply inside an existing thread/);
+  assert.deepEqual(runner.calls, ["findPendingReview", "readPendingReview"]);
+  assert.deepEqual(snapshotsIn(cwd), []);
+});
+
+test("a failed post still restores the draft, keeps the snapshot and names it", () => {
+  const cwd = ignoringRepo();
+  const runner = parkRunner({ fail: ["createReview"] });
+  let message;
+  assert.throws(() => runReview(parkArgs(runner, cwd)), (e) => { message = e.message; return true; });
+  assert.ok(runner.calls.includes("createPendingReview"), "step 5 must run after a failed step 4");
+  const [kept] = snapshotsIn(cwd);
+  assert.ok(kept, "the snapshot must be kept");
+  assert.match(message, /step 4 \(post the agent's review\): createReview exploded/);
+  assert.match(message, /restored as pending and verified/);
+  assert.ok(message.includes(kept));
+});
+
+test("a failed restore keeps the snapshot and names it with the replay command", () => {
+  const cwd = ignoringRepo();
+  const runner = parkRunner({ fail: ["createPendingReview"] });
+  let message;
+  assert.throws(() => runReview(parkArgs(runner, cwd)), (e) => { message = e.message; return true; });
+  const [kept] = snapshotsIn(cwd);
+  assert.ok(kept, "the snapshot must be kept");
+  assert.match(message, /step 5 \(restore your draft\)/);
+  assert.match(message, /NOT restored/);
+  assert.ok(message.includes(`restore-pending --repo o/n --pr 7 --snapshot "${kept}"`));
+  assert.doesNotMatch(message, /delete it on GitHub/);
+});
+
+test("a restore that fails the compare says to delete the partial pending review before replaying", () => {
+  const cwd = ignoringRepo();
+  const runner = parkRunner({ restored: (id) => ({ ...draftReview(id), commentCount: 1, threads: [] }) });
+  assert.throws(() => runReview(parkArgs(runner, cwd)),
+    /step 6 \(compare the restored draft\)[\s\S]*Pending review PRR_new was created but does not match the snapshot: delete it on GitHub first/);
+  assert.equal(snapshotsIn(cwd).length, 1);
+});
+
+function keptSnapshot() {
+  const dir = makeTempDir("prsnap-");
+  const path = join(dir, "PRR_z-1.json");
+  writeFileSync(path, JSON.stringify(toSnapshot(draftReview(), { repo: "o/n", pr: 7 })));
+  return path;
+}
+
+test("restore-pending replays a snapshot and removes it on a verified compare", () => {
+  const snapshotPath = keptSnapshot();
+  const runner = parkRunner({ pending: null });
+  const r = runRestorePending({ repo: "o/n", pr: 7, snapshotPath, runner });
+  assert.deepEqual(r, { status: "restored", commentCount: 2 });
+  assert.deepEqual(runner.calls, [
+    "findPendingReview", "createPendingReview", "addPendingThread", "addPendingThread", "readPendingReview",
+  ]);
+  assert.equal(existsSync(snapshotPath), false);
+});
+
+test("restore-pending refuses while a pending review exists", () => {
+  const snapshotPath = keptSnapshot();
+  const runner = parkRunner({ pending: "PRR_y" });
+  assert.throws(() => runRestorePending({ repo: "o/n", pr: 7, snapshotPath, runner }), /already have pending review PRR_y/);
+  assert.deepEqual(runner.calls, ["findPendingReview"]);
+  assert.equal(existsSync(snapshotPath), true);
+});
+
+test("restore-pending keeps the snapshot on a failed compare", () => {
+  const snapshotPath = keptSnapshot();
+  const runner = parkRunner({ pending: null, restored: (id) => ({ ...draftReview(id), body: "x", commentCount: 0, threads: [] }) });
+  assert.throws(() => runRestorePending({ repo: "o/n", pr: 7, snapshotPath, runner }), /step 6[\s\S]*PRR_new/);
+  assert.equal(existsSync(snapshotPath), true);
+});
+
+// A stateless fake gh for the CLI: one pending review PRR_z owned by octocat, read back under
+// whatever id is asked for; the batched-review POST fails when FAKE_GH_FAIL_POST is set.
+const FAKE_GH = `
+const args = process.argv.slice(2);
+const query = (args.find((a) => a.startsWith("query=")) ?? "").slice(6);
+const id = (args.find((a) => a.startsWith("id=")) ?? "").slice(3);
+const out = (data) => process.stdout.write(JSON.stringify({ data }));
+if (args[1] === "user") process.stdout.write("octocat\\n");
+else if (args.includes("--input")) {
+  if (process.env.FAKE_GH_FAIL_POST) { process.stderr.write("HTTP 422"); process.exit(1); }
+} else if (query.includes("states:[PENDING]"))
+  out({ repository: { pullRequest: { reviews: { nodes: [{ id: "PRR_z", author: { login: "octocat" } }] } } } });
+else if (query.includes("reviewThreads"))
+  out({
+    repository: { pullRequest: { id: "PR_1", reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [
+      { path: "a.js", originalLine: 3, originalStartLine: null, diffSide: "RIGHT", startDiffSide: null, subjectType: "LINE",
+        comments: { nodes: [{ body: "Rename this.", replyTo: null, pullRequestReview: { id }, originalCommit: { oid: "c0ffee" } }] } },
+    ] } } },
+    node: { id, state: "PENDING", body: "My draft.", commit: { oid: "c0ffee" }, comments: { totalCount: 1 } },
+  });
+else if (query.includes("addPullRequestReview("))
+  out({ addPullRequestReview: { pullRequestReview: { id: "PRR_new" } } });
+else out({});
+`;
+
+function runParkCli(extraArgs, { failPost = false } = {}) {
+  const cwd = ignoringRepo();
+  const ghDir = makeFakeBin("gh", FAKE_GH);
+  const bodyFile = join(makeTempDir("prbody-"), "body.md");
+  writeFileSync(bodyFile, "Summary.");
+  const commentsFile = join(makeTempDir("prcomments-"), "comments.json");
+  writeFileSync(commentsFile, "[]");
+  const res = spawnSync(process.execPath, [SCRIPT, "review", "--repo", "o/n", "--pr", "7",
+    "--commit-id", "abc", "--event", "COMMENT", "--body-file", bodyFile, "--comments-file", commentsFile,
+    ...extraArgs], {
+    cwd, encoding: "utf8",
+    env: { ...process.env, PATH: `${ghDir}:${process.env.PATH}`, ...(failPost ? { FAKE_GH_FAIL_POST: "1" } : {}) },
+  });
+  return { res, cwd };
+}
+
+test("CLI review names --merge-into, --park and abort when a pending review exists", () => {
+  const { res } = runParkCli([]);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /--merge-into PRR_z[\s\S]*submit your draft[\s\S]*--park PRR_z[\s\S]*abort/);
+});
+
+test("CLI review --park reports the parked review on success", () => {
+  const { res, cwd } = runParkCli(["--park", "PRR_z"]);
+  assert.equal(res.status, 0, res.stderr);
+  assert.match(res.stdout, /^reviewed 0 comment\(s\)\n.*parked and restored/);
+  assert.deepEqual(snapshotsIn(cwd), []);
+});
+
+test("CLI review --park exits non-zero naming the kept snapshot when the post fails", () => {
+  const { res, cwd } = runParkCli(["--park", "PRR_z"], { failPost: true });
+  assert.equal(res.status, 1);
+  const [kept] = snapshotsIn(cwd);
+  assert.ok(kept, "the snapshot must be kept");
+  assert.ok(res.stderr.includes(kept), res.stderr);
+  assert.match(res.stderr, /step 4/);
+});
+
+test("defaultPostRunner passes park strings with -f, integers with -F, and no anchor for a file-level thread", async () => {
+  const { defaultPostRunner } = await import("../../scripts/pr-review-post.mjs");
+  const seen = [];
+  const exec = (_bin, args) => {
+    seen.push(args);
+    return JSON.stringify({ data: { addPullRequestReview: { pullRequestReview: { id: "PRR_new" } } } });
+  };
+  const runner = defaultPostRunner(exec);
+  assert.equal(runner.createPendingReview("PR_1", "c0ffee", "123"), "PRR_new");
+  runner.addPendingThread("PRR_new", { path: "a.js", line: 3, side: "RIGHT", startLine: null, startSide: null, subjectType: "LINE", body: "@x" });
+  runner.addPendingThread("PRR_new", { path: "b.md", line: null, side: "RIGHT", startLine: null, startSide: null, subjectType: "FILE", body: "true" });
+  runner.deletePendingReview("PRR_z");
+  const flagOf = (args, value) => args[args.indexOf(value) - 1];
+  assert.equal(flagOf(seen[0], "body=123"), "-f");
+  assert.equal(flagOf(seen[1], "body=@x"), "-f");
+  assert.equal(flagOf(seen[1], "line=3"), "-F");
+  assert.equal(seen[1].some((a) => a.startsWith("startLine=")), false);
+  assert.equal(flagOf(seen[2], "body=true"), "-f");
+  assert.equal(seen[2].some((a) => a.startsWith("line=")), false);
+  assert.equal(seen[2].some((a) => a.startsWith("side=")), false, "a file-level thread sends no side");
+  assert.equal(flagOf(seen[2], "subjectType=FILE"), "-f");
+  assert.ok(seen[3].join(" ").includes("deletePullRequestReview"));
+  assert.equal(flagOf(seen[3], "id=PRR_z"), "-f");
+});
+
+test("defaultPostRunner.readPendingReview keeps only the review's threads and maps the thread anchor", async () => {
+  const { defaultPostRunner } = await import("../../scripts/pr-review-post.mjs");
+  const comment = (reviewId, extra = {}) =>
+    ({ body: "b", replyTo: null, pullRequestReview: { id: reviewId }, originalCommit: { oid: "c0ffee" }, ...extra });
+  const payload = { data: {
+    repository: { pullRequest: { id: "PR_1", reviewThreads: { pageInfo: { hasNextPage: true }, nodes: [
+      { path: "a.js", originalLine: 5, originalStartLine: 2, diffSide: "LEFT", startDiffSide: "LEFT", subjectType: "LINE",
+        comments: { nodes: [comment("PRR_other"), comment("PRR_z", { replyTo: { id: "C_1" } })] } },
+      { path: "c.js", originalLine: 1, originalStartLine: null, diffSide: "RIGHT", startDiffSide: null, subjectType: "LINE",
+        comments: { nodes: [comment("PRR_other")] } },
+    ] } } },
+    node: { id: "PRR_z", state: "PENDING", body: "draft", commit: { oid: "c0ffee" }, comments: { totalCount: 1 } },
+  } };
+  const seen = [];
+  const runner = defaultPostRunner((_bin, args) => { seen.push(args); return JSON.stringify(payload); });
+  const review = runner.readPendingReview("o/n", 7, "PRR_z");
+  assert.equal(flagOf(seen[0], "pr=7"), "-F");
+  assert.equal(flagOf(seen[0], "id=PRR_z"), "-f");
+  assert.deepEqual(review, {
+    reviewId: "PRR_z", pullRequestId: "PR_1", body: "draft", commitOid: "c0ffee", commentCount: 1,
+    threadsTruncated: true,
+    threads: [{
+      path: "a.js", line: 5, startLine: 2, side: "LEFT", startSide: "LEFT", subjectType: "LINE",
+      comments: [
+        { body: "b", reviewId: "PRR_other", isReply: false, originalCommitOid: "c0ffee" },
+        { body: "b", reviewId: "PRR_z", isReply: true, originalCommitOid: "c0ffee" },
+      ],
+    }],
+  });
+  function flagOf(args, value) { return args[args.indexOf(value) - 1]; }
 });

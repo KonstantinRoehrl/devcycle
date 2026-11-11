@@ -5,6 +5,25 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-11 — A pending review can be parked and restored around a posted review
+
+**Decision:** `scripts/pr-review-post.mjs review` gains `--park <PRR_…>`, which snapshots the user's
+pending review to an ignored `.devcycle/pending-review-snapshots/` file, deletes it, posts the
+agent's review, then recreates the draft as pending and verifies it. `restore-pending` replays a
+kept snapshot. `playbooks/writing-the-findings-document.md` step 7 asks merge, park or abort, and
+says plainly that merge submits the user's own draft.
+
+**Why:** merge and abort were the only choices, so a user mid-review had to publish an unfinished
+draft or file nothing (#305).
+
+**Budgets:** the three-way step 7 grows `playbooks/writing-the-findings-document.md` by 412 bytes
+and the surface by 5 lines. The figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6938
+budget: context-budget.json playbooks/writing-the-findings-document.md 67603
+```
+
 ## 2026-11-11 — A PR-bound draft may carry the destination repo's own name once the user records it
 
 **Decision:** `scripts/redaction-check.mjs` gains `--repo <owner/name>` (only with `--file`) and

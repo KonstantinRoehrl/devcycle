@@ -99,8 +99,13 @@ Orchestration, once the three conditions hold:
    `${CLAUDE_PLUGIN_ROOT}/scripts/pr-review-post.mjs` — one batched review carrying every inline
    comment plus the summary body, one notification.
 7. **Never clobber a pending review.** When the `review` route reports an existing pending review,
-   surface its `PRR_…` node id and ask: merge into it (`--merge-into <PRR_…>`) or abort. Without an
-   explicit `--merge-into` the route exits non-zero naming that node id and files nothing.
+   surface its `PRR_…` node id and ask one of three. **Merge** (`--merge-into <PRR_…>`) adds the
+   comments to the user's draft and **submits the user's own draft** with them. **Park and
+   restore** (`--park <PRR_…>`) posts this review separately and puts the draft back as pending.
+   **Abort** files nothing. Choosing park is its own confirmation, separate from Gate 2. Without
+   either flag the route exits non-zero naming that node id and files nothing. If park fails, show
+   the route's stderr — it names the kept snapshot and the `restore-pending` command that replays
+   it — and stop.
 8. **Record the write.** Append one `review-writeback` marker via
    `${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append` — finding counts, the verdict event enum,
    and the PR number only; never body text, never a host path.
