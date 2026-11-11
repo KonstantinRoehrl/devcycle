@@ -36,7 +36,7 @@ its gate commands stay pinned verbatim. And a large plan is delegated: 3+ indepe
 unknowns run as parallel spikes, and 5+ tasks as parallel per-task drafters, each writing a file under
 `.devcycle/plan-work/<run id>/` that the coordinator splices into the plan by shell concatenation without reading the drafts, then
 checks across tasks (including a scan for placeholders and cross-task back-references) in one checker
-dispatch that returns findings only, per
+dispatch that writes its findings to a file and returns the path and a count, per
 [`references/delegated-planning.md`](../../../references/delegated-planning.md). Below both
 thresholds planning runs inline, and the finished plan looks the same either way.
 

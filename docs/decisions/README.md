@@ -5,6 +5,28 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-11 — Delegated merge checker writes a findings file, and the merge keeps the plan body unread
+
+**Decision:** The delegated merge's checker dispatch writes its findings to
+`.devcycle/plan-work/<run id>/merge-findings.md` and returns a path and a count, read only when the
+count is above zero. The plan is presented to the user by path with `plan-check`'s result and the
+findings count, with no read of its body. The duty-list bullet in `references/delegation.md` covers
+the splice wherever the plan path is. A spike's envelope states whether its `Design impact:` is
+non-empty, and the coordinator reads that section before the task cut.
+
+**Why:** the plan-under-approval exemption let the coordinator read the whole merged plan on every
+delegated run, undoing the body-free splice, and the inline findings return contradicted the
+envelope rule. The duty bullet named `.devcycle/` while the plan lives under `docs/superpowers/plans/`.
+
+**Budgets:** the merge, spike and drafter clauses and the engine note grow `playbooks/planning-waves.md`'s
+closure by 702 bytes, and the checklist and feasibility-gate pointers grow the surface by 7 lines.
+The figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6905
+budget: context-budget.json playbooks/planning-waves.md 88386
+```
+
 ## 2026-11-11 — Delegated planning merges without reading drafts, and finish archives the work files
 
 **Decision:** Delegated planning's merge is a shell concatenation of the coordinator's header, the

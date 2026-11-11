@@ -28,7 +28,8 @@ Run a short feasibility pass and record an explicit verdict before writing any t
 
 - Can this be built here, with what actually exists? Verify every API, module, tool, document
   section, and convention the spec names against real docs or code — never assume one exists.
-- What are the real unknowns? Spike the riskiest bit if a quick spike can settle it.
+- What are the real unknowns? Spike the riskiest bit if a quick spike can settle it; the
+  thresholds below (Delegated planning) say when spikes run as parallel dispatches.
 - Verdict: **GO**, or **NO-GO** — a stop, not a footnote, since a risk noted inside a detailed plan
   still gets dispatched: name each blocking unknown in plain language, report it for a user decision,
   and write no detailed plan.
@@ -70,7 +71,8 @@ trips, read `${CLAUDE_PLUGIN_ROOT}/references/delegated-planning.md` and follow 
 
 ## Plan mechanics — the native engine (`lean` / `standard`)
 
-Skip this section at `thorough`; the sub-skill supplies it there. **Where the plan goes:**
+Skip this section at `thorough`, except the task template and the No placeholders paragraph the
+override list names, which every engine follows; the sub-skill supplies the rest there. **Where the plan goes:**
 `docs/superpowers/plans/YYYY-MM-DD-<topic>.md`, unless the user prefers another location. A spec
 covering multiple independent subsystems should have been split into sub-project specs during
 brainstorming; if it wasn't, suggest one plan per subsystem, each producing working, testable
@@ -122,8 +124,9 @@ or method no task defines. One exception: a `red-green` task may declare `**Deta
 `**Interfaces:**` block with exact signatures and constants, the complete failing test code (every
 case) in a fenced block, and the exact gate commands with their expected red and green output.
 
-**Self-review — once the plan is complete,** run this checklist yourself (not a subagent dispatch),
-fixing what it finds inline as you go; no re-review pass.
+**Self-review — once the plan is complete,** run this checklist yourself (not a subagent dispatch; on the delegated path the cross-task items run
+as the checker dispatch `references/delegated-planning.md` names), fixing what it finds inline as you go; no
+re-review pass.
 
 1. **Spec coverage:** point each spec requirement at the task that implements it; add a task for gaps.
 2. **Placeholder scan:** search the plan for the failures above and fix them.

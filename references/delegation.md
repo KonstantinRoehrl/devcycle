@@ -15,8 +15,9 @@ The coordinator does exactly these things itself, and delegates everything else 
 - append the ledger;
 - append the run record, always via `${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append`;
 - update `.devcycle/state.md`;
-- write files under `.devcycle/` that persist a dispatch's returned result, or that splice
-  dispatch-written files into the plan by shell concatenation without reading them;
+- write a file that persists a dispatch's returned result, or splice dispatch-written files into
+  the plan by shell concatenation with the coordinator's own header and Dispatch Map, never
+  reading the drafts, wherever the plan path is;
 - emit handoff blocks.
 
 The list is positive and closed, so "is this micro-work?" is never a judgment call. Anything
@@ -97,8 +98,7 @@ The procedure, named rather than restated by the stages that run it:
    either way**: no note about which mode ran, and no docs found is nothing to report.
 5. **Persist the map.** The coordinator writes it to `.devcycle/research/<stage>-map.md`, logged as
    the stage's `research-map` key where `references/stage-log.md` has one; a later dispatch gets that
-   path, never a restatement and never a redo. A spike writes its own file
-   (`references/delegated-planning.md`).
+   path, never a restatement and never a redo.
 
 The coordinator never tells a subagent to go invoke graphify: a subagent's skill list may
 differ from the coordinator's, and content a subagent must fetch can be silently skipped while
