@@ -13,21 +13,27 @@
 //
 // The deny-list stores sha256 hashes so the forbidden terms never appear in the public repo.
 // No failure message ever reprints what it matched — a CI log is as public as the repo.
+//
+// Deny-listed terms are never downgraded: not by --advisory-identity, not by an inline
+// `redaction-allow` marker. The one sanctioned exemption is the recorded per-destination
+// allowance (--repo with --allow-found-terms), scoped to one --file and one --repo: a term that
+// is the destination repo's own name, recorded by hash once the user has confirmed it.
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync, readdirSync, existsSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync, existsSync, statSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 
 const args = process.argv.slice(2);
-// --auto-redact and --advisory-identity are the valueless flags here; --hashes names a deny-list
-// file and takes one. Declaring that arity is what stops `--dir <clean> --auto-redact <leaky>`
-// from scanning only the clean corpus and printing `redaction: ok` over a leaky one it never
-// opened.
+// --auto-redact, --advisory-identity and --allow-found-terms are the valueless flags here; --hashes
+// names a deny-list file and takes one, as --repo takes a destination. Declaring that arity is what
+// stops `--dir <clean> --auto-redact <leaky>` from scanning only the clean corpus and printing
+// `redaction: ok` over a leaky one it never opened.
 const KNOWN_FLAGS = {
   "--file": "value", "--dir": "value", "--hashes": "value", "--auto-redact": "none",
-  "--advisory-identity": "none",
+  "--advisory-identity": "none", "--repo": "value", "--allow-found-terms": "none",
 };
 // Flag parsing lives in cli-flags.mjs, which owns it for every script here. This script keeps its
 // own message prefix and exit code by catching what that module throws: an unknown flag (a typo
@@ -71,6 +77,27 @@ const autoRedact = "--auto-redact" in flags;
 // gitignored local-only corpus (`.devcycle/`) where those forms are the expected shape, not a
 // leak. Deny-listed terms are NEVER downgraded: a real secret is a leak in any corpus.
 const advisoryIdentity = "--advisory-identity" in flags;
+// The destination a --file draft will be posted to, as `owner/name`. Its recorded allowance is
+// subtracted from the deny-list for this one scan; without --repo the store is never read.
+const repo = read("--repo");
+// Records every deny-listed term found in the --file draft as allowed for --repo. Callers pass it
+// only after the user has confirmed the term is the destination repo's own name.
+const allowFoundTerms = "--allow-found-terms" in flags;
+
+// An allowance is for one draft bound for one destination, never a corpus: --repo with --dir or
+// the tracked tree would exempt a term from every file in it.
+if (repo !== undefined && (!file || dir !== undefined)) {
+  console.error("redaction-check: --repo applies only to a single --file draft, never with --dir");
+  process.exit(1);
+}
+if (repo !== undefined && !/^[^/]+\/[^/]+$/.test(repo)) {
+  console.error("redaction-check: --repo must be owner/name");
+  process.exit(1);
+}
+if (allowFoundTerms && (!file || repo === undefined)) {
+  console.error("redaction-check: --allow-found-terms requires --file and --repo");
+  process.exit(1);
+}
 
 // --auto-redact rewrites files in place, and a scan pattern has known false positives (a public
 // UUID, a URL containing "/Users/"). Without an explicit corpus, listFiles() falls back to
@@ -96,6 +123,49 @@ const hashes = new Set(
   readFileSync(hashesPath, "utf8").split("\n").map((l) => l.trim()).filter(Boolean)
 );
 const sha = (s) => createHash("sha256").update(s).digest("hex");
+// The one tokenizer every deny-list lookup uses — scan, rewrite and allowance recording — so a
+// term recorded as allowed is exactly a term the scan would have flagged.
+const tokensOf = (text) => new Set(text.toLowerCase().match(/[a-z][a-z0-9_-]{3,}/g) ?? []);
+
+// The per-destination allowance store: lower-cased `owner/name` -> sorted deny-list hashes allowed
+// in drafts posted there. Hashes only, never a term, and outside every repo, so it is never
+// published. Overridable for tests, as DEVCYCLE_RUNS_DIR is in run-record.mjs.
+const ALLOW_FILE =
+  process.env.DEVCYCLE_REDACTION_ALLOW_FILE ?? join(homedir(), ".claude", "devcycle", "redaction-allow.json");
+const repoKey = repo?.toLowerCase();
+let denied = hashes;
+if (repoKey !== undefined) {
+  let store = {};
+  if (existsSync(ALLOW_FILE)) {
+    try {
+      store = JSON.parse(readFileSync(ALLOW_FILE, "utf8"));
+    } catch (err) {
+      console.error(`redaction-check: cannot read the allowance store ${ALLOW_FILE} (${err.message})`);
+      process.exit(1);
+    }
+  }
+  const allowed = new Set(store[repoKey] ?? []);
+  if (allowFoundTerms) {
+    let draft;
+    try {
+      draft = readFileSync(file, "utf8");
+    } catch (err) {
+      console.error(`redaction-check: cannot read ${basename(file)} (${err.code ?? err.message})`);
+      process.exit(1);
+    }
+    const before = allowed.size;
+    for (const hash of [...tokensOf(draft)].map(sha)) if (hashes.has(hash)) allowed.add(hash);
+    store[repoKey] = [...allowed].sort();
+    mkdirSync(dirname(ALLOW_FILE), { recursive: true });
+    writeFileSync(ALLOW_FILE, JSON.stringify(store, null, 2) + "\n");
+    // A count only: the term is what this script never prints, and its hash would name it to
+    // anyone holding the deny-list.
+    process.stderr.write(
+      `redaction-check: recorded ${allowed.size - before} deny-listed term(s) as allowed for this --repo\n`
+    );
+  }
+  denied = new Set([...hashes].filter((h) => !allowed.has(h)));
+}
 
 // Patterns are assembled from fragments so this file never matches itself — the self-exemption
 // above is a second line of defence, not the only one.
@@ -138,8 +208,8 @@ function redactText(text) {
   let out = text;
   let count = 0;
   for (const { re, to } of REDACTIONS) out = out.replace(re, () => { count++; return to; });
-  for (const token of new Set(out.toLowerCase().match(/[a-z][a-z0-9_-]{3,}/g) ?? [])) {
-    if (!hashes.has(sha(token))) continue;
+  for (const token of tokensOf(out)) {
+    if (!denied.has(sha(token))) continue;
     const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     out = out.replace(new RegExp("\\b" + escaped + "\\b", "gi"), () => { count++; return "<redacted-term>"; });
   }
@@ -226,8 +296,8 @@ for (const f of files) {
     const msg = `${f}: contains ${cls} (redact it)`;
     (advisoryIdentity ? advisories : errors).push(msg);
   }
-  for (const token of new Set(text.toLowerCase().match(/[a-z][a-z0-9_-]{3,}/g) ?? []))
-    if (hashes.has(sha(token))) errors.push(`${f}: contains a deny-listed term ("${token[0]}…", redact it)`);
+  for (const token of tokensOf(text))
+    if (denied.has(sha(token))) errors.push(`${f}: contains a deny-listed term ("${token[0]}…", redact it)`);
 }
 
 // Report every in-place mutation by file and span count (never the redacted text — a log is as

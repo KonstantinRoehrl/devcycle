@@ -5,6 +5,68 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-11 — A pending review can be parked and restored around a posted review
+
+**Decision:** `scripts/pr-review-post.mjs review` gains `--park <PRR_…>`, which snapshots the user's
+pending review to an ignored `.devcycle/pending-review-snapshots/` file, deletes it, posts the
+agent's review, then recreates the draft as pending and verifies it. `restore-pending` replays a
+kept snapshot. `playbooks/writing-the-findings-document.md` step 7 asks merge, park or abort, and
+says plainly that merge submits the user's own draft.
+
+**Why:** merge and abort were the only choices, so a user mid-review had to publish an unfinished
+draft or file nothing (#305).
+
+**Budgets:** the three-way step 7 grows `playbooks/writing-the-findings-document.md` by 412 bytes
+and the surface by 5 lines. The figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6938
+budget: context-budget.json playbooks/writing-the-findings-document.md 67603
+```
+
+## 2026-11-11 — A PR-bound draft may carry the destination repo's own name once the user records it
+
+**Decision:** `scripts/redaction-check.mjs` gains `--repo <owner/name>` (only with `--file`) and
+`--allow-found-terms`, backed by a local per-destination allowance of deny-list hashes outside every
+repo. `references/review-comments.md` gains § The destination-name allowance, the one owner of
+which screens pass `--repo` and of the single question that records an allowance; the reconcile
+reply screens and the write-back filing screen pass `--repo` and point to it.
+
+**Why:** one deny-listed term is the name of the company that owns a host repo, so every reply or
+review draft posted there failed the screen and was waived by hand each time. A repo's
+`owner/name` cannot be relied on to contain that word, so the allowance is recorded once per
+destination on the user's answer instead of derived.
+
+**Budgets:** the new section grows `references/review-comments.md` by 14 lines; the two playbooks
+that read it carry the closure growth, and the call-site edits add 4 surface lines. The figures
+below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6933
+budget: context-budget.json playbooks/receiving-review.md 122347
+budget: context-budget.json playbooks/writing-the-findings-document.md 67191
+```
+
+## 2026-11-11 — A reply is skipped only when an identical body is already posted under the footer marker
+
+**Decision:** `pr-review-post.mjs` skips a threaded reply only when a reply to the same comment
+carries the attribution-footer marker and the same normalized body; a different reply to the same
+thread is posted. Both skip paths report `identical-reply-posted`, and `references/review-comments.md`
+says so in its reply contract and its Attribution-footer pinned constant.
+
+**Why:** the marker alone matched any earlier stamped reply on the thread, so a second, different
+reply was silently dropped and the CLI still exited 0 (#307).
+
+**Budgets:** the reworded contract and pinned constant grow `references/review-comments.md` by
+73 bytes and the surface by two lines; both playbooks that cite it carry the closure growth. The
+figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6915
+budget: context-budget.json playbooks/receiving-review.md 121456
+budget: context-budget.json playbooks/writing-the-findings-document.md 66341
+```
+
 ## 2026-11-11 — The duty bullet gets a location bound, the thorough carve-out names every section it depends on, and result-file dispatches get an envelope
 
 **Decision:** The coordinator-duty bullet in `references/delegation.md` bounds a persisted result to

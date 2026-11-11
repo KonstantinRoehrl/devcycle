@@ -111,11 +111,12 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/pr-review-post.mjs" reply --repo <owner/name
 ```
 
 Both invocations apply the attribution footer structurally (see "Attribution footer" under
-"Pinned constants" below) and skip a reply already posted under that footer's marker — never a
-hand-built `gh api …/replies` or `gh pr comment` call. Neither passes a posting identity:
-`pr-review-post.mjs` derives it from the authenticated account, and `--login` is accepted only as
-an optional assertion that aborts the post when it disagrees with that account. The same
-`--repo <owner/name>` resolution rule above carries from the intake call's own `--repo` argument.
+"Pinned constants" below) and skip a reply only when an identical body is already posted under
+that footer's marker — never a hand-built `gh api …/replies` or `gh pr comment` call. Neither
+passes a posting identity: `pr-review-post.mjs` derives it from the authenticated account, and
+`--login` is accepted only as an optional assertion that aborts the post when it disagrees with
+that account. The same `--repo <owner/name>` resolution rule above carries from the intake call's
+own `--repo` argument.
 
 **The `.devcycle/reopen-request.md` shape** (written for a contested `conflicts-with-spec`
 item, consumed at §6.4 / §6.6 to recommend a rewind to `stage: brainstorm`):
@@ -148,14 +149,29 @@ and marker are not restated here; this subsection only names that the footer app
 comment-body rendered through this contract. The footer marks **only** Claude-authored comments; a
 human reviewer's own comments are never stamped with it.
 
+## The destination-name allowance
+
+Only a draft posted to the PR's own repo is screened with `--repo <owner/name>` — the same value
+its `pr-review-post.mjs` call takes. Every other screen runs without it. When that screen fails on
+deny-listed terms alone, with no machine-identity class, ask ONE `AskUserQuestion`:
+
+- **Allow for <owner/name>** — this is the destination repo's own name; record it so it is never
+  asked again for that repo, by rerunning the screen with `--allow-found-terms` added;
+- **Redact it**;
+- **Drop the draft**.
+
+A failure that includes a machine-identity class never offers the allowance, and nothing records an
+allowance without that answer.
+
 ## Pinned constants
 
 - **Attribution footer.** Every posted reply/comment ends with the exact literal
   `\n\n---\n🤖 Posted by Claude Code on behalf of @<login>`; the stable, login-independent
   marker `🤖 Posted by Claude Code on behalf of` is what `pr-review-post.mjs` matches on to skip
-  a reply already posted. `<login>` is the derived posting identity above, never hardcoded. This
-  file **declares** the literal and marker as the contract; the exported constant's body lives in
-  and is owned by `pr-review-post.mjs` — never hand-typed into a draft.
+  a reply only when an identical body is already posted under it. `<login>` is the derived
+  posting identity above, never hardcoded. This file **declares** the literal and marker as the
+  contract; the exported constant's body lives in and is owned by `pr-review-post.mjs` — never
+  hand-typed into a draft.
 - **Frontier = 25.** At most 25 classified items are shown at the confirmation gate; beyond
   that, remaining items are **named and deferred**, never silently truncated. This is this
   file's own literal — `playbooks/writing-the-findings-document.md` carries no numeric
