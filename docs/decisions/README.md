@@ -5,6 +5,48 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-11 — Planning delegates large plans, lets a task pin interfaces instead of code, and derives Files blocks with a scan (#331, #329, #335)
+
+**Decision:** A `red-green` task may declare `**Detail:** interface-pinned — <reason>` and write its
+implementation steps as prose, while its interfaces, failing test code and gate commands stay pinned;
+`briefCompleteness` fails a Detail line with no reason, on another evidence class, or with no fenced
+block. A plan past 3+ independent feasibility unknowns or 5+ tasks delegates that half to parallel
+spike or drafter dispatches that write files under `.devcycle/plan-work/<run id>/`, per the new
+`references/delegated-planning.md`, which only planning cites. A planner derives each Files block with
+`blast-radius-check.mjs --scan`, an advisory pass over every text code file that matches declared
+symbols and the basename with or without its extension. The `blastRadius` gate keeps its JS/TS/Python
+basename match, now stated as such, and each finding names the task that declares the changed file.
+Every research map is persisted under `.devcycle/research/` and passed by path.
+
+**Why:** planning subagents peaked at 413k–747k tokens. Writing full code for a design-heavy task cost
+about as much as implementing it, a large replan ran as one serial dispatch with no persisted
+research, and Files blocks undercounted shared components because the gate's coverage was narrower
+than its header claimed and nothing told the planner how to derive the block.
+
+**Budgets:** the new reference joins `playbooks/planning-waves.md`'s closure whole, alongside the
+thresholds, the scan rule, the interface-pinned exception and the engine-override additions. The
+persistence step grows `references/delegation.md` and every closure that reads it; the planning
+row's new stage-log keys grow every closure that reads `references/stage-log.md`; the
+`plan-work/<run id>/` archive and ephemeral entries grow `playbooks/finishing-the-cycle.md`. The new
+reference is read by one file, so it carries no entry of its own.
+
+```text
+budget: surface-budget.json surfaceTotal 6891
+budget: context-budget.json commands/cycle.md 86908
+budget: context-budget.json playbooks/executing-waves.md 117712
+budget: context-budget.json playbooks/finishing-the-cycle.md 50772
+budget: context-budget.json playbooks/learning-from-sessions.md 65422
+budget: context-budget.json playbooks/maintaining-the-repo.md 66044
+budget: context-budget.json playbooks/planning-waves.md 86955
+budget: context-budget.json playbooks/receiving-review.md 120878
+budget: context-budget.json playbooks/reviewing-code.md 99088
+budget: context-budget.json playbooks/reviewing-the-branch.md 59668
+budget: context-budget.json playbooks/scoping-the-request.md 35721
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 93845
+budget: context-budget.json playbooks/verifying-on-device.md 66121
+budget: context-budget.json references/delegation.md 11781
+```
+
 ## 2026-11-08 — reviewDepth binds through a script: risk-based auto asks before a panel, and the launcher refuses one the knob never allowed
 
 **Decision:** `scripts/review-depth.mjs` decides the review engine and writes a decision record,

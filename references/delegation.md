@@ -93,6 +93,10 @@ The procedure, named rather than restated by the stages that run it:
    entries judged relevant.
 4. **Read-only either way** — never trigger a graphify build or `--update` — and **silent
    either way**: no note about which mode ran, and no docs found is nothing to report.
+5. **Persist the map.** The coordinator writes it to `.devcycle/research/<stage>-map.md`, logged as
+   the stage's `research-map` key where `references/stage-log.md` has one; a later dispatch gets that
+   path, never a restatement and never a redo. A spike writes its own file
+   (`references/delegated-planning.md`).
 
 The coordinator never tells a subagent to go invoke graphify: a subagent's skill list may
 differ from the coordinator's, and content a subagent must fetch can be silently skipped while
