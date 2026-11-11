@@ -292,7 +292,9 @@ export function compareRestored(snapshot, restored) {
 }
 
 // Steps 5 and 6: recreate the pending review from a snapshot, then re-read and compare it. Never
-// throws -- the caller needs to know, either way, whether a pending review now exists.
+// throws -- the caller needs to know, either way, whether a pending review now exists. A mismatch on
+// a truncated re-read is `inconclusive`: the draft was recreated, but the PR's thread page was too
+// short to read all of it back.
 function restoreSnapshot(snapshot, { repo, pr, runner }) {
   let reviewId = null;
   let step = "step 5 (restore your draft)";
@@ -300,8 +302,9 @@ function restoreSnapshot(snapshot, { repo, pr, runner }) {
     reviewId = runner.createPendingReview(snapshot.pullRequestId, snapshot.commitOid, snapshot.body);
     for (const c of snapshot.comments) runner.addPendingThread(reviewId, c);
     step = "step 6 (compare the restored draft)";
-    const problems = compareRestored(snapshot, runner.readPendingReview(repo, pr, reviewId));
-    return { reviewId, step, problems };
+    const restored = runner.readPendingReview(repo, pr, reviewId);
+    const problems = compareRestored(snapshot, restored);
+    return { reviewId, step, problems, inconclusive: problems.length > 0 && restored.threadsTruncated };
   } catch (e) {
     return { reviewId, step, problems: [e.message] };
   }
@@ -311,6 +314,10 @@ const replayCommand = ({ snapshotPath, repo, pr }) =>
   `node "${SCRIPT_PATH}" restore-pending --repo ${repo} --pr ${pr} --snapshot "${snapshotPath}"`;
 
 function replayAdvice({ restore, snapshotPath, repo, pr }) {
+  if (restore.inconclusive)
+    return `Pending review ${restore.reviewId} was created but could not be verified, because the PR has more ` +
+      `than one page of review threads (${restore.problems.join("; ")}). Check pending review ` +
+      `${restore.reviewId} on GitHub; the snapshot is kept at ${snapshotPath} until you have.`;
   const partial = restore.reviewId
     ? ` Pending review ${restore.reviewId} was created but does not match the snapshot: delete it on GitHub first.`
     : "";

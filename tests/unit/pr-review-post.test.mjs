@@ -595,6 +595,49 @@ test("a restore that fails the compare says to delete the partial pending review
   assert.equal(snapshotsIn(cwd).length, 1);
 });
 
+// A re-read that hit GitHub's one-page thread limit: only the first thread of the restored review
+// comes back, though the review itself reports both comments.
+const truncatedRead = (id) => {
+  const full = draftReview(id);
+  return { ...full, threadsTruncated: true, threads: full.threads.slice(0, 1) };
+};
+
+function assertUnverified(message, { snapshot, reviewId }) {
+  assert.match(message, new RegExp(`pending review ${reviewId} was created`, "i"));
+  assert.match(message, /could not be verified[\s\S]*more than one page of review threads/);
+  assert.match(message, new RegExp(`check pending review ${reviewId} on GitHub`, "i"));
+  assert.ok(message.includes(snapshot), "the snapshot path must be named");
+  assert.doesNotMatch(message, /NOT restored/);
+  assert.doesNotMatch(message, /delete/i);
+}
+
+test("a park whose re-read is truncated and short keeps the snapshot and does not say the draft was lost", () => {
+  const cwd = ignoringRepo();
+  const runner = parkRunner({ restored: truncatedRead });
+  let message;
+  assert.throws(() => runReview(parkArgs(runner, cwd)), (e) => { message = e.message; return true; });
+  const [kept] = snapshotsIn(cwd);
+  assert.ok(kept, "the snapshot must be kept");
+  assert.match(message, /step 6 \(compare the restored draft\)/);
+  assertUnverified(message, { snapshot: kept, reviewId: "PRR_new" });
+});
+
+test("a truncated re-read whose comments all match is a verified restore", () => {
+  const cwd = ignoringRepo();
+  const runner = parkRunner({ restored: (id) => ({ ...draftReview(id), threadsTruncated: true }) });
+  assert.deepEqual(runReview(parkArgs(runner, cwd)), { status: "submitted", parked: true, commentCount: 1 });
+  assert.deepEqual(snapshotsIn(cwd), []);
+});
+
+test("CLI review --park exits non-zero naming the kept snapshot when the re-read is truncated and short", () => {
+  const { res, cwd } = runParkCli(["--park", "PRR_z"], { truncateRestore: true });
+  assert.equal(res.status, 1);
+  const [kept] = snapshotsIn(cwd);
+  assert.ok(kept, "the snapshot must be kept");
+  assert.ok(res.stderr.includes(kept), res.stderr);
+  assert.doesNotMatch(res.stderr, /NOT restored|delete/i);
+});
+
 function keptSnapshot() {
   const dir = makeTempDir("prsnap-");
   const path = join(dir, "PRR_z-1.json");
@@ -628,8 +671,25 @@ test("restore-pending keeps the snapshot on a failed compare", () => {
   assert.equal(existsSync(snapshotPath), true);
 });
 
+test("restore-pending keeps the snapshot and does not say the draft was lost when the re-read is truncated and short", () => {
+  const snapshotPath = keptSnapshot();
+  const runner = parkRunner({ pending: null, restored: truncatedRead });
+  let message;
+  assert.throws(() => runRestorePending({ repo: "o/n", pr: 7, snapshotPath, runner }), (e) => { message = e.message; return true; });
+  assert.equal(existsSync(snapshotPath), true);
+  assertUnverified(message, { snapshot: snapshotPath, reviewId: "PRR_new" });
+});
+
+test("restore-pending removes the snapshot when a truncated re-read still matches in full", () => {
+  const snapshotPath = keptSnapshot();
+  const runner = parkRunner({ pending: null, restored: (id) => ({ ...draftReview(id), threadsTruncated: true }) });
+  assert.deepEqual(runRestorePending({ repo: "o/n", pr: 7, snapshotPath, runner }), { status: "restored", commentCount: 2 });
+  assert.equal(existsSync(snapshotPath), false);
+});
+
 // A stateless fake gh for the CLI: one pending review PRR_z owned by octocat, read back under
-// whatever id is asked for; the batched-review POST fails when FAKE_GH_FAIL_POST is set.
+// whatever id is asked for; the batched-review POST fails when FAKE_GH_FAIL_POST is set, and a read
+// of any other review id returns a truncated thread page with no threads when FAKE_GH_TRUNCATE_RESTORE is.
 const FAKE_GH = `
 const args = process.argv.slice(2);
 const query = (args.find((a) => a.startsWith("query=")) ?? "").slice(6);
@@ -640,20 +700,21 @@ else if (args.includes("--input")) {
   if (process.env.FAKE_GH_FAIL_POST) { process.stderr.write("HTTP 422"); process.exit(1); }
 } else if (query.includes("states:[PENDING]"))
   out({ repository: { pullRequest: { reviews: { nodes: [{ id: "PRR_z", author: { login: "octocat" } }] } } } });
-else if (query.includes("reviewThreads"))
+else if (query.includes("reviewThreads")) {
+  const truncated = Boolean(process.env.FAKE_GH_TRUNCATE_RESTORE) && id !== "PRR_z";
   out({
-    repository: { pullRequest: { id: "PR_1", reviewThreads: { pageInfo: { hasNextPage: false }, nodes: [
+    repository: { pullRequest: { id: "PR_1", reviewThreads: { pageInfo: { hasNextPage: truncated }, nodes: truncated ? [] : [
       { path: "a.js", originalLine: 3, originalStartLine: null, diffSide: "RIGHT", startDiffSide: null, subjectType: "LINE",
         comments: { nodes: [{ body: "Rename this.", replyTo: null, pullRequestReview: { id }, originalCommit: { oid: "c0ffee" } }] } },
     ] } } },
     node: { id, state: "PENDING", body: "My draft.", commit: { oid: "c0ffee" }, comments: { totalCount: 1 } },
   });
-else if (query.includes("addPullRequestReview("))
+} else if (query.includes("addPullRequestReview("))
   out({ addPullRequestReview: { pullRequestReview: { id: "PRR_new" } } });
 else out({});
 `;
 
-function runParkCli(extraArgs, { failPost = false } = {}) {
+function runParkCli(extraArgs, { failPost = false, truncateRestore = false } = {}) {
   const cwd = ignoringRepo();
   const ghDir = makeFakeBin("gh", FAKE_GH);
   const bodyFile = join(makeTempDir("prbody-"), "body.md");
@@ -664,7 +725,8 @@ function runParkCli(extraArgs, { failPost = false } = {}) {
     "--commit-id", "abc", "--event", "COMMENT", "--body-file", bodyFile, "--comments-file", commentsFile,
     ...extraArgs], {
     cwd, encoding: "utf8",
-    env: { ...process.env, PATH: `${ghDir}:${process.env.PATH}`, ...(failPost ? { FAKE_GH_FAIL_POST: "1" } : {}) },
+    env: { ...process.env, PATH: `${ghDir}:${process.env.PATH}`, ...(failPost ? { FAKE_GH_FAIL_POST: "1" } : {}),
+      ...(truncateRestore ? { FAKE_GH_TRUNCATE_RESTORE: "1" } : {}) },
   });
   return { res, cwd };
 }
