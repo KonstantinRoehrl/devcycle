@@ -7,7 +7,7 @@
 // any other language, or one that imports `./foo` without the extension, is never seen. `--scan`
 // is the planner's wider, advisory pass over the same walk. See playbooks/planning-waves.md.
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
-import { join, basename, extname, relative, sep } from "node:path";
+import { join, basename, extname, relative, resolve, isAbsolute, sep, posix } from "node:path";
 import { taskBlocks, taskFileMap, TEST_FILE_SUFFIXES, normalizeFileToken, isTestPath } from "./task-files.mjs";
 import { parseFlags } from "./cli-flags.mjs";
 import { isMain } from "./is-main.mjs";
@@ -196,9 +196,10 @@ function classify(path, content, inherits) {
   return "consumer";
 }
 
-// One entry per changed file, in argument order: the names searched, the auto-extracted names
-// skipped, and per name or basename the referencers that matched it, each tagged test, subclass or
-// consumer. A changed file that does not exist yet (a task creates it) is matched by name only.
+// One entry per changed file, in argument order: whether it is on disk and whether symbols could be
+// extracted from its type, the names searched, the auto-extracted names skipped, and per name or
+// basename the referencers that matched it, each tagged test, subclass or consumer. A changed file
+// that does not exist yet (a task creates it) is matched by name only.
 export function scanReferencers({ changed, symbols = [], repoRoot }) {
   const codeFiles = walk(repoRoot)
     .map((p) => relative(repoRoot, p).split(sep).join("/"))
@@ -216,7 +217,9 @@ export function scanReferencers({ changed, symbols = [], repoRoot }) {
     return contents.get(path);
   };
   return changed.map((file) => {
-    const own = SCAN_CODE_EXT.has(extname(file)) && existsSync(join(repoRoot, file)) ? extractSymbols(read(file) ?? "") : [];
+    const onDisk = existsSync(join(repoRoot, file));
+    const parsed = SCAN_CODE_EXT.has(extname(file));
+    const own = parsed && onDisk ? extractSymbols(read(file) ?? "") : [];
     const skipped = own.filter(isStoplisted);
     const names = [...new Set([...own.filter((n) => !isStoplisted(n)), ...symbols])];
     const base = basename(file);
@@ -239,14 +242,22 @@ export function scanReferencers({ changed, symbols = [], repoRoot }) {
       }
       if (referencers.length) groups.push({ match, referencers });
     }
-    return { file, symbols: names, skipped, groups };
+    return { file, onDisk, parsed, symbols: names, skipped, groups };
   });
 }
 
 export function formatScan(results) {
-  const lines = ["blast-radius-check: scan (advisory) -- put every referencer below in the task's Files block, or record a Blast-radius override with a reason"];
-  for (const { file, symbols, skipped, groups } of results) {
+  const lines = [
+    "blast-radius-check: scan (advisory) -- put every referencer below in the task's Files block, or record a Blast-radius override with a reason",
+    `referencers are searched only in files ending ${[...SCAN_CODE_EXT].sort().join(", ")}; files of any other type are never read`,
+  ];
+  for (const { file, onDisk, parsed, symbols, skipped, groups } of results) {
     lines.push(file);
+    if (!onDisk) lines.push("  not on disk -- matched by name only");
+    else if (!parsed) {
+      const ext = extname(file);
+      lines.push(`  no symbols extracted from ${ext ? `a ${ext} file` : "a file with no extension"} -- referencers matched by file name only`);
+    }
     lines.push(`  symbols: ${symbols.join(", ") || "(none)"}${skipped.length ? ` (skipped: ${skipped.join(", ")})` : ""}`);
     if (groups.length === 0) lines.push("  no referencers found");
     for (const { match, referencers } of groups) {
@@ -259,6 +270,13 @@ export function formatScan(results) {
 
 const SCAN_FLAGS = { "--scan": "none", "--symbol": "repeat", "--root": "value" };
 const SCAN_USAGE = "usage: node scripts/blast-radius-check.mjs --scan <changed-file>... [--symbol <name>]... [--root <repo-root>]";
+
+// A changed-file argument as a repo-relative POSIX path, or null when it points outside `repoRoot`.
+export function normalizeScanPath(raw, repoRoot) {
+  const folded = raw.replaceAll("\\", "/");
+  const relativePath = isAbsolute(folded) ? relative(resolve(repoRoot), folded).split(sep).join("/") : posix.normalize(folded);
+  return relativePath === ".." || relativePath.startsWith("../") || isAbsolute(relativePath) ? null : relativePath;
+}
 
 function scanMain(argv) {
   let parsed;
@@ -273,7 +291,17 @@ function scanMain(argv) {
     console.error(`blast-radius-check: --scan needs at least one changed file\n${SCAN_USAGE}`);
     process.exit(1);
   }
-  const results = scanReferencers({ changed: positionals, symbols: flags["--symbol"] ?? [], repoRoot: flags["--root"] ?? process.cwd() });
+  const repoRoot = flags["--root"] ?? process.cwd();
+  const changed = [];
+  for (const raw of positionals) {
+    const file = normalizeScanPath(raw, repoRoot);
+    if (file === null) {
+      console.error(`blast-radius-check: ${raw} is outside the repo root ${repoRoot}`);
+      process.exit(1);
+    }
+    changed.push(file);
+  }
+  const results = scanReferencers({ changed, symbols: flags["--symbol"] ?? [], repoRoot });
   console.log(formatScan(results));
   process.exit(0);
 }

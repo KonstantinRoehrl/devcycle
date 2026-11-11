@@ -432,7 +432,7 @@ test("--scan reports a changed file no referencer names, and one that does not e
   const r = scan(repo, "src/alone.mjs", "src/created-later.mjs");
   assert.equal(r.code, 0);
   assert.match(r.out, /src\/alone\.mjs\n {2}symbols: lonelyThing\n {2}no referencers found/);
-  assert.match(r.out, /src\/created-later\.mjs\n {2}symbols: \(none\)\n {2}no referencers found/);
+  assert.match(r.out, /src\/created-later\.mjs\n {2}not on disk -- matched by name only\n {2}symbols: \(none\)\n {2}no referencers found/);
 });
 
 test("--scan with no changed file is a usage error", () => {
@@ -456,4 +456,62 @@ test("--scan takes only an ES module's exports, declared inline or in an export 
   assert.equal(r.code, 0);
   assert.match(r.out, /symbols: listedThing, inlineThing\n/);
   assert.doesNotMatch(r.out, /helperWalk|other\.mjs/);
+});
+
+// --- --scan: the output says what it did not look at ---
+
+test("--scan names the extensions it reads, directly under the header, and that other files are never read", () => {
+  const r = scan(makeRepo({ "a.mjs": "export function aThing() {}\n" }), "a.mjs");
+  const [header, coverage] = r.out.split("\n");
+  assert.match(header, /^blast-radius-check: scan \(advisory\)/);
+  assert.match(coverage, /referencers are searched only in files ending .*\.c, \.cc, .*\.mjs, .*\.ts/);
+  assert.match(coverage, /files of any other type are never read/);
+  assert.equal(r.out.split("never read").length - 1, 1, "the coverage line appears once, not per file");
+});
+
+test("--scan labels a changed file that is not on disk as matched by name only", () => {
+  const repo = makeRepo({ "src/alone.mjs": "export function lonelyThing() {}\n" });
+  const r = scan(repo, "src/alone.mjs", "src/typo.mjs");
+  assert.equal(r.code, 0);
+  assert.match(r.out, /\nsrc\/typo\.mjs\n {2}not on disk -- matched by name only\n/);
+  assert.doesNotMatch(r.out, /src\/alone\.mjs\n {2}not on disk/);
+});
+
+test("--scan says no symbols were extracted from a changed file of a type it does not parse", () => {
+  const repo = makeRepo({ "src/q.sql": "select 1;\n", "src/page.xml": '<a src="q.sql"/>\n', "Makefile": "all:\n" });
+  const r = scan(repo, "src/q.sql", "Makefile");
+  assert.equal(r.code, 0);
+  assert.match(r.out, /\nsrc\/q\.sql\n {2}no symbols extracted from a \.sql file -- referencers matched by file name only\n/);
+  assert.match(r.out, /\nMakefile\n {2}no symbols extracted from a file with no extension -- referencers matched by file name only\n/);
+  assert.doesNotMatch(r.out, /page\.xml/, "an .xml referencer is never read, which the coverage line states");
+});
+
+test("--scan folds ./ prefixes, repeated slashes and backslashes into one repo-relative path", () => {
+  const repo = makeRepo({ "src/foo.ts": "export function makeFoo() {}\n", "src/app.ts": "import { x } from './foo';\n" });
+  for (const arg of ["./src/foo.ts", "src//foo.ts", "src\\foo.ts"]) {
+    const r = scan(repo, arg);
+    assert.equal(r.code, 0, arg);
+    assert.match(r.out, /\nsrc\/foo\.ts\n {2}symbols: makeFoo\n/, arg);
+    assert.doesNotMatch(r.out, /src\/foo\.ts \(/, `${arg}: the changed file is not its own referencer`);
+    assert.match(r.out, /src\/app\.ts \(consumer\)/, arg);
+  }
+});
+
+test("--scan makes an absolute path inside --root relative to it", () => {
+  const repo = makeRepo({ "src/foo.ts": "export function makeFoo() {}\n", "src/app.ts": "import { x } from './foo';\n" });
+  const r = scan(repo, join(repo, "src/foo.ts"));
+  assert.equal(r.code, 0);
+  assert.match(r.out, /\nsrc\/foo\.ts\n {2}symbols: makeFoo\n/);
+  assert.doesNotMatch(r.out, /not on disk/);
+});
+
+test("--scan rejects a path outside --root with a one-line usage error and no scan output", () => {
+  const repo = makeRepo({ "src/foo.ts": "export function makeFoo() {}\n" });
+  for (const arg of ["../elsewhere.ts", "src/../../elsewhere.ts", "/definitely/not/in/the/repo.ts"]) {
+    const r = scan(repo, arg);
+    assert.equal(r.code, 1, arg);
+    assert.equal(r.out.trim().split("\n").length, 1, `${arg}: one line`);
+    assert.ok(r.out.includes(arg), `${arg}: the message names the path`);
+    assert.doesNotMatch(r.out, /scan \(advisory\)/, arg);
+  }
 });
