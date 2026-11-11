@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.32.0 — 2026-11-11
+
+- feat(planning): delegate large plans, allow interface-pinned tasks and scan blast radius (#329, #331, #335)
+
 A large plan no longer has to pass through the planning session's own window, a task can describe its implementation in prose while its interfaces stay pinned, and posting a review to a pull request no longer clobbers the review you already have open.
 
 **Delegated planning (#329).** A large plan can be written by delegated subagents and merged by a body-free splice with a placeholder and back-reference scan, so the planning session's context no longer carries every task body. `references/delegated-planning.md` owns the mechanism, and `playbooks/planning-waves.md` and `references/delegation.md` point to it.
