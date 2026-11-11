@@ -110,7 +110,8 @@ built here:
   paths only, never a host path — and drafts `Fixed in <sha>: <summary>` to
   `.devcycle/review-replies/<comment-id>.md`, its body rendered as §6.5b renders every reply.
   It screens the draft
-  (`node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft>`), then posts it
+  (`node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft> --repo <owner/name>`,
+  handling a failure as §6.5b's screen does), then posts it
   through the content and post gates via the `pr-review-post.mjs reply` route §6.5b defines —
   whose exact flags and attribution footer `references/review-comments.md`'s
   reply contract owns. A fixed item whose comment carries no `thread_id` (a `pr-level` /
@@ -131,13 +132,14 @@ the **comment-body contract** (the `## The comment-body contract` subsection of
 share one body shape, then screened before any display or post:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft>
+node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft> --repo <owner/name>
 ```
 
-A draft that fails the screen is not shown; the failing class is named. Posting clears the two
-gates `references/review-comments.md`'s reply contract defines, paste mode included. A
-rejection or decline reply states its **why** — the governing spec or convention passage it
-rests on. An approved reply posts
+A draft that fails the screen is not shown; the failing class is named. A failure on deny-listed
+terms alone follows `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md`'s destination-name
+allowance. Posting clears the two gates `references/review-comments.md`'s reply contract defines,
+paste mode included. A rejection or decline reply states its **why** — the governing spec or
+convention passage it rests on. An approved reply posts
 through `node "${CLAUDE_PLUGIN_ROOT}/scripts/pr-review-post.mjs" reply` — `--pr-level` when the
 comment has no inline anchor (`thread_id: null`), a threaded reply otherwise — never a raw
 `gh api` call. Its exact flags, the attribution footer, and the `--repo` resolution rule follow

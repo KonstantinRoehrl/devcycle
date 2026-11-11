@@ -11,6 +11,7 @@ one line per entry; the hub (`README.md`) mirrors this roster in its surface tab
 | `commit-convention.md` | How a devcycle-driven commit's subject matches the target repo's own commit-message rules — deriving and recording them. |
 | `config.md` | How devcycle resolves configuration — the knobs, the knob channel from commands to stages, and the profile. |
 | `culprits.json` | The culprit vocabulary — each slug with its kind, phase, description, and the version it entered. |
+| `delegated-planning.md` | How planning splits a large plan across spike and per-task drafter dispatches — the run-scoped work files, the two brief shapes and the one merge. |
 | `delegation.md` | Who does the work inside a stage — the coordinator's closed duty list, the stage budget, the research-dispatch contract, and the return envelopes. |
 | `drive.md` | What `/devcycle:continue` does with unattended execution at execution start — the drive actions, the stopped-run question, the start path and watch, the run's end, and the `drive:` row's two forms and writers. |
 | `evidence.md` | How devcycle proves a task did what it claims — the evidence classes, the file-backed contract, the report and verdict shapes — and what a verification command may leave behind. |

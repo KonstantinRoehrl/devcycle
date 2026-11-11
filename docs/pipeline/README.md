@@ -274,7 +274,8 @@ marks the handoff ready, so you can clear it and attach later with `/devcycle:co
 Cost in a pipeline like this is mostly the orchestrator's own context — every file it reads
 stays in the window for the rest of the session, and the stages that read the most are the ones
 that run first. So the coordinator keeps a short, closed list of duties (interviews, dispatches,
-the green gate, commits, the ledger, the state file, handoff blocks) and delegates everything
+the green gate, commits, the ledger, the state file, handoff blocks, and the writes that persist a
+dispatch's result under `.devcycle/` or splice dispatch-written plan drafts unread into the plan) and delegates everything
 else — searching, mapping, reading source, producing diffs, drafting fix briefs — as a dispatch
 that returns only an envelope: paths and counts, never file contents. See
 [`references/delegation.md`](../../references/delegation.md) for the full duty list, the stage

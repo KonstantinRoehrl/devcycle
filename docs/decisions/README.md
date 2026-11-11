@@ -5,6 +5,200 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-11 — A pending review can be parked and restored around a posted review
+
+**Decision:** `scripts/pr-review-post.mjs review` gains `--park <PRR_…>`, which snapshots the user's
+pending review to an ignored `.devcycle/pending-review-snapshots/` file, deletes it, posts the
+agent's review, then recreates the draft as pending and verifies it. `restore-pending` replays a
+kept snapshot. `playbooks/writing-the-findings-document.md` step 7 asks merge, park or abort, and
+says plainly that merge submits the user's own draft.
+
+**Why:** merge and abort were the only choices, so a user mid-review had to publish an unfinished
+draft or file nothing (#305).
+
+**Budgets:** the three-way step 7 grows `playbooks/writing-the-findings-document.md` by 412 bytes
+and the surface by 5 lines. The figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6938
+budget: context-budget.json playbooks/writing-the-findings-document.md 67603
+```
+
+## 2026-11-11 — A PR-bound draft may carry the destination repo's own name once the user records it
+
+**Decision:** `scripts/redaction-check.mjs` gains `--repo <owner/name>` (only with `--file`) and
+`--allow-found-terms`, backed by a local per-destination allowance of deny-list hashes outside every
+repo. `references/review-comments.md` gains § The destination-name allowance, the one owner of
+which screens pass `--repo` and of the single question that records an allowance; the reconcile
+reply screens and the write-back filing screen pass `--repo` and point to it.
+
+**Why:** one deny-listed term is the name of the company that owns a host repo, so every reply or
+review draft posted there failed the screen and was waived by hand each time. A repo's
+`owner/name` cannot be relied on to contain that word, so the allowance is recorded once per
+destination on the user's answer instead of derived.
+
+**Budgets:** the new section grows `references/review-comments.md` by 14 lines; the two playbooks
+that read it carry the closure growth, and the call-site edits add 4 surface lines. The figures
+below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6933
+budget: context-budget.json playbooks/receiving-review.md 122347
+budget: context-budget.json playbooks/writing-the-findings-document.md 67191
+```
+
+## 2026-11-11 — A reply is skipped only when an identical body is already posted under the footer marker
+
+**Decision:** `pr-review-post.mjs` skips a threaded reply only when a reply to the same comment
+carries the attribution-footer marker and the same normalized body; a different reply to the same
+thread is posted. Both skip paths report `identical-reply-posted`, and `references/review-comments.md`
+says so in its reply contract and its Attribution-footer pinned constant.
+
+**Why:** the marker alone matched any earlier stamped reply on the thread, so a second, different
+reply was silently dropped and the CLI still exited 0 (#307).
+
+**Budgets:** the reworded contract and pinned constant grow `references/review-comments.md` by
+73 bytes and the surface by two lines; both playbooks that cite it carry the closure growth. The
+figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6915
+budget: context-budget.json playbooks/receiving-review.md 121456
+budget: context-budget.json playbooks/writing-the-findings-document.md 66341
+```
+
+## 2026-11-11 — The duty bullet gets a location bound, the thorough carve-out names every section it depends on, and result-file dispatches get an envelope
+
+**Decision:** The coordinator-duty bullet in `references/delegation.md` bounds a persisted result to
+`.devcycle/` and the plan splice to the plan file the planning stage names. A plan merged from
+dispatch-written drafts is presented by path with its body unread. `references/delegation.md` §
+Return envelopes gains one shape for a dispatch that writes a single result file (spike, drafter,
+plan checker), which `references/delegated-planning.md` names instead of wording its own. The
+`thorough` carve-out in `playbooks/planning-waves.md` now names the Derive each Files block
+paragraph and self-review items 7 and 8 beside the task template and No placeholders.
+
+**Why:** the unbounded bullet read as permission to write a returned result anywhere, the generic
+plan-under-approval exemption contradicted the unread merged plan, the checker's envelope cited a
+section that did not define it, and a `thorough` planner or drafter never reached the `--scan`
+command, the run-marker rule or the plan gate the override list depends on.
+
+**Budgets:** the new envelope shape, the bound and the carve-out grow `references/delegation.md` by
+330 bytes and the surface by 8 lines; every playbook that cites it carries the closure growth. The
+figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6913
+budget: context-budget.json playbooks/executing-waves.md 118217
+budget: context-budget.json playbooks/learning-from-sessions.md 65927
+budget: context-budget.json playbooks/maintaining-the-repo.md 66549
+budget: context-budget.json playbooks/planning-waves.md 88928
+budget: context-budget.json playbooks/profiling-sessions.md 43437
+budget: context-budget.json playbooks/receiving-review.md 121383
+budget: context-budget.json playbooks/reviewing-code.md 99593
+budget: context-budget.json playbooks/scoping-the-request.md 36226
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 94350
+budget: context-budget.json playbooks/taking-the-fast-path.md 53537
+budget: context-budget.json playbooks/writing-the-findings-document.md 66268
+budget: context-budget.json references/delegation.md 12286
+```
+
+## 2026-11-11 — Delegated merge checker writes a findings file, and the merge keeps the plan body unread
+
+**Decision:** The delegated merge's checker dispatch writes its findings to
+`.devcycle/plan-work/<run id>/merge-findings.md` and returns a path and a count, read only when the
+count is above zero. The plan is presented to the user by path with `plan-check`'s result and the
+findings count, with no read of its body. The duty-list bullet in `references/delegation.md` covers
+the splice wherever the plan path is. A spike's envelope states whether its `Design impact:` is
+non-empty, and the coordinator reads that section before the task cut.
+
+**Why:** the plan-under-approval exemption let the coordinator read the whole merged plan on every
+delegated run, undoing the body-free splice, and the inline findings return contradicted the
+envelope rule. The duty bullet named `.devcycle/` while the plan lives under `docs/superpowers/plans/`.
+
+**Budgets:** the merge, spike and drafter clauses and the engine note grow `playbooks/planning-waves.md`'s
+closure by 702 bytes, and the checklist and feasibility-gate pointers grow the surface by 7 lines.
+The figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6905
+budget: context-budget.json playbooks/planning-waves.md 88386
+```
+
+## 2026-11-11 — Delegated planning merges without reading drafts, and finish archives the work files
+
+**Decision:** Delegated planning's merge is a shell concatenation of the coordinator's header, the
+drafts and its Dispatch Map, and its cross-task self-review runs as one checker dispatch that
+returns findings only. Drafters and that checker scan for placeholders and cross-task
+back-references. `references/delegation.md`'s coordinator duty list gains one bullet for writes
+that persist a dispatch's result or splice dispatch-written files without reading them. Finish
+archives and offers to remove `.devcycle/research/` beside `plan-work/<run id>/`.
+
+**Why:** the merge as first written read every draft body into the coordinator's window, the
+placeholder scan ran nowhere on the delegated path, two coordinator writes contradicted the closed
+duty list, and finish's archive and ephemeral sets omitted two directories the planning change
+began writing.
+
+**Budgets:** the duty bullet grows `references/delegation.md` and every closure that reads it, and
+the `research/` entries grow `playbooks/finishing-the-cycle.md`; the merge and drafter prose in
+`references/delegated-planning.md` grows only `playbooks/planning-waves.md`'s closure, which
+reads it whole. The figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6898
+budget: context-budget.json playbooks/executing-waves.md 117887
+budget: context-budget.json playbooks/finishing-the-cycle.md 50809
+budget: context-budget.json playbooks/learning-from-sessions.md 65597
+budget: context-budget.json playbooks/maintaining-the-repo.md 66219
+budget: context-budget.json playbooks/planning-waves.md 87684
+budget: context-budget.json playbooks/receiving-review.md 121053
+budget: context-budget.json playbooks/reviewing-code.md 99263
+budget: context-budget.json playbooks/scoping-the-request.md 35896
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 94020
+budget: context-budget.json references/delegation.md 11956
+```
+
+## 2026-11-11 — Planning delegates large plans, lets a task pin interfaces instead of code, and derives Files blocks with a scan (#331, #329, #335)
+
+**Decision:** A `red-green` task may declare `**Detail:** interface-pinned — <reason>` and write its
+implementation steps as prose, while its interfaces, failing test code and gate commands stay pinned;
+`briefCompleteness` fails a Detail line with no reason, on another evidence class, or with no fenced
+block. A plan past 3+ independent feasibility unknowns or 5+ tasks delegates that half to parallel
+spike or drafter dispatches that write files under `.devcycle/plan-work/<run id>/`, per the new
+`references/delegated-planning.md`, which only planning cites. A planner derives each Files block with
+`blast-radius-check.mjs --scan`, an advisory pass over every text code file that matches declared
+symbols and the basename with or without its extension. The `blastRadius` gate keeps its JS/TS/Python
+basename match, now stated as such, and each finding names the task that declares the changed file.
+Every research map is persisted under `.devcycle/research/` and passed by path.
+
+**Why:** planning subagents peaked at 413k–747k tokens. Writing full code for a design-heavy task cost
+about as much as implementing it, a large replan ran as one serial dispatch with no persisted
+research, and Files blocks undercounted shared components because the gate's coverage was narrower
+than its header claimed and nothing told the planner how to derive the block.
+
+**Budgets:** the new reference joins `playbooks/planning-waves.md`'s closure whole, alongside the
+thresholds, the scan rule, the interface-pinned exception and the engine-override additions. The
+persistence step grows `references/delegation.md` and every closure that reads it; the planning
+row's new stage-log keys grow every closure that reads `references/stage-log.md`; the
+`plan-work/<run id>/` archive and ephemeral entries grow `playbooks/finishing-the-cycle.md`. The new
+reference is read by one file, so it carries no entry of its own.
+
+```text
+budget: surface-budget.json surfaceTotal 6891
+budget: context-budget.json commands/cycle.md 86908
+budget: context-budget.json playbooks/executing-waves.md 117712
+budget: context-budget.json playbooks/finishing-the-cycle.md 50772
+budget: context-budget.json playbooks/learning-from-sessions.md 65422
+budget: context-budget.json playbooks/maintaining-the-repo.md 66044
+budget: context-budget.json playbooks/planning-waves.md 86955
+budget: context-budget.json playbooks/receiving-review.md 120878
+budget: context-budget.json playbooks/reviewing-code.md 99088
+budget: context-budget.json playbooks/reviewing-the-branch.md 59668
+budget: context-budget.json playbooks/scoping-the-request.md 35721
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 93845
+budget: context-budget.json playbooks/verifying-on-device.md 66121
+budget: context-budget.json references/delegation.md 11781
+```
+
 ## 2026-11-08 — reviewDepth binds through a script: risk-based auto asks before a panel, and the launcher refuses one the knob never allowed
 
 **Decision:** `scripts/review-depth.mjs` decides the review engine and writes a decision record,

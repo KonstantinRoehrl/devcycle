@@ -318,7 +318,15 @@ const closeTo = (actual, expected) =>
 
 test("PRICING: Opus 5.5 and Sonnet 5.5 carry the listed prices and cache-read rates", () => {
   assert.deepEqual(priceFor("claude-opus-5-5"), { in: 4, out: 20, cacheRead: 0.2, window: 1_000_000 });
-  assert.deepEqual(priceFor("claude-sonnet-5-5"), { in: 2, out: 10, cacheRead: 0.2, window: 1_000_000 });
+  assert.deepEqual(priceFor("claude-sonnet-5-5"), { in: 2, out: 10, cacheRead: 0.1, window: 1_000_000 });
+});
+
+test("PRICING: Fable 5.2 is priced below Fable 5.1 but still above Opus, with its listed cache-read rate", () => {
+  assert.deepEqual(priceFor("claude-fable-5-2"), { in: 8, out: 40, cacheRead: 0.2, window: 1_000_000 });
+  assert.ok(priceFor("claude-fable-5-2").in < priceFor("claude-fable-5-1").in);
+  assert.ok(priceFor("claude-fable-5-2").in > priceFor("claude-opus-5").in);
+  assert.equal(provisionalPriceFor("claude-fable-5-2"), null, "an exact row needs no provisional price");
+  assert.equal(provisionalPriceFor("claude-fable-5-3").basedOn, "claude-fable-5-2");
 });
 
 test("PRICING: Fable 5.1 lists its cache-read rate; Fable 5 is unlisted and assumed", () => {
@@ -327,7 +335,7 @@ test("PRICING: Fable 5.1 lists its cache-read rate; Fable 5 is unlisted and assu
 });
 
 test("PRICING: asOf is the date the claude-api reference was cached", () => {
-  assert.equal(PRICING.asOf, "2026-10-06");
+  assert.equal(PRICING.asOf, "2026-11-03");
 });
 
 test("PRICING: Haiku 5.5 carries its up-to-100K list price and a 1M window", () => {

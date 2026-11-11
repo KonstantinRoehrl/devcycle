@@ -24,7 +24,21 @@ template comes from the `superpowers:writing-plans` sub-skill instead, with rule
 always keeps regardless: the executor named in the plan header is always `executing-waves.md`,
 the header names the repo's whole verification gate as one `**Verification gate:**` command — the
 single command every test-class task's evidence captures and the green gate re-runs — no task
-ever carries a commit step, and the plan gate below runs on the finished plan.
+ever carries a commit step, every pinned fenced block carries a run marker, and the plan gate below runs on the finished plan.
+
+Three rules hold under both engines. A planner derives each task's `Files` block by running
+`scripts/blast-radius-check.mjs --scan` on the files the task modifies: an advisory pass over every
+text code file, not only JS/TS/Python, that matches the symbols each file declares (plus any
+`--symbol` given) and its basename with or without the extension, and tags each referencer `test`,
+`subclass` or `consumer`, and prints which extensions it read and which files are not on disk. A `red-green` task may declare `**Detail:** interface-pinned — <reason>` and
+describe its implementation in prose, as long as its interfaces, its complete failing test code and
+its gate commands stay pinned verbatim. And a large plan is delegated: 3+ independent feasibility
+unknowns run as parallel spikes, and 5+ tasks as parallel per-task drafters, each writing a file under
+`.devcycle/plan-work/<run id>/` that the coordinator splices into the plan by shell concatenation without reading the drafts, then
+checks across tasks (including a scan for placeholders and cross-task back-references) in one checker
+dispatch that writes its findings to a file and returns the path and a count, per
+[`references/delegated-planning.md`](../../../references/delegated-planning.md). Below both
+thresholds planning runs inline, and the finished plan looks the same either way.
 
 Once the plan is drafted, planning runs its own eight-item self-review — spec coverage,
 placeholder scan, type consistency, factual-claim accuracy, no count-only enumeration,
@@ -36,8 +50,9 @@ inline, with no separate re-review pass. The plan gate is one command,
 blocks parse), `briefCompleteness` (every task carries its required fields, a `red-green` task
 that creates a non-test source file mentions a stub, and the Dispatch Map lists every task; it
 also notes, without failing, each prescribed git command the dispatch guard would deny an
-implementer), `blastRadius` (every referencer of a changed file, test or not, sits in some
-Files block), `contentCoupling` (no same-wave task's brief names a file another same-wave task
+implementer, and checks that an interface-pinned task gives a reason, is `red-green` and pins a
+fenced block), `blastRadius` (every JS/TS/Python file naming a changed file's basename, test or
+not, sits in some Files block; each finding opens with the task that declares the changed file), `contentCoupling` (no same-wave task's brief names a file another same-wave task
 edits), `budgetFixtures` (a task touching a budgeted surface — `playbooks/`, `commands/`,
 `agents/`, `references/` markdown — also touches its budget fixtures and
 `docs/decisions/README.md`, whose `budget:` lines `validate.mjs` holds the fixtures to),

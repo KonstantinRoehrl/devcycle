@@ -15,6 +15,9 @@ The coordinator does exactly these things itself, and delegates everything else 
 - append the ledger;
 - append the run record, always via `${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append`;
 - update `.devcycle/state.md`;
+- write a file under `.devcycle/` that persists a dispatch's returned result, or splice
+  dispatch-written files by shell concatenation, with the coordinator's own header and Dispatch
+  Map, into the plan file the planning stage names, never reading the drafts;
 - emit handoff blocks.
 
 The list is positive and closed, so "is this micro-work?" is never a judgment call. Anything
@@ -24,7 +27,8 @@ failures — is a dispatch.
 **Exempt from delegation**, read directly however deep the session has run: files whose exact
 path is already known and whose contents the coordinator must reason about itself —
 `.devcycle/state.md`, `.devcycle/ledger.md`, the run record, the plan's dispatch map, a spec or
-plan under approval, and the on-device checklist. Small and bounded; a subagent would cost more
+plan under approval (a plan merged from dispatch-written drafts is presented by path, its body
+unread), and the on-device checklist. Small and bounded; a subagent would cost more
 than it saves.
 
 ## The stage budget
@@ -93,6 +97,9 @@ The procedure, named rather than restated by the stages that run it:
    entries judged relevant.
 4. **Read-only either way** — never trigger a graphify build or `--update` — and **silent
    either way**: no note about which mode ran, and no docs found is nothing to report.
+5. **Persist the map.** The coordinator writes it to `.devcycle/research/<stage>-map.md`, logged as
+   the stage's `research-map` key where `references/stage-log.md` has one; a later dispatch gets that
+   path, never a restatement and never a redo.
 
 The coordinator never tells a subagent to go invoke graphify: a subagent's skill list may
 differ from the coordinator's, and content a subagent must fetch can be silently skipped while
@@ -167,6 +174,13 @@ lessons: <N matched / M read>
 `culprit` repeats the verdict block's `Culprit` line verbatim and is `none` wherever that line is
 absent; `references/evidence.md` § Reviewer verdicts owns both the slug's shape and which verdicts
 carry it.
+
+**Result-file dispatch** (spike, drafter, plan checker) — the dispatch's entire final output:
+
+```
+file: <path>
+<summary>: <a spike's answer line and design-impact flag | a drafter's overrides | a checker's finding count>
+```
 
 The reviewer writes its findings file to the named path itself, as the implementer writes its
 report — `references/evidence.md` owns both file-write contracts.

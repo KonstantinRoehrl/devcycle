@@ -1,11 +1,12 @@
-// A stand-in for the `claude` CLI that tests/unit/drive-execution.test.mjs hands the driver through
-// `--claude`; it never calls a model. Each invocation plays the next step of the JSON array named by
-// STUB_CLAUDE_SCENARIO — editing the state file, the ledger and drive-stop.json the way a driven
-// session would, then printing stream-json events — and first appends what it was given (its argv,
-// whether DEVCYCLE_NESTED_RUN reached it, its pid, the DEVCYCLE_DRIVE_TOKEN it was handed, the
-// CLAUDE_CODE_EFFORT_LEVEL override that sets its effort (`effort`) and any CLAUDE_EFFORT, which Claude
-// Code only outputs and never reads (`outputEffort`), the drive lock's tokenHash at that moment, and its
-// clock reading) to the JSONL file named by STUB_CLAUDE_CALLS.
+// A stand-in for the `claude` CLI that tests/unit/drive-execution.test.mjs and
+// tests/unit/drive-resilience.test.mjs hand the driver through `--claude`; it never calls a model.
+// Each invocation plays the next step of the JSON array named by STUB_CLAUDE_SCENARIO — editing the
+// state file, the ledger and drive-stop.json the way a driven session would, and printing
+// stream-json events — and first appends what it was given (its argv, whether DEVCYCLE_NESTED_RUN
+// reached it, its pid, the DEVCYCLE_DRIVE_TOKEN it was handed, the CLAUDE_CODE_EFFORT_LEVEL override
+// that sets its effort (`effort`) and any CLAUDE_EFFORT, which Claude Code only outputs and never
+// reads (`outputEffort`), the drive lock's tokenHash at that moment, and its clock reading) to the
+// JSONL file named by STUB_CLAUDE_CALLS.
 //
 // A step's keys, all optional: `plugins` (the init event's list; default devcycle only),
 // `pluginErrors`, `ledger` (lines appended after a `- [<stamp>] ` prefix), `stage` (rewrites the
@@ -15,10 +16,16 @@
 // `costUsd`, `denials`, `usage` (the assistant event's usage block), `messageId` and `repeat` (that
 // event's message id, and how many times it is streamed, as Claude Code streams one event per
 // content block), `toolUseId` (the id of that event's `tool_use` block) and `toolResult` (a main-thread
-// `user` event carrying that call's `tool_result` follows it), `hangMs` (wait before the result event), `hangAfterResultMs` (stay alive and silent
-// after it), `noResult` (exit without a result event, as a crashed session does), `noInit` (exit
-// before even the init event, as a `claude` that fails at startup does; exit code 1 unless
-// `exitCode` says otherwise), `exitCode`.
+// `user` event carrying that call's `tool_result` follows it), `pauseAfterWritesMs` (wait that long
+// after the step's file writes, before its next event), `hangMs` (wait before the result event),
+// `hangAfterResultMs` (stay alive and silent after it), `noResult` (exit without a result event, as a
+// crashed session does), `noInit` (exit before even the init event, as a `claude` that fails at
+// startup does; exit code 1 unless `exitCode` says otherwise), `exitCode`.
+//
+// A step plays in this order: the init event; its `tool_use` event(s) when it sets `toolUseId`, since
+// in a real session the main-thread tool call is already pending while it writes the ledger; the file
+// writes (`ledger`, `stage`, `stop`) and `pauseAfterWritesMs`; the rate-limit events; the `assistant`
+// event(s) when it sets no `toolUseId`; the `tool_result` event when `toolResult` is set; the result.
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -67,6 +74,16 @@ emit({
   plugins: step.plugins ?? [{ name: "devcycle", version: "0.0.0-stub" }],
   ...(step.pluginErrors ? { plugin_errors: step.pluginErrors } : {}),
 });
+const emitToolUse = () => {
+  const usage = step.usage ?? { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 60000 };
+  for (let i = 0; i < (step.repeat ?? 1); i++)
+    emit({
+      type: "assistant",
+      parent_tool_use_id: null,
+      message: { ...(step.messageId ? { id: step.messageId } : {}), content: [{ type: "tool_use", name: "Bash", ...(step.toolUseId ? { id: step.toolUseId } : {}) }], usage },
+    });
+};
+if (step.toolUseId) emitToolUse();
 for (const line of step.ledger ?? []) appendFileSync(join(".devcycle", "ledger.md"), `- [2026-10-08T00:00:00Z] ${line}\n`);
 if (step.stage) writeFileSync(statePath, readFileSync(statePath, "utf8").replace(/^- stage: .*$/m, `- stage: ${step.stage}`));
 if (step.stop)
@@ -74,16 +91,11 @@ if (step.stop)
     join(".devcycle", "drive-stop.json"),
     JSON.stringify({ stage: "execution", stamp: "2026-10-08T00:00:00Z", sessionHash: "0".repeat(64), ...step.stop }),
   );
+if (step.pauseAfterWritesMs) await new Promise((r) => setTimeout(r, step.pauseAfterWritesMs));
 if (step.rateLimitInSec !== undefined)
   emit({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: Math.floor(clockNow() / 1000) + step.rateLimitInSec } });
 if (step.rateLimitNoReset) emit({ type: "rate_limit_event", rate_limit_info: { status: "rejected" } });
-const usage = step.usage ?? { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 60000 };
-for (let i = 0; i < (step.repeat ?? 1); i++)
-  emit({
-    type: "assistant",
-    parent_tool_use_id: null,
-    message: { ...(step.messageId ? { id: step.messageId } : {}), content: [{ type: "tool_use", name: "Bash", ...(step.toolUseId ? { id: step.toolUseId } : {}) }], usage },
-  });
+if (!step.toolUseId) emitToolUse();
 if (step.toolUseId && step.toolResult)
   emit({ type: "user", parent_tool_use_id: null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: step.toolUseId }] } });
 

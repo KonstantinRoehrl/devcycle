@@ -437,3 +437,57 @@ test("a convention command is skipped on the Evidence line only; a step that typ
   assert.equal(notesIn(typed.out).length, 1, typed.out);
   assert.match(notesIn(typed.out)[0], /command substitution/);
 });
+
+// --- #331: an interface-pinned task says why and still pins its failing test code ---
+
+const PINNED = COMPLETE.replace(
+  "**Evidence:** red-green\n",
+  "**Evidence:** red-green\n**Detail:** interface-pinned — new interception layer, design-heavy\n",
+).replace("- [ ] step\n", "- [ ] Write the failing test:\n```js\ntest(\"x\", () => {});\n```\n");
+
+test("passes an interface-pinned red-green task with a reason and a fenced test block", () => {
+  const r = run(PINNED);
+  assert.equal(r.code, 0, r.out);
+});
+
+test("fails an interface-pinned task with no reason after the dash", () => {
+  const r = run(PINNED.replace("interface-pinned — new interception layer, design-heavy", "interface-pinned"));
+  assert.equal(r.code, 1);
+  assert.match(r.out, /Task 1: \*\*Detail:\*\* interface-pinned needs a reason after the dash/);
+});
+
+test("fails an interface-pinned task whose dash is followed by nothing", () => {
+  const r = run(PINNED.replace("interface-pinned — new interception layer, design-heavy", "interface-pinned — "));
+  assert.equal(r.code, 1);
+  assert.match(r.out, /Task 1: \*\*Detail:\*\* interface-pinned needs a reason after the dash/);
+});
+
+test("fails an interface-pinned task whose evidence class is not red-green", () => {
+  const r = run(PINNED.replace("**Evidence:** red-green", "**Evidence:** green-green (behavior-preserving)"));
+  assert.equal(r.code, 1);
+  assert.match(r.out, /Task 1: \*\*Detail:\*\* interface-pinned is allowed only on a red-green task/);
+});
+
+test("fails an interface-pinned task whose brief pins no fenced code", () => {
+  const r = run(PINNED.replace("- [ ] Write the failing test:\n```js\ntest(\"x\", () => {});\n```\n", "- [ ] Write the failing test\n"));
+  assert.equal(r.code, 1);
+  assert.match(r.out, /Task 1: \*\*Detail:\*\* interface-pinned still pins the complete failing test code in a fenced block/);
+});
+
+test("fails an unknown Detail value", () => {
+  const r = run(PINNED.replace("interface-pinned — new interception layer, design-heavy", "sketch — too big to write"));
+  assert.equal(r.code, 1);
+  assert.match(r.out, /Task 1: \*\*Detail:\*\* must be `interface-pinned — <reason>`, got: sketch — too big to write/);
+});
+
+test("a brief that quotes the Detail form mid-line declares nothing", () => {
+  const r = run(COMPLETE.replace("- [ ] step\n", "- [ ] Mention that a task may declare `**Detail:** interface-pinned` instead\n"));
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /Detail/);
+});
+
+test("a task without a Detail line is a full-code task and is not checked for one", () => {
+  const r = run(COMPLETE);
+  assert.equal(r.code, 0);
+  assert.doesNotMatch(r.out, /Detail/);
+});

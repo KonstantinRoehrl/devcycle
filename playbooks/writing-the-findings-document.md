@@ -91,14 +91,21 @@ Orchestration, once the three conditions hold:
    attribution footer it pins; this step does not restate them.
 5. **Screen every draft** — inline bodies and the summary body alike — by writing each body to a temp
    file and screening it with `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file
-   <draft>`; a body that would leak a host path or secret is fixed or dropped before any gate.
+   <draft> --repo <owner/name>`, the PR's own repo; a body that would leak a host path or secret is
+   fixed or dropped before any gate. A failure on deny-listed terms alone follows
+   `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md`'s destination-name allowance.
 6. **Two gates, then one post.** Gate 1 (content: is what will be filed right?) → Gate 2 (post: may
    I file it?), then post through the `review` route of
    `${CLAUDE_PLUGIN_ROOT}/scripts/pr-review-post.mjs` — one batched review carrying every inline
    comment plus the summary body, one notification.
 7. **Never clobber a pending review.** When the `review` route reports an existing pending review,
-   surface its `PRR_…` node id and ask: merge into it (`--merge-into <PRR_…>`) or abort. Without an
-   explicit `--merge-into` the route exits non-zero naming that node id and files nothing.
+   surface its `PRR_…` node id and ask one of three. **Merge** (`--merge-into <PRR_…>`) adds the
+   comments to the user's draft and **submits the user's own draft** with them. **Park and
+   restore** (`--park <PRR_…>`) posts this review separately and puts the draft back as pending.
+   **Abort** files nothing. Choosing park is its own confirmation, separate from Gate 2. Without
+   either flag the route exits non-zero naming that node id and files nothing. If park fails, show
+   the route's stderr — it names the kept snapshot and the `restore-pending` command that replays
+   it — and stop.
 8. **Record the write.** Append one `review-writeback` marker via
    `${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append` — finding counts, the verdict event enum,
    and the PR number only; never body text, never a host path.

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, realpathSync, existsSync } from "node:fs";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, dirname, delimiter } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
@@ -223,8 +223,10 @@ test("claudeStructured surfaces total_cost_usd from the envelope as cost", { ski
 });
 
 // Polls until `pid` is gone (ESRCH) or `ms` elapses; a SIGKILLed process can sit un-reaped for a
-// few milliseconds after the kill, during which kill(pid, 0) still succeeds.
+// few milliseconds after the kill, during which kill(pid, 0) still succeeds. A pid of 0 or below
+// would probe the caller's own process group, which never answers ESRCH, so it is refused outright.
 async function waitForExit(pid, ms) {
+  if (!Number.isInteger(pid) || pid <= 0) throw new Error(`waitForExit needs a positive integer pid, got ${pid}`);
   const until = Date.now() + ms;
   for (;;) {
     try { process.kill(pid, 0); } catch (e) { if (e.code === "ESRCH") return true; throw e; }
@@ -232,6 +234,37 @@ async function waitForExit(pid, ms) {
     await new Promise((r) => setTimeout(r, 25));
   }
 }
+
+// Polls until `path` holds a positive integer pid or `ms` elapses. writeFileSync creates the file
+// before it writes the pid, so a read in between sees "" — and Number("") is 0.
+async function readPidFile(path, ms) {
+  const until = Date.now() + ms;
+  for (;;) {
+    let text = "";
+    try { text = readFileSync(path, "utf8"); } catch (e) { if (e.code !== "ENOENT") throw e; }
+    const pid = Number(text);
+    if (Number.isInteger(pid) && pid > 0) return pid;
+    if (Date.now() > until) assert.fail("the child never started");
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
+test("waitForExit refuses a pid that is not a positive integer instead of waiting out its ceiling", async () => {
+  await assert.rejects(waitForExit(0, 1000), /waitForExit needs a positive integer pid, got 0/);
+  await assert.rejects(waitForExit(Number.NaN, 1000), /waitForExit needs a positive integer pid, got NaN/);
+});
+
+test("readPidFile waits out a pid file that exists before its pid is written", async () => {
+  const pidFile = join(makeTempDir("devcycle-agent-cli-pidfile-"), "child.pid");
+  writeFileSync(pidFile, "");
+  setTimeout(() => writeFileSync(pidFile, "4242"), 100);
+  assert.equal(await readPidFile(pidFile, 3000), 4242);
+});
+
+test("readPidFile fails with the child never started when no pid arrives in time", async () => {
+  const pidFile = join(makeTempDir("devcycle-agent-cli-pidfile-"), "child.pid");
+  await assert.rejects(readPidFile(pidFile, 200), /the child never started/);
+});
 
 // Audit 2026-09-05 H5: run() killed only the direct child and resolved on `close`, which waits for
 // every holder of the stdio pipes — a grandchild that inherited them kept the promise pending past
@@ -420,10 +453,7 @@ run(process.execPath, ["-e", 'require("node:fs").writeFileSync(${JSON.stringify(
 `;
   const { spawn } = await import("node:child_process");
   const parent = spawn(process.execPath, ["-e", runner], { stdio: "ignore" });
-  const until = Date.now() + 3000;
-  while (!existsSync(pidFile) && Date.now() < until) await new Promise((r) => setTimeout(r, 25));
-  assert.ok(existsSync(pidFile), "the child never started");
-  const childPid = Number(readFileSync(pidFile, "utf8"));
+  const childPid = await readPidFile(pidFile, 3000);
   parent.kill("SIGTERM");
   await new Promise((r) => parent.once("exit", r));
   assert.equal(await waitForExit(childPid, 1000), true, "the child group must die with its parent");
