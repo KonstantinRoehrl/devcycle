@@ -6,8 +6,8 @@
 // files (CODE_EXT) and matches the changed file's basename with its extension, so a referencer in
 // any other language, or one that imports `./foo` without the extension, is never seen. `--scan`
 // is the planner's wider, advisory pass over the same walk. See playbooks/planning-waves.md.
-import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
-import { join, basename, extname, relative, resolve, isAbsolute, sep, posix } from "node:path";
+import { readFileSync, existsSync, readdirSync, statSync, realpathSync } from "node:fs";
+import { join, basename, dirname, extname, relative, resolve, isAbsolute, sep, posix } from "node:path";
 import { taskBlocks, taskFileMap, TEST_FILE_SUFFIXES, normalizeFileToken, isTestPath } from "./task-files.mjs";
 import { parseFlags } from "./cli-flags.mjs";
 import { isMain } from "./is-main.mjs";
@@ -134,15 +134,18 @@ export const SCAN_CODE_EXT = new Set([
 ]);
 
 // An auto-extracted name this short or this common matches half of any repo, so it is listed as
-// skipped instead of searched. An explicit --symbol is never skipped.
+// skipped instead of searched. An explicit --symbol is never skipped. Entries are lowercase and
+// compared case-insensitively: C# `Name` and `Update()` are as common as `name` and `update`.
 export const SCAN_MIN_SYMBOL = 4;
 export const SCAN_STOPLIST = new Set([
-  "main", "Main", "init", "test", "Test", "Tests", "self", "this", "that", "class", "type", "enum",
-  "value", "name", "data", "item", "index", "default", "constructor", "toString", "equals", "hashCode",
+  "main", "init", "test", "tests", "self", "this", "that", "class", "type", "enum",
+  "value", "name", "data", "item", "index", "default", "constructor", "tostring", "equals", "hashcode",
   "setup", "teardown", "start", "stop", "close", "open", "load", "save", "parse", "apply", "call",
   "render", "update", "handle", "string", "number", "boolean", "object", "void",
+  "count", "result", "message", "text", "key", "id",
 ]);
-export const isStoplisted = (name) => name.length < SCAN_MIN_SYMBOL || SCAN_STOPLIST.has(name);
+const onStoplist = (name) => SCAN_STOPLIST.has(name.toLowerCase());
+export const isStoplisted = (name) => name.length < SCAN_MIN_SYMBOL || onStoplist(name);
 
 // Line-anchored, so a keyword in a comment or in prose ("// a class that ...") declares nothing.
 // Modifiers cover the languages SCAN_CODE_EXT names; a name these miss is passed with --symbol.
@@ -190,6 +193,15 @@ const inheritsRe = (name) =>
     "m"
   );
 
+// A line that begins with an import-style keyword and holds the stem as a whole identifier or path
+// segment; a `.js`-family extension after the stem is not an identifier character, so it is allowed.
+const IMPORT_KEYWORDS = "import|from|require_relative|require|include|load|use|using";
+const stemRe = (stem) =>
+  new RegExp(
+    `/${escapeRe(stem)}['"\`]|^[ \\t]*(?:${IMPORT_KEYWORDS})\\b[^\\n]*?(?<![\\w$])${escapeRe(stem)}(?![\\w$])`,
+    "m"
+  );
+
 function classify(path, content, inherits) {
   if (isTestPath(path)) return "test";
   if (inherits?.test(content)) return "subclass";
@@ -225,12 +237,14 @@ export function scanReferencers({ changed, symbols = [], repoRoot }) {
     const base = basename(file);
     const stem = base.slice(0, base.length - extname(base).length);
     const matchers = names.map((name) => ({ match: name, re: symbolRe(name), inherits: inheritsRe(name) }));
-    // The gate's basename match, plus the stem as the last segment of a quoted path: `from './foo'`
-    // names foo.ts. Being path-shaped, the stem skips only the stoplist, not the length rule.
+    // The gate's basename match, plus the stem two ways: as the last segment of a quoted path
+    // (`from './foo'` names foo.ts), and as an identifier or path segment on a line that opens with an
+    // import keyword (`import './foo.js'`, `from pkg import foo`, `require 'foo'`). Being path-shaped,
+    // the stem skips only the stoplist, not the length rule.
     matchers.push({ match: base, re: new RegExp(`[/.'"\`]${escapeRe(base)}\\b`), inherits: null });
     if (stem && stem !== base) {
-      if (SCAN_STOPLIST.has(stem)) skipped.push(stem);
-      else matchers.push({ match: stem, re: new RegExp(`/${escapeRe(stem)}['"\`]`), inherits: null });
+      if (onStoplist(stem)) skipped.push(stem);
+      else matchers.push({ match: stem, re: stemRe(stem), inherits: null });
     }
     const groups = [];
     for (const { match, re, inherits } of matchers) {
@@ -250,6 +264,7 @@ export function formatScan(results) {
   const lines = [
     "blast-radius-check: scan (advisory) -- put every referencer below in the task's Files block, or record a Blast-radius override with a reason",
     `referencers are searched only in files ending ${[...SCAN_CODE_EXT].sort().join(", ")}; files of any other type are never read`,
+    `directories not searched, at any depth: ${[...IGNORE_DIRS].join(", ")}`,
   ];
   for (const { file, onDisk, parsed, symbols, skipped, groups } of results) {
     lines.push(file);
@@ -271,10 +286,28 @@ export function formatScan(results) {
 const SCAN_FLAGS = { "--scan": "none", "--symbol": "repeat", "--root": "value" };
 const SCAN_USAGE = "usage: node scripts/blast-radius-check.mjs --scan <changed-file>... [--symbol <name>]... [--root <repo-root>]";
 
+// The real path of `p`, resolving symlinks in its deepest existing ancestor and re-appending the
+// part that does not exist yet: a file a task creates is a legitimate changed-file argument.
+function realpathWithTail(p) {
+  let head = p;
+  const tail = [];
+  while (!existsSync(head)) {
+    const parent = dirname(head);
+    if (parent === head) return p;
+    tail.unshift(basename(head));
+    head = parent;
+  }
+  return join(realpathSync(head), ...tail);
+}
+
 // A changed-file argument as a repo-relative POSIX path, or null when it points outside `repoRoot`.
+// An absolute argument and the root are compared as real paths, so a symlinked root or `/var` versus
+// `/private/var` does not read as "outside".
 export function normalizeScanPath(raw, repoRoot) {
   const folded = raw.replaceAll("\\", "/");
-  const relativePath = isAbsolute(folded) ? relative(resolve(repoRoot), folded).split(sep).join("/") : posix.normalize(folded);
+  const relativePath = isAbsolute(folded)
+    ? relative(realpathWithTail(resolve(repoRoot)), realpathWithTail(resolve(folded))).split(sep).join("/")
+    : posix.normalize(folded);
   return relativePath === ".." || relativePath.startsWith("../") || isAbsolute(relativePath) ? null : relativePath;
 }
 
@@ -294,9 +327,17 @@ function scanMain(argv) {
   const repoRoot = flags["--root"] ?? process.cwd();
   const changed = [];
   for (const raw of positionals) {
+    if (raw.trim() === "") {
+      console.error(`blast-radius-check: an empty argument is not a changed file -- pass changed files`);
+      process.exit(1);
+    }
     const file = normalizeScanPath(raw, repoRoot);
     if (file === null) {
       console.error(`blast-radius-check: ${raw} is outside the repo root ${repoRoot}`);
+      process.exit(1);
+    }
+    if (file === "." || (existsSync(join(repoRoot, file)) && statSync(join(repoRoot, file)).isDirectory())) {
+      console.error(`blast-radius-check: ${raw} is a directory, not a changed file -- pass changed files`);
       process.exit(1);
     }
     changed.push(file);

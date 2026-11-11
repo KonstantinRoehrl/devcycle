@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, realpathSync } from "node:fs";
+import { mkdirSync, writeFileSync, realpathSync, symlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
@@ -514,4 +514,98 @@ test("--scan rejects a path outside --root with a one-line usage error and no sc
     assert.ok(r.out.includes(arg), `${arg}: the message names the path`);
     assert.doesNotMatch(r.out, /scan \(advisory\)/, arg);
   }
+});
+
+// --- --scan: symlinked roots, skipped directories, directory arguments, import shapes, stoplist case ---
+
+test("--scan accepts an absolute path through a symlinked --root and the reverse, and still rejects a path outside it", () => {
+  const repo = makeRepo({ "src/foo.ts": "export function makeFoo() {}\n", "src/app.ts": "import { x } from './foo';\n" });
+  const link = join(realpathSync(makeTempDir("brc-link-")), "root-link");
+  symlinkSync(repo, link);
+  const outside = makeRepo({ "elsewhere.ts": "export const e = 1;\n" });
+  const cases = [
+    { root: link, arg: join(repo, "src/foo.ts"), label: "symlinked root, real path" },
+    { root: repo, arg: join(link, "src/foo.ts"), label: "real root, symlinked path" },
+    { root: link, arg: join(repo, "src/not-created-yet.ts"), label: "symlinked root, file not created yet" },
+  ];
+  for (const { root, arg, label } of cases) {
+    const r = spawnSync("node", [SCRIPT, "--scan", arg, "--root", root], { encoding: "utf8" });
+    const out = (r.stdout || "") + (r.stderr || "");
+    assert.equal(r.status, 0, `${label}: ${out}`);
+    assert.doesNotMatch(out, /outside the repo root/, label);
+  }
+  const created = spawnSync("node", [SCRIPT, "--scan", join(repo, "src/not-created-yet.ts"), "--root", link], { encoding: "utf8" });
+  assert.match(created.stdout, /\nsrc\/not-created-yet\.ts\n {2}not on disk -- matched by name only\n/);
+  const out = spawnSync("node", [SCRIPT, "--scan", join(outside, "elsewhere.ts"), "--root", link], { encoding: "utf8" });
+  assert.equal(out.status, 1);
+  assert.match(out.stderr, /elsewhere\.ts is outside the repo root/);
+});
+
+test("--scan names the directories its walk skips, once, so a referencer under one is not read as absent", () => {
+  const repo = makeRepo({
+    "lib/z.ts": "export function zeta() {}\n",
+    "build/use.ts": "import { zeta } from '../lib/z';\n",
+  });
+  const r = scan(repo, "lib/z.ts");
+  assert.equal(r.code, 0);
+  const skippedLine = r.out.split("\n").find((l) => /not searched/.test(l));
+  assert.ok(skippedLine, `a line states the directories not searched:\n${r.out}`);
+  for (const dir of ["node_modules", ".git", "dist", "build", "coverage", ".devcycle", ".worktrees"]) {
+    assert.ok(skippedLine.includes(dir), `${dir} is named`);
+  }
+  assert.equal(r.out.split("not searched").length - 1, 1, "stated once, not per file");
+});
+
+test("--scan treats a directory, `.` or an empty changed-file argument as a usage error", () => {
+  const repo = makeRepo({ "src/a.ts": "export function aThing() {}\n", "pkg.ts/inner.ts": "export const i = 1;\n" });
+  for (const arg of ["src", ".", "", "pkg.ts", "src/"]) {
+    const r = scan(repo, arg);
+    assert.equal(r.code, 1, `[${arg}]: ${r.out}`);
+    assert.equal(r.out.trim().split("\n").length, 1, `[${arg}]: one line`);
+    assert.match(r.out, /pass changed files/, `[${arg}]`);
+    assert.doesNotMatch(r.out, /scan \(advisory\)|no symbols extracted|symbols: \(none\)/, `[${arg}]`);
+  }
+});
+
+test("--scan finds a TS `.js` import, a Python `import mod`, `from pkg import mod`, and a Ruby `require`", () => {
+  const repo = makeRepo({
+    "src/foo.ts": "export function makeFoo() {}\n",
+    "src/app.ts": "import './foo.js';\n",
+    "py/mod.py": "def run_mod():\n    pass\n",
+    "py/a.py": "import mod\n",
+    "py/b.py": "from pkg import mod\n",
+    "rb/helper.rb": "def help_me; end\n",
+    "rb/main.rb": "require 'helper'\n",
+  });
+  const ts = scan(repo, "src/foo.ts");
+  assert.match(ts.out, /\n {2}foo\n {4}src\/app\.ts \(consumer\)/);
+  const py = scan(repo, "py/mod.py");
+  assert.match(py.out, / {2}mod\n {4}py\/a\.py \(consumer\)\n {4}py\/b\.py \(consumer\)/);
+  const rb = scan(repo, "rb/helper.rb");
+  assert.match(rb.out, / {2}helper\n {4}rb\/main\.rb \(consumer\)/);
+});
+
+test("--scan does not match a stem mentioned in prose or a comment without an import keyword", () => {
+  const repo = makeRepo({
+    "src/foo.ts": "export function makeFoo() {}\n",
+    "src/notes.ts": "// we should import foo here later\nconst note = 'see foo for details';\nconst x = foofoo + 1;\n",
+    "src/words.py": "# the foo module is great\nprint('foo')\n",
+  });
+  const r = scan(repo, "src/foo.ts");
+  assert.equal(r.code, 0);
+  assert.doesNotMatch(r.out, /notes\.ts|words\.py/);
+  assert.match(r.out, /no referencers found/);
+});
+
+test("--scan compares the stoplist case-insensitively and still searches a distinctive member", () => {
+  const repo = makeRepo({
+    "src/Widget.cs":
+      "public class Widget\n{\n    public string Name;\n    public int Value;\n    public void Update() {}\n    public void Start() {}\n    public void Frobnicate() {}\n}\n",
+    "src/Other.cs": "class Other { void Go(Widget w) { w.Name = w.Name; Update(); Start(); w.Frobnicate(); } }\n",
+  });
+  const r = scan(repo, "src/Widget.cs");
+  assert.equal(r.code, 0);
+  assert.match(r.out, /symbols: Widget, Frobnicate \(skipped: Name, Value, Update, Start\)/);
+  assert.match(r.out, / {2}Frobnicate\n {4}src\/Other\.cs \(consumer\)/);
+  assert.doesNotMatch(r.out, / {2}(Name|Value|Update|Start)\n/);
 });
