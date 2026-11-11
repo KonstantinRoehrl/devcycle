@@ -638,6 +638,66 @@ test("a park whose re-read is truncated and short keeps the snapshot and does no
   assertUnverified(message, { snapshot: kept, reviewId: "PRR_new" });
 });
 
+function assertDefiniteFailure(message, snapshot) {
+  assert.match(message, /step 6 \(compare the restored draft\)/);
+  assert.match(message, /NOT restored/);
+  assert.match(message, /Pending review PRR_new was created but does not match the snapshot: delete it on GitHub first/);
+  assert.match(message, /restore-pending --repo o\/n --pr 7 --snapshot/);
+  assert.doesNotMatch(message, /could not be verified/);
+  assert.ok(message.includes(snapshot), "the snapshot path must be named");
+}
+
+test("a truncated re-read whose review holds the wrong number of comments is a definite failure", () => {
+  const cwd = ignoringRepo();
+  const runner = parkRunner({ restored: (id) => ({ ...truncatedRead(id), commentCount: 1 }) });
+  let message;
+  assert.throws(() => runReview(parkArgs(runner, cwd)), (e) => { message = e.message; return true; });
+  const [kept] = snapshotsIn(cwd);
+  assert.ok(kept, "the snapshot must be kept");
+  assertDefiniteFailure(message, kept);
+});
+
+test("a truncated re-read that reads every comment back with a different body is a definite failure", () => {
+  const cwd = ignoringRepo();
+  const runner = parkRunner({ restored: (id) => {
+    const full = draftReview(id);
+    full.threads[0].comments[0].body = "Rename that.";
+    return { ...full, threadsTruncated: true };
+  } });
+  let message;
+  assert.throws(() => runReview(parkArgs(runner, cwd)), (e) => { message = e.message; return true; });
+  const [kept] = snapshotsIn(cwd);
+  assert.ok(kept, "the snapshot must be kept");
+  assertDefiniteFailure(message, kept);
+});
+
+test("a truncated re-read that reads back a different comment than any the snapshot holds is a definite failure", () => {
+  const cwd = ignoringRepo();
+  const runner = parkRunner({ restored: (id) => {
+    const full = draftReview(id);
+    full.threads[1].comments[0].body = "Something else entirely.";
+    return { ...full, threadsTruncated: true, threads: full.threads.slice(1) };
+  } });
+  let message;
+  assert.throws(() => runReview(parkArgs(runner, cwd)), (e) => { message = e.message; return true; });
+  const [kept] = snapshotsIn(cwd);
+  assert.ok(kept, "the snapshot must be kept");
+  assertDefiniteFailure(message, kept);
+});
+
+test("a truncated short re-read whose threads come back in a different order is still inconclusive", () => {
+  const cwd = ignoringRepo();
+  const runner = parkRunner({ restored: (id) => {
+    const full = draftReview(id);
+    return { ...full, threadsTruncated: true, threads: full.threads.slice(1) };
+  } });
+  let message;
+  assert.throws(() => runReview(parkArgs(runner, cwd)), (e) => { message = e.message; return true; });
+  const [kept] = snapshotsIn(cwd);
+  assert.ok(kept, "the snapshot must be kept");
+  assertUnverified(message, { snapshot: kept, reviewId: "PRR_new" });
+});
+
 test("a truncated re-read whose comments all match is a verified restore", () => {
   const cwd = ignoringRepo();
   const runner = parkRunner({ restored: (id) => ({ ...draftReview(id), threadsTruncated: true }) });

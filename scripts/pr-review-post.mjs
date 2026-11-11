@@ -276,26 +276,37 @@ export function toSnapshot(review, { repo, pr }) {
   };
 }
 
+function commentMismatches(got, want, at) {
+  const mismatches = [];
+  if (normalizeBody(got.body) !== normalizeBody(want.body)) mismatches.push(`${at}: body differs`);
+  if (got.path !== want.path) mismatches.push(`${at}: restored on ${got.path}`);
+  if (got.line !== want.line) mismatches.push(`${at}: restored on line ${got.line}, expected ${want.line}`);
+  return mismatches;
+}
+
 export function compareRestored(snapshot, restored) {
   const got = ownComments(restored);
   const want = snapshot.comments;
   if (restored.commentCount !== want.length || got.length !== want.length)
     return [`restored ${restored.commentCount} comment(s) (${got.length} readable), the snapshot holds ${want.length}`];
-  const mismatches = [];
-  want.forEach((w, i) => {
-    const g = got[i];
-    const at = `comment ${i + 1} (${w.path})`;
-    if (normalizeBody(g.body) !== normalizeBody(w.body)) mismatches.push(`${at}: body differs`);
-    if (g.path !== w.path) mismatches.push(`${at}: restored on ${g.path}`);
-    if (g.line !== w.line) mismatches.push(`${at}: restored on line ${g.line}, expected ${w.line}`);
-  });
-  return mismatches;
+  return want.flatMap((w, i) => commentMismatches(got[i], w, `comment ${i + 1} (${w.path})`));
+}
+
+// Only a cut-short thread page makes a mismatch unknowable rather than definite: the review still
+// holds the right number of comments, the page returned fewer, and every comment it did return is
+// a snapshot comment (threads on a truncated page may come back in any order).
+function cutShortButIntact(snapshot, restored) {
+  const got = ownComments(restored);
+  return restored.threadsTruncated
+    && restored.commentCount === snapshot.comments.length
+    && got.length < snapshot.comments.length
+    && got.every((g) => snapshot.comments.some((w) => commentMismatches(g, w, "").length === 0));
 }
 
 // Steps 5 and 6: recreate the pending review from a snapshot, then re-read and compare it. Never
-// throws -- the caller needs to know, either way, whether a pending review now exists. A mismatch on
-// a truncated re-read is `inconclusive`: the draft was recreated, but the PR's thread page was too
-// short to read all of it back.
+// throws -- the caller needs to know, either way, whether a pending review now exists. A mismatch
+// that cutShortButIntact explains is `inconclusive`: the draft was recreated, but the PR's thread
+// page was too short to read all of it back.
 function restoreSnapshot(snapshot, { repo, pr, runner }) {
   let reviewId = null;
   let step = "step 5 (restore your draft)";
@@ -305,7 +316,7 @@ function restoreSnapshot(snapshot, { repo, pr, runner }) {
     step = "step 6 (compare the restored draft)";
     const restored = runner.readPendingReview(repo, pr, reviewId);
     const problems = compareRestored(snapshot, restored);
-    return { reviewId, step, problems, inconclusive: problems.length > 0 && restored.threadsTruncated };
+    return { reviewId, step, problems, inconclusive: problems.length > 0 && cutShortButIntact(snapshot, restored) };
   } catch (e) {
     return { reviewId, step, problems: [e.message] };
   }
