@@ -561,6 +561,22 @@ test("park refuses an unrestorable comment shape before deleting anything", () =
   assert.deepEqual(snapshotsIn(cwd), []);
 });
 
+// GitHub's PullRequestReview.commit is nullable, and the restore cannot recreate a review on no commit.
+function commitlessReview() {
+  const review = draftReview();
+  review.commitOid = null;
+  for (const t of review.threads) for (const c of t.comments) c.originalCommitOid = null;
+  return review;
+}
+
+test("park refuses a review that records no commit before deleting anything", () => {
+  const cwd = ignoringRepo();
+  const runner = parkRunner({ review: commitlessReview() });
+  assert.throws(() => runReview(parkArgs(runner, cwd)), /refusing to park PRR_z[\s\S]*records no commit/);
+  assert.deepEqual(runner.calls, ["findPendingReview", "readPendingReview"]);
+  assert.deepEqual(snapshotsIn(cwd), []);
+});
+
 test("a failed post still restores the draft, keeps the snapshot and names it", () => {
   const cwd = ignoringRepo();
   const runner = parkRunner({ fail: ["createReview"] });
@@ -661,6 +677,16 @@ test("restore-pending refuses while a pending review exists", () => {
   const runner = parkRunner({ pending: "PRR_y" });
   assert.throws(() => runRestorePending({ repo: "o/n", pr: 7, snapshotPath, runner }), /already have pending review PRR_y/);
   assert.deepEqual(runner.calls, ["findPendingReview"]);
+  assert.equal(existsSync(snapshotPath), true);
+});
+
+test("restore-pending refuses a snapshot with no commit before any write and keeps the file", () => {
+  const dir = makeTempDir("prsnap-");
+  const snapshotPath = join(dir, "PRR_z-1.json");
+  writeFileSync(snapshotPath, JSON.stringify(toSnapshot(commitlessReview(), { repo: "o/n", pr: 7 })));
+  const runner = parkRunner({ pending: null });
+  assert.throws(() => runRestorePending({ repo: "o/n", pr: 7, snapshotPath, runner }), /records no commit/);
+  assert.equal(runner.calls.some((c) => WRITES.includes(c)), false);
   assert.equal(existsSync(snapshotPath), true);
 });
 

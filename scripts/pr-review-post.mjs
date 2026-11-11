@@ -247,6 +247,7 @@ function ownComments(review) {
 // top-level comment on that commit would come back different.
 export function parkProblems(review) {
   const problems = [];
+  if (!review.commitOid) problems.push("the review records no commit to recreate it on");
   for (const t of review.threads) {
     const own = t.comments.filter((c) => c.reviewId === review.reviewId);
     if (own.some((c) => c.isReply)) problems.push(`a reply inside an existing thread on ${t.path}`);
@@ -424,6 +425,8 @@ export function runRestorePending({ repo, pr, snapshotPath, runner = defaultPost
   const snapshot = JSON.parse(readFileSync(snapshotPath, "utf8"));
   if (snapshot.repo !== repo || Number(snapshot.pr) !== Number(pr))
     throw new Error(`refusing to restore: ${snapshotPath} is a snapshot of ${snapshot.repo}#${snapshot.pr}, not ${repo}#${pr}`);
+  if (!snapshot.commitOid)
+    throw new Error(`refusing to restore: ${snapshotPath} records no commit to recreate the draft on; nothing was changed`);
   const pending = runner.findPendingReview(repo, pr, actor);
   if (pending)
     throw new Error(`refusing to restore: you already have pending review ${pending} on ${repo}#${pr}, and GitHub allows one`);
