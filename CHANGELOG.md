@@ -1,5 +1,17 @@
 # Changelog
 
+A large plan no longer has to pass through the planning session's own window, a task can describe its implementation in prose while its interfaces stay pinned, and posting a review to a pull request no longer clobbers the review you already have open.
+
+**Delegated planning (#329).** A large plan can be written by delegated subagents and merged by a body-free splice with a placeholder and back-reference scan, so the planning session's context no longer carries every task body. `references/delegated-planning.md` owns the mechanism, and `playbooks/planning-waves.md` and `references/delegation.md` point to it.
+
+**Interface-pinned tasks and the blast-radius scan (#331, #335).** A red-green task may declare `**Detail:** interface-pinned — <reason>` and describe its implementation in prose, as long as its interfaces, failing test code and gate commands stay pinned; `brief-completeness-check.mjs` checks the declaration and that some code is still pinned. `blast-radius-check.mjs --scan` is a new advisory mode that derives a task's Files block from repo referencers and says which extensions and directories it did not search, and findings now name the task that owns the file.
+
+**PR posting (#305, #306, #307).** `pr-review-post.mjs` parks your pending review, posts, then restores it and verifies the restore, calling a truncated re-read unverified rather than lost and refusing to park a review that records no commit. A reply is skipped as already posted only when its id and normalized body both match, so a second, different reply on one thread is no longer dropped. `redaction-check --repo` lets a draft carry the destination repo's own name once you record it; machine-identity classes are never exempted.
+
+**Pricing and tests (#410).** `scripts/pricing.mjs` prices `claude-fable-5-2` and corrects the Sonnet 5.5 cache-read rate from $0.20 to $0.10 per MTok. The `agent-cli` SIGTERM and `drive-execution` watchdog tests no longer race fixed kill budgets.
+
+**Known issues.** The PR-posting restore check does not compare the pending review's summary body, and the redaction allowance store is written non-atomically (a truncated store blocks every `--repo` screen, failing closed).
+
 ## 0.31.0 — 2026-11-08
 
 - feat(review-depth): make reviewDepth binding and gate the auto panel on risk and consent (#422)
