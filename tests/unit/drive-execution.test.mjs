@@ -1527,7 +1527,7 @@ test("the watchdog never acts while a main-thread tool call is pending", async (
   mkdirSync(join(root, ".devcycle/dispatch"), { recursive: true });
   const env = { DEVCYCLE_DRIVE_HEARTBEAT_MS: "50", DEVCYCLE_DRIVE_WATCHDOG_GRACE_MS: "1" };
   const r = await drive(root, [
-    { ledger: [DISPATCHED_1], toolUseId: "toolu_1", hangMs: 1_500 },
+    { ledger: [DISPATCHED_1], toolUseId: "toolu_1", pauseAfterWritesMs: 300, hangMs: 1_500 },
     { ledger: [DONE[0], DONE[1]], stage: "branch-review" },
   ], { env, beforeStart: (h) => seedDispatch(root, h.env.HOME, "interrupted") });
   assert.notEqual(r.records[0].exitReason, "dead-dispatch");
