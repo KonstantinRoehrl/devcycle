@@ -149,6 +149,20 @@ and marker are not restated here; this subsection only names that the footer app
 comment-body rendered through this contract. The footer marks **only** Claude-authored comments; a
 human reviewer's own comments are never stamped with it.
 
+## The destination-name allowance
+
+Only a draft posted to the PR's own repo is screened with `--repo <owner/name>` — the same value
+its `pr-review-post.mjs` call takes. Every other screen runs without it. When that screen fails on
+deny-listed terms alone, with no machine-identity class, ask ONE `AskUserQuestion`:
+
+- **Allow for <owner/name>** — this is the destination repo's own name; record it so it is never
+  asked again for that repo, by rerunning the screen with `--allow-found-terms` added;
+- **Redact it**;
+- **Drop the draft**.
+
+A failure that includes a machine-identity class never offers the allowance, and nothing records an
+allowance without that answer.
+
 ## Pinned constants
 
 - **Attribution footer.** Every posted reply/comment ends with the exact literal

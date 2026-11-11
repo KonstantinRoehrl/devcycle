@@ -91,7 +91,9 @@ Orchestration, once the three conditions hold:
    attribution footer it pins; this step does not restate them.
 5. **Screen every draft** — inline bodies and the summary body alike — by writing each body to a temp
    file and screening it with `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file
-   <draft>`; a body that would leak a host path or secret is fixed or dropped before any gate.
+   <draft> --repo <owner/name>`, the PR's own repo; a body that would leak a host path or secret is
+   fixed or dropped before any gate. A failure on deny-listed terms alone follows
+   `${CLAUDE_PLUGIN_ROOT}/references/review-comments.md`'s destination-name allowance.
 6. **Two gates, then one post.** Gate 1 (content: is what will be filed right?) → Gate 2 (post: may
    I file it?), then post through the `review` route of
    `${CLAUDE_PLUGIN_ROOT}/scripts/pr-review-post.mjs` — one batched review carrying every inline

@@ -675,3 +675,131 @@ test("still flags a deny-listed term, read from the hashes file", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// The per-destination allowance. Every case runs against a fixture deny-list and a temp allowance
+// store, so neither the real deny-list nor the real home directory is read or written.
+const ALLOWED_TERM = "destinationword";
+const OTHER_TERM = "unrecordedword";
+
+function allowanceFixture(draft) {
+  const dir = makeTempDir("redaction-allow-");
+  const hashes = join(dir, "hashes.txt");
+  writeFileSync(hashes, [ALLOWED_TERM, OTHER_TERM].map((t) => createHash("sha256").update(t).digest("hex")).join("\n") + "\n");
+  const draftFile = join(dir, "draft.md");
+  writeFileSync(draftFile, draft);
+  const store = join(dir, "state", "redaction-allow.json");
+  const screen = (extra) =>
+    spawnSync(process.execPath, [SCRIPT, "--file", draftFile, "--hashes", hashes, ...extra], {
+      encoding: "utf8",
+      env: { ...process.env, DEVCYCLE_REDACTION_ALLOW_FILE: store },
+    });
+  return { dir, draftFile, store, screen };
+}
+
+test("--repo: a deny-listed term fails while nothing is recorded for the destination", () => {
+  const { dir, store, screen } = allowanceFixture(`Thanks from ${ALLOWED_TERM}.\n`);
+  try {
+    const res = screen(["--repo", "a/b"]);
+    assert.equal(res.status, 1, res.stdout);
+    assert.match(res.stderr, /deny-listed term/);
+    assert.throws(() => readFileSync(store, "utf8"), { code: "ENOENT" }, "a plain screen never writes the store");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--allow-found-terms records the term's hash only, never the term", () => {
+  const { dir, store, screen } = allowanceFixture(`Thanks from ${ALLOWED_TERM}.\n`);
+  try {
+    const res = screen(["--repo", "a/b", "--allow-found-terms"]);
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stderr, /recorded 1 deny-listed term/);
+    assert.ok(!res.stderr.includes(ALLOWED_TERM), "the record summary must never print the term");
+    const text = readFileSync(store, "utf8");
+    assert.ok(!text.includes(ALLOWED_TERM), "the store must never hold the term");
+    assert.deepEqual(JSON.parse(text), { "a/b": [createHash("sha256").update(ALLOWED_TERM).digest("hex")] });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a recorded allowance passes for its destination only, with the destination matched case-insensitively", () => {
+  const { dir, screen } = allowanceFixture(`Thanks from ${ALLOWED_TERM}.\n`);
+  try {
+    assert.equal(screen(["--repo", "a/b", "--allow-found-terms"]).status, 0);
+    assert.equal(screen(["--repo", "a/b"]).status, 0, "the recorded destination passes");
+    assert.equal(screen([]).status, 1, "without --repo the term still fails");
+    assert.equal(screen(["--repo", "c/d"]).status, 1, "another destination still fails");
+    assert.equal(screen(["--repo", "A/B"]).status, 0, "the destination key is lower-cased");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a second, unrecorded deny-listed term in the same draft still fails", () => {
+  const { dir, draftFile, screen } = allowanceFixture(`Thanks from ${ALLOWED_TERM}.\n`);
+  try {
+    assert.equal(screen(["--repo", "a/b", "--allow-found-terms"]).status, 0);
+    writeFileSync(draftFile, `Thanks from ${ALLOWED_TERM} and ${OTHER_TERM}.\n`);
+    const res = screen(["--repo", "a/b"]);
+    assert.equal(res.status, 1, res.stdout);
+    assert.match(res.stderr, /deny-listed term \("u…"/);
+    assert.doesNotMatch(res.stderr, /deny-listed term \("d…"/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--repo never exempts a machine-identity class", () => {
+  const { dir, draftFile, screen } = allowanceFixture(`Thanks from ${ALLOWED_TERM}.\n`);
+  try {
+    assert.equal(screen(["--repo", "a/b", "--allow-found-terms"]).status, 0);
+    writeFileSync(draftFile, `Thanks from ${ALLOWED_TERM}, see ${MAC_HOME}/x.\n`);
+    const res = screen(["--repo", "a/b"]);
+    assert.equal(res.status, 1, res.stdout);
+    assert.match(res.stderr, /home-directory path/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--repo over --dir, a malformed --repo, and --allow-found-terms without --repo are each refused", () => {
+  const { dir, store, screen } = allowanceFixture(`Thanks from ${ALLOWED_TERM}.\n`);
+  try {
+    const overDir = spawnSync(process.execPath, [SCRIPT, "--dir", dir, "--repo", "a/b"], {
+      encoding: "utf8",
+      env: { ...process.env, DEVCYCLE_REDACTION_ALLOW_FILE: store },
+    });
+    assert.equal(overDir.status, 1);
+    assert.match(overDir.stderr, /redaction-check: --repo applies only to a single --file/);
+    const fileAndDir = screen(["--dir", dir, "--repo", "a/b"]);
+    assert.equal(fileAndDir.status, 1, "--file does not license --repo alongside --dir");
+    assert.match(fileAndDir.stderr, /redaction-check: --repo applies only to a single --file/);
+    for (const malformed of ["ab", "a/b/c", "/b", "a/"]) {
+      const res = screen(["--repo", malformed]);
+      assert.equal(res.status, 1, malformed);
+      assert.match(res.stderr, /redaction-check: --repo must be owner\/name/);
+    }
+    const noRepo = screen(["--allow-found-terms"]);
+    assert.equal(noRepo.status, 1);
+    assert.match(noRepo.stderr, /redaction-check: --allow-found-terms requires --file and --repo/);
+    assert.throws(() => readFileSync(store, "utf8"), { code: "ENOENT" }, "a refused run records nothing");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--auto-redact with --repo leaves an allowed term in place", () => {
+  const { dir, draftFile, screen } = allowanceFixture(`Thanks from ${ALLOWED_TERM}.\n`);
+  try {
+    assert.equal(screen(["--repo", "a/b", "--allow-found-terms"]).status, 0);
+    writeFileSync(draftFile, `Thanks from ${ALLOWED_TERM} and ${OTHER_TERM}.\n`);
+    const res = screen(["--repo", "a/b", "--auto-redact"]);
+    assert.equal(res.status, 0, res.stderr);
+    const after = readFileSync(draftFile, "utf8");
+    assert.ok(after.includes(ALLOWED_TERM), "the allowed term stays");
+    assert.ok(!after.includes(OTHER_TERM), "an unallowed term is still rewritten");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

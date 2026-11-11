@@ -5,6 +5,29 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-11 — A PR-bound draft may carry the destination repo's own name once the user records it
+
+**Decision:** `scripts/redaction-check.mjs` gains `--repo <owner/name>` (only with `--file`) and
+`--allow-found-terms`, backed by a local per-destination allowance of deny-list hashes outside every
+repo. `references/review-comments.md` gains § The destination-name allowance, the one owner of
+which screens pass `--repo` and of the single question that records an allowance; the reconcile
+reply screens and the write-back filing screen pass `--repo` and point to it.
+
+**Why:** one deny-listed term is the name of the company that owns a host repo, so every reply or
+review draft posted there failed the screen and was waived by hand each time. A repo's
+`owner/name` cannot be relied on to contain that word, so the allowance is recorded once per
+destination on the user's answer instead of derived.
+
+**Budgets:** the new section grows `references/review-comments.md` by 14 lines; the two playbooks
+that read it carry the closure growth, and the call-site edits add 4 surface lines. The figures
+below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6933
+budget: context-budget.json playbooks/receiving-review.md 122347
+budget: context-budget.json playbooks/writing-the-findings-document.md 67191
+```
+
 ## 2026-11-11 — A reply is skipped only when an identical body is already posted under the footer marker
 
 **Decision:** `pr-review-post.mjs` skips a threaded reply only when a reply to the same comment
