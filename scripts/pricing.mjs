@@ -11,14 +11,15 @@ export const CACHE_READ_DEFAULT_MULTIPLIER = 0.1;
 
 export const PRICING = Object.freeze({
   // The date the claude-api reference these prices came from was cached.
-  asOf: "2026-10-06",
+  asOf: "2026-11-03",
   models: Object.freeze({
     "claude-opus-5-5": Object.freeze({ in: 4, out: 20, cacheRead: 0.2, window: 1_000_000 }),
     "claude-opus-5": Object.freeze({ in: 5, out: 25, window: 1_000_000 }),
     "claude-opus-4-8": Object.freeze({ in: 5, out: 25, window: 1_000_000 }),
     "claude-fable-5": Object.freeze({ in: 10, out: 50, window: 1_000_000 }),
     "claude-fable-5-1": Object.freeze({ in: 10, out: 50, cacheRead: 0.25, window: 1_000_000 }),
-    "claude-sonnet-5-5": Object.freeze({ in: 2, out: 10, cacheRead: 0.2, window: 1_000_000 }),
+    "claude-fable-5-2": Object.freeze({ in: 8, out: 40, cacheRead: 0.2, window: 1_000_000 }),
+    "claude-sonnet-5-5": Object.freeze({ in: 2, out: 10, cacheRead: 0.1, window: 1_000_000 }),
     // List price per the claude-api reference as of asOf.
     "claude-sonnet-5": Object.freeze({ in: 2, out: 10, window: 1_000_000 }),
     "claude-haiku-4-5-20251001": Object.freeze({ in: 1, out: 5, window: 200_000 }),
