@@ -368,6 +368,19 @@ test("a driver that cannot read its own plugin version says so, rather than leav
   }
 });
 
+// #404: headless -p stops a session's background subagents 10 minutes after its last turn unless
+// this ceiling is 0 (docs/platform-notes.md § (p)); an inherited value never shortens it again.
+test("a driven session lifts the headless background-task ceiling, overriding an inherited one", () => {
+  const inherited = process.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS;
+  process.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS = "600000";
+  try {
+    assert.equal(childEnv({ token: "t", effort: "default" }, "1.2.3").CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, "0");
+  } finally {
+    if (inherited === undefined) delete process.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS;
+    else process.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS = inherited;
+  }
+});
+
 // D5: a driven session holds DEVCYCLE_DRIVE_TOKEN; only /devcycle:continue starts a driver.
 test("a start from a driven session (DEVCYCLE_DRIVE_TOKEN set) is refused before the pre-flight, touching neither the lock nor a result", async () => {
   const root = makeCycle();

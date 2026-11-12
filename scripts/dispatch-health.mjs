@@ -421,15 +421,53 @@ export function currentDispatchStartMs(root, task) {
   return starts.length ? Math.max(...starts) : null;
 }
 
-const FLAGS = { "--record": "none", "--stopped": "value", "--json": "none", "--ledger": "value" };
+// One --wait call stays under the Bash tool's 10-minute ceiling, so a driven coordinator can wait
+// inside its turn (playbooks/executing-waves.md § Per-task cycle) in bounded foreground calls.
+export const WAIT_MAX_MS = 590_000;
+const WAIT_POLL_MS = Number(process.env.DEVCYCLE_DISPATCH_WAIT_POLL_MS) || 5_000;
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
+// dispatchHealth, polled until a dispatch needs acting on (an action other than `wait`), none is in
+// flight, or `waitMs` has passed — whichever comes first.
+export function waitForDispatches({ waitMs, poll = WAIT_POLL_MS, clock = Date.now, sleep = pause, ...opts }) {
+  const until = clock() + waitMs;
+  for (;;) {
+    const dispatches = dispatchHealth({ ...opts, now: clock() });
+    if (!dispatches.length || dispatches.some((d) => d.action !== "wait") || clock() >= until) return dispatches;
+    sleep(Math.min(poll, until - clock()));
+  }
+}
+
+// The Stop sensor's hold for the live driver's own session (hooks/dispatch-sensor.mjs): a headless
+// session that ends its turn exits about 600 s later and interrupts every running subagent
+// (docs/platform-notes.md § (p)), so its turn may not end while a dispatch is still working — running,
+// or not yet bound to its transcript inside UNBOUND_MS. A dispatch with anything to act on releases
+// the turn: the coordinator acts on it, and a dead or quiet one is never held for ever.
+export function holdTurnEnd({ root, ledgerPath = join(root, LEDGER_REL), sessionId, env = process.env, now = Date.now() }) {
+  const working = dispatchHealth({ root, ledgerPath, sessionId, env, now })
+    .filter((d) => d.action === "wait" && (d.state === "running" || (d.state === "unbound" && d.elapsedMs < UNBOUND_MS)));
+  if (!working.length) return { hold: false };
+  const names = working.map((d) => (d.kind === "task" ? `task ${d.task} ${d.role}` : `progress ${d.id}`)).join(", ");
+  return {
+    hold: true,
+    reason: `devcycle: this driven session still has ${names} in flight, and ending the turn now loses ${working.length === 1 ? "it" : "them"}. ` +
+      `Wait inside the turn: run \`node "$(devcycle-root)/scripts/dispatch-health.mjs" --record --wait ${WAIT_MAX_MS}\` and act on its lines.`,
+  };
+}
+
+const FLAGS = { "--record": "none", "--stopped": "value", "--json": "none", "--ledger": "value", "--wait": "value" };
 
 function healthMain(argv) {
   try {
     const flags = taskFlags(argv, FLAGS, []);
     const sessionId = process.env.CLAUDE_CODE_SESSION_ID;
     if (!sessionId) throw new Error("CLAUDE_CODE_SESSION_ID is unset: cannot tell this session's dispatches from another's");
+    const waitMs = flags["--wait"] === undefined ? null : Number(flags["--wait"]);
+    if (waitMs !== null && !(Number.isInteger(waitMs) && waitMs > 0 && waitMs <= WAIT_MAX_MS))
+      throw new UsageError(`--wait takes milliseconds from 1 to ${WAIT_MAX_MS}, got "${flags["--wait"]}"`);
     const root = workTreeRoot(process.cwd());
-    const dispatches = dispatchHealth({ root, ledgerPath: flags["--ledger"] ?? join(root, LEDGER_REL), sessionId, record: Boolean(flags["--record"]), stopped: flags["--stopped"] ?? null });
+    const opts = { root, ledgerPath: flags["--ledger"] ?? join(root, LEDGER_REL), sessionId, record: Boolean(flags["--record"]), stopped: flags["--stopped"] ?? null };
+    const dispatches = waitMs === null ? dispatchHealth(opts) : waitForDispatches({ ...opts, waitMs });
     if (flags["--json"]) console.log(JSON.stringify({ ok: true, sessionId, dispatches }));
     else console.log(dispatches.length ? dispatches.map(formatDispatch).join("\n") : "no dispatch in flight");
   } catch (err) {
