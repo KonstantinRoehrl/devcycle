@@ -112,7 +112,8 @@ exit 2 or 3 a stop.
      command, and a brief never nests git in `$(…)` or backticks: `hooks/block-destructive-git.mjs`
      denies an implementer all of them.
 3. **Dispatch devcycle:implementer** with that brief only, never accumulated session history or other
-   tasks' reports, on the model `references/model-routing.md` resolves. The dispatch prompt must NEVER
+   tasks' reports, on the model `references/model-routing.md` resolves, in a response that holds no
+   `Bash` call (`references/delegation.md` § One Bash call per response). The dispatch prompt must NEVER
    instruct the implementer to commit, stage, or push. Immediately before it, give the brief to
    `task-dispatch.mjs --role implementer --model-decision "<the routing decision>"` (a fix pass adds
    `--round <n>`) on stdin as a quoted heredoc (`<<'EOF'`) — one `node` call, nothing chained to it,
@@ -180,8 +181,11 @@ exit 2 or 3 a stop.
    `unproven-commit` even after a fix or revert on top: the user resets it off the branch by hand,
    then calls `task-commit` again. The `PostToolUse` commit-sensor records `workload` itself.
 
-**Waiting on dispatches.** While any dispatch is in flight, wait on its completion notification; a
-self-wake (`ScheduleWakeup`, `Monitor`) is at most 5 minutes. On every wake, and before every wait,
+**Waiting on dispatches.** While any dispatch is in flight, a walked session waits on its completion
+notification, a self-wake (`ScheduleWakeup`, `Monitor`) at most 5 minutes away. A driven session never
+ends its turn to wait (when it ends is `commands/continue.md` § Drive mode's): it adds `--wait 590000`
+to the check below, a foreground call that returns once a line's action is not `wait`, nothing is in
+flight, or the limit passes, and repeats it. On every wake, and before every wait,
 first run `node "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch-health.mjs" --record` and act on each line's
 action, never on a missing report (`references/delegation.md` § Return envelopes): `wait`; `intake` or
 `verdict` (its notification is due); `redispatch-implementer` or `redispatch-reviewer` (the same brief,

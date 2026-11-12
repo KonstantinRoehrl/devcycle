@@ -22,7 +22,9 @@ exact text, console output, the route a navigation landed on, or what survived a
 the item asserts against. Capture fresh output; never report from memory of an earlier item.
 
 When a checklist item needs several `mcp__claude-in-chrome__*` reads that don't depend on each
-other's results, issue them together in one message block rather than one at a time.
+other's results, issue them together in one message block rather than one at a time. A `Bash` call
+never shares that block, or any other, with a browser call:
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/delegation.md one-bash-call-per-response`.
 
 Write captured evidence an item asserts against — DOM dumps, console output, screenshots — to a
 file under `.devcycle/evidence/` rather than leaving it only in the transcript, and name that

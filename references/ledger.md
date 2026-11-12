@@ -83,14 +83,17 @@ flag at once; `--help` answers `action: "usage"` with the script's `required` an
   a `**Capture command:**` line and the `- Narrowing:` line a concurrent wave's capture needs. It
   refuses (exit 2, writing nothing) when the state file beside the ledger gives the waves to the
   driver — a `drive: auto` row, or none under a recorded `executionMode=unattended` — and the
-  caller lacks that live driver's token. It reads the recorded `knobs:` line, never the live knob,
-  and covers only this script: the sweep, commit and `follow-decision` resume steps do not pass
-  through it.
-- `node "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch-health.mjs" [--record] [--stopped <task>] [--json]`
+  caller lacks that live driver's token, at `stage: execution` or a stage outside the enum; the
+  driver walks execution alone, so any other stage proceeds. It reads the recorded `knobs:` line,
+  never the live knob, and covers only this script: the sweep, commit and `follow-decision` resume
+  steps do not pass through it.
+- `node "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch-health.mjs" [--record] [--stopped <task>] [--json] [--wait <ms>]`
   while dispatches are in flight: one line per in-flight dispatch of this session — state, elapsed
   time, tool uses, idle time, last tool — and the next action; with `--record`, appends
   `dispatch-ended` (`outcome=without output (<role>)`, the dead dispatch's record as `ref=`) for a
   dispatch that ended without its output, a quiet one `--stopped` names, or one that never started.
+  `--wait <ms>` (1 to 590000) polls in the foreground and prints once a line's action is not `wait`,
+  nothing is in flight, or `<ms>` has passed.
 - `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-intake.mjs" --run <run-id> --task <id> --report <path> --status complete|blocked --agent-type <type> --model <id> --model-source explicit|inherited [--agent-id <id>] [--compose-review]`
   once the implementer's envelope returns, against the task's latest `dispatched` line:
   `status: blocked` appends `report-received outcome=blocked` (action `needs-user`); a missing report,

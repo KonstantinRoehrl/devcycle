@@ -205,6 +205,14 @@ is legitimate when none applied. `culprit` earns its place the same way: the coo
 the rejecting event's slug from the envelope alone, so an envelope without the field would force it
 to open the findings file for one token or record the event unattributed.
 
+## One Bash call per response
+
+A user's hook (RTK's, for one) may rewrite a `Bash` call after auto mode reviewed it, and auto mode
+then fails that call and every other call in its response (`docs/platform-notes.md` § (q)). So a
+response holding a `Bash` call holds no `Agent`, browser or other MCP call. A call refused with "no
+verdict … a hook changed this call's input" is reissued once, verbatim, alone; refused again, it is
+reported.
+
 ## The short paths
 
 `playbooks/taking-the-fast-path.md` and `playbooks/sweeping-mechanical-changes.md` are in-session by design. The
