@@ -328,7 +328,7 @@ test("Stop: the driver's own session is held while a dispatch works, with the fo
   assert.notEqual(r.stdout, "", "the driven turn was not held");
   const out = JSON.parse(r.stdout);
   assert.equal(out.decision, "block");
-  assert.match(out.reason, /task 5 implementer in flight.*dispatch-health\.mjs" --record --wait 590000/);
+  assert.match(out.reason, /task 5 implementer in flight.*dispatch-health\.mjs" --record --wait 590000.*Bash tool's `timeout: 600000`/);
 });
 
 test("Stop: a walked session, a wrong token or no lock is never held", () => {

@@ -398,8 +398,8 @@ branch with real settings, install the checkout through a directory-source marke
   and `message.usage`, from which the agent's final context depth is read.
 - `session_id` was not recorded.
 
-**Consequence.** `hooks/dispatch-sensor.mjs` registers on `SubagentStop` only (decision D15,
-`docs/decisions/README.md` 2026-10-07): it is the one event that sees every agent, and it reads the
+**Consequence.** `hooks/dispatch-sensor.mjs` registers on `SubagentStop` for its depth sensing (decision D15,
+`docs/decisions/README.md` 2026-10-07; its later `Stop` registration is § (p)'s): it is the one event that sees every agent, and it reads the
 single transcript the input names. Because its input always carries `agent_type`/`agent_id`, the
 subagent-origin guard § (f) describes for the workload sensor does not apply here. It also records
 only when the input's `session_id` — Claude Code's common hook-input field, assumed to be the
@@ -651,5 +651,5 @@ evidence stays outside version control, in `.devcycle/diagnosis.md` § 2.
   One rewrite also broke its command: `rtk grep` rejected the flag set it was given.
 
 **Consequence.** `references/delegation.md` § One Bash call per response owns the rule. A response
-that holds a `Bash` call holds no `Agent`, browser or other MCP call, and a call refused this way is
+that holds a `Bash` call holds no other tool call, and a call refused this way is
 reissued once, verbatim, alone. `playbooks/executing-waves.md` and `agents/on-device-driver.md` point to it.

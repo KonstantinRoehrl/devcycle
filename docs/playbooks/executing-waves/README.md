@@ -34,8 +34,8 @@ implementer for a fix pass, bounded at three rounds per task, past which the tas
 `exhausted-unresolved` and is surfaced to the user rather than committed as if it had passed.
 While dispatches are in flight a walked coordinator waits on their notifications, waking at most
 every 5 minutes to run `dispatch-health.mjs --record`. A driven coordinator never ends its turn to
-wait: it runs the same check with `--wait`, a foreground call under the Bash tool's 10-minute
-ceiling, and a `Stop` hook holds its turn open while a dispatch still works, because a headless
+wait: it runs the same check with `--wait`, a foreground call under the Bash tool's
+`timeout: 600000`, and a `Stop` hook holds its turn open while a dispatch still works, because a headless
 session that ends its turn exits about 600 s later and takes its running subagents with it. A
 dispatch that ended without its report is
 redispatched once per role, then it is the user's call. Concurrent tasks capture their own test

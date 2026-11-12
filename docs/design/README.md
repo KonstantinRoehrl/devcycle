@@ -127,7 +127,7 @@ devcycle/                (public GitHub repo)
 │   ├── lib/run-scope.mjs              # which state file names an active run — node-free, shared by the depth-sensor and the hooks module
 │   ├── lib/run-context.mjs            # state file → active run → joined session, for the depth-sensor and the module's sink
 │   ├── workload-sensor.mjs       # PostToolUse(Bash) commit-sensor: re-derives the run's workload record (#139)
-│   ├── dispatch-sensor.mjs       # SubagentStop depth-sensor: one agent-depth record per finished subagent; holds an implementer that stops before its report; on a released stop marks its dispatch record ended and retires it in the process registry
+│   ├── dispatch-sensor.mjs       # SubagentStop depth-sensor: one agent-depth record per finished subagent; holds an implementer that stops before its report; on a released stop marks its dispatch record ended and retires it in the process registry; on Stop holds the live driver's turn while a dispatch works
 │   ├── devcycle-mod.mjs          # the hooks module (in-process, no Node): agent-trace observer, subagentBudget limiter, stage meter, handoff notification relay, drive band
 │   └── mod-sink.mjs              # the module's Node side: the joined check and agent-trace writes
 ├── references/                   # L3 — one owner per convention; enumerated in §15.1

@@ -451,7 +451,7 @@ export function holdTurnEnd({ root, ledgerPath = join(root, LEDGER_REL), session
   return {
     hold: true,
     reason: `devcycle: this driven session still has ${names} in flight, and ending the turn now loses ${working.length === 1 ? "it" : "them"}. ` +
-      `Wait inside the turn: run \`node "$(devcycle-root)/scripts/dispatch-health.mjs" --record --wait ${WAIT_MAX_MS}\` and act on its lines.`,
+      `Wait inside the turn: run \`node "$(devcycle-root)/scripts/dispatch-health.mjs" --record --wait ${WAIT_MAX_MS}\` under the Bash tool's \`timeout: 600000\` and act on its lines.`,
   };
 }
 

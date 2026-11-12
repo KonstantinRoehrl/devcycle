@@ -181,11 +181,11 @@ exit 2 or 3 a stop.
    `unproven-commit` even after a fix or revert on top: the user resets it off the branch by hand,
    then calls `task-commit` again. The `PostToolUse` commit-sensor records `workload` itself.
 
-**Waiting on dispatches.** While any dispatch is in flight, a walked session waits on its completion
-notification, a self-wake (`ScheduleWakeup`, `Monitor`) at most 5 minutes away. A driven session never
+**Waiting on dispatches.** While a dispatch is in flight, a walked session waits on its
+notification, a self-wake (`ScheduleWakeup`, `Monitor`) within 5 minutes. A driven session never
 ends its turn to wait (when it ends is `commands/continue.md` § Drive mode's): it adds `--wait 590000`
-to the check below, a foreground call that returns once a line's action is not `wait`, nothing is in
-flight, or the limit passes, and repeats it. On every wake, and before every wait,
+to the check below, a Bash call with `timeout: 600000` that returns once a line's action is not `wait`,
+nothing is in flight or the limit passes, and repeats it. On every wake and before every wait,
 first run `node "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch-health.mjs" --record` and act on each line's
 action, never on a missing report (`references/delegation.md` § Return envelopes): `wait`; `intake` or
 `verdict` (its notification is due); `redispatch-implementer` or `redispatch-reviewer` (the same brief,
