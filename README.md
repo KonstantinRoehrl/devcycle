@@ -210,7 +210,8 @@ plugin ships. Start there.
   the same tables as the full report. A step that needs one section of a shared reference loads
   only that section, through `scripts/read-section.mjs`.
 - `scripts/dispatch-health.mjs` — tells a running dispatch from one that ended without its report,
-  for the coordinator, the driver's watchdog and the drive band.
+  for the coordinator, the driver's watchdog and the drive band; with `--wait`, a driven coordinator
+  waits on its dispatches inside its turn.
 - Developing devcycle itself: `scripts/self-dev-check.mjs` guards the case where the repo under
   work *is* this plugin's own source, so the pipeline runs from the installed copy while the
   deliverable belongs in the repo. `/devcycle:cycle` records what the installed copy holds when the
