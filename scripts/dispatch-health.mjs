@@ -12,6 +12,7 @@ import { atomicWrite } from "./atomic-write.mjs";
 import { claudeProjectsDir } from "./depth-probe.mjs";
 import { isMain } from "./is-main.mjs";
 import { eachRecord } from "./jsonl.mjs";
+import { sleepSync } from "./sleep.mjs";
 import { briefPathFor, roundFindingsPath } from "./task-dispatch.mjs";
 import { HelpRequest, UsageError, appendLedgerLine, nextRetry, parseLedgerLine, taskEntries, taskFlags, usageLine, workTreeRoot } from "./task-ledger.mjs";
 
@@ -425,11 +426,10 @@ export function currentDispatchStartMs(root, task) {
 // inside its turn (playbooks/executing-waves.md § Per-task cycle) in bounded foreground calls.
 export const WAIT_MAX_MS = 590_000;
 const WAIT_POLL_MS = Number(process.env.DEVCYCLE_DISPATCH_WAIT_POLL_MS) || 5_000;
-const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 // dispatchHealth, polled until a dispatch needs acting on (an action other than `wait`), none is in
 // flight, or `waitMs` has passed — whichever comes first.
-export function waitForDispatches({ waitMs, poll = WAIT_POLL_MS, clock = Date.now, sleep = pause, ...opts }) {
+export function waitForDispatches({ waitMs, poll = WAIT_POLL_MS, clock = Date.now, sleep = sleepSync, ...opts }) {
   const until = clock() + waitMs;
   for (;;) {
     const dispatches = dispatchHealth({ ...opts, now: clock() });
