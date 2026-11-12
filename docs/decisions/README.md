@@ -5,6 +5,61 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-12 — A driven coordinator waits inside its turn, and a response with a Bash call holds nothing else (#404, #432)
+
+**Decision:** while a dispatch is in flight a driven coordinator never ends its turn to wait. It runs
+`scripts/dispatch-health.mjs --record --wait <ms>`, a foreground poll of at most 590 000 ms that
+returns once a line's action is not `wait`, nothing is in flight, or the limit passes, and repeats it
+(`playbooks/executing-waves.md` § Per-task cycle, **Waiting on dispatches**). `hooks/dispatch-sensor.mjs`
+also handles `Stop`: in the live driver's own session, outside a `/devcycle:stop` window, it blocks
+the turn end while a dispatch is still running, or not yet bound to its transcript inside
+`UNBOUND_MS` (`dispatch-health.mjs` `holdTurnEnd`). `scripts/drive-execution.mjs` sets
+`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` for every driven session. A walked session waits on
+notifications as before. Separately, `references/delegation.md` § One Bash call per response owns the
+rule that a response holding a `Bash` call holds no `Agent`, browser or other MCP call, and that a
+call refused with no verdict after a hook rewrite is reissued once, verbatim, alone. The playbook's
+dispatch step and `agents/on-device-driver.md` point to it.
+
+**Why:** headless `-p` stops a session's background subagents 10 minutes after its last turn
+(`docs/platform-notes.md` § (p)), so a driven coordinator that ended its turn to wait lost every
+running implementer and the next session dispatched them again from scratch (#404). A Bash call that
+the user's RTK hook rewrote gets no auto-mode verdict, and every other call in its response fails with
+it, including on-device browser calls (`docs/platform-notes.md` § (q), #432).
+
+**Budgets:** the new delegation section grows `references/delegation.md` by 442 bytes, which every
+entry point citing it carries; the dispatch step, the waiting paragraph and the `ledger.md` bullets
+grow `playbooks/executing-waves.md`'s closure further, and every added line grows the surface. The
+figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6955
+budget: context-budget.json commands/cycle.md 87185
+budget: context-budget.json playbooks/executing-waves.md 119332
+budget: context-budget.json playbooks/learning-from-sessions.md 66369
+budget: context-budget.json playbooks/maintaining-the-repo.md 66991
+budget: context-budget.json playbooks/planning-waves.md 89370
+budget: context-budget.json playbooks/receiving-review.md 122789
+budget: context-budget.json playbooks/reviewing-code.md 100035
+budget: context-budget.json playbooks/scoping-the-request.md 36668
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 94792
+budget: context-budget.json references/delegation.md 12728
+```
+
+## 2026-11-12 — The dispatch guard ends at execution's close (#431)
+
+**Decision:** `scripts/task-dispatch.mjs` refuses a dispatch of driver-owned waves without the live
+driver's token only while the state file's `stage:` is `execution`, or is missing or outside the
+stage enum (`references/stages.json`'s keys plus the closed stage). At any other stage a dispatch
+proceeds whatever the `drive:` row or `executionMode` records, and `task-intake.mjs --compose-review`
+follows, since it calls the same guard in-process. The `drive:` row stays as history.
+
+**Why:** the driver walks only execution (`scripts/drive-execution.mjs` refuses any other start and
+ends `complete` at branch-review), yet an interactive branch-review or on-device fix dispatch was
+refused because the state file still read `drive: auto`, and the session asked the user about
+execution mode (#431).
+
+**Supersedes:** the 2026-11-06 entry's (#412) refusal at every stage; it now holds at execution only.
+
 ## 2026-11-11 — A pending review can be parked and restored around a posted review
 
 **Decision:** `scripts/pr-review-post.mjs review` gains `--park <PRR_…>`, which snapshots the user's

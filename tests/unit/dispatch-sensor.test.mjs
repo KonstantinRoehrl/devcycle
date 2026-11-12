@@ -7,6 +7,7 @@ import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
 import { repoSlug, gitToplevel, hashSession } from "../../scripts/run-record.mjs";
 import { readProcesses, recordProcess } from "../../scripts/process-registry.mjs";
+import { acquireDriveLock, driveTokenHash, releaseDriveLock } from "../../scripts/drive-lock.mjs";
 
 const HOOK = new URL("../../hooks/dispatch-sensor.mjs", import.meta.url).pathname;
 const SCHEMA = JSON.parse(readFileSync(new URL("../fixtures/run-record.schema.json", import.meta.url), "utf8"));
@@ -289,4 +290,60 @@ test("a stop input with no transcript path still retires the subagent from the p
   const r = callHook(fx, { agent_transcript_path: undefined });
   assert.equal(r.stdout, "");
   assert.equal(readProcesses(dir).find((e) => e.id === "a3382414bf84c15db").endedBy, "finished");
+});
+
+// #404: the live driver's own session may not end its turn while a dispatch it started is still
+// working; a headless session that does exits ~600 s later and interrupts it (docs/platform-notes.md § (p)).
+const DRIVE_TOKEN = "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
+function drivenFixture() {
+  const fx = fixture({ stage: "execution" });
+  writeInto(fx.repo, ".devcycle/ledger.md", "Plan: `docs/plan.md`\n\n- [2026-10-28T08:00:00Z] task=5 event=dispatched outcome=model x ref=.devcycle/briefs/5-implementer.md key=5/dispatched/0/0\n");
+  writeInto(fx.repo, ".devcycle/dispatch/5-implementer-0-0.json", JSON.stringify({ startedAt: "2026-10-28T08:00:00Z", sessionId: SESSION }) + "\n");
+  const config = makeTempDir("dispatch-sensor-config");
+  const subagents = join(config, "projects", "-repo", SESSION, "subagents");
+  mkdirSync(subagents, { recursive: true });
+  writeFileSync(join(config, "projects", "-repo", `${SESSION}.jsonl`), "");
+  writeFileSync(join(subagents, "agent-a1.jsonl"), readFileSync(new URL("../fixtures/dispatch-health/pending-tool.jsonl", import.meta.url), "utf8"));
+  return { ...fx, config };
+}
+function callStop(fx, env = {}) {
+  return spawnSync("node", [HOOK], {
+    input: JSON.stringify({ hook_event_name: "Stop", cwd: fx.repo, session_id: SESSION, stop_hook_active: false, background_tasks: [] }),
+    encoding: "utf8", env: { ...process.env, DEVCYCLE_RUNS_DIR: fx.runsDir, CLAUDE_CONFIG_DIR: fx.config, ...env } });
+}
+function withDriveLock(fx, fn) {
+  const statePath = join(fx.repo, ".devcycle/state.md");
+  const { lock } = acquireDriveLock(fx.repo, { statePath, logPath: join(fx.repo, ".devcycle/drive.log"), tokenHash: driveTokenHash(DRIVE_TOKEN) });
+  try {
+    return fn();
+  } finally {
+    releaseDriveLock(fx.repo, lock);
+  }
+}
+
+test("Stop: the driver's own session is held while a dispatch works, with the foreground wait in the reason", () => {
+  const fx = drivenFixture();
+  const r = withDriveLock(fx, () => callStop(fx, { DEVCYCLE_DRIVE_TOKEN: DRIVE_TOKEN }));
+  assert.equal(r.status, 0, r.stderr);
+  assert.notEqual(r.stdout, "", "the driven turn was not held");
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.decision, "block");
+  assert.match(out.reason, /task 5 implementer in flight.*dispatch-health\.mjs" --record --wait 590000.*Bash tool's `timeout: 600000`/);
+});
+
+test("Stop: a walked session, a wrong token or no lock is never held", () => {
+  const fx = drivenFixture();
+  assert.equal(callStop(fx, { DEVCYCLE_DRIVE_TOKEN: DRIVE_TOKEN }).stdout, "", "no lock");
+  assert.equal(withDriveLock(fx, () => callStop(fx, { DEVCYCLE_DRIVE_TOKEN: "" })).stdout, "", "a walked session");
+  assert.equal(withDriveLock(fx, () => callStop(fx, { DEVCYCLE_DRIVE_TOKEN: "not-the-token" })).stdout, "", "a wrong token");
+});
+
+test("Stop: a dispatch with its report, or a stop window, releases the driven turn", () => {
+  const reported = drivenFixture();
+  writeInto(reported.repo, ".devcycle/reports/5.md", "## Task report\n");
+  writeFileSync(join(reported.config, "projects", "-repo", SESSION, "subagents", "agent-a1.meta.json"), JSON.stringify({ finished: true }));
+  assert.equal(withDriveLock(reported, () => callStop(reported, { DEVCYCLE_DRIVE_TOKEN: DRIVE_TOKEN })).stdout, "");
+  const stopping = drivenFixture();
+  writeInto(stopping.repo, ".devcycle/stop-request", JSON.stringify({ requestedAt: new Date().toISOString(), sessions: [] }));
+  assert.equal(withDriveLock(stopping, () => callStop(stopping, { DEVCYCLE_DRIVE_TOKEN: DRIVE_TOKEN })).stdout, "");
 });

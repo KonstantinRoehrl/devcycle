@@ -335,7 +335,7 @@ test("a brief whose constraints are in no recognised form never claims it has no
 });
 
 // #412: the reviewer dispatch --compose-review runs in-process takes task-dispatch's driver guard.
-test("--compose-review on waves the driver owns refuses the reviewer dispatch; a manual row composes it", () => {
+test("--compose-review on waves the driver owns refuses the reviewer dispatch; a manual row or a stage after execution composes it", () => {
   const owned = planned();
   writeInto(owned.repo, ".devcycle/state.md", "# devcycle state\n- stage: execution\n- knobs: profile=standard executionMode=unattended\n");
   const refused = intake(owned, ["--compose-review"]);
@@ -349,6 +349,13 @@ test("--compose-review on waves the driver owns refuses the reviewer dispatch; a
   const composed = intake(walked, ["--compose-review"]);
   assert.equal(composed.status, 0, composed.stderr);
   assert.equal(composed.out.reviewBriefPath, ".devcycle/briefs/5-reviewer-round-1.md");
+  // #431: the driver walks only execution, so at branch-review an auto row holds no fix dispatch.
+  const after = planned();
+  writeInto(after.repo, ".devcycle/state.md",
+    "# devcycle state\n- stage: branch-review\n- knobs: profile=standard executionMode=unattended\n- drive: auto model=claude-sonnet-5-5 opted=2026-11-06T09:00:00Z via=knob\n");
+  const postExecution = intake(after, ["--compose-review"]);
+  assert.equal(postExecution.status, 0, postExecution.stderr);
+  assert.equal(postExecution.out.reviewBriefPath, ".devcycle/briefs/5-reviewer-round-1.md");
 });
 
 test("--compose-review composes the reviewer dispatch for a session holding the live driver's token", () => {

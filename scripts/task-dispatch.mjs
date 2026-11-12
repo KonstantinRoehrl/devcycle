@@ -16,6 +16,7 @@ import { isMain } from "./is-main.mjs";
 import { matchedLessons } from "./lesson-match.mjs";
 import { fieldText } from "./md-field.mjs";
 import { parseRecordedLine } from "./resolve-knobs.mjs";
+import { CLOSED_STAGE, loadStages } from "./stage-entry.mjs";
 import { now } from "./stamp.mjs";
 import {
   UsageError, appendLedgerLine, checkIds, countFlag, ledgerKey, nextReviewRound, nextRetry, runTaskScript, taskEntries, taskFiles,
@@ -81,10 +82,20 @@ function withLessons(brief, root, ledger, task) {
   return { text, lessons: matched ? matched.split("\n").length : 0 };
 }
 
+// A stage the cycle enum names: references/stages.json's keys plus the closed stage.
+function isStage(stage) {
+  try {
+    return stage === CLOSED_STAGE || Object.hasOwn(loadStages(), stage);
+  } catch {
+    return false;
+  }
+}
+
 // The state file beside the ledger records whose waves these are (references/drive.md § Drive actions):
 // an `auto` drive row, or no row under a recorded unattended knob, gives them to the driver, and
-// only a session that driver started holds its token. No state file records no mode, so nothing is
-// refused.
+// only a session that driver started holds its token. The driver walks the execution stage alone,
+// so at any other stage a dispatch proceeds; a stage missing or outside the enum refuses as if at
+// execution. No state file records no mode, so nothing is refused.
 function refuseDriverOwnedWaves(ledger, cwd) {
   const statePath = join(dirname(resolve(cwd, ledger)), "state.md");
   let stateText;
@@ -93,6 +104,8 @@ function refuseDriverOwnedWaves(ledger, cwd) {
   } catch {
     return;
   }
+  const stage = fieldText(stateText, "stage");
+  if (stage !== "execution" && isStage(stage)) return;
   const row = fieldText(stateText, "drive");
   const unattended = parseRecordedLine(fieldText(stateText, "knobs")).executionMode === "unattended";
   const recorded = /^auto\b/.test(row) ? "a drive: auto row" : !row && unattended ? "executionMode=unattended and no drive: row" : null;

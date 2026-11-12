@@ -398,8 +398,8 @@ branch with real settings, install the checkout through a directory-source marke
   and `message.usage`, from which the agent's final context depth is read.
 - `session_id` was not recorded.
 
-**Consequence.** `hooks/dispatch-sensor.mjs` registers on `SubagentStop` only (decision D15,
-`docs/decisions/README.md` 2026-10-07): it is the one event that sees every agent, and it reads the
+**Consequence.** `hooks/dispatch-sensor.mjs` registers on `SubagentStop` for its depth sensing (decision D15,
+`docs/decisions/README.md` 2026-10-07; its later `Stop` registration is § (p)'s): it is the one event that sees every agent, and it reads the
 single transcript the input names. Because its input always carries `agent_type`/`agent_id`, the
 subagent-origin guard § (f) describes for the workload sensor does not apply here. It also records
 only when the input's `session_id` — Claude Code's common hook-input field, assumed to be the
@@ -596,3 +596,60 @@ Measured on Claude Code 2.1.316 under a zsh login shell on macOS, 2026-10-31 (#3
 - A blocked stop does not set `.meta.json`'s `finished`; after a block the transcript's last message record is a `user` record with `isMeta: true` carrying the hook's feedback.
 
 **Consequence.** `hooks/dispatch-sensor.mjs` is the one `SubagentStop` handler, so nothing marks ended a stop it held: it holds an implementer whose owed report is missing, counting holds on the dispatch record (cap 3) rather than trusting `stop_hook_active`, and `scripts/dispatch-health.mjs` reads a hold newer than the transcript's last record as in flight for a minute. The CI-pinned versions (2.1.287, 2.1.292) are assumed to honour the block; where one does not, the agent ends, the `heldAt` grace lapses and the transcript classifier records the death as before.
+
+## (p) Headless `-p` stops background subagents 10 minutes after the last turn
+
+**What was tried.** A spike on 2026-11-12 against Claude Code 2.1.322 (#404), with the driver's flags
+(`claude -p --permission-mode auto --output-format stream-json --verbose`) in scratch repos under
+`/private/tmp/devcycle-tests`. The coordinator dispatched one background subagent that ran
+`node work.mjs 590`, then `node work.mjs 120 --done`, about 710 s in all, and the probes varied only
+what the coordinator did next. A standalone `sleep 590` is refused by Claude Code ("Blocked:
+standalone sleep"), so the work is a Node script. The raw output stays outside version control,
+under `.devcycle/evidence/unattended-stalls/spike/`.
+
+**Exact result.**
+
+| Probe | Coordinator | Outcome |
+| --- | --- | --- |
+| P0 | Ends its turn. | The turn ended at +6.5 s. At +607 s the subagent was `killed` and stderr read "Background tasks still running 10m after the last turn (subagent …); stopping them. Set CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 to wait indefinitely". Exit 0 at +608 s, and the subagent's `done.txt` was never written. |
+| P1 | Loops a foreground `node wait.mjs` of at most 580 s per call. | It survived past 600 s and `done.txt` was written. After the wait returned, the completion notification arrived and the result carried the subagent's final reply. Exit at +733 s. |
+| P2 | Ends its turn, and a project `Stop` hook blocks while `done.txt` is missing and a token variable is set. | `Stop` fired at +6.5 s with `background_tasks` listing the running subagent, and the hook saw the session's token variable. The block reason arrived as "Stop hook feedback", and the coordinator stayed in its turn running the wait. It survived past 600 s, received the final reply, and exited at +733 s. |
+
+- The exit is a platform ceiling, 10 minutes after the last turn, named in stderr and set by
+  `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`.
+- A turn inside a foreground Bash call is not ended by it, and notifications reach the coordinator
+  once the call returns.
+- A `Stop` block under `-p` keeps the session in its turn, and a hook inherits the session's
+  environment.
+
+**Consequence.** Three layers keep a driven session's dispatches alive.
+`scripts/drive-execution.mjs` sets `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` for each driven
+session. A driven coordinator waits inside its turn with `dispatch-health.mjs --wait`
+(`playbooks/executing-waves.md` § Per-task cycle). `hooks/dispatch-sensor.mjs` blocks the driven
+session's `Stop` while a dispatch still works (`scripts/dispatch-health.mjs` `holdTurnEnd`). Each
+layer covers the others' failure: a Claude Code without the variable, a coordinator that ends its
+turn anyway, and a hold that releases on a dead or quiet dispatch.
+
+## (q) A hook-rewritten Bash call gets no auto-mode verdict
+
+**What was tried.** About 60 transcripts from 2026-11-05 to 2026-11-12 under `--permission-mode auto`,
+read for #432, with the user's RTK `PreToolUse` hook (`rtk hook claude`) rewriting Bash commands, for
+example `grep` to `rtk grep`. Reproduced live on 2026-11-12 against Claude Code 2.1.322. The
+evidence stays outside version control, in `.devcycle/diagnosis.md` § 2.
+
+**Exact result.**
+
+- A rewritten call is refused with "gave no verdict for Bash: a hook changed this call's input after
+  auto mode reviewed it, so the review does not cover what would run. This is not a judgment that
+  the action is unsafe."
+- Every other call in the same response fails with it, as "another call in this response was changed
+  by a hook after auto mode reviewed it". That reached on-device `javascript_tool`, `navigate` and
+  `tabs_create_mcp` calls, which looked like denials of the browser work and were not.
+- Each call passed when it was reissued once, verbatim, in a response of its own. No hard denial with
+  a `Reason:` was found on these shapes.
+- An allow rule cannot help, because it matches the input before the rewrite (§ (k), v5a).
+  One rewrite also broke its command: `rtk grep` rejected the flag set it was given.
+
+**Consequence.** `references/delegation.md` § One Bash call per response owns the rule. A response
+that holds a `Bash` call holds no other tool call, and a call refused this way is
+reissued once, verbatim, alone. `playbooks/executing-waves.md` and `agents/on-device-driver.md` point to it.

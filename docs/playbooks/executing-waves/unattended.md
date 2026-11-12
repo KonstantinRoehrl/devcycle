@@ -89,7 +89,8 @@ attaches or picks up the end.
    `--permission-mode auto`, `--output-format stream-json`, `--verbose` and the lean surface below
    (plus `--max-budget-usd` when you set `--max-usd`), with `DEVCYCLE_NESTED_RUN` and `CLAUDECODE` removed
    from the session's environment so devcycle's hooks module stays active, and this run's token in
-   `DEVCYCLE_DRIVE_TOKEN`. The session resumes from the files
+   `DEVCYCLE_DRIVE_TOKEN`, and `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`, so headless mode never stops its
+   running subagents 10 minutes after a turn ends. The session resumes from the files
    under `.devcycle/`, runs the wave, emits its handoff and ends — ending a print-mode session is the
    clear.
 3. **One record per session.** As each session ends the driver appends a `drive` row to the cycle's

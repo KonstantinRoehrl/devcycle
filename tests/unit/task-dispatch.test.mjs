@@ -331,9 +331,10 @@ const TOKEN = "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
 const AUTO_ROW = "- drive: auto model=claude-haiku-4-5 opted=2026-11-06T09:00:00Z via=knob";
 const MANUAL_ROW = "- drive: manual chosen=2026-11-06T09:00:00Z via=answer";
 const knobs = (mode) => `- knobs: profile=standard executionMode=${mode} driveWatch=end`;
-function repoWithState(rows) {
+function repoWithState(rows, stage = "execution") {
   const repo = repoWithLedger();
-  writeFileSync(join(repo, ".devcycle/state.md"), ["# devcycle state", "- stage: execution", `- run: ${RUN}`, ...rows].join("\n") + "\n");
+  const stageRow = stage === null ? [] : [`- stage: ${stage}`];
+  writeFileSync(join(repo, ".devcycle/state.md"), ["# devcycle state", ...stageRow, `- run: ${RUN}`, ...rows].join("\n") + "\n");
   return repo;
 }
 function withDriveLock(repo, fn, statePath = join(repo, ".devcycle/state.md")) {
@@ -346,13 +347,15 @@ function withDriveLock(repo, fn, statePath = join(repo, ".devcycle/state.md")) {
 }
 const implementer = ["--run", RUN, "--task", "5", "--role", "implementer"];
 
-test("a dispatch of waves the driver owns is refused, writing nothing, unless this session holds the live driver's token", () => {
+test("a dispatch of waves the driver owns is refused at execution, or with no real stage, writing nothing, unless this session holds the live driver's token", () => {
   for (const rows of [[AUTO_ROW, knobs("ask")], [knobs("unattended")]]) {
     const refusals = [
       ["no lock", repoWithState(rows), (repo, fn) => fn(), { DEVCYCLE_DRIVE_TOKEN: TOKEN }],
       ["a lock on another state file", repoWithState(rows), (repo, fn) => withDriveLock(repo, fn, join(repo, ".devcycle/other.md")), { DEVCYCLE_DRIVE_TOKEN: TOKEN }],
       ["a wrong token", repoWithState(rows), withDriveLock, { DEVCYCLE_DRIVE_TOKEN: "not-the-token" }],
       ["no token", repoWithState(rows), withDriveLock, { DEVCYCLE_DRIVE_TOKEN: "" }],
+      ["no stage row", repoWithState(rows, null), (repo, fn) => fn(), {}],
+      ["a stage outside the enum", repoWithState(rows, "reviewing"), (repo, fn) => fn(), {}],
     ];
     for (const [why, repo, locked, env] of refusals) {
       const r = locked(repo, () => dispatch(repo, implementer, undefined, env));
@@ -366,13 +369,16 @@ test("a dispatch of waves the driver owns is refused, writing nothing, unless th
   }
 });
 
-test("a dispatch goes through on a manual row, the driver's own session, a walked knob or no state file", () => {
+test("a dispatch goes through on a manual row, the driver's own session, a walked knob, a stage after execution or no state file", () => {
   const passes = [
     ["a manual row under the unattended knob", repoWithState([MANUAL_ROW, knobs("unattended")]), (repo, fn) => fn(), {}],
     ["the live driver's token", repoWithState([AUTO_ROW, knobs("unattended")]), withDriveLock, { DEVCYCLE_DRIVE_TOKEN: TOKEN }],
     ["no row under manual", repoWithState([knobs("manual")]), (repo, fn) => fn(), {}],
     ["no row under ask", repoWithState([knobs("ask")]), (repo, fn) => fn(), {}],
     ["no knobs line", repoWithState([]), (repo, fn) => fn(), {}],
+    ["an auto row at branch-review, no token", repoWithState([AUTO_ROW, knobs("unattended")], "branch-review"), (repo, fn) => fn(), {}],
+    ["an auto row at on-device, no token", repoWithState([AUTO_ROW, knobs("unattended")], "on-device"), (repo, fn) => fn(), {}],
+    ["no row under the unattended knob at finish", repoWithState([knobs("unattended")], "finish"), (repo, fn) => fn(), {}],
     ["no state file", repoWithLedger(), (repo, fn) => fn(), {}],
   ];
   for (const [why, repo, locked, env] of passes) {
