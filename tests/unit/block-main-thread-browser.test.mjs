@@ -140,3 +140,20 @@ test("still denies when rendering the deny reason cannot succeed", () => {
   const out = JSON.parse(r.stdout);
   assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
 });
+
+// #421: the driver picks the browser, so the selection tools must reach the driver and nobody else.
+// The guard stays the driver's alone for every tool in the namespace, these three included.
+for (const tool of ["list_connected_browsers", "select_browser", "switch_browser"]) {
+  const name = `mcp__claude-in-chrome__${tool}`;
+  test(`denies ${tool} from the main thread and from another subagent, allows it from the driver`, () => {
+    for (const extra of [{}, { agent_type: "" }, { agent_type: "implementer", agent_id: "def456" }]) {
+      const out = JSON.parse(call(browserCall({ tool_name: name, ...extra })).stdout);
+      assert.equal(out.hookSpecificOutput.permissionDecision, "deny");
+    }
+    for (const agent_type of ["on-device-driver", "devcycle:on-device-driver"]) {
+      const r = call(browserCall({ tool_name: name, agent_type, agent_id: "abc123" }));
+      assert.equal(r.status, 0);
+      assert.equal(r.stdout.trim(), "");
+    }
+  });
+}

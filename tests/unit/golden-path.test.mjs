@@ -2271,6 +2271,25 @@ test("the browser guard's matcher does not reach ordinary main-thread tools", ()
     );
 });
 
+test("the on-device driver is granted the browser-selection tools and owns the selection rule (#421)", () => {
+  const driver = read("agents/on-device-driver.md");
+  const granted = (driver.match(/^tools:\s*(.+)$/m)?.[1] ?? "").split(",").map((t) => t.trim());
+  for (const tool of ["list_connected_browsers", "select_browser", "switch_browser"])
+    assert.ok(granted.includes(`${CHROME_NS}${tool}`), `the driver's tools: line must grant ${CHROME_NS}${tool}`);
+  const section = driver.match(/\n## Choosing the browser\n[\s\S]*?(?=\n## |$)/)?.[0] ?? "";
+  assert.ok(section, "the driver must carry a '## Choosing the browser' section");
+  assert.match(section, /the `inUse` browser is `onThisComputer: true`[^\n]*report `blocked`/);
+  assert.match(section, /exactly one entry is `onThisComputer: true`[^\n]*`select_browser`[^\n]*retry the navigation once/);
+  assert.match(section, /anything else[^\n]*`status: blocked`[^\n]*`deviceId`[^\n]*`inUse`/);
+  assert.match(section, /Never pick among several candidates/);
+});
+
+test("the on-device walkthrough asks the user once when the driver returns a browser list (#421)", () => {
+  const walk = read("playbooks/verifying-on-device.md").match(/\n## The walkthrough\n[\s\S]*?(?=\n## )/)?.[0] ?? "";
+  assert.match(walk, /returns `blocked` with a browser list, ask once \(AskUserQuestion\)[\s\S]*re-dispatch it with the chosen `deviceId`/);
+  assert.match(walk, /\*\*No driver\*\* \(claude-in-chrome not connected, or its browser still unreachable/);
+});
+
 // Every file the plugin ships under workflows/, by path relative to workflows/ — the roster
 // the docs hub's Machinery table must mirror. Walked recursively so a new nested engine (e.g.
 // lib/*) is covered, not just the top-level scripts.
