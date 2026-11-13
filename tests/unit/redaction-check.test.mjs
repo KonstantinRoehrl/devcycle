@@ -782,7 +782,7 @@ test("--repo over --dir, a malformed --repo, and --allow-found-terms without --r
     }
     const noRepo = screen(["--allow-found-terms"]);
     assert.equal(noRepo.status, 1);
-    assert.match(noRepo.stderr, /redaction-check: --allow-found-terms requires --file and --repo/);
+    assert.match(noRepo.stderr, /redaction-check: --allow-found-terms requires --file with --repo, or --dir with --own-repo/);
     assert.throws(() => readFileSync(store, "utf8"), { code: "ENOENT" }, "a refused run records nothing");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -801,5 +801,130 @@ test("--auto-redact with --repo leaves an allowed term in place", () => {
     assert.ok(!after.includes(OTHER_TERM), "an unallowed term is still rewritten");
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --own-repo: the same allowance store, reached from a --dir corpus inside a git checkout whose
+// origin remote names the repo. The fixture repo carries the deny-list outside the corpus.
+const hashOf = (term) => createHash("sha256").update(term).digest("hex");
+
+function ownRepoFixture(origin, corpus) {
+  const repoDir = makeRepo();
+  if (origin) sh("git", ["remote", "add", "origin", origin], { cwd: repoDir });
+  const hashes = join(repoDir, "hashes.txt");
+  writeFileSync(hashes, [ALLOWED_TERM, OTHER_TERM].map(hashOf).join("\n") + "\n");
+  const corpusDir = join(repoDir, ".devcycle");
+  mkdirSync(corpusDir);
+  writeFileSync(join(corpusDir, "notes.md"), corpus);
+  const store = join(repoDir, "state", "redaction-allow.json");
+  const screen = (extra) =>
+    spawnSync(process.execPath, [SCRIPT, "--dir", corpusDir, "--hashes", hashes, ...extra], {
+      encoding: "utf8",
+      env: { ...process.env, DEVCYCLE_REDACTION_ALLOW_FILE: store },
+    });
+  return { repoDir, corpusDir, store, screen };
+}
+
+test("--own-repo records the checkout's own name from the corpus, then passes it", () => {
+  const { repoDir, store, screen } = ownRepoFixture("git@github.com:Owner/Name.git", `From ${ALLOWED_TERM}.\n`);
+  try {
+    const strict = screen(["--own-repo"]);
+    assert.equal(strict.status, 1, strict.stdout);
+    assert.match(strict.stderr, /deny-listed term/);
+    const record = screen(["--own-repo", "--allow-found-terms"]);
+    assert.equal(record.status, 0, record.stderr);
+    assert.match(record.stderr, /recorded 1 deny-listed term/);
+    assert.ok(!record.stderr.includes(ALLOWED_TERM), "the record summary must never print the term");
+    assert.deepEqual(JSON.parse(readFileSync(store, "utf8")), { "owner/name": [hashOf(ALLOWED_TERM)] });
+    assert.equal(screen(["--own-repo"]).status, 0, "the recorded own name passes");
+    assert.equal(screen([]).status, 1, "without --own-repo the term still fails");
+  } finally {
+    rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test("--own-repo reads the --repo store key from scp, https and ssh origins alike", () => {
+  for (const origin of ["git@github.com:Owner/Name.git", "https://github.com/owner/name.git", "ssh://git@github.com/owner/name"]) {
+    const { repoDir, store, screen } = ownRepoFixture(origin, `From ${ALLOWED_TERM}.\n`);
+    try {
+      mkdirSync(join(repoDir, "state"));
+      writeFileSync(store, JSON.stringify({ "owner/name": [hashOf(ALLOWED_TERM)] }));
+      const res = screen(["--own-repo"]);
+      assert.equal(res.status, 0, `${origin}: ${res.stderr}`);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("--own-repo with no origin, or an unparseable one, screens strictly and says so", () => {
+  for (const origin of [null, "../upstream.git"]) {
+    const { repoDir, store, screen } = ownRepoFixture(origin, `From ${ALLOWED_TERM}.\n`);
+    try {
+      mkdirSync(join(repoDir, "state"));
+      writeFileSync(store, JSON.stringify({ "owner/name": [hashOf(ALLOWED_TERM)] }));
+      const res = screen(["--own-repo"]);
+      assert.equal(res.status, 1, `${origin}: ${res.stdout}`);
+      assert.match(res.stderr, /--own-repo found no parseable origin remote — no allowance applied/);
+      assert.match(res.stderr, /deny-listed term/);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("--own-repo records nothing when the corpus holds more than one distinct deny-listed term", () => {
+  const { repoDir, store, screen } = ownRepoFixture("git@github.com:owner/name.git", `From ${ALLOWED_TERM} and ${OTHER_TERM}.\n`);
+  try {
+    const res = screen(["--own-repo", "--allow-found-terms"]);
+    assert.equal(res.status, 1, res.stdout);
+    assert.match(res.stderr, /records only a single deny-listed term, and this corpus holds 2 — nothing recorded/);
+    assert.ok(!res.stderr.includes(ALLOWED_TERM) && !res.stderr.includes(OTHER_TERM), "no term is printed");
+    assert.throws(() => readFileSync(store, "utf8"), { code: "ENOENT" }, "a refused record writes nothing");
+  } finally {
+    rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test("--own-repo never exempts machine identity, and the finish rerun records under --advisory-identity", () => {
+  const { repoDir, screen } = ownRepoFixture("git@github.com:owner/name.git", `From ${ALLOWED_TERM}, see ${MAC_HOME}/x.\n`);
+  try {
+    const rerun = screen(["--advisory-identity", "--own-repo", "--allow-found-terms"]);
+    assert.equal(rerun.status, 0, rerun.stderr);
+    assert.match(rerun.stderr, /recorded 1 deny-listed term/);
+    assert.match(rerun.stderr, /advisory \(machine identity/);
+    const strict = screen(["--own-repo"]);
+    assert.equal(strict.status, 1, strict.stdout);
+    assert.match(strict.stderr, /home-directory path/);
+    assert.doesNotMatch(strict.stderr, /deny-listed term/);
+  } finally {
+    rmSync(repoDir, { recursive: true, force: true });
+  }
+});
+
+test("--own-repo with --file, with --repo, without --dir, and --allow-found-terms over a bare --dir are each refused", () => {
+  const { repoDir, corpusDir, store, screen } = ownRepoFixture("git@github.com:owner/name.git", `From ${ALLOWED_TERM}.\n`);
+  try {
+    const run = (args) =>
+      spawnSync(process.execPath, [SCRIPT, ...args], {
+        cwd: repoDir,
+        encoding: "utf8",
+        env: { ...process.env, DEVCYCLE_REDACTION_ALLOW_FILE: store },
+      });
+    for (const args of [
+      ["--own-repo", "--file", join(corpusDir, "notes.md")],
+      ["--own-repo", "--dir", corpusDir, "--repo", "owner/name"],
+      ["--own-repo"],
+    ]) {
+      const res = run(args);
+      assert.equal(res.status, 1, args.join(" "));
+      assert.match(res.stderr, /redaction-check: --own-repo applies only to a --dir corpus, never with --file or --repo/);
+    }
+    const bareDir = screen(["--allow-found-terms"]);
+    assert.equal(bareDir.status, 1);
+    assert.match(bareDir.stderr, /--allow-found-terms requires --file with --repo, or --dir with --own-repo/);
+    assert.throws(() => readFileSync(store, "utf8"), { code: "ENOENT" }, "a refused run records nothing");
+  } finally {
+    rmSync(repoDir, { recursive: true, force: true });
   }
 });
