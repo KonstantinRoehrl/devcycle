@@ -871,6 +871,16 @@ test("harvested: finishing-the-cycle/artifact-cleanup — the ephemeral set is e
   assert.match(t, /Never anything outside the repo root/);
 });
 
+test("finish's .devcycle screen honours the repo's own name through the allowance section (#430)", () => {
+  const finish = read("playbooks/finishing-the-cycle.md");
+  assert.ok(finish.includes("redaction-check.mjs --advisory-identity --own-repo --dir .devcycle"), "the .devcycle screen does not pass --own-repo");
+  assert.ok(finish.includes("references/review-comments.md the-destination-name-allowance"), "finish does not read the allowance section");
+  const allowance = read("references/review-comments.md");
+  assert.match(allowance, /whose `--own-repo` names the origin remote's repo/);
+  assert.match(allowance, /rerunning the failing screen with every flag kept and\s+`--allow-found-terms` added/);
+  assert.match(allowance, /Advisory output under `--advisory-identity` \(stderr, exit 0\) is not\s+such a failure/);
+});
+
 test("harvested: onboarding-a-repo/output-shape — the scaffold names real commands and the allowlist is only proposed", () => {
   const t = read("playbooks/onboarding-a-repo.md");
   assert.match(t, /## devcycle onboarding/);

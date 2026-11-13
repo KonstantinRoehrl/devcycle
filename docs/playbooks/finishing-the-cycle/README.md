@@ -33,7 +33,10 @@ their content has different fates: `.devcycle/` is gitignored and local-only, so
 machine-identity classes (absolute home paths, session ids, the escaped project-directory form)
 are the expected shape there, not a leak — that call passes `--advisory-identity`, which
 downgrades those three classes to a stderr report and exit 0, leaving only a deny-listed term as
-a hard stop; the run-record-store call carries no such flag and stays the hard gate on all four
+a hard stop. That call also passes `--own-repo`, which exempts the terms recorded as the
+checkout's own repo name, derived from its `origin` remote; the first time the name fails the
+screen, the stage asks once whether to allow it for that repo, and the answer covers PR-comment
+drafts too. The run-record-store call carries no such flag and stays the hard gate on all four
 classes, because that content is durable and potentially shared. A single line can be exempted
 from the machine-identity classes only (never from a deny-listed term) with an inline
 `redaction-allow` marker on that line. Either call's non-zero exit stops the stage rather than
@@ -85,7 +88,7 @@ flowchart TD
     HANDBACK --> REDACT
     PUSH --> REDACT
     PR --> REDACT
-    REDACT{"redaction-check.mjs: --advisory-identity over .devcycle/, hard gate over the run-record dir — exit 0?"}:::stage
+    REDACT{"redaction-check.mjs: --advisory-identity --own-repo over .devcycle/, hard gate over the run-record dir — exit 0?"}:::stage
     REDACT -->|"no"| STOP[("stage stops — surface the finding")]:::structural
     REDACT -->|"yes"| RECORD("Append the workload signature via run-record.mjs"):::stage
     RECORD --> ARCHIVE[("Archive ledger, briefs, evidence, findings, reports, research, plan-work into .devcycle/archive-&lt;date&gt;-&lt;branch-slug&gt;/")]:::structural

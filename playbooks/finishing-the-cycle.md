@@ -83,7 +83,7 @@ list in the PR description under a `## Known on-device issues` heading.
 **Screen this cycle's real artifacts for privacy.** Constraint 4 (`.devcycle/scope.md`) is a
 hard gate: `redaction-check.mjs` defaults to `git ls-files`, so gitignored `.devcycle/` has
 never been screened by CI. Run it directly against what actually exists on this machine —
-`node ${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs --advisory-identity --dir .devcycle` and
+`node ${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs --advisory-identity --own-repo --dir .devcycle` and
 `node ${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs --dir
 $(node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs').then(m
 => console.log(m.runsDirForRepo(m.gitToplevel(process.cwd()))))")`. The second call screens only this
@@ -95,7 +95,10 @@ set is screened at the directory their records actually live in. The mint step
 time finish runs. Severity differs: `.devcycle` is gitignored and local-only, so its
 machine-identity forms (home paths, session ids, escaped project-directory) are *expected*
 there, not a leak — `--advisory-identity` downgrades those three classes to a stderr report at
-exit 0, hard-stopping only on a deny-listed term. The run-record-store call carries no such flag
+exit 0, hard-stopping only on a deny-listed term. `--own-repo` exempts the terms recorded as this
+repo's own name; a failure on deny-listed terms alone follows
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/review-comments.md the-destination-name-allowance`.
+The run-record-store call carries no such flag
 and stays the hard gate on all four classes, since that content is durable and potentially
 shared. An inline `redaction-allow` marker exempts one line from the machine-identity classes
 only, never a deny-listed term. A non-zero exit stops

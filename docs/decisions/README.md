@@ -5,6 +5,31 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-13 — Finish's `.devcycle` screen honours the repo's own name (#430)
+
+**Decision:** `scripts/redaction-check.mjs --own-repo`, valid only with `--dir`, subtracts the
+allowance recorded for the checkout's own repo, which it derives from the `origin` remote; with no
+parseable origin it screens strictly and says so. `--allow-found-terms` records from such a corpus
+only when it holds exactly one distinct deny-listed term. Finish's `.devcycle` screen passes
+`--own-repo`, and `references/review-comments.md` § The destination-name allowance owns the question
+for it as for a PR draft. `--repo` stays exclusive of `--dir`, and the run-record-store screen takes
+no allowance.
+
+**Why:** a host repo whose own name is deny-listed failed finish's screen at every cycle, and the
+user waived it by hand each time (#430). Deriving the repo keeps a caller from naming another
+destination, and one store means one answer covers PR drafts and finish alike.
+
+**Budgets:** the widened allowance section grows `references/review-comments.md`, which
+`playbooks/receiving-review.md` and `playbooks/writing-the-findings-document.md` carry; finish pays
+for the section it reads and its own added lines. The figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6968
+budget: context-budget.json playbooks/finishing-the-cycle.md 52483
+budget: context-budget.json playbooks/receiving-review.md 123022
+budget: context-budget.json playbooks/writing-the-findings-document.md 67855
+```
+
 ## 2026-11-13 — Finish removes its own ephemeral files without asking (#433)
 
 **Decision:** finish's cleanup removes this cycle's ephemeral files — modified at or after the run's
