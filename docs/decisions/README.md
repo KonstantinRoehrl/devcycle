@@ -5,6 +5,25 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-13 — Finish removes its own ephemeral files without asking (#433)
+
+**Decision:** finish's cleanup removes this cycle's ephemeral files — modified at or after the run's
+`startedAt`, plus `plan-work/<run id>/` — without a question, keeping any file whose archive copy
+failed. It asks once, with file count and size, only about leftovers from earlier cycles.
+
+**Why:** the question came at every finish and sessions answered it differently, some keeping the
+files and some removing them (#433). The archive copy already holds everything the removal takes.
+
+**Supersedes:** the cleanup question that removed nothing without an explicit yes.
+
+**Budgets:** the split adds lines to `playbooks/finishing-the-cycle.md`. The figures below are the
+new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6961
+budget: context-budget.json playbooks/finishing-the-cycle.md 51316
+```
+
 ## 2026-11-12 — A driven coordinator waits inside its turn, and a response with a Bash call holds nothing else (#404, #432)
 
 **Decision:** while a dispatch is in flight a driven coordinator never ends its turn to wait. It runs

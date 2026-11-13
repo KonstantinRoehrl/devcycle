@@ -43,17 +43,18 @@ the primary collection: the
 commit during the run, and the last-wins join makes this closing write harmless. The stage's
 final write to `.devcycle/state.md` sets `stage: done`.
 
-Before offering any cleanup, the stage unconditionally copies this cycle's audit trail —
+Before any cleanup, the stage unconditionally copies this cycle's audit trail —
 `ledger.md` plus the `briefs/`, `evidence/`, `findings/`, `reports/`, `research/`, and
 `plan-work/<run id>/` directories — into
 `.devcycle/archive-<date>-<branch-slug>/`, first moving any superseded findings-loop status
-files into that same archive. Only then does it offer, in one question, to delete the ephemeral
-set that only ever existed to pass content between this cycle's dispatches
-(`.devcycle/reports/*`, `.devcycle/evidence/*`, `.devcycle/findings/*`,
-`.devcycle/plan-work/<run id>/*`, `.devcycle/research/*`, sweep-argument/report files, generated
-per-task briefs); anything short of an explicit yes leaves every file in
-place, and the state file, ledger, scope, spec, plan, checklist, and on-device results — plus
-anything git-tracked — are never removed regardless of the answer.
+files into that same archive. Only then does it clear the ephemeral set that only ever existed to
+pass content between dispatches (`.devcycle/reports/*`, `.devcycle/evidence/*`,
+`.devcycle/findings/*`, `.devcycle/plan-work/<run id>/*`, `.devcycle/research/*`,
+sweep-argument/report files, generated per-task briefs). This cycle's files — modified since the
+run started — go without a question, except any whose archive copy failed. Leftovers from earlier
+cycles are listed with their count and size and removed only on an explicit yes to one question.
+The state file, ledger, scope, spec, plan, checklist, and on-device results — plus anything
+git-tracked — are never removed.
 
 The stage also runs `scripts/leftover-processes.mjs` and passes on anything it reports: process groups still busy after their leader exited, which may be this cycle's leak. It is a notice, kills nothing and never changes the outcome. The diagram leaves it out because it does not branch.
 
@@ -65,7 +66,7 @@ The stage also runs `scripts/leftover-processes.mjs` and passes on anything it r
 ```mermaid
 ---
 title: finishing-the-cycle — policy resolution through cleanup
-accDescr: Playbook-internal flowchart of the finish stage, from resolving the configured git policy through the permission and protected-branch signal checks, acting on the effective policy, the redaction and workload gates, the unconditional archive copy, and the ephemeral-cleanup offer.
+accDescr: Playbook-internal flowchart of the finish stage, from resolving the configured git policy through the permission and protected-branch signal checks, acting on the effective policy, the redaction and workload gates, the unconditional archive copy, and the ephemeral cleanup.
 ---
 flowchart TD
     CFG("Resolve the configured gitPolicy — local-commits-only | push-allowed | open-pr"):::stage
@@ -88,7 +89,7 @@ flowchart TD
     REDACT -->|"no"| STOP[("stage stops — surface the finding")]:::structural
     REDACT -->|"yes"| RECORD("Append the workload signature via run-record.mjs"):::stage
     RECORD --> ARCHIVE[("Archive ledger, briefs, evidence, findings, reports, research, plan-work into .devcycle/archive-&lt;date&gt;-&lt;branch-slug&gt;/")]:::structural
-    ARCHIVE --> CLEAN("Offer to delete the ephemeral set — one question, removes only on explicit yes"):::stage
+    ARCHIVE --> CLEAN("Remove this cycle's ephemeral files — ask once, only about earlier cycles' leftovers"):::stage
     CLEAN --> DONE("stage: done — handoff"):::stage
 
     classDef stage fill:#EEEDFE,stroke:#534AB7,color:#3C3489;

@@ -139,9 +139,9 @@ As this stage's final state-file write, set `stage: done` and a fresh `updated:`
 
 ## Archive this cycle's audit trail
 
-`.devcycle/ledger.md` is a single slot the next cycle overwrites, and the ephemeral set below
-is offered for deletion — so without this step a finished cycle leaves no durable record for a
-later consolidation pass to read.
+`.devcycle/ledger.md` is a single slot the next cycle overwrites, and the cleanup below removes
+the ephemeral set — so without this step a finished cycle leaves no durable record for a later
+consolidation pass to read.
 
 Before copying the audit trail below, move every status file in `.devcycle/findings/` whose
 verdict the run superseded into `.devcycle/archive-<YYYY-MM-DD>-<branch-slug>/`, per
@@ -151,21 +151,27 @@ verdicts for one loop is a defect, not a record.
 Then copy into `.devcycle/archive-<YYYY-MM-DD>-<branch-slug>/`: `ledger.md`, and
 the `briefs/`, `evidence/`, `findings/`, `reports/`, `research/` and `plan-work/<run id>/` directories; move `format-backup-*` there. Use the cycle's own branch name,
 slugified, and today's UTC date. The step asks nothing: it only
-duplicates files this stage already declines to delete, or moves a backup, so it cannot
-lose work or change the finish verdict. A failed copy is reported and the stage continues.
+copies files or moves a backup, so it cannot lose work or change the finish verdict. A failed
+copy is reported and the stage continues, and the cleanup below keeps that copy's files.
 
 ## Clean up this cycle's ephemeral artifacts
 
-After the state file is closed above and before the handoff block below, offer to remove the
-files whose only purpose was to pass content between this cycle's dispatches.
+After the state file is closed above and before the handoff block below, remove the files whose
+only purpose was to pass content between dispatches.
 
 1. **Enumerate.** The ephemeral set is exactly: `.devcycle/reports/*`, `.devcycle/evidence/*`,
    `.devcycle/findings/*`, `.devcycle/plan-work/<run id>/*`, `.devcycle/research/*`, `.devcycle/sweep-args-*.json`, `.devcycle/sweep-report*.json`, and
    any generated per-task brief files. Nothing else is a candidate.
-2. **Show and ask.** Present the list and what it totals — file count and size — and ask for
-   confirmation in one question, answered inside a cycle run: an Other answer appends
-   `user-correction-at-gate`, whose rule `references/ledger.md` owns.
-3. **Remove only on an explicit yes.** Anything short of that leaves every file in place.
+2. **Split.** This cycle's files are those modified at or after the `startedAt` of the `run` line
+   opening `<the run-record dir screened above>/<run id>.jsonl`, plus all of
+   `.devcycle/plan-work/<run id>/`. The rest are prior cycles' leftovers.
+3. **Remove this cycle's files without asking.** A file under a directory the archive step copies
+   is removed only if its copy succeeded; a failed copy keeps it, reported. The sweep argument and
+   report files are never archived and are removed regardless.
+4. **Ask once about prior leftovers.** Present their list and what it totals — file count and size
+   — in one question, answered inside a cycle run: an Other answer appends
+   `user-correction-at-gate`, whose rule `references/ledger.md` owns. Remove them only on an
+   explicit yes; anything short of that leaves them in place. No leftovers, no question.
 
 **Never removed, whatever the answer:** `.devcycle/state.md`, `.devcycle/ledger.md`,
 `.devcycle/scope.md`, the spec, the plan, the checklist, and the on-device results — this
@@ -173,7 +179,7 @@ cycle's audit trail. Never anything tracked by git: check with `git ls-files --e
 <path>` and keep the file if it is tracked, rather than assuming a path under `.devcycle/` is
 ignored in every repo. Never anything outside the repo root.
 
-Cleanup never blocks the finish and never changes its verdict: a declined offer, or a removal
+Cleanup never blocks the finish and never changes its verdict: a declined question, or a removal
 that fails, is reported and the stage completes regardless. The fast path and the sweep path
 reach this stage too, so they inherit it.
 

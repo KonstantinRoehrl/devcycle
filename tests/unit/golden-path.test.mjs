@@ -858,12 +858,14 @@ test("harvested: fast-path/mini-cycle — the fast path keeps its evidence files
   assert.match(t, /No step is optional because the change is small/);
 });
 
-test("harvested: finishing-the-cycle/artifact-cleanup — the ephemeral set is enumerated, confirmed, and bounded", () => {
+test("harvested: finishing-the-cycle/artifact-cleanup — the ephemeral set is enumerated, split, and bounded", () => {
   const t = read("playbooks/finishing-the-cycle.md");
   assert.match(t, /The ephemeral set is exactly: `\.devcycle\/reports\/\*`, `\.devcycle\/evidence\/\*`,\s+`\.devcycle\/findings\/\*`/);
   assert.match(t, /Nothing else is a candidate/);
   assert.match(t, /file count and size/);
-  assert.match(t, /\*\*Remove only on an explicit yes\.\*\*/);
+  assert.match(t, /\*\*Remove this cycle's files without asking\.\*\*/);
+  assert.match(t, /removed only if its copy succeeded/);
+  assert.match(t, /Remove them only on an\s+explicit yes/);
   assert.match(t, /\*\*Never removed, whatever the answer:\*\*/);
   assert.match(t, /git ls-files --error-unmatch/);
   assert.match(t, /Never anything outside the repo root/);
