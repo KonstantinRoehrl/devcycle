@@ -163,8 +163,15 @@ let ownKey;
 if (ownRepo) {
   ownKey = ownRepoKey(dir);
   // Strict, and said so: a missing allowance must never read as a screen that applied one.
-  if (ownKey === null)
+  if (ownKey === null) {
     process.stderr.write("redaction-check: --own-repo found no parseable origin remote — no allowance applied\n");
+    // Recording needs a key; without one the rerun would fail on the screen alone and read as if
+    // the answer had been recorded.
+    if (allowFoundTerms) {
+      console.error("redaction-check: --allow-found-terms recorded nothing — --own-repo has no origin remote to record against");
+      process.exit(1);
+    }
+  }
 }
 const repoKey = repo?.toLowerCase() ?? ownKey ?? undefined;
 let denied = hashes;

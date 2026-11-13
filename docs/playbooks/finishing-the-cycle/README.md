@@ -36,7 +36,8 @@ downgrades those three classes to a stderr report and exit 0, leaving only a den
 a hard stop. That call also passes `--own-repo`, which exempts the terms recorded as the
 checkout's own repo name, derived from its `origin` remote; the first time the name fails the
 screen, the stage asks once whether to allow it for that repo, and the answer covers PR-comment
-drafts too. The run-record-store call carries no such flag and stays the hard gate on all four
+drafts too. When the screen cannot derive the repo (no parseable `origin`), it offers no allowance
+and the failure stands. The run-record-store call carries no such flag and stays the hard gate on all four
 classes, because that content is durable and potentially shared. A single line can be exempted
 from the machine-identity classes only (never from a deny-listed term) with an inline
 `redaction-allow` marker on that line. Either call's non-zero exit stops the stage rather than
@@ -54,7 +55,8 @@ files into that same archive. Only then does it clear the ephemeral set that onl
 pass content between dispatches (`.devcycle/reports/*`, `.devcycle/evidence/*`,
 `.devcycle/findings/*`, `.devcycle/plan-work/<run id>/*`, `.devcycle/research/*`,
 sweep-argument/report files, generated per-task briefs). This cycle's files — modified since the
-run started — go without a question, except any whose archive copy failed. Leftovers from earlier
+run started — go without a question, except any whose archive copy failed. If the run's start time
+cannot be read, only `plan-work/<run id>/` counts as this cycle's and the rest is asked about. Leftovers from earlier
 cycles are listed with their count and size and removed only on an explicit yes to one question.
 The state file, ledger, scope, spec, plan, checklist, and on-device results — plus anything
 git-tracked — are never removed.

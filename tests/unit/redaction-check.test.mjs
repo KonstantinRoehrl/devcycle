@@ -873,6 +873,22 @@ test("--own-repo with no origin, or an unparseable one, screens strictly and say
   }
 });
 
+test("--own-repo --allow-found-terms with no resolvable origin exits 1 saying nothing was recorded", () => {
+  for (const origin of [null, "../upstream.git", "git@gitlab.com:group/sub/project.git"]) {
+    const { repoDir, store, screen } = ownRepoFixture(origin, `From ${ALLOWED_TERM}.\n`);
+    try {
+      const res = screen(["--own-repo", "--allow-found-terms"]);
+      assert.equal(res.status, 1, `${origin}: ${res.stdout}`);
+      assert.match(res.stderr, /--own-repo found no parseable origin remote — no allowance applied/);
+      assert.match(res.stderr, /--allow-found-terms recorded nothing — --own-repo has no origin remote to record against/);
+      assert.ok(!res.stderr.includes(ALLOWED_TERM), "the diagnostic must never print the term");
+      assert.throws(() => readFileSync(store, "utf8"), { code: "ENOENT" }, `${origin}: a refused record writes nothing`);
+    } finally {
+      rmSync(repoDir, { recursive: true, force: true });
+    }
+  }
+});
+
 test("--own-repo records nothing when the corpus holds more than one distinct deny-listed term", () => {
   const { repoDir, store, screen } = ownRepoFixture("git@github.com:owner/name.git", `From ${ALLOWED_TERM} and ${OTHER_TERM}.\n`);
   try {

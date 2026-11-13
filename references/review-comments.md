@@ -163,9 +163,13 @@ without either. When one fails on deny-listed terms alone, with no machine-ident
 - **Redact it**;
 - **Drop the draft** — at finish, stop the stage.
 
-A failure that includes a machine-identity class never offers the allowance, and nothing records an
-allowance without that answer. Advisory output under `--advisory-identity` (stderr, exit 0) is not
-such a failure.
+`<owner/name>` is the `--repo` value, or the origin remote's `owner/name` for `--own-repo`. Offer it
+only when the screen resolved the repo: a `--own-repo` screen that printed `found no parseable
+origin remote` has nothing to record against, so there is no Allow offer — the failure stands and
+goes to Redact or Drop. A failure that includes a machine-identity class never offers the allowance,
+and nothing records an allowance without that answer.
+Advisory output under `--advisory-identity` (stderr, exit 0) is not such a failure. Inside a cycle
+run, an Other answer appends `user-correction-at-gate`, whose rule `references/ledger.md` owns.
 
 ## Pinned constants
 
