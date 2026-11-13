@@ -858,15 +858,45 @@ test("harvested: fast-path/mini-cycle — the fast path keeps its evidence files
   assert.match(t, /No step is optional because the change is small/);
 });
 
-test("harvested: finishing-the-cycle/artifact-cleanup — the ephemeral set is enumerated, confirmed, and bounded", () => {
+test("harvested: finishing-the-cycle/artifact-cleanup — the ephemeral set is enumerated, split, and bounded", () => {
   const t = read("playbooks/finishing-the-cycle.md");
   assert.match(t, /The ephemeral set is exactly: `\.devcycle\/reports\/\*`, `\.devcycle\/evidence\/\*`,\s+`\.devcycle\/findings\/\*`/);
   assert.match(t, /Nothing else is a candidate/);
   assert.match(t, /file count and size/);
-  assert.match(t, /\*\*Remove only on an explicit yes\.\*\*/);
+  assert.match(t, /\*\*Remove this cycle's files without asking\.\*\*/);
+  assert.match(t, /removed only if its copy succeeded/);
+  assert.match(t, /Remove them only on an\s+explicit yes/);
   assert.match(t, /\*\*Never removed, whatever the answer:\*\*/);
   assert.match(t, /git ls-files --error-unmatch/);
   assert.match(t, /Never anything outside the repo root/);
+});
+
+test("finish's .devcycle screen honours the repo's own name through the allowance section (#430)", () => {
+  const finish = read("playbooks/finishing-the-cycle.md");
+  assert.ok(finish.includes("redaction-check.mjs --advisory-identity --own-repo --dir .devcycle"), "the .devcycle screen does not pass --own-repo");
+  assert.ok(finish.includes("references/review-comments.md the-destination-name-allowance"), "finish does not read the allowance section");
+  const allowance = read("references/review-comments.md");
+  assert.match(allowance, /whose `--own-repo` names the origin remote's repo/);
+  assert.match(allowance, /rerunning the failing screen with every flag kept and\s+`--allow-found-terms` added/);
+  assert.match(allowance, /Advisory output under `--advisory-identity` \(stderr, exit 0\) is not\s+such a failure/);
+});
+
+test("the allowance section offers nothing when the --own-repo screen found no parseable origin, and says where the name comes from", () => {
+  const section = sectionText(read("references/review-comments.md"), "the-destination-name-allowance");
+  assert.ok(section, "references/review-comments.md has no destination-name allowance section");
+  assert.match(section, /Offer\s+it\s+only\s+when\s+the\s+screen\s+resolved\s+the\s+repo/);
+  assert.match(section, /found\s+no\s+parseable\s+origin\s+remote/);
+  assert.match(section, /no\s+Allow\s+offer/);
+  assert.match(section, /<owner\/name>` is the `--repo` value, or the origin remote's `owner\/name` for `--own-repo`/);
+  assert.ok(!read("playbooks/finishing-the-cycle.md").includes("found no parseable origin"), "finish points to the section; it does not restate the rule");
+});
+
+test("the cleanup split states what counts as this cycle's when the run record's startedAt cannot be read", () => {
+  const t = read("playbooks/finishing-the-cycle.md");
+  assert.match(
+    t,
+    /cannot be read[^.]*\bonly\s+`\.devcycle\/plan-work\/<run id>\/`\s+is this cycle's\b[^.]*\bprior\s+leftover\b[^.]*\bstep 4 asks\b/
+  );
 });
 
 test("harvested: onboarding-a-repo/output-shape — the scaffold names real commands and the allowlist is only proposed", () => {
@@ -1848,6 +1878,21 @@ test("the runless-section list cannot go stale or silently flip to affirmative",
   }
 });
 
+// The allowance question is a gate (finish runs it inside a run-bearing cycle), but its wording
+// ("ask ONE `AskUserQuestion`" ... "never asked again") reads as a denial to NEGATES_GATE, so the
+// every-gating-section test above never sees it and stays green with no citation at all. Asserted
+// here at the section finish reads, which is the gate's one owner text.
+test("the allowance question cites the write site, and finish reaches it by that section", () => {
+  const section = sectionText(read("references/review-comments.md"), "the-destination-name-allowance");
+  assert.ok(section, "references/review-comments.md has no destination-name allowance section");
+  assert.equal(
+    citationVerdict(section),
+    "affirmative",
+    `the allowance question's Other answer must append ${TOKEN} per ${OWNER_REF}; its citation reads "${citationVerdict(section)}"`
+  );
+  assert.match(read("playbooks/finishing-the-cycle.md"), /read-section\.mjs" references\/review-comments\.md the-destination-name-allowance/);
+});
+
 test("every stage playbook reads its own lessons section, and no other file claims to", () => {
   const STAGE_PLAYBOOKS = {
     "scoping-the-request.md": "scoping",
@@ -2224,6 +2269,25 @@ test("the browser guard's matcher does not reach ordinary main-thread tools", ()
         "main-thread tools or another MCP server's tools registers a deny over every one of them, not just " +
         "the browser MCP namespace"
     );
+});
+
+test("the on-device driver is granted the browser-selection tools and owns the selection rule (#421)", () => {
+  const driver = read("agents/on-device-driver.md");
+  const granted = (driver.match(/^tools:\s*(.+)$/m)?.[1] ?? "").split(",").map((t) => t.trim());
+  for (const tool of ["list_connected_browsers", "select_browser", "switch_browser"])
+    assert.ok(granted.includes(`${CHROME_NS}${tool}`), `the driver's tools: line must grant ${CHROME_NS}${tool}`);
+  const section = driver.match(/\n## Choosing the browser\n[\s\S]*?(?=\n## |$)/)?.[0] ?? "";
+  assert.ok(section, "the driver must carry a '## Choosing the browser' section");
+  assert.match(section, /the `inUse` browser is `onThisComputer: true`[^\n]*report `blocked`/);
+  assert.match(section, /exactly one entry is `onThisComputer: true`[^\n]*`select_browser`[^\n]*retry the navigation once/);
+  assert.match(section, /anything else[^\n]*`status: blocked`[^\n]*`deviceId`[^\n]*`inUse`/);
+  assert.match(section, /Never pick among several candidates/);
+});
+
+test("the on-device walkthrough asks the user once when the driver returns a browser list (#421)", () => {
+  const walk = read("playbooks/verifying-on-device.md").match(/\n## The walkthrough\n[\s\S]*?(?=\n## )/)?.[0] ?? "";
+  assert.match(walk, /returns `blocked` with a browser list, ask once \(AskUserQuestion\)[\s\S]*re-dispatch it with the chosen `deviceId`/);
+  assert.match(walk, /\*\*No driver\*\* \(claude-in-chrome not connected, or its browser still unreachable/);
 });
 
 // Every file the plugin ships under workflows/, by path relative to workflows/ — the roster

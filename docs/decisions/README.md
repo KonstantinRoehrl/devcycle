@@ -5,6 +5,133 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-13 — The on-device driver picks the browser on this computer, and asks only when it cannot (#421)
+
+**Decision:** `agents/on-device-driver.md` grants `list_connected_browsers`, `select_browser` and
+`switch_browser`. When the first navigation fails, or a browser tool reports several connected
+browsers with none selected, the driver lists them and selects the single one with
+`onThisComputer: true`; with no such browser, several, or an `inUse` browser already on this
+computer, it returns `blocked` carrying the list, and `playbooks/verifying-on-device.md` step 2 asks
+the user once and re-dispatches the driver with the chosen `deviceId` or a confirmation-screen request.
+The browser guard is unchanged: every `mcp__claude-in-chrome__*` call stays the driver's alone.
+
+**Why:** with Claude in Chrome connected on several machines, the extension can route the driver to a
+browser that cannot reach the dev server's `127.0.0.1`, and nothing in the stage could recover (#421).
+The tool's own description says to ask the user and never pick one; auto-selecting the single browser
+on this computer narrows that on purpose, because the dev server listens only on this machine's
+loopback, so only a browser here can reach it. Several candidates, or none on this computer, still go
+to the user.
+
+**Budgets:** the driver section grows the surface by 18 lines and the step 2 ask grows
+`playbooks/verifying-on-device.md`'s closure by 319 bytes. The figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6992
+budget: context-budget.json playbooks/verifying-on-device.md 66440
+```
+
+## 2026-11-13 — Finish's `.devcycle` screen honours the repo's own name (#430)
+
+**Decision:** `scripts/redaction-check.mjs --own-repo`, valid only with `--dir`, subtracts the
+allowance recorded for the checkout's own repo, which it derives from the `origin` remote; with no
+parseable origin it screens strictly and says so, `--allow-found-terms` there exits 1 saying nothing
+was recorded, and the section offers no allowance. `--allow-found-terms` records from such a corpus
+only when it holds exactly one distinct deny-listed term. Finish's `.devcycle` screen passes
+`--own-repo`, and `references/review-comments.md` § The destination-name allowance owns the question
+for it as for a PR draft. `--repo` stays exclusive of `--dir`, and the run-record-store screen takes
+no allowance.
+
+**Why:** a host repo whose own name is deny-listed failed finish's screen at every cycle, and the
+user waived it by hand each time (#430). Deriving the repo keeps a caller from naming another
+destination, and one store means one answer covers PR drafts and finish alike.
+
+**Budgets:** the widened allowance section grows `references/review-comments.md`, which
+`playbooks/receiving-review.md` and `playbooks/writing-the-findings-document.md` carry; finish pays
+for the section it reads and its own added lines. The figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6974
+budget: context-budget.json playbooks/finishing-the-cycle.md 53078
+budget: context-budget.json playbooks/receiving-review.md 123453
+budget: context-budget.json playbooks/writing-the-findings-document.md 68286
+```
+
+## 2026-11-13 — Finish removes its own ephemeral files without asking (#433)
+
+**Decision:** finish's cleanup removes this cycle's ephemeral files — modified at or after the run's
+`startedAt`, plus `plan-work/<run id>/` — without a question, keeping any file whose archive copy
+failed. It asks once, with file count and size, only about leftovers from earlier cycles. When the
+run record's `startedAt` cannot be read, only `plan-work/<run id>/` is this cycle's and the rest is
+asked about.
+
+**Why:** the question came at every finish and sessions answered it differently, some keeping the
+files and some removing them (#433). The archive copy already holds everything the removal takes.
+
+**Supersedes:** the cleanup question that removed nothing without an explicit yes.
+
+**Budgets:** the split adds lines to `playbooks/finishing-the-cycle.md`. The figures below are the
+new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6961
+budget: context-budget.json playbooks/finishing-the-cycle.md 51316
+```
+
+## 2026-11-12 — A driven coordinator waits inside its turn, and a response with a Bash call holds nothing else (#404, #432)
+
+**Decision:** while a dispatch is in flight a driven coordinator never ends its turn to wait. It runs
+`scripts/dispatch-health.mjs --record --wait <ms>`, a foreground poll of at most 590 000 ms that
+returns once a line's action is not `wait`, nothing is in flight, or the limit passes, and repeats it
+(`playbooks/executing-waves.md` § Per-task cycle, **Waiting on dispatches**). `hooks/dispatch-sensor.mjs`
+also handles `Stop`: in the live driver's own session, outside a `/devcycle:stop` window, it blocks
+the turn end while a dispatch is still running, or not yet bound to its transcript inside
+`UNBOUND_MS` (`dispatch-health.mjs` `holdTurnEnd`). `scripts/drive-execution.mjs` sets
+`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` for every driven session. A walked session waits on
+notifications as before. Separately, `references/delegation.md` § One Bash call per response owns the
+rule that a response holding a `Bash` call holds no `Agent`, browser or other MCP call, and that a
+call refused with no verdict after a hook rewrite is reissued once, verbatim, alone. The playbook's
+dispatch step and `agents/on-device-driver.md` point to it.
+
+**Why:** headless `-p` stops a session's background subagents 10 minutes after its last turn
+(`docs/platform-notes.md` § (p)), so a driven coordinator that ended its turn to wait lost every
+running implementer and the next session dispatched them again from scratch (#404). A Bash call that
+the user's RTK hook rewrote gets no auto-mode verdict, and every other call in its response fails with
+it, including on-device browser calls (`docs/platform-notes.md` § (q), #432).
+
+**Budgets:** the new delegation section grows `references/delegation.md` by 442 bytes, which every
+entry point citing it carries; the dispatch step, the waiting paragraph and the `ledger.md` bullets
+grow `playbooks/executing-waves.md`'s closure further, and every added line grows the surface. The
+figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6955
+budget: context-budget.json commands/cycle.md 87185
+budget: context-budget.json playbooks/executing-waves.md 119332
+budget: context-budget.json playbooks/learning-from-sessions.md 66369
+budget: context-budget.json playbooks/maintaining-the-repo.md 66991
+budget: context-budget.json playbooks/planning-waves.md 89370
+budget: context-budget.json playbooks/receiving-review.md 122789
+budget: context-budget.json playbooks/reviewing-code.md 100035
+budget: context-budget.json playbooks/scoping-the-request.md 36668
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 94792
+budget: context-budget.json references/delegation.md 12728
+```
+
+## 2026-11-12 — The dispatch guard ends at execution's close (#431)
+
+**Decision:** `scripts/task-dispatch.mjs` refuses a dispatch of driver-owned waves without the live
+driver's token only while the state file's `stage:` is `execution`, or is missing or outside the
+stage enum (`references/stages.json`'s keys plus the closed stage). At any other stage a dispatch
+proceeds whatever the `drive:` row or `executionMode` records, and `task-intake.mjs --compose-review`
+follows, since it calls the same guard in-process. The `drive:` row stays as history.
+
+**Why:** the driver walks only execution (`scripts/drive-execution.mjs` refuses any other start and
+ends `complete` at branch-review), yet an interactive branch-review or on-device fix dispatch was
+refused because the state file still read `drive: auto`, and the session asked the user about
+execution mode (#431).
+
+**Supersedes:** the 2026-11-06 entry's (#412) refusal at every stage; it now holds at execution only.
+
 ## 2026-11-11 — A pending review can be parked and restored around a posted review
 
 **Decision:** `scripts/pr-review-post.mjs review` gains `--park <PRR_…>`, which snapshots the user's

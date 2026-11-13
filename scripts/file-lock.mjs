@@ -7,6 +7,7 @@ import { closeSync, openSync, readFileSync, statSync, unlinkSync, writeSync } fr
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { sleepSync } from "./sleep.mjs";
 
 // `lstart` is printed in the caller's timezone and locale, so it is pinned: a lock written from one
 // terminal is compared by a process started from another.
@@ -110,8 +111,6 @@ export class LockTimeoutError extends Error {
   }
 }
 
-const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-
 const unlinkIfPresent = (path) => {
   try {
     unlinkSync(path);
@@ -191,7 +190,7 @@ export function withFileLock(target, fn, { timeoutMs = 10000, pollMs = 25 } = {}
     }
     if (reclaimIfStale(lockPath, timeoutMs)) continue;
     if (Date.now() >= deadline) throw new LockTimeoutError(lockPath);
-    sleep(pollMs);
+    sleepSync(pollMs);
   }
   try {
     try {

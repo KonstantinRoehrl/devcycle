@@ -151,17 +151,25 @@ human reviewer's own comments are never stamped with it.
 
 ## The destination-name allowance
 
-Only a draft posted to the PR's own repo is screened with `--repo <owner/name>` — the same value
-its `pr-review-post.mjs` call takes. Every other screen runs without it. When that screen fails on
-deny-listed terms alone, with no machine-identity class, ask ONE `AskUserQuestion`:
+Two screens carry an allowance: a draft posted to the PR's own repo, screened with
+`--repo <owner/name>` — the same value its `pr-review-post.mjs` call takes — and finish's
+`.devcycle` screen, whose `--own-repo` names the origin remote's repo. Every other screen runs
+without either. When one fails on deny-listed terms alone, with no machine-identity class, ask ONE
+`AskUserQuestion`:
 
 - **Allow for <owner/name>** — this is the destination repo's own name; record it so it is never
-  asked again for that repo, by rerunning the screen with `--allow-found-terms` added;
+  asked again for that repo, by rerunning the failing screen with every flag kept and
+  `--allow-found-terms` added;
 - **Redact it**;
-- **Drop the draft**.
+- **Drop the draft** — at finish, stop the stage.
 
-A failure that includes a machine-identity class never offers the allowance, and nothing records an
-allowance without that answer.
+`<owner/name>` is the `--repo` value, or the origin remote's `owner/name` for `--own-repo`. Offer it
+only when the screen resolved the repo: a `--own-repo` screen that printed `found no parseable
+origin remote` has nothing to record against, so there is no Allow offer — the failure stands and
+goes to Redact or Drop. A failure that includes a machine-identity class never offers the allowance,
+and nothing records an allowance without that answer.
+Advisory output under `--advisory-identity` (stderr, exit 0) is not such a failure. Inside a cycle
+run, an Other answer appends `user-correction-at-gate`, whose rule `references/ledger.md` owns.
 
 ## Pinned constants
 

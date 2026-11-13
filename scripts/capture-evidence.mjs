@@ -10,6 +10,7 @@ import { atomicWrite } from "./atomic-write.mjs";
 import { currentDispatchStartMs } from "./dispatch-health.mjs";
 import { isMain } from "./is-main.mjs";
 import { runShell, writeCapture } from "./evidence-capture.mjs";
+import { sleepSync } from "./sleep.mjs";
 import { HelpRequest, UsageError, checkTaskId, taskFlags, taskGate, usageLine, workTreeRoot } from "./task-ledger.mjs";
 
 const FLAGS = { "--task": "value", "--phase": "value", "--cmd": "value", "--ledger": "value", "--await": "none" };
@@ -43,7 +44,6 @@ const alive = (pid) => {
     return err.code === "EPERM";
   }
 };
-const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 // A capture counts only when it is this one's: written after the marker appeared or, with no marker
 // seen, since this task's current dispatch started — never a file an earlier attempt left on the path.
@@ -68,7 +68,7 @@ function awaitCapture({ root, task, phase, evidenceClass }) {
     }
     if (Date.now() - started >= AWAIT_TIMEOUT_MS)
       throw new Error(`the ${phase} capture for task ${task} is still running after ${Math.round(AWAIT_TIMEOUT_MS / 1000)}s — run --await again`);
-    pause(AWAIT_POLL_MS);
+    sleepSync(AWAIT_POLL_MS);
   }
   const text = readFileSync(abs, "utf8");
   const cmd = text.match(/^# devcycle-cmd: (.*)$/m)?.[1];

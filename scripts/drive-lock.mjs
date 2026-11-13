@@ -11,13 +11,13 @@ import { dirname, join, resolve } from "node:path";
 import { hostname, uptime } from "node:os";
 import { spawnSync } from "node:child_process";
 import { isLiveHolder, processStartTime } from "./file-lock.mjs";
+import { sleepSync } from "./sleep.mjs";
 
 export const DRIVE_LOCK_REL = ".devcycle/drive.lock";
 const RECLAIM_WAIT_MS = 2000;
 const POLL_MS = 10;
 
 const lockPath = (toplevel) => join(toplevel, DRIVE_LOCK_REL);
-const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 // The lock is readable by anything in the checkout, so it carries only this hash: holding the token
 // itself is what proves a session was started by the driver that holds the lock.
@@ -177,7 +177,7 @@ export function acquireDriveLock(toplevel, { statePath, logPath, tokenHash = nul
     if (isLive(holder)) return { ok: false, holder };
     if (reclaim(path, raw, lock)) continue;
     if (Date.now() >= deadline) throw new Error(`drive-lock: another starter has been reclaiming ${path} for ${RECLAIM_WAIT_MS} ms`);
-    sleep(POLL_MS);
+    sleepSync(POLL_MS);
   }
 }
 

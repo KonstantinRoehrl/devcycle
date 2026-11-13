@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// SubagentStop hook — the dispatch depth-sensor. It first decides a hold: an implementer stopping
+// SubagentStop and Stop hook — the dispatch depth-sensor. On Stop it only holds the live driver's own
+// session in its turn while a dispatch it started still works (holdDrivenTurn). On SubagentStop it first decides a hold: an implementer stopping
 // before its owed report is told to carry on (`decision: block`), bounded by scripts/dispatch-health.mjs.
 // On a stop it releases during an active cycle it appends one `agent-depth` run-record row (the agent's
 // final context depth, model, tool uses and duration, read from the one transcript the hook input names,
@@ -14,7 +15,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { AGENT_ID_CHARS, AGENT_TYPE_CHARS, MODEL_CHARS, clean, runContext, sessionJoined } from "./lib/run-context.mjs";
 import { transcriptStats } from "../scripts/depth-probe.mjs";
-import { holdStop, markEnded, markStopped } from "../scripts/dispatch-health.mjs";
+import { holdStop, holdTurnEnd, markEnded, markStopped } from "../scripts/dispatch-health.mjs";
+import { holdsDriveToken } from "../scripts/drive-lock.mjs";
 import { isMain } from "../scripts/is-main.mjs";
 import { retireProcess } from "../scripts/process-registry.mjs";
 import { now } from "../scripts/stamp.mjs";
@@ -32,13 +34,24 @@ function readInput() {
   return o && typeof o === "object" && !Array.isArray(o) ? o : null;
 }
 
+// Stop: only the live driver's own session is held, while a dispatch it started is still working and
+// no stop window is open (scripts/dispatch-health.mjs holdTurnEnd). A walked session waiting on a
+// notification is correct, so it is never held.
+function holdDrivenTurn(input, context) {
+  if (!holdsDriveToken(context.repoRoot, context.stateFile, process.env.DEVCYCLE_DRIVE_TOKEN)) return;
+  if (stopWindowOpen(dirname(context.stateFile), readFileSync(context.stateFile, "utf8")) !== false) return;
+  const held = holdTurnEnd({ root: context.repoRoot, sessionId: input.session_id });
+  if (held.hold) process.stdout.write(JSON.stringify({ decision: "block", reason: held.reason }) + "\n");
+}
+
 function main() {
   const input = readInput();
-  if (!input || input.hook_event_name !== "SubagentStop") return;
+  if (!input || (input.hook_event_name !== "SubagentStop" && input.hook_event_name !== "Stop")) return;
   const context = runContext(typeof input.cwd === "string" && input.cwd ? input.cwd : process.cwd());
   if (!context) return;
   if (typeof input.session_id !== "string" || !input.session_id) return;
   if (!sessionJoined(context, input.session_id)) return;
+  if (input.hook_event_name === "Stop") return holdDrivenTurn(input, context);
   const { run, stage, repoRoot } = context;
   const devcycleDir = dirname(context.stateFile);
   const agentId = clean(input.agent_id, AGENT_ID_CHARS, 40);
@@ -86,6 +99,6 @@ function main() {
 }
 
 if (isMain(import.meta.url, process.argv[1])) {
-  try { main(); } catch { /* SubagentStop is observe-only here: any failure is a silent no-op */ }
+  try { main(); } catch { /* both events are observe-only here: any failure is a silent no-op */ }
   process.exit(0);
 }

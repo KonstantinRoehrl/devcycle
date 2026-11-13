@@ -113,8 +113,8 @@ devcycle/                (public GitHub repo)
 │   │                             # review-panel's per-finding verification pass
 │   ├── history-inspector.md      # read-only git-history lens for /devcycle:maintain; bounded traversal
 │   ├── spec-reviewer.md          # read-only spec-claims check against live code, before brainstorm's approval question
-│   └── on-device-driver.md       # drives claude-in-chrome for the on-device stage; the only
-│                                 # origin the browser guard below permits
+│   └── on-device-driver.md       # drives claude-in-chrome for the on-device stage, choosing the
+│                                 # browser on this computer; the only origin the browser guard below permits
 ├── hooks/                        # L4 — the hooks that ship (docs/decisions/README.md, 2026-08-20, 2026-09-02, 2026-09-05, 2026-10-07, 2026-10-30)
 │   ├── hooks.json                # registers the guards on PreToolUse (browser, destructive-git, and stop-guard on every tool), the commit-sensor, process-sensor and leftover-sensor on PostToolUse, the depth-sensor on SubagentStop, process-sensor on Stop, and the hooks module under modules
 │   ├── block-main-thread-browser.mjs  # denies browser calls from any origin but on-device-driver
@@ -127,7 +127,7 @@ devcycle/                (public GitHub repo)
 │   ├── lib/run-scope.mjs              # which state file names an active run — node-free, shared by the depth-sensor and the hooks module
 │   ├── lib/run-context.mjs            # state file → active run → joined session, for the depth-sensor and the module's sink
 │   ├── workload-sensor.mjs       # PostToolUse(Bash) commit-sensor: re-derives the run's workload record (#139)
-│   ├── dispatch-sensor.mjs       # SubagentStop depth-sensor: one agent-depth record per finished subagent; holds an implementer that stops before its report; on a released stop marks its dispatch record ended and retires it in the process registry
+│   ├── dispatch-sensor.mjs       # SubagentStop depth-sensor: one agent-depth record per finished subagent; holds an implementer that stops before its report; on a released stop marks its dispatch record ended and retires it in the process registry; on Stop holds the live driver's turn while a dispatch works
 │   ├── devcycle-mod.mjs          # the hooks module (in-process, no Node): agent-trace observer, subagentBudget limiter, stage meter, handoff notification relay, drive band
 │   └── mod-sink.mjs              # the module's Node side: the joined check and agent-trace writes
 ├── references/                   # L3 — one owner per convention; enumerated in §15.1

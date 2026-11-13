@@ -411,6 +411,8 @@ export function childEnv(ctx, pluginVersion = DRIVER_PLUGIN_VERSION) {
   if (ctx.effort === "default") delete env.CLAUDE_CODE_EFFORT_LEVEL;
   else env.CLAUDE_CODE_EFFORT_LEVEL = ctx.effort;
   delete env.CLAUDE_EFFORT;
+  // Headless -p stops background subagents 10 minutes after the last turn (docs/platform-notes.md § (p)).
+  env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS = "0";
   return env;
 }
 

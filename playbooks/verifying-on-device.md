@@ -82,7 +82,10 @@ holds the recorded lines and the new ones.
    once they say it is up.
 2. **Agent pass** (`auto`, `auto-ok`). Dispatch `devcycle:on-device-driver` with the launched URL
    and every `structural` and `agent-observable` item. It runs on this session's model, the one
-   `walkthroughModel` recommended above. The driver reports observations, never a verdict. Run
+   `walkthroughModel` recommended above. The driver reports observations, never a verdict. When it
+   returns `blocked` with a browser list, ask once (AskUserQuestion): one option per browser, this
+   computer's first, then **Open a confirmation screen in every connected Chrome extension**, and
+   re-dispatch it with the chosen `deviceId` or that request. Run
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/checklist.md tiers` and apply
    it to what the driver reported.
 3. **Announce the gate.** One line, before the first question: the gate, why it applies, and the
@@ -99,7 +102,7 @@ holds the recorded lines and the new ones.
 6. **Teardown.** Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/on-device-launch.mjs" stop` whenever the
    stage ends: complete, blocked, or stopped for a user decision.
 
-**No driver** (claude-in-chrome not connected): nothing is ticked `(auto)`, every item goes to
+**No driver** (claude-in-chrome not connected, or its browser still unreachable after that choice): nothing is ticked `(auto)`, every item goes to
 the human pass, and the announce line says so (`driver unavailable: all N items are yours`).
 
 Interview rule: **ONE question per checklist item, never batched** for every `needs-eyes` item, and for

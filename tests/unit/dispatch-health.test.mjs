@@ -9,7 +9,7 @@ import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { nextReviewRound, parseLedgerLine, taskEntries } from "../../scripts/task-ledger.mjs";
 import {
   DEATH_CAP, DISPATCH_ENDED, HOLD_CAP, HOLD_GRACE_MS, QUIET_MS, UNBOUND_MS, deathRoute, deathsOf, dispatchHealth, endedOutcome, endedRole, formatDispatch, lastMilestone,
-  currentDispatchStartMs, holdReason, holdStop, markEnded, markStopped, recordDeath,
+  currentDispatchStartMs, holdReason, holdStop, markEnded, markStopped, recordDeath, WAIT_MAX_MS, waitForDispatches,
 } from "../../scripts/dispatch-health.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
 
@@ -355,4 +355,44 @@ test("currentDispatchStartMs is the newest implementer record's start for the ta
   writeInto(w.root, ".devcycle/dispatch/15-implementer-0-0.json", JSON.stringify({ startedAt: "2026-10-28T11:00:00Z", sessionId: SID }) + "\n");
   assert.equal(currentDispatchStartMs(w.root, "5"), Date.parse("2026-10-28T09:00:00Z"));
   assert.equal(currentDispatchStartMs(w.root, "7"), null);
+});
+
+// #404: a driven coordinator waits inside its turn, so --wait returns on the first actionable line, on
+// nothing in flight, or at its limit — never later than one Bash call can run.
+function fakeClock(start) {
+  let t = start;
+  return { clock: () => t, sleep: (ms) => { t += ms; }, at: () => t };
+}
+
+test("--wait polls a running dispatch until its limit, then returns it still waiting", () => {
+  const w = world({ mtime: T0 + 60_000 });
+  const c = fakeClock(T0 + 120_000);
+  const out = waitForDispatches({ root: w.root, ledgerPath: w.ledgerPath, sessionId: SID, env: w.env, waitMs: 60_000, poll: 5_000, clock: c.clock, sleep: c.sleep });
+  assert.deepEqual(out.map((d) => [d.task, d.action]), [["5", "wait"]]);
+  assert.equal(c.at(), T0 + 180_000);
+});
+
+test("--wait returns at once on an actionable dispatch or on none in flight", () => {
+  const dead = world({ agents: { a1: "interrupted" } });
+  const c = fakeClock(T0 + 3 * 60_000);
+  const out = waitForDispatches({ root: dead.root, ledgerPath: dead.ledgerPath, sessionId: SID, env: dead.env, waitMs: 60_000, clock: c.clock, sleep: c.sleep, record: true });
+  assert.deepEqual(out.map((d) => [d.action, d.recorded]), [["redispatch-implementer", true]]);
+  assert.equal(c.at(), T0 + 3 * 60_000);
+  const none = makeRepo();
+  writeInto(none, ".devcycle/ledger.md", PREAMBLE);
+  assert.deepEqual(waitForDispatches({ root: none, sessionId: SID, waitMs: 60_000, clock: c.clock, sleep: c.sleep }), []);
+});
+
+test("the CLI's --wait takes 1 to WAIT_MAX_MS milliseconds and prints the same lines as a plain check", () => {
+  const cli = new URL("../../scripts/dispatch-health.mjs", import.meta.url).pathname;
+  const w = world({ agents: { a1: "interrupted" } });
+  const env = { ...w.env, CLAUDE_CODE_SESSION_ID: SID };
+  for (const bad of ["0", String(WAIT_MAX_MS + 1), "soon"]) {
+    const r = spawnSync(process.execPath, [cli, "--wait", bad], { cwd: w.root, encoding: "utf8", env });
+    assert.equal(r.status, 2, bad);
+    assert.match(r.stderr, /--wait takes milliseconds/);
+  }
+  const r = spawnSync(process.execPath, [cli, "--record", "--wait", "60000"], { cwd: w.root, encoding: "utf8", env });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /→ redispatch-implementer \(recorded\)\n$/);
 });
