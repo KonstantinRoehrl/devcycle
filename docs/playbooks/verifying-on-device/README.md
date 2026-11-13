@@ -21,7 +21,7 @@ steps. **Launch:** the coordinator starts the app from the checklist's `Launch:`
 `scripts/on-device-launch.mjs` and waits for `Ready:`; a launch that fails falls back to asking
 you to start the app. **Agent pass:** it dispatches `devcycle:on-device-driver` over the
 `structural` and `agent-observable` items, ticking `(auto)` each structural read that holds,
-with its evidence path; the driver never decides a verdict. **Announce the gate:** one line says
+with its evidence path; the driver never decides a verdict. When the first page will not load it lists the connected browsers and selects the one on this computer; with none or several to choose from it comes back `blocked` with the list, and you are asked once which browser to use before it is dispatched again. **Announce the gate:** one line says
 which gate applies and how the items split. **Batch:** every `agent-observable` item and every
 failure the agent observed comes to you as one question of proposed verdicts to confirm or
 override (under `auto-ok`, the observed failures only). **Human pass:** each `needs-eyes` item
