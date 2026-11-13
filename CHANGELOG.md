@@ -1,5 +1,15 @@
 # Changelog
 
+A driven cycle no longer loses a dispatch while an implementer waits on a background job, the finish stage stops asking for two corrections it needed nearly every cycle, and the on-device driver now picks the right browser itself.
+
+**Driven coordinator (#404, #431, #432).** A driven coordinator now holds its turn open while dispatches run: the Stop hook tells it to wait with `--wait 590000` under the Bash tool's 600000 ms timeout, and the headless ceiling is lifted, so an implementer that ends its turn on a background capture no longer drops the dispatch. The dispatch guard refuses a driver-owned wave only at the execution stage, so an unattended request made at the start question is honoured mid-cycle. The one-Bash-call rule and the platform notes on the classifier blocking the detached driver, on-device driver JavaScript and hook-rewritten Bash are documented, and the four polling scripts share one synchronous sleep helper (`scripts/sleep.mjs`).
+
+**Finish stage (#430, #433).** `redaction-check.mjs --own-repo` exempts the terms recorded as the checkout's own `owner/name`, so the `.devcycle` privacy screen no longer fails on this repo's own name when a draft is PR-bound; the finish playbook passes it. The finish stage removes this cycle's ephemeral `.devcycle` files without asking once the archive copy succeeded, and asks once, only about prior cycles' leftovers.
+
+**On-device driver (#421).** `agents/on-device-driver.md` carries `list_connected_browsers`, `select_browser` and `switch_browser`. On a failed first navigation, or when several browsers are connected, the driver selects the single `onThisComputer: true` entry; when it cannot, it returns `blocked` and the coordinator asks you once. The main-thread browser guard keeps those tools the driver's alone.
+
+**Known issues.** The decisions entry for #421 says the driver returns the list when the in-use browser is already on this computer, but the driver reports a plain `blocked` there. A dispatch that names a `deviceId` is obeyed even when it is not the one you chose, and deleting the dispatch-named-`deviceId` clause leaves every new test green. With four or more connected browsers there is no overflow rule for the ask, and your browser choice is not written to the stage log.
+
 ## 0.32.0 — 2026-11-11
 
 - feat(planning): delegate large plans, allow interface-pinned tasks and scan blast radius (#329, #331, #335)
