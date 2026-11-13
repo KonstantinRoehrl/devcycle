@@ -5,6 +5,53 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-13 — Finish's `.devcycle` screen honours the repo's own name (#430)
+
+**Decision:** `scripts/redaction-check.mjs --own-repo`, valid only with `--dir`, subtracts the
+allowance recorded for the checkout's own repo, which it derives from the `origin` remote; with no
+parseable origin it screens strictly and says so, `--allow-found-terms` there exits 1 saying nothing
+was recorded, and the section offers no allowance. `--allow-found-terms` records from such a corpus
+only when it holds exactly one distinct deny-listed term. Finish's `.devcycle` screen passes
+`--own-repo`, and `references/review-comments.md` § The destination-name allowance owns the question
+for it as for a PR draft. `--repo` stays exclusive of `--dir`, and the run-record-store screen takes
+no allowance.
+
+**Why:** a host repo whose own name is deny-listed failed finish's screen at every cycle, and the
+user waived it by hand each time (#430). Deriving the repo keeps a caller from naming another
+destination, and one store means one answer covers PR drafts and finish alike.
+
+**Budgets:** the widened allowance section grows `references/review-comments.md`, which
+`playbooks/receiving-review.md` and `playbooks/writing-the-findings-document.md` carry; finish pays
+for the section it reads and its own added lines. The figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6974
+budget: context-budget.json playbooks/finishing-the-cycle.md 53078
+budget: context-budget.json playbooks/receiving-review.md 123453
+budget: context-budget.json playbooks/writing-the-findings-document.md 68286
+```
+
+## 2026-11-13 — Finish removes its own ephemeral files without asking (#433)
+
+**Decision:** finish's cleanup removes this cycle's ephemeral files — modified at or after the run's
+`startedAt`, plus `plan-work/<run id>/` — without a question, keeping any file whose archive copy
+failed. It asks once, with file count and size, only about leftovers from earlier cycles. When the
+run record's `startedAt` cannot be read, only `plan-work/<run id>/` is this cycle's and the rest is
+asked about.
+
+**Why:** the question came at every finish and sessions answered it differently, some keeping the
+files and some removing them (#433). The archive copy already holds everything the removal takes.
+
+**Supersedes:** the cleanup question that removed nothing without an explicit yes.
+
+**Budgets:** the split adds lines to `playbooks/finishing-the-cycle.md`. The figures below are the
+new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6961
+budget: context-budget.json playbooks/finishing-the-cycle.md 51316
+```
+
 ## 2026-11-12 — A driven coordinator waits inside its turn, and a response with a Bash call holds nothing else (#404, #432)
 
 **Decision:** while a dispatch is in flight a driven coordinator never ends its turn to wait. It runs

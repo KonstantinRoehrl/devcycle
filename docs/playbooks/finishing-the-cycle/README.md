@@ -33,7 +33,11 @@ their content has different fates: `.devcycle/` is gitignored and local-only, so
 machine-identity classes (absolute home paths, session ids, the escaped project-directory form)
 are the expected shape there, not a leak — that call passes `--advisory-identity`, which
 downgrades those three classes to a stderr report and exit 0, leaving only a deny-listed term as
-a hard stop; the run-record-store call carries no such flag and stays the hard gate on all four
+a hard stop. That call also passes `--own-repo`, which exempts the terms recorded as the
+checkout's own repo name, derived from its `origin` remote; the first time the name fails the
+screen, the stage asks once whether to allow it for that repo, and the answer covers PR-comment
+drafts too. When the screen cannot derive the repo (no parseable `origin`), it offers no allowance
+and the failure stands. The run-record-store call carries no such flag and stays the hard gate on all four
 classes, because that content is durable and potentially shared. A single line can be exempted
 from the machine-identity classes only (never from a deny-listed term) with an inline
 `redaction-allow` marker on that line. Either call's non-zero exit stops the stage rather than
@@ -43,17 +47,19 @@ the primary collection: the
 commit during the run, and the last-wins join makes this closing write harmless. The stage's
 final write to `.devcycle/state.md` sets `stage: done`.
 
-Before offering any cleanup, the stage unconditionally copies this cycle's audit trail —
+Before any cleanup, the stage unconditionally copies this cycle's audit trail —
 `ledger.md` plus the `briefs/`, `evidence/`, `findings/`, `reports/`, `research/`, and
 `plan-work/<run id>/` directories — into
 `.devcycle/archive-<date>-<branch-slug>/`, first moving any superseded findings-loop status
-files into that same archive. Only then does it offer, in one question, to delete the ephemeral
-set that only ever existed to pass content between this cycle's dispatches
-(`.devcycle/reports/*`, `.devcycle/evidence/*`, `.devcycle/findings/*`,
-`.devcycle/plan-work/<run id>/*`, `.devcycle/research/*`, sweep-argument/report files, generated
-per-task briefs); anything short of an explicit yes leaves every file in
-place, and the state file, ledger, scope, spec, plan, checklist, and on-device results — plus
-anything git-tracked — are never removed regardless of the answer.
+files into that same archive. Only then does it clear the ephemeral set that only ever existed to
+pass content between dispatches (`.devcycle/reports/*`, `.devcycle/evidence/*`,
+`.devcycle/findings/*`, `.devcycle/plan-work/<run id>/*`, `.devcycle/research/*`,
+sweep-argument/report files, generated per-task briefs). This cycle's files — modified since the
+run started — go without a question, except any whose archive copy failed. If the run's start time
+cannot be read, only `plan-work/<run id>/` counts as this cycle's and the rest is asked about. Leftovers from earlier
+cycles are listed with their count and size and removed only on an explicit yes to one question.
+The state file, ledger, scope, spec, plan, checklist, and on-device results — plus anything
+git-tracked — are never removed.
 
 The stage also runs `scripts/leftover-processes.mjs` and passes on anything it reports: process groups still busy after their leader exited, which may be this cycle's leak. It is a notice, kills nothing and never changes the outcome. The diagram leaves it out because it does not branch.
 
@@ -65,7 +71,7 @@ The stage also runs `scripts/leftover-processes.mjs` and passes on anything it r
 ```mermaid
 ---
 title: finishing-the-cycle — policy resolution through cleanup
-accDescr: Playbook-internal flowchart of the finish stage, from resolving the configured git policy through the permission and protected-branch signal checks, acting on the effective policy, the redaction and workload gates, the unconditional archive copy, and the ephemeral-cleanup offer.
+accDescr: Playbook-internal flowchart of the finish stage, from resolving the configured git policy through the permission and protected-branch signal checks, acting on the effective policy, the redaction and workload gates, the unconditional archive copy, and the ephemeral cleanup.
 ---
 flowchart TD
     CFG("Resolve the configured gitPolicy — local-commits-only | push-allowed | open-pr"):::stage
@@ -84,11 +90,11 @@ flowchart TD
     HANDBACK --> REDACT
     PUSH --> REDACT
     PR --> REDACT
-    REDACT{"redaction-check.mjs: --advisory-identity over .devcycle/, hard gate over the run-record dir — exit 0?"}:::stage
+    REDACT{"redaction-check.mjs: --advisory-identity --own-repo over .devcycle/, hard gate over the run-record dir — exit 0?"}:::stage
     REDACT -->|"no"| STOP[("stage stops — surface the finding")]:::structural
     REDACT -->|"yes"| RECORD("Append the workload signature via run-record.mjs"):::stage
     RECORD --> ARCHIVE[("Archive ledger, briefs, evidence, findings, reports, research, plan-work into .devcycle/archive-&lt;date&gt;-&lt;branch-slug&gt;/")]:::structural
-    ARCHIVE --> CLEAN("Offer to delete the ephemeral set — one question, removes only on explicit yes"):::stage
+    ARCHIVE --> CLEAN("Remove this cycle's ephemeral files — ask once, only about earlier cycles' leftovers"):::stage
     CLEAN --> DONE("stage: done — handoff"):::stage
 
     classDef stage fill:#EEEDFE,stroke:#534AB7,color:#3C3489;

@@ -17,9 +17,11 @@
 // Deny-listed terms are never downgraded: not by --advisory-identity, not by an inline
 // `redaction-allow` marker. The one sanctioned exemption is the recorded per-destination
 // allowance (--repo with --allow-found-terms), scoped to one --file and one --repo: a term that
-// is the destination repo's own name, recorded by hash once the user has confirmed it.
+// is the destination repo's own name, recorded by hash once the user has confirmed it. --own-repo
+// reaches the same store from a --dir corpus, for the checkout's own repo only: the script derives
+// that repo from the origin remote, so no caller can name another one.
 import { createHash } from "node:crypto";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { readFileSync, writeFileSync, readdirSync, existsSync, statSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
@@ -33,7 +35,7 @@ const args = process.argv.slice(2);
 // `redaction: ok` over a leaky one it never opened.
 const KNOWN_FLAGS = {
   "--file": "value", "--dir": "value", "--hashes": "value", "--auto-redact": "none",
-  "--advisory-identity": "none", "--repo": "value", "--allow-found-terms": "none",
+  "--advisory-identity": "none", "--repo": "value", "--allow-found-terms": "none", "--own-repo": "none",
 };
 // Flag parsing lives in cli-flags.mjs, which owns it for every script here. This script keeps its
 // own message prefix and exit code by catching what that module throws: an unknown flag (a typo
@@ -80,9 +82,17 @@ const advisoryIdentity = "--advisory-identity" in flags;
 // The destination a --file draft will be posted to, as `owner/name`. Its recorded allowance is
 // subtracted from the deny-list for this one scan; without --repo the store is never read.
 const repo = read("--repo");
-// Records every deny-listed term found in the --file draft as allowed for --repo. Callers pass it
-// only after the user has confirmed the term is the destination repo's own name.
+// Records every deny-listed term found in the --file draft (or the --dir corpus, under --own-repo)
+// as allowed for that destination. Callers pass it only after the user has confirmed the term is the
+// destination repo's own name.
 const allowFoundTerms = "--allow-found-terms" in flags;
+// The --dir corpus's own repo, resolved from its origin remote rather than named by the caller.
+const ownRepo = "--own-repo" in flags;
+
+if (ownRepo && (dir === undefined || file !== undefined || repo !== undefined)) {
+  console.error("redaction-check: --own-repo applies only to a --dir corpus, never with --file or --repo");
+  process.exit(1);
+}
 
 // An allowance is for one draft bound for one destination, never a corpus: --repo with --dir or
 // the tracked tree would exempt a term from every file in it.
@@ -94,8 +104,8 @@ if (repo !== undefined && !/^[^/]+\/[^/]+$/.test(repo)) {
   console.error("redaction-check: --repo must be owner/name");
   process.exit(1);
 }
-if (allowFoundTerms && (!file || repo === undefined)) {
-  console.error("redaction-check: --allow-found-terms requires --file and --repo");
+if (allowFoundTerms && !ownRepo && (!file || repo === undefined)) {
+  console.error("redaction-check: --allow-found-terms requires --file with --repo, or --dir with --own-repo");
   process.exit(1);
 }
 
@@ -132,7 +142,38 @@ const tokensOf = (text) => new Set(text.toLowerCase().match(/[a-z][a-z0-9_-]{3,}
 // published. Overridable for tests, as DEVCYCLE_RUNS_DIR is in run-record.mjs.
 const ALLOW_FILE =
   process.env.DEVCYCLE_REDACTION_ALLOW_FILE ?? join(homedir(), ".claude", "devcycle", "redaction-allow.json");
-const repoKey = repo?.toLowerCase();
+// `owner/name`, lower-cased, from an scp-style (`git@host:owner/name.git`) or URL-style
+// (`https://host/owner/name.git`, `ssh://git@host/owner/name`) remote; null for any other shape.
+function repoFromRemoteUrl(url) {
+  const m = /^(?:[a-z][a-z0-9+.-]*:\/\/[^/]+\/|(?:[^@/:]+@)?[^:/]+:)([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(url.trim());
+  return m ? `${m[1]}/${m[2]}`.toLowerCase() : null;
+}
+function ownRepoKey(corpusDir) {
+  try {
+    const url = execFileSync("git", ["-C", corpusDir, "remote", "get-url", "origin"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return repoFromRemoteUrl(url);
+  } catch {
+    return null;
+  }
+}
+let ownKey;
+if (ownRepo) {
+  ownKey = ownRepoKey(dir);
+  // Strict, and said so: a missing allowance must never read as a screen that applied one.
+  if (ownKey === null) {
+    process.stderr.write("redaction-check: --own-repo found no parseable origin remote — no allowance applied\n");
+    // Recording needs a key; without one the rerun would fail on the screen alone and read as if
+    // the answer had been recorded.
+    if (allowFoundTerms) {
+      console.error("redaction-check: --allow-found-terms recorded nothing — --own-repo has no origin remote to record against");
+      process.exit(1);
+    }
+  }
+}
+const repoKey = repo?.toLowerCase() ?? ownKey ?? undefined;
 let denied = hashes;
 if (repoKey !== undefined) {
   let store = {};
@@ -146,22 +187,25 @@ if (repoKey !== undefined) {
   }
   const allowed = new Set(store[repoKey] ?? []);
   if (allowFoundTerms) {
-    let draft;
-    try {
-      draft = readFileSync(file, "utf8");
-    } catch (err) {
-      console.error(`redaction-check: cannot read ${basename(file)} (${err.code ?? err.message})`);
+    const found = new Set();
+    for (const text of corpusTexts())
+      for (const hash of [...tokensOf(text)].map(sha)) if (hashes.has(hash)) found.add(hash);
+    // The user confirmed one term as the repo's own name; a corpus can hide a second, genuine one.
+    if (ownRepo && found.size > 1) {
+      console.error(
+        `redaction-check: --own-repo records only a single deny-listed term, and this corpus holds ${found.size} — nothing recorded`
+      );
       process.exit(1);
     }
     const before = allowed.size;
-    for (const hash of [...tokensOf(draft)].map(sha)) if (hashes.has(hash)) allowed.add(hash);
+    for (const hash of found) allowed.add(hash);
     store[repoKey] = [...allowed].sort();
     mkdirSync(dirname(ALLOW_FILE), { recursive: true });
     writeFileSync(ALLOW_FILE, JSON.stringify(store, null, 2) + "\n");
     // A count only: the term is what this script never prints, and its hash would name it to
     // anyone holding the deny-list.
     process.stderr.write(
-      `redaction-check: recorded ${allowed.size - before} deny-listed term(s) as allowed for this --repo\n`
+      `redaction-check: recorded ${allowed.size - before} deny-listed term(s) as allowed for this destination\n`
     );
   }
   denied = new Set([...hashes].filter((h) => !allowed.has(h)));
@@ -214,6 +258,25 @@ function redactText(text) {
     out = out.replace(new RegExp("\\b" + escaped + "\\b", "gi"), () => { count++; return "<redacted-term>"; });
   }
   return { out, count };
+}
+
+// What --allow-found-terms records from: the one --file draft, or every readable file of the --dir.
+function corpusTexts() {
+  if (file) {
+    try {
+      return [readFileSync(file, "utf8")];
+    } catch (err) {
+      console.error(`redaction-check: cannot read ${basename(file)} (${err.code ?? err.message})`);
+      process.exit(1);
+    }
+  }
+  return walk(dir).flatMap((f) => {
+    try {
+      return [readFileSync(join(dir, f), "utf8")];
+    } catch {
+      return [];
+    }
+  });
 }
 
 function walk(root, base = root) {

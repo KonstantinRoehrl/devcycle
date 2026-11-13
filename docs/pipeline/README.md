@@ -86,7 +86,7 @@ flowchart TD
     FAST("Fast path<br/>in-session implementation · one task-reviewer pass"):::stage --> FINISH
     SWEEP("Mechanical sweep<br/>blast-radius gate · pilot-first sweep · one reviewer pass"):::stage --> FINISH
 
-    FINISH("Finish<br/>resolve gitPolicy · apply the external clamps · offer to clear ephemeral artifacts · hand back"):::stage
+    FINISH("Finish<br/>resolve gitPolicy · apply the external clamps · clear ephemeral artifacts · hand back"):::stage
     FINISH --> A_FIN[("branch, pushed branch, or PR")]:::structural --> STOP(["cycle closed"]):::tool
 
     REVIEWCMD -. "standalone — same engine, starts no cycle" .-> AUDIT
@@ -184,11 +184,12 @@ see `docs/design/`.
    items.
 9. **Finish** — hands the branch back per your `gitPolicy` (see `docs/configuration/`); first copies the
    cycle's audit trail (ledger, evidence, findings, reports) into
-   `.devcycle/archive-<date>-<branch-slug>/`, unconditionally, then offers to delete the
-   files that only ever existed to pass content between this cycle's dispatches (per-task
-   reports, evidence, findings, sweep arguments). It shows the list and the total before
-   asking, removes nothing without an explicit yes, and never touches the audit trail —
-   state file, ledger, scope, spec, plan, checklist — or any file your repo tracks in git.
+   `.devcycle/archive-<date>-<branch-slug>/`, unconditionally, then deletes this cycle's
+   files that only ever existed to pass content between dispatches (per-task reports,
+   evidence, findings, sweep arguments), keeping any whose archive copy failed. Leftovers from
+   earlier cycles are listed with their total and removed only on an explicit yes. It never
+   touches the audit trail — state file, ledger, scope, spec, plan, checklist — or any file
+   your repo tracks in git.
    Ahead of that archiving and cleanup, two checks gate the stage's green report: this cycle's
    own `.devcycle/` artifacts are screened for privacy, and the landing guard
    `scripts/self-dev-check.mjs` asserts that the deliverable reached the repo and that the
