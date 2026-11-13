@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.32.1 — 2026-11-13
+
+- fix(drive): hold a driven coordinator's turn open, stop two finish-stage corrections and let the on-device driver pick its browser (#404, #431, #432, #430, #433, #421)
+
 A driven cycle no longer loses a dispatch while an implementer waits on a background job, the finish stage stops asking for two corrections it needed nearly every cycle, and the on-device driver now picks the right browser itself.
 
 **Driven coordinator (#404, #431, #432).** A driven coordinator now holds its turn open while dispatches run: the Stop hook tells it to wait with `--wait 590000` under the Bash tool's 600000 ms timeout, and the headless ceiling is lifted, so an implementer that ends its turn on a background capture no longer drops the dispatch. The dispatch guard refuses a driver-owned wave only at the execution stage, so an unattended request made at the start question is honoured mid-cycle. The one-Bash-call rule and the platform notes on the classifier blocking the detached driver, on-device driver JavaScript and hook-rewritten Bash are documented, and the four polling scripts share one synchronous sleep helper (`scripts/sleep.mjs`).
