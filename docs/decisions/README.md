@@ -5,6 +5,31 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-13 — The on-device driver picks the browser on this computer, and asks only when it cannot (#421)
+
+**Decision:** `agents/on-device-driver.md` grants `list_connected_browsers`, `select_browser` and
+`switch_browser`. When the first navigation fails, or a browser tool reports several connected
+browsers with none selected, the driver lists them and selects the single one with
+`onThisComputer: true`; with no such browser, several, or an `inUse` browser already on this
+computer, it returns `blocked` carrying the list, and `playbooks/verifying-on-device.md` step 2 asks
+the user once and re-dispatches the driver with the chosen `deviceId` or a confirmation-screen request.
+The browser guard is unchanged: every `mcp__claude-in-chrome__*` call stays the driver's alone.
+
+**Why:** with Claude in Chrome connected on several machines, the extension can route the driver to a
+browser that cannot reach the dev server's `127.0.0.1`, and nothing in the stage could recover (#421).
+The tool's own description says to ask the user and never pick one; auto-selecting the single browser
+on this computer narrows that on purpose, because the dev server listens only on this machine's
+loopback, so only a browser here can reach it. Several candidates, or none on this computer, still go
+to the user.
+
+**Budgets:** the driver section grows the surface by 18 lines and the step 2 ask grows
+`playbooks/verifying-on-device.md`'s closure by 319 bytes. The figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 6992
+budget: context-budget.json playbooks/verifying-on-device.md 66440
+```
+
 ## 2026-11-13 — Finish's `.devcycle` screen honours the repo's own name (#430)
 
 **Decision:** `scripts/redaction-check.mjs --own-repo`, valid only with `--dir`, subtracts the
