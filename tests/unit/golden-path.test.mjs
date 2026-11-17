@@ -2095,7 +2095,7 @@ const workflowFiles = () => readdirSync(join(root, "workflows")).filter((f) => f
 const workflowLibFiles = () => readdirSync(join(root, "workflows/lib")).filter((f) => f.endsWith(".js"));
 
 test("C3 leg 5: every workflows/*.js is invoked from the surface or imported by another module", () => {
-  // workflows/lib/ (agent-cli.js today) holds library files, not engines: they carry no shebang,
+  // workflows/lib/ (agent-cli.js and result-store.js today) holds library files, not engines: they carry no shebang,
   // so they can never satisfy "invoked from the surface", and they import nothing else under
   // workflows/ themselves, so they never discharge another file's half of this check either.
   // They are targets only — reachable exclusively through another workflow file's import — never
