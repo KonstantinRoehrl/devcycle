@@ -15,7 +15,7 @@ import {
   compareVersions, versionCohorts, isInFlight, IN_FLIGHT_MS, formatCandidate,
   cohortTable, readRunRecords, attributeFromRecord, costBand, buildJsonReport,
   emitComplianceCandidates, complianceCandidatesOf, qualitySignals, corpusDirectionOfTravel, toolCallsForDispatch,
-  reviewDepthCohortTable, reviewDepthMismatches, deriveEvents, attributedCost, impactScores,
+  reviewDepthCohortTable, PER_LENS_SINGLE_SINCE, SINGLE_ONE_REVIEWER, reviewDepthMismatches, deriveEvents, attributedCost, impactScores,
   bandFor, recencyBand, inBand, runAggregates, versionProfileTable, culpritTable, lifecycle,
   renderReport, complianceIssueBody, COMPLIANCE_TYPES, NoComplianceCandidateError,
   formatComplianceCandidate, parseDraftedMarkers, complianceType, COMPLIANCE_TITLES,
@@ -1988,6 +1988,20 @@ test("reviewDepthCohortTable aggregates quality per cohort via aggregateQuality,
   assert.strictEqual(panel.quality.roundsPerTask, 1.5);
   const single = rows.find((r) => r.reviewDepth === "single");
   assert.strictEqual(single.quality, null);
+});
+
+test("reviewDepthCohortTable splits single runs from before the per-lens engine into their own cohort", () => {
+  const rows = reviewDepthCohortTable([
+    { resolvedReviewDepth: "single", pluginVersion: "0.32.1", costByStage: { a: 1.0 } },
+    { resolvedReviewDepth: "single", pluginVersion: "0.9.0", costByStage: { a: 1.0 } },
+    { resolvedReviewDepth: "single", pluginVersion: PER_LENS_SINGLE_SINCE, costByStage: { a: 3.0 } },
+    { resolvedReviewDepth: "single", pluginVersion: "0.40.0", costByStage: { a: 3.0 } },
+    { resolvedReviewDepth: "single", costByStage: { a: 5.0 } }, // no version: nothing dates it
+    { resolvedReviewDepth: "panel", pluginVersion: "0.32.1", costByStage: { a: 7.0 } },
+  ]);
+  const by = Object.fromEntries(rows.map((r) => [r.reviewDepth, r.sessions]));
+  assert.deepEqual(by, { panel: 1, single: 3, [SINGLE_ONE_REVIEWER]: 2 });
+  assert.equal(SINGLE_ONE_REVIEWER, "single (one reviewer)");
 });
 
 test("the default text report renders the reviewDepth cohort table", () => {
