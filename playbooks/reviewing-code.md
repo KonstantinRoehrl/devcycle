@@ -166,9 +166,32 @@ is reviewed rather than sampled. The `COVERAGE WARNING` its summary can open wit
 input reached the reviewers truncated — an oversize lone hunk, an oversize spec, or an oversize
 file list.
 
-**`single`** — the same lenses as inline read-only reviewers, same refutation pass, same finding
-shape; a complete review in its own right, not a degraded panel. Its lenses run inside one reviewer
-and leave no per-lens result, so a stop re-runs the whole round.
+**`single`** dispatches one fresh-context `devcycle:red-team-reviewer` per lens, in parallel, then one
+refutation reader: one reviewer dispatch per lens plus one, and a complete review in its own right,
+not a degraded panel.
+
+1. **Lens reviewers.** Each gets § 4's payload narrowed to its own lens charter, plus the matched
+   lessons and, when the caller supplied them, § 2's orientation digest and hotspot list. The prompt
+   names the scope form under review (`branch`, `files` or `repo`) and asks for one JSON block,
+   `{"findings":[…],"strengths":[…]}`: each finding carries `file`, `line` (an integer or `null`),
+   `claim`, `severity`, `measuredAgainst` and `needsExecution`, each strength `file`, `line`, `claim`
+   and `measuredAgainst`. The agent's Verdict format is for standalone dispatch only. The model is
+   `branchReviewModel` per `references/model-routing.md`, omitted on the session tier.
+2. **Result files** — only with a `resultDir`, which only the branch-review stage passes. Run
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/lens-results.mjs" missing --dir <resultDir>` first. A saved
+   lens set dispatches only the lenses its `missing` lists, with the charters
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/lens-results.mjs" lenses --dir <resultDir>` prints, and takes the
+   other lenses' findings from its `results`. With none (exit 3), write
+   `{"lenses":[{"key":…,"charter":…}],"specPath":…,"lessons":…}` to a file under `.devcycle/tmp/`, run
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/lens-results.mjs" save-lenses --dir <resultDir> --ref <base>..<branch> --from <file>`,
+   and dispatch every lens. Each lens that returns to a clean tree is stored with
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/lens-results.mjs" record --dir <resultDir> --lens <key> --from <its JSON block's file>`;
+   a non-zero `record` stores nothing, so that lens runs again.
+3. **Refutation.** One more fresh `devcycle:red-team-reviewer`, in its adversarial role, takes every
+   lens's findings, stored and new, tries to refute each one and returns
+   `{"verdicts":[{"finding":…,"verified":…,"verification":…}]}`. With a `resultDir`, store it with
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/lens-results.mjs" record-refutation --dir <resultDir> --from <file>`.
+   Then dedup across lenses and rank per § 4.
 
 **Reviewers never write the working tree — the owner of that rule for every reviewer, inline or
 dispatched; the reviewer agents and the branch-review stage name it and do not restate it.** A
@@ -182,12 +205,13 @@ prose: a `PreToolUse` hook denies every destructive/ambiguous git subcommand fro
 (allowing only inspection commands and that one `git add -N`), so the ban no longer rests on prose the
 `tools:` grant contradicts.
 
-**Dirty-tree backstop.** Snapshot `git status --porcelain` before the reviewer runs — the single
-inline reviewer here, a dispatched reviewer subagent in the branch-review stage — and again after.
-A reviewer that left the tree dirtier than it found it, beyond that permitted `git add -N`, mutated
-the code it was assessing, so the review is invalid: file it as a blocking process finding in
-`${CLAUDE_PLUGIN_ROOT}/references/findings.md`'s shape, discard that verdict, and re-run from the
-clean tree.
+**Dirty-tree backstop.** Snapshot `git status --porcelain` before the reviewers run — each lens
+reviewer and the refutation reader here, a dispatched reviewer subagent in the branch-review stage —
+and again as each one returns, before anything it returned is recorded. A reviewer that left the tree
+dirtier than it found it, beyond that permitted `git add -N`, mutated the code it was assessing, so
+the review is invalid: file it as a blocking process finding in
+`${CLAUDE_PLUGIN_ROOT}/references/findings.md`'s shape, record nothing more from that dispatch, and
+re-run every unrecorded reviewer from the clean tree.
 
 **`panel→single` degradation is a first-class path, not an apology.** A missing or non-zero
 `review-panel.js` means the panel is unavailable: **exit 1 means the panel failed, never that findings

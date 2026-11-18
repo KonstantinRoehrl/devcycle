@@ -1005,6 +1005,16 @@ test("harvested: reviewing-the-branch/graceful-degradation — the fallback is d
   assert.match(read("playbooks/reviewing-code.md"), /a\s+fallback presented as a panel run makes the review unauditable/);
 });
 
+test("#438: the single engine dispatches one reviewer per lens and keeps each lens's result", () => {
+  const code = read("playbooks/reviewing-code.md");
+  assert.ok(
+    code.includes("**`single`** dispatches one fresh-context `devcycle:red-team-reviewer` per lens"),
+    "§ 3 no longer gives single one reviewer per lens",
+  );
+  assert.ok(!code.includes("Its lenses run inside one reviewer"), "§ 3 still runs every single lens inside one reviewer");
+  assert.ok(code.includes('scripts/lens-results.mjs" missing --dir <resultDir>'), "§ 3 no longer asks the script which lenses are missing");
+});
+
 test("branch review skips on-device only when no checklist exists and nothing renders, and its own block carries the skip", () => {
   const handoff = sectionText(read("playbooks/reviewing-the-branch.md"), "handoff") ?? "";
   assert.ok(
@@ -2088,8 +2098,8 @@ test("C3 leg 4: a shebang means the file has a CLI, and only a CLI file carries 
 // and `agents/*.md` ship the same way and were uncovered: nothing above would have caught an
 // orphaned workflow engine or an orphaned agent definition dropped into the tree. There is no
 // live orphan today — both workflow files are named from the surface and
-// `agents/red-team-reviewer.md` is reached only through workflows/review-panel.js's charter
-// loader — so these two legs close the guarantee gap rather than any currently-hidden dead code.
+// `agents/red-team-reviewer.md` is reached through workflows/review-panel.js's charter loader as
+// well as by name from the surface — so these two legs close the guarantee gap rather than any currently-hidden dead code.
 
 const workflowFiles = () => readdirSync(join(root, "workflows")).filter((f) => f.endsWith(".js"));
 const workflowLibFiles = () => readdirSync(join(root, "workflows/lib")).filter((f) => f.endsWith(".js"));

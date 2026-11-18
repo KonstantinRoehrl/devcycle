@@ -5,6 +5,29 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-17 — The `single` review engine runs one reviewer per lens (#438)
+
+**Decision:** `reviewDepth=single` dispatches one fresh-context `devcycle:red-team-reviewer` per lens,
+in parallel, then one refutation reader over every lens's findings. In the branch-review stage each
+lens's result goes to the round directory the panel already uses, through
+`workflows/lib/result-store.js`, which both engines now share, and `scripts/lens-results.mjs` names
+the lenses a stopped round still needs. The engine line stays `single`, so old and new run records
+read alike; `scripts/doctor.mjs` tells the two apart by plugin version. This supersedes the
+2026-10-30 entry's "The `single` engine keeps no per-lens result, so a stop there re-runs the round."
+
+**Why:** one reader holding every lens charter spread its attention thin, carried what it found early
+into the later lenses, and left nothing to resume, and `single` is the default engine at `lean` and
+`standard` (#438). The two engines now differ in fan-out per lens, not in whether the lenses are
+independent: `single` costs one reviewer per lens plus one refutation reader.
+
+**Budgets:** `playbooks/reviewing-code.md` § 3 grows by the fan-out, the result-file steps and the
+per-return backstop. The figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 7016
+budget: context-budget.json playbooks/reviewing-code.md 102184
+```
+
 ## 2026-11-13 — The on-device driver picks the browser on this computer, and asks only when it cannot (#421)
 
 **Decision:** `agents/on-device-driver.md` grants `list_connected_browsers`, `select_browser` and
