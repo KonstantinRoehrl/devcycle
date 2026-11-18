@@ -50,7 +50,7 @@
 // with `{ resultDir }` alone (which reuses `_args.json`), runs only what has no entry. An entry is
 // keyed by a hash of what it reviewed, so a moved branch re-runs rather than replays. A failed
 // lens or verifier is never stored, so a rerun retries it. `costByLens` is this run's spend: a
-// reused entry costs 0.
+// reused entry costs 0. workflows/lib/result-store.js owns these files and their keys.
 //
 // Optional env: DEVCYCLE_PANEL_MODEL sets --model for the claude subagents
 // (unset -> the CLI's configured default model).
@@ -71,11 +71,13 @@
 "use strict";
 
 const { execFileSync } = require("node:child_process");
-const { createHash } = require("node:crypto");
-const { readFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } = require("node:fs");
+const { readFileSync, existsSync, mkdtempSync, rmSync } = require("node:fs");
 const { join, resolve } = require("node:path");
 const os = require("node:os");
 const { makeLogger, run, claudeStructured: claudeStructuredCli } = require("./lib/agent-cli.js");
+const {
+  RESULT_DIR_SHAPE, SAVED_ARGS_FILE, REFUTATION_FILE, contentKey, lensResultFile, refutationKey, readJsonObject, createResultStore,
+} = require("./lib/result-store.js");
 
 const DIFF_CHAR_CAP = 60_000;
 const SPEC_CHAR_CAP = 30_000;
@@ -85,10 +87,7 @@ const VERIFY_CONCURRENCY = 4;
 // chunk under crossModel. Same cap as stage 2's verification, same reason.
 const LENS_CONCURRENCY = 4;
 const SEVERITIES = ["critical", "high", "medium", "low"];
-const RESULT_DIR_SHAPE = /(^|\/)\.devcycle\/review\/[^/]+$/;
-const SAVED_ARGS_FILE = "_args.json";
 const DECISION_REFUSED_EXIT = 3;
-const REFUTATION_FILE = "_refutation.json";
 const LENS_CHARTERS = {
   spec:
     "Spec compliance: compare the diff against the spec below. Report every place the " +
@@ -133,48 +132,8 @@ const claudeStructured = (opts) => claudeStructuredCli({ ...opts, attempts: 2, e
 
 // ---------- result files ----------
 
-const contentKey = (...parts) => createHash("sha256").update(JSON.stringify(parts)).digest("hex");
-
-// A caller-supplied lens key becomes one path component: encoding removes every "/", and the
-// ".json" suffix means no key can resolve to "." or "..".
-const lensResultFile = (lensKey) => `${encodeURIComponent(lensKey)}.json`;
-
-function readJsonObject(path) {
-  try {
-    const parsed = JSON.parse(readFileSync(path, "utf8"));
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-const NO_RESULT_STORE = { get: () => null, put() {}, saveArgs() {} };
-
-// The review must survive a write that fails: a lost result file costs one re-run on resume, and
-// failing the panel for it would cost the whole round.
-function createResultStore(dir, atomicWrite) {
-  const write = (name, value) => {
-    try {
-      mkdirSync(dir, { recursive: true });
-      atomicWrite(join(dir, name), JSON.stringify(value, null, 2) + "\n");
-    } catch (e) {
-      log(`result file ${name} not written: ${e.message}`);
-    }
-  };
-  const files = new Map();
-  const entriesOf = (name) => {
-    if (!files.has(name)) files.set(name, readJsonObject(join(dir, name)) ?? {});
-    return files.get(name);
-  };
-  return {
-    get: (name, key) => entriesOf(name)[key] ?? null,
-    put(name, key, value) {
-      entriesOf(name)[key] = value;
-      write(name, entriesOf(name));
-    },
-    saveArgs: (args) => write(SAVED_ARGS_FILE, args),
-  };
-}
+// workflows/lib/result-store.js owns the files; with no resultDir nothing is kept.
+const NO_RESULT_STORE = { get: () => null, put() {}, save() {} };
 
 // ---------- args + repo inputs ----------
 
@@ -839,9 +798,9 @@ async function main() {
 
   // A dynamic import: this file is CommonJS, and the plugin does not pin the Node that runs it.
   const store = args.resultDir
-    ? createResultStore(args.resultDir, (await import("../scripts/atomic-write.mjs")).atomicWrite)
+    ? createResultStore(args.resultDir, { atomicWrite: (await import("../scripts/atomic-write.mjs")).atomicWrite, log })
     : NO_RESULT_STORE;
-  store.saveArgs(args.reviewArgs);
+  store.save(SAVED_ARGS_FILE, args.reviewArgs);
 
   // Every input the reviewers saw only part of, kept apart from the other notes: these are
   // coverage reductions and are disclosed in the report itself, not just in the prompts.
@@ -949,7 +908,7 @@ async function main() {
   // A verifier re-reads the code, so a verdict holds only for the diff it was reached on.
   const reviewedInput = contentKey(fullDiff ?? fileList);
   const verifyRaw = await mapLimit(distinct, VERIFY_CONCURRENCY, async (f) => {
-    const key = contentKey(reviewedInput, f.file, f.line, f.claim, f.severity, f.measuredAgainst, f.needsExecution, f.lens);
+    const key = refutationKey(reviewedInput, f);
     const saved = store.get(REFUTATION_FILE, key);
     if (saved) return { finding: { ...f, verified: saved.verified, verification: saved.verification }, cost: 0 };
     const outcome = await runGuarded(

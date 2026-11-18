@@ -44,8 +44,8 @@ front; a concern line carries none and is self-contained, though `--lesson` also
 bracketed id. A match that comes back empty adds no such block.
 
 Invoke it with `scope: {ref: "<base>..<branch>"}`, the spec path as `specPath`, and this
-stage's criteria — what the spec requires and forbids, plus the default criteria set — plus, on the
-panel, the `resultDir` § Findings loop's step 1 names, and
+stage's criteria — what the spec requires and forbids, plus the default criteria set — plus, for
+either engine, the `resultDir` § Findings loop's step 1 names, and
 record the engine line it returns **verbatim** in the report below, with its depth line. Round 1
 runs § 3's `select` over the whole branch with `--caller cycle`, which rewrites `.devcycle/review/decision.json`; rounds 2..N reuse that record's engine and never ask again. In
 cycle (the state file names a `run:`), append what the first round to finish ran once its engine returns —
@@ -55,10 +55,9 @@ cycle (the state file names a `run:`), append what the first round to finish ran
 node "${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs" append --run <state.run> --kind event --event review-depth --stage branch-review --reviewDepth <single|panel> --depthKnob <auto|single|panel> --consent <none|panel|single>
 ```
 
-**Dirty-tree backstop.** The reviewers this stage dispatches are read-only; snapshot `git status
---porcelain` before each subagent and check it again after. The backstop itself — what a tree left
-dirtier means, and that its verdict is discarded and re-run — is owned by
-`playbooks/reviewing-code.md` and not restated here.
+**Dirty-tree backstop.** The reviewers this stage dispatches are read-only, and
+`playbooks/reviewing-code.md` § 3's backstop checks the tree as each one returns. What a tree left
+dirtier means, and that its verdict is discarded and re-run, is owned there and not restated here.
 
 The built-in `code-review` skill is user-invocation-only in current Claude Code — an agent
 cannot launch it, so never plan a review around it. It is an opportunistic fold-in only: if the
@@ -91,10 +90,11 @@ green and diff tidy, and still fail its spec:
    opens logs its own line, runs the engine the dead line names, and reviews the dead round's scope,
    whichever round that was. Its panel directory is `.devcycle/review/round-<d>`, `<d>` being one more
    than this cycle's `task=branch event=review-verdict` lines, so a dead round's results wait there for
-   the round after it. With a dead round and that directory's `_args.json`, pass `{"resultDir":"<it>"}`
-   alone: only the missing lenses and verdicts run. With nothing to resume, remove the directory before
-   logging the line, since an earlier cycle may have left one, and pass the full arguments. A `single`
-   round re-runs whole (`playbooks/reviewing-code.md` § 3). Once the panel returns, log the finished
+   the round after it. A dead round's directory resumes from the arguments it saved: with
+   `_args.json`, pass the panel `{"resultDir":"<it>"}` alone; with `_lenses.json`, `single`
+   dispatches only the lenses `missing` lists (`playbooks/reviewing-code.md` § 3). Either way only the
+   missing lenses and verdicts run. With nothing to resume, remove the directory before logging the
+   line, since an earlier cycle may have left one, and pass the full arguments. Once the engine returns, log the finished
    refutation for `<n>`, the ledger's round, per `${CLAUDE_PLUGIN_ROOT}/references/stage-log.md`:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/stage-log.mjs" log --state .devcycle/state.md --stage branch-review --key refutation-<n> --ref .devcycle/review/round-<d>`.
 

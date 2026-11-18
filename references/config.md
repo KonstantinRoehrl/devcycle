@@ -126,6 +126,9 @@ of knob values; `references/resume.md` owns its forms.
 Which column applies, and when a knob overrides it, is the resolution order above —
 this table supplies the values, not the rule for choosing them.
 
+Per lens, `single` runs one reviewer, plus one refutation reader in all; `panel` one job per diff
+chunk, plus the cross-model lens and per-finding refutation (`playbooks/reviewing-code.md` § 3).
+
 The learn depth column controls how deep a run mines, staged densest signal
 first: **journal → memory → archives/findings/ledgers → user-correction turns → raw transcript text**.
 Gating is by profile, never by token budget or a signal heuristic — a budget gate would make

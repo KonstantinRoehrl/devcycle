@@ -75,8 +75,9 @@ at face value. The dispatch returns the classified map; it verifies nothing and 
 ## §6.3 — cross-reference
 
 Every `actionable-valid` candidate is verified through the review engine
-`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` provides, used as one lens against the real
-spec/plan/code. `already-addressed` **fails closed**: if the line the comment references is
+`${CLAUDE_PLUGIN_ROOT}/playbooks/reviewing-code.md` provides, used as one lens covering every such
+comment against the real spec/plan/code: under `single`, one lens reviewer for all of them plus one
+refutation reader, two dispatches whatever the comment count. `already-addressed` **fails closed**: if the line the comment references is
 gone, it is not already-addressed and re-enters classification. Each surviving claim carries a
 `Confidence:` field per `references/evidence.md` — `verified` with its
 traced evidence, or `suspected` — becoming a `${CLAUDE_PLUGIN_ROOT}/references/findings.md`-shaped

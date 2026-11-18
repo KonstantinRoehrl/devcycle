@@ -386,6 +386,10 @@ export const RUN_RECORD_SINCE = "0.13.0";
 export const DEPTH_SENSOR_SINCE = "0.23.0";
 // The first release that ships hooks/devcycle-mod.mjs (assumption: the next minor); older runs cannot have agent-trace rows.
 export const MOD_SINCE = "0.24.0";
+// The first release whose `single` review engine runs one reviewer per lens (#438). The engine string
+// stayed `single`, so an older run is told apart by its version alone.
+export const PER_LENS_SINGLE_SINCE = "0.32.2";
+export const SINGLE_ONE_REVIEWER = "single (one reviewer)";
 // Why a forward-filled session has no run record: a standalone command mints none by design, a
 // session from before 0.13.0 predates the record, and anything else expected one and is missing it.
 export function splitReason({ firstTag = null, pluginVersion = null } = {}) {
@@ -620,12 +624,17 @@ export function cohortTable(summaries) {
 // such event (one that predates it) falls back to its minted `reviewDepth` knob. Reuses
 // aggregateQuality rather than re-deriving its arithmetic. A session with neither (pre
 // branch-fix-2-3's --knob wiring) buckets under "unknown" — same convention cohortTable's own
-// "unknown" version bucket already uses, never dropped silently.
+// "unknown" version bucket already uses, never dropped silently. A `single` run from before
+// PER_LENS_SINGLE_SINCE ran every lens in one reviewer, so it gets its own cohort; one whose version
+// is unknown stays `single`, since nothing dates it.
 export function reviewDepthCohortTable(summaries) {
   const settled = summaries.filter((s) => !s.inFlight);
   const cohorts = new Map();
   for (const s of settled) {
-    const key = s.resolvedReviewDepth ?? s.knobs?.reviewDepth ?? "unknown";
+    const engine = s.resolvedReviewDepth ?? s.knobs?.reviewDepth ?? "unknown";
+    const oneReviewer =
+      engine === "single" && s.pluginVersion && s.pluginVersion !== "unknown" && compareVersions(s.pluginVersion, PER_LENS_SINGLE_SINCE) < 0;
+    const key = oneReviewer ? SINGLE_ONE_REVIEWER : engine;
     if (!cohorts.has(key)) cohorts.set(key, { sessions: 0, dollars: [], depths: [], qualities: [] });
     const c = cohorts.get(key);
     c.sessions++;
@@ -1782,7 +1791,7 @@ export function formatReport(summaries) {
   lines.push("", "Per-reviewDepth cohorts:");
   for (const r of reviewDepthCohortTable(summaries))
     lines.push(
-      `  ${r.reviewDepth.padEnd(10)} n=${String(r.sessions).padStart(3)}  ` +
+      `  ${r.reviewDepth.padEnd(SINGLE_ONE_REVIEWER.length)} n=${String(r.sessions).padStart(3)}  ` +
       `total=$${r.total.toFixed(2).padStart(9)}  median/session=$${r.medianPerSession.toFixed(2).padStart(7)}  ` +
       `quality: ${qualityText(r.quality)}` +
       (r.reviewDepth === "unknown" ? "   (inferred: no reviewDepth knob recorded)" : "")

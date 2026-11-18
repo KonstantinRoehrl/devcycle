@@ -259,8 +259,9 @@ function executionSummary(root, devcycleDir, stateText, run) {
   return `${planned.length - next.length} of ${planned.length} plan tasks committed${next.length ? `; next: ${next.slice(0, NEXT_LISTED).join(", ")}${more}` : ""}`;
 }
 
-// The panel keeps a lens job's result as it resolves (workflows/review-panel.js § Result files), so a
-// stopped round shows what finished even though the stage log only records the refutation.
+// Both review engines keep a lens's result as it resolves (workflows/lib/result-store.js), so a stopped
+// round shows what finished even though the stage log only records the refutation. The underscore
+// files (_args.json, _lenses.json, _refutation.json) are a round's bookkeeping, not lens results.
 function branchReviewSummary(devcycleDir) {
   const reviewDir = join(devcycleDir, "review");
   const round = Math.max(0, ...readdirSync(reviewDir).map((name) => Number(name.match(/^round-(\d+)$/)?.[1] ?? 0)));
