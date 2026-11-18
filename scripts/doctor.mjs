@@ -24,6 +24,7 @@ import { verify, installedVersion, releaseDates, defaultRunCheck } from "./verif
 import { eachRecord } from "./jsonl.mjs";
 import { SYNTHETIC_MODEL, contextDepth, budgetBand, claudeProjectsDir, findTranscriptFiles, resolveDepth, depthLine } from "./depth-probe.mjs";
 import { usd, markdownTable, deltaText, directionLine, cohortSessionsText, withInferredNote, unpricedMediansNote } from "./doctor-format.mjs";
+import { planningBreakdowns, planningBreakdownLines } from "./doctor-planning.mjs";
 import { buildOverview, renderOverview, renderTrendSummary } from "./doctor-overview.mjs";
 
 export { SYNTHETIC_MODEL, contextDepth, budgetBand, findTranscriptFiles, resolveDepth };
@@ -1073,7 +1074,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         } else if (o.kind === "session") {
           current = o.sessionHash;
           if (!windows.has(current))
-            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [], workloads: [], lensCosts: [], commits: [], agentDepths: [], agentTraces: [] });
+            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [], workloads: [], lensCosts: [], commits: [], agentDepths: [], agentTraces: [], agentCosts: [], planStats: [] });
         } else if (o.kind === "stage") { if (current) windows.get(current).stages.push(o); }
         else if (o.kind === "dispatch") { if (current) windows.get(current).dispatches.push(o); }
         else if (o.kind === "verdict") { if (current) windows.get(current).verdicts.push(o); }
@@ -1089,6 +1090,8 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         else if (o.kind === "lens-cost") { if (current) windows.get(current).lensCosts.push(o); }
         else if (o.kind === "agent-depth") { if (current) windows.get(current).agentDepths.push(o); }
         else if (o.kind === "agent-trace") { if (current) windows.get(current).agentTraces.push(o); }
+        else if (o.kind === "agent-cost") { if (current) windows.get(current).agentCosts.push(o); }
+        else if (o.kind === "plan-stats") { if (current) windows.get(current).planStats.push(o); }
         else if (o.kind === "commit") { if (current) windows.get(current).commits.push(o); }
         else if (o.kind === "triage") { triage = { requestKind: o.requestKind, entryStage: o.entryStage }; }
         else if (o.kind === "drive") drives.push(o);
@@ -1131,6 +1134,8 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
               commits: [...prior.commits, ...rec.commits],
               agentDepths: [...prior.agentDepths, ...rec.agentDepths],
               agentTraces: [...prior.agentTraces, ...rec.agentTraces],
+              agentCosts: [...prior.agentCosts, ...rec.agentCosts],
+              planStats: [...prior.planStats, ...rec.planStats],
               planningRuns: [...prior.planningRuns, ...rec.planningRuns],
               traceRuns: [...prior.traceRuns, ...rec.traceRuns],
               driveRuns: [...prior.driveRuns, ...rec.driveRuns],
@@ -1262,6 +1267,21 @@ function culpritsByKey(record) {
     (out[key] ??= new Set()).add(e.culprit);
   }
   return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, [...v].sort()]));
+}
+
+// What doctor-planning.mjs needs from one session's window, joined per run there; null without a record.
+function planningRowsOf(record) {
+  if (!record) return null;
+  const planning = (record.stages ?? []).filter((s) => s.stage === "planning");
+  return {
+    hasPlanning: planning.length > 0,
+    planningMs: planning.reduce((n, s) => n + (Date.parse(s.endedAt) - Date.parse(s.startedAt)), 0),
+    agentCosts: record.agentCosts ?? [],
+    planStats: record.planStats ?? [],
+    events: journalEvents(record),
+    blocked: (record.dispatches ?? []).filter((d) => d.outcome === "blocked").length,
+    retried: (record.dispatches ?? []).filter((d) => (d.retryIndex ?? 0) > 0).length,
+  };
 }
 
 export function summarizeSession(sessionId, records, runRecords = new Map()) {
@@ -1406,6 +1426,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     costByAgentType,
     costByLens,
     agentDepths: record?.agentDepths ?? [],
+    planningRows: planningRowsOf(record),
     traceGaps: (record?.traceRuns ?? []).filter((r) => r.depthRows > 0 && r.traceRows > 0 && r.onlyInDepth + r.onlyInTrace > 0),
     bandCounts,
     startupFloor,
@@ -2842,6 +2863,9 @@ const GLOSSES = {
   "agent-depth":
     "How deep each subagent ran, per stage, from the agent-depth rows the dispatch-sensor hook writes — " +
     "warn above 150k tokens, breach above 200k.",
+  "planning-breakdown":
+    "Where each run's planning dollars went by role, and how planning scored against its P1-P12 bars — " +
+    "from the agent-cost and plan-stats rows the planning stage writes.",
   culprits:
     "Recurring problems, priced. The dollar figure is what each one actually cost you, summed " +
     "over every occurrence — not a severity guess. The Δ and Trend are per-session (derived), so " +
@@ -3239,6 +3263,12 @@ export function renderReport(summaries, ctx) {
     agentDepthTable(summaries).map((r) => [r.stage, r.count, r.p50, r.max, r.warns, r.breaches]),
     "no agent-depth records (the dispatch-sensor hook writes one per finished subagent)",
   ));
+
+  const planning = planningBreakdowns(summaries);
+  if (planning.length) {
+    section("### Planning breakdown (observed)", "planning-breakdown");
+    L.push(...planningBreakdownLines(planning));
+  }
 
   // The raw observed outcome family (spec C3): one row per run carrying a quality signal, its
   // raw verdicts/counts straight off the run records. conformancePass is null exactly when no
