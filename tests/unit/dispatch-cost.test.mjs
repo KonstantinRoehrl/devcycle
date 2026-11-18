@@ -109,3 +109,29 @@ test("priceTranscript: Fable 5.1 cache reads use the listed $0.25/M rate, Fable 
   assert.ok(Math.abs(rows["agent-f51"].usd - 0.25) < 1e-9, `got ${rows["agent-f51"].usd}`);
   assert.ok(Math.abs(rows["agent-f5"].usd - 1.0) < 1e-9, `got ${rows["agent-f5"].usd}`);
 });
+
+test("priceTranscript: returns the four token sums over the turns it counts, cache writes from the TTL breakdown when present", () => {
+  const file = join(makeTempDir("dispatch-cost-"), "agent-sums.jsonl");
+  const lines = [
+    { type: "assistant", message: { model: "claude-sonnet-5", usage: { input_tokens: 10, cache_creation_input_tokens: 300, cache_read_input_tokens: 40, output_tokens: 5 } } },
+    // The breakdown wins over the flat counter when it is present: 200 + 100, not 999.
+    { type: "assistant", message: { model: "claude-sonnet-5", usage: { input_tokens: 20, cache_creation_input_tokens: 999, cache_creation: { ephemeral_1h_input_tokens: 200, ephemeral_5m_input_tokens: 100 }, cache_read_input_tokens: 60, output_tokens: 7 } } },
+    { type: "assistant", message: { model: "<synthetic>", usage: { input_tokens: 5000, output_tokens: 5000 } } },
+    { type: "user", message: { content: "x" } },
+  ];
+  writeFileSync(file, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const r = priceTranscript(file);
+  assert.equal(r.measurement, "ok");
+  assert.equal(r.turns, 2);
+  assert.deepEqual([r.inputTokens, r.cacheWriteTokens, r.cacheReadTokens, r.outputTokens], [30, 600, 100, 12]);
+});
+
+test("priceTranscript: the token sums are 0 when the transcript is missing or has no counted turn", () => {
+  const dir = makeTempDir("dispatch-cost-");
+  const empty = join(dir, "agent-empty.jsonl");
+  writeFileSync(empty, JSON.stringify({ type: "user", message: { content: "x" } }) + "\n");
+  for (const file of [join(dir, "agent-absent.jsonl"), empty]) {
+    const r = priceTranscript(file);
+    assert.deepEqual([r.inputTokens, r.cacheWriteTokens, r.cacheReadTokens, r.outputTokens], [0, 0, 0, 0], file);
+  }
+});

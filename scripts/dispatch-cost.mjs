@@ -31,12 +31,15 @@ function entriesOrNone(dir) {
 
 // Sums one subagent transcript at each turn's own model. Streams via eachRecord rather than
 // reading the whole file: the corpus is thousands of transcripts, and peak memory should track
-// the work, not the largest file.
+// the work, not the largest file. The four token sums cover exactly the turns counted, so a
+// per-agent cost row can show what the dollars were spent on.
 export function priceTranscript(file) {
+  const none = { inputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 };
   if (!existsSync(file))
-    return { usd: null, turns: 0, models: [], measurement: "missing-transcript" };
+    return { usd: null, turns: 0, models: [], measurement: "missing-transcript", ...none };
 
   let usd = 0, turns = 0, unpriced = null;
+  const sums = { ...none };
   const models = new Set();
   eachRecord(file, (r) => {
     const usage = r.message?.usage, model = r.message?.model;
@@ -45,15 +48,22 @@ export function priceTranscript(file) {
     if (r.type !== "assistant" || !usage || !model || model === SYNTHETIC_MODEL) return;
     turns += 1;
     models.add(model);
+    // The same cache-write rule pricing.mjs applies: the TTL breakdown when present, else the flat counter.
+    const cc = usage.cache_creation ?? {};
+    const ttlWrite = (cc.ephemeral_1h_input_tokens ?? 0) + (cc.ephemeral_5m_input_tokens ?? 0);
+    sums.inputTokens += usage.input_tokens ?? 0;
+    sums.cacheWriteTokens += ttlWrite > 0 ? ttlWrite : usage.cache_creation_input_tokens ?? 0;
+    sums.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
+    sums.outputTokens += usage.output_tokens ?? 0;
     if (!priceFor(model)) { unpriced ??= model; return; }
     usd += costUSD(usage, model) ?? 0;
   });
 
   const list = [...models];
-  if (unpriced) return { usd: null, turns, models: list, measurement: `unpriced-model:${unpriced}` };
-  if (turns === 0) return { usd: null, turns: 0, models: [], measurement: "no-priced-turns" };
-  if (list.length > 1) return { usd, turns, models: list, measurement: "multi-model" };
-  return { usd, turns, models: list, measurement: "ok" };
+  if (unpriced) return { usd: null, turns, models: list, measurement: `unpriced-model:${unpriced}`, ...sums };
+  if (turns === 0) return { usd: null, turns: 0, models: [], measurement: "no-priced-turns", ...none };
+  if (list.length > 1) return { usd, turns, models: list, measurement: "multi-model", ...sums };
+  return { usd, turns, models: list, measurement: "ok", ...sums };
 }
 
 // Every dispatch of one agent type under `slugDir`, a single
