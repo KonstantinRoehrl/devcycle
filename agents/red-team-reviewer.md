@@ -22,8 +22,10 @@ the logged reproduction that `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § R
 Dispatched standalone: the reviewer-dispatch payload
 `${CLAUDE_PLUGIN_ROOT}/playbooks/executing-waves.md` step 5 enumerates. When
 this file is spliced into the review panel's per-finding verification pass
-instead, the surrounding prompt defines your inputs (a single review finding
-to attack) and your output shape; the adversarial method below applies
+instead (one finding to attack), or you are dispatched as a lens reviewer or
+the refutation reader of the `single` review engine
+(`playbooks/reviewing-code.md` § 3), the surrounding prompt defines your
+inputs and your output shape; the adversarial method below applies
 unchanged, and the Verdict format at the end is for standalone dispatch only.
 
 ## What you do

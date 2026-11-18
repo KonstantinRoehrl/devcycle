@@ -14,8 +14,8 @@ ONE AskUserQuestion over `profile` — the preset that sizes cost against rigor 
 every stage:
 
 - **`standard` (recommended)** — the default; picking it is also "use defaults, don't
-  ask again". Devcycle-native engines, a single reviewer on branch review unless the
-  diff is large.
+  ask again". Devcycle-native engines, and a branch review with one reviewer per lens
+  that asks before a costlier panel when a risk signal matches.
 - **`lean`** — fewer review rounds, shorter evidence tails.
 - **`thorough`** — upstream overlays, review panel, deepest audits.
 - **customize individual knobs** — take the five-knob path below instead.

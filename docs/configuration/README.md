@@ -134,9 +134,9 @@ panel: the panel refuses to start without a decision record that allows it, and 
 matched signals are named in the report and never escalate. Doctor lists every run where a panel
 ran that the knob did not allow. [`playbooks/reviewing-code.md`](../../playbooks/reviewing-code.md)
 § 3 owns the rule, and the review report's `Depth:` line says which engine was picked and why.
-`single` runs the review's two to five criteria lenses as inline read-only
-reviewers, then re-verifies each finding against the code — a complete review in its own
-right, not a degraded panel. Claude Code's built-in `code-review` skill is
+`single` gives each of the review's two to five criteria lenses its own fresh read-only
+reviewer, then one more reader re-verifies every finding against the code: one reviewer per lens
+plus one, and a complete review in its own right, not a degraded panel. Claude Code's built-in `code-review` skill is
 user-invocation-only, so an agent cannot launch it; if you have run it on the branch
 yourself, its findings are folded in and the engine line says `single + user-run
 code-review`. `panel` runs `review-panel.js` instead: two to five read-only reviewers,
