@@ -386,9 +386,9 @@ export const RUN_RECORD_SINCE = "0.13.0";
 export const DEPTH_SENSOR_SINCE = "0.23.0";
 // The first release that ships hooks/devcycle-mod.mjs (assumption: the next minor); older runs cannot have agent-trace rows.
 export const MOD_SINCE = "0.24.0";
-// The first release whose `single` review engine runs one reviewer per lens (#438; assumption: the next
-// minor). The engine string stayed `single`, so an older run is told apart by its version alone.
-export const PER_LENS_SINGLE_SINCE = "0.33.0";
+// The first release whose `single` review engine runs one reviewer per lens (#438). The engine string
+// stayed `single`, so an older run is told apart by its version alone.
+export const PER_LENS_SINGLE_SINCE = "0.32.2";
 export const SINGLE_ONE_REVIEWER = "single (one reviewer)";
 // Why a forward-filled session has no run record: a standalone command mints none by design, a
 // session from before 0.13.0 predates the record, and anything else expected one and is missing it.
