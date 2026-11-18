@@ -209,7 +209,10 @@ After saving the plan (or issuing a NO-GO report), update `.devcycle/state.md` (
 the stage to resume at — and the `plan:` path; after a NO-GO, keep `stage: planning`), also writing
 `- plan-counts: planned=<count from the Dispatch Map> waves=<wave count from the Dispatch Map>` so
 the sensor can carry the plan totals into each progressive workload write (`planned=0 waves=0` after
-a NO-GO, where no Dispatch Map exists), then emit this
+a NO-GO, where no Dispatch Map exists). Then record the plan's shape with
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-stats.mjs" --state .devcycle/state.md --plan <plan path> --spec <spec path> --strategy inline|delegated`
+(`delegated` when per-task drafters ran), which appends one `plan-stats` run-record row; skip it after
+a NO-GO or with `spec: none`, and report a non-zero exit without stopping on it. Then emit this
 stage's handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, with
 `Stage completed: planning` and the plan path (or the NO-GO report) as its artifact. The plan carries
 everything execution needs, so the context action is `Clear + /devcycle:continue`. How the waves

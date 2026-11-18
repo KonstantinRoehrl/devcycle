@@ -5,6 +5,22 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-18 — Planning's handoff records the plan's shape
+
+**Decision:** the planning handoff runs `scripts/plan-stats.mjs`, which appends one `plan-stats`
+run-record row: spec and plan bytes, fenced-code share, task and wave counts, strategy, drafter count,
+subagent dollars and the spec-review result.
+
+**Why:** the planning-stage overhaul (#442) is weighed against these figures, and a CLI that no surface
+invokes is dead code to the golden-path check, so the script and its one caller land together.
+
+**Budgets:** the handoff paragraph of `playbooks/planning-waves.md` grows by its invocation.
+
+```text
+budget: surface-budget.json surfaceTotal 7027
+budget: context-budget.json playbooks/planning-waves.md 89864
+```
+
 ## 2026-11-18 — The run record carries planning cost and plan-shape telemetry
 
 **Decision:** the run record gains an `agent-cost` kind (one row per released `SubagentStop`, with
