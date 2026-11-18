@@ -21,11 +21,29 @@ into the later lenses, and left nothing to resume, and `single` is the default e
 independent: `single` costs one reviewer per lens plus one refutation reader.
 
 **Budgets:** `playbooks/reviewing-code.md` § 3 grows by the fan-out, the result-file steps and the
-per-return backstop. The figures below are the new ceilings.
+per-return backstop, and the cost sentence in `references/config.md` reaches every closure that
+cites it. The figures below are the new ceilings.
 
 ```text
-budget: surface-budget.json surfaceTotal 7016
-budget: context-budget.json playbooks/reviewing-code.md 102184
+budget: surface-budget.json surfaceTotal 7022
+budget: context-budget.json commands/cycle.md 87381
+budget: context-budget.json commands/learn.md 17578
+budget: context-budget.json commands/maintain.md 18757
+budget: context-budget.json commands/onboard.md 17866
+budget: context-budget.json commands/reconcile.md 25303
+budget: context-budget.json commands/review.md 25933
+budget: context-budget.json commands/verify.md 25031
+budget: context-budget.json playbooks/executing-waves.md 119506
+budget: context-budget.json playbooks/finishing-the-cycle.md 53275
+budget: context-budget.json playbooks/learning-from-sessions.md 66547
+budget: context-budget.json playbooks/maintaining-the-repo.md 67169
+budget: context-budget.json playbooks/onboarding-a-repo.md 31525
+budget: context-budget.json playbooks/planning-waves.md 89499
+budget: context-budget.json playbooks/receiving-review.md 123799
+budget: context-budget.json playbooks/reviewing-code.md 102381
+budget: context-budget.json playbooks/reviewing-the-branch.md 59868
+budget: context-budget.json playbooks/verifying-on-device.md 66588
+budget: context-budget.json references/config.md 15052
 ```
 
 ## 2026-11-13 — The on-device driver picks the browser on this computer, and asks only when it cannot (#421)

@@ -109,7 +109,8 @@ devcycle/                (public GitHub repo)
 ├── agents/                       # L2
 │   ├── implementer.md            # brief-driven implementer template
 │   ├── task-reviewer.md          # per-task reviewer; read-only apart from its own findings file
-│   ├── red-team-reviewer.md      # adversarial charter; read-only allowlist; spliced into
+│   ├── red-team-reviewer.md      # adversarial reviewer; read-only allowlist; single's lens
+│   │                             # reviewers and refutation reader, and spliced into
 │   │                             # review-panel's per-finding verification pass
 │   ├── history-inspector.md      # read-only git-history lens for /devcycle:maintain; bounded traversal
 │   ├── spec-reviewer.md          # read-only spec-claims check against live code, before brainstorm's approval question
