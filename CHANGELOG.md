@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.32.2 — 2026-11-18
+
+- fix(review): dispatch one fresh-context reviewer per lens at single review depth
+
 ## 0.32.1 — 2026-11-13
 
 - fix(drive): hold a driven coordinator's turn open, stop two finish-stage corrections and let the on-device driver pick its browser (#404, #431, #432, #430, #433, #421)
