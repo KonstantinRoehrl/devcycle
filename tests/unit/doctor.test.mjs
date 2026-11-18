@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import {
-  parseArgs, isDevcycleSession, contextDepth, costUSD, depthBand, median,
+  parseArgs, isDevcycleSession, contextDepth, depthBand, median,
   summarizeSession, formatReport, budgetBand, resolveDepth,
   extractPluginVersion, emitCandidates, configDrift, findTranscriptFiles,
   compareVersions, versionCohorts, isInFlight, IN_FLIGHT_MS, formatCandidate,
@@ -19,11 +19,11 @@ import {
   bandFor, recencyBand, inBand, runAggregates, versionProfileTable, culpritTable, lifecycle,
   renderReport, complianceIssueBody, COMPLIANCE_TYPES, NoComplianceCandidateError,
   formatComplianceCandidate, parseDraftedMarkers, complianceType, COMPLIANCE_TITLES,
-  ENTRY_TAGS, PLAYBOOK_STAGE, stageSignal, splitReason, provisionalCostUSD, excludedRequestsOf, excludedNote, stageByVersionTable,
+  ENTRY_TAGS, PLAYBOOK_STAGE, stageSignal, splitReason, excludedRequestsOf, excludedNote, stageByVersionTable,
   owningSession, readRecords, inWindow, summarizeCorpus, groupFilesBySession, issueDraftLines, unpricedModelIssueBody, repoShape, UNPRICED_MODEL_SLUG,
   observedInheritance, KNOB_GOVERNED_AGENTS,
 } from "../../scripts/doctor.mjs";
-import { PRICING } from "../../scripts/pricing.mjs";
+import { PRICING, costUSD, provisionalCostUSD } from "../../scripts/pricing.mjs";
 import { usd } from "../../scripts/doctor-format.mjs";
 
 const SCRIPT = new URL("../../scripts/doctor.mjs", import.meta.url).pathname;

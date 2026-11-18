@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 // The one owner of CLI flag parsing across the scripts; an unrecognised flag is fatal here rather
 // than a silent no-op that would profile the default corpus instead of the one asked for.
 import { parseFlags, requireValue } from "./cli-flags.mjs";
-import { PRICING, priceFor, provisionalPriceFor, cacheReadDollars } from "./pricing.mjs";
+import { PRICING, priceFor, costUSD, provisionalCostUSD, CACHE_WRITE_1H_MULTIPLIER, CACHE_WRITE_5M_MULTIPLIER } from "./pricing.mjs";
 // The one reader of this repo's promotion records; doctor's Cost-by-version "Shipped" column
 // names what each version shipped rather than parsing those records a second time here.
 import { readPromotions } from "./promotions.mjs";
@@ -237,46 +237,6 @@ export function isDevcycleSession(records) {
     }
   }
   return false;
-}
-
-// A 1h cache write costs 2.00x the input price, a 5m write 1.25x. Named once, beside the other
-// module-level constants, because the same two numbers price the exact path and both band edges.
-const CACHE_WRITE_1H_MULTIPLIER = 2.0;
-const CACHE_WRITE_5M_MULTIPLIER = 1.25;
-
-// Dollars for one usage record against a given price row. Both the strict and the provisional
-// entry points go through it, so the two can never disagree about how a record is priced.
-function priceUsage(usage, p) {
-  const cc = usage.cache_creation ?? {};
-  const h1 = cc.ephemeral_1h_input_tokens ?? 0;
-  const m5 = cc.ephemeral_5m_input_tokens ?? 0;
-  // 39% of observed cache writes are 1h (2.00x). Only when no TTL breakdown is present does
-  // the flat counter stand in, billed at the 5m rate.
-  const write =
-    h1 + m5 > 0
-      ? h1 * p.in * CACHE_WRITE_1H_MULTIPLIER + m5 * p.in * CACHE_WRITE_5M_MULTIPLIER
-      : (usage.cache_creation_input_tokens ?? 0) * p.in * CACHE_WRITE_5M_MULTIPLIER;
-  const perMillion =
-    (usage.input_tokens ?? 0) * p.in +
-    write +
-    cacheReadDollars(usage.cache_read_input_tokens ?? 0, p) +
-    (usage.output_tokens ?? 0) * p.out;
-  return perMillion / 1e6;
-}
-
-// Dollars for one request. Returns null when the model is not in the pricing table, so the
-// caller can report it and exclude it instead of silently defaulting to a price. Strict on
-// purpose: dispatch-cost and the routing advisories call this and present the result as measured.
-export function costUSD(usage, model) {
-  const p = priceFor(model);
-  return p ? priceUsage(usage, p) : null;
-}
-
-// The estimate for a model newer than anything priced in its family (scripts/pricing.mjs owns
-// the rule). Never folded into a measured figure: summarizeSession tallies it on its own.
-export function provisionalCostUSD(usage, model) {
-  const provisional = provisionalPriceFor(model);
-  return provisional ? { dollars: priceUsage(usage, provisional.price), basedOn: provisional.basedOn } : null;
 }
 
 // Requests a model's absence from the price table kept out of (unpriced) or estimated apart from

@@ -8,8 +8,8 @@
 // failure of the two, because it reads as a complete figure.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { costUSD, SYNTHETIC_MODEL } from "./doctor.mjs";
-import { priceFor } from "./pricing.mjs";
+import { SYNTHETIC_MODEL } from "./depth-probe.mjs";
+import { costUSD, priceFor } from "./pricing.mjs";
 import { hashSession } from "./run-record.mjs";
 import { eachRecord } from "./jsonl.mjs";
 
