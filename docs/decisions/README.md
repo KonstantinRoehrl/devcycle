@@ -5,6 +5,23 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-18 — Planning dispatches name their role
+
+**Decision:** every planning-stage dispatch opens its `description` with `plan-<role>: `, one of
+spike, research, drafter, checker or repair, and the dispatch sensor copies that role onto the
+agent's `agent-cost` row.
+
+**Why:** doctor's Planning breakdown prices planning by role; a description prefix needs no new
+hook input and costs one sentence in `references/delegated-planning.md`.
+
+**Budgets:** `references/delegated-planning.md` grows by that sentence, which
+`playbooks/planning-waves.md` carries through its citation.
+
+```text
+budget: surface-budget.json surfaceTotal 7031
+budget: context-budget.json playbooks/planning-waves.md 90309
+```
+
 ## 2026-11-18 — Planning's handoff records the plan's shape
 
 **Decision:** the planning handoff runs `scripts/plan-stats.mjs`, which appends one `plan-stats`
