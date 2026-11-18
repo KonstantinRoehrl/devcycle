@@ -52,6 +52,13 @@
     "since": "0.13.0"
   },
   {
+    "slug": "plan-defect",
+    "kind": "friction",
+    "phase": ["execution"],
+    "desc": "A blocked, rejected or retried execution task traced to plan content: a wrong interface, a wrong test, or a missing file.",
+    "since": "0.33.0"
+  },
+  {
     "slug": "redispatched-task",
     "kind": "friction",
     "phase": ["execution"],

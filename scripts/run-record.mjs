@@ -235,9 +235,11 @@ function main() {
   const intFields = new Set(["round", "blockingCount", "reviewRound", "retryIndex",
     "filesChanged", "filesCreated", "filesDeleted", "insertions", "deletions",
     "plannedTaskCount", "waveCount", "filed", "degraded", "tokens", "toolUses", "durationMs",
-    "steps", "peakDepth", "window", "toolResultChars", "warned", "refused"]);
-  const floatFields = new Set(["cost"]);
-  const boolFields = new Set(["background", "fork", "windowAssumed", "isAborted"]);
+    "steps", "peakDepth", "window", "toolResultChars", "warned", "refused",
+    "inputTokens", "cacheWriteTokens", "cacheReadTokens", "outputTokens", "turns", "continuationOf",
+    "specBytes", "planBytes", "tasks", "waves", "drafters"]);
+  const floatFields = new Set(["cost", "usd", "fenceShare", "subagentUsd"]);
+  const boolFields = new Set(["background", "fork", "windowAssumed", "isAborted", "explicitModel"]);
 
   if (sub === "new") {
     const runId = randomBytes(8).toString("hex");
@@ -267,7 +269,7 @@ function main() {
     }
     for (const [k, v] of Object.entries(objects)) obj[k] = v;
     if (Object.keys(knobs).length) obj.knobs = knobs;
-    if (["event", "agent-depth", "agent-trace"].includes(obj.kind) && obj.ts === undefined)
+    if (["event", "agent-depth", "agent-trace", "agent-cost", "plan-stats"].includes(obj.kind) && obj.ts === undefined)
       obj.ts = now();
     writeLine(toplevel, runId, obj);
   } else if (sub === "workload") {

@@ -5,6 +5,26 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-18 — The run record carries planning cost and plan-shape telemetry
+
+**Decision:** the run record gains an `agent-cost` kind (one row per released `SubagentStop`, with
+per-agent token and dollar deltas), a `plan-stats` kind (one row at the planning handoff), a `legs`
+field on the `gate-ran` event naming the failing plan-check legs, and the `plan-defect` culprit for an
+execution task traced to plan content.
+
+**Why:** planning's cost and shape were unmeasured, so a plan that was expensive to draft or that
+later blocked execution could not be told apart from one that was cheap and sound.
+
+**Budgets:** `references/ledger.md` § The run record gains two rows, which every closure that cites it
+carries. The figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 7024
+budget: context-budget.json commands/continue.md 75618
+budget: context-budget.json commands/cycle.md 88025
+budget: context-budget.json playbooks/executing-waves.md 120150
+```
+
 ## 2026-11-17 — The `single` review engine runs one reviewer per lens (#438)
 
 **Decision:** `reviewDepth=single` dispatches one fresh-context `devcycle:red-team-reviewer` per lens,
