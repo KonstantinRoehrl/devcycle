@@ -6,11 +6,15 @@
 // Nothing here spends money: only `run`, given a go-ahead token that matches the printed estimate,
 // launches a session.
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isMain } from "./is-main.mjs";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { gitToplevel } from "./run-record.mjs";
+import { claudeProjectsDir } from "./depth-probe.mjs";
+import { readPluginList } from "./drive-surface.mjs";
+import { runPass } from "./plan-bench-pass.mjs";
 
 export const ARMS = ["status-quo", "inline"];
 export const SIZES = ["small", "medium", "large"];
@@ -195,10 +199,50 @@ function estimate(argv, root) {
   return within ? 0 : 2;
 }
 
-// Subcommand name to handler (argv, root) → exit code.
-export const SUBCOMMANDS = { estimate };
+export const SESSION_MODEL = "claude-opus-5-5";
+export const IMPLEMENTER_MODEL = "claude-sonnet-5-5";
 
-const USAGE = "usage: plan-bench.mjs <estimate> [--manifest <path>] [--arms status-quo,inline] [--entries <id,…>] [--budget <usd>] [--pass <id>]";
+const RUN_FLAGS = {
+  ...KNOWN_FLAGS, "--go-ahead": "value", "--plugin-dir": "value", "--model": "value", "--implementer-model": "value", "--claude": "value",
+};
+
+// The paid subcommand. Order is the consent contract: the estimate prints first, a pass over budget is
+// refused, a pass whose go-ahead token does not match the printed estimate is refused, and under
+// `node --test` the real `claude` is never launched.
+function run(argv, root) {
+  const { flags } = parseFlags(argv, RUN_FLAGS);
+  const common = readCommon(flags, root);
+  const { lines, token, within } = estimateLines(common);
+  console.log(lines.join("\n"));
+  if (!within) return 2;
+  if (requireValue(flags, "--go-ahead", "the go-ahead token the estimate printed") !== token) {
+    console.log("no go-ahead: show the user this estimate, and rerun with --go-ahead <token> only once they approve this pass");
+    return 3;
+  }
+  const claude = requireValue(flags, "--claude", "a claude binary") ?? "claude";
+  if (process.env.NODE_TEST_CONTEXT && !("--claude" in flags)) throw new PlanBenchError("refusing to launch the real claude under node --test; pass --claude <stub>");
+  const list = readPluginList({ bin: claude, cwd: root });
+  if (!list.ok) console.error("plan-bench: warning: plugin list unavailable — replays load every enabled plugin");
+  const implementerModel = requireValue(flags, "--implementer-model", "a model id") ?? IMPLEMENTER_MODEL;
+  const passDir = join(root, BENCH_DIR, "passes", common.passId);
+  const outcomes = runPass(common, {
+    passDir,
+    pluginDir: requireValue(flags, "--plugin-dir") ?? root,
+    model: requireValue(flags, "--model", "a model id") ?? SESSION_MODEL,
+    settingsFor: (arm) => benchSettings({ plugins: list.ok ? list.plugins : [], knobs: benchKnobs(arm, { implementerModel }) }),
+    projectsRoot: claudeProjectsDir(),
+    spawn: (args, { cwd, env }) => spawnSync(claude, args, { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 30 }).stdout ?? "",
+  });
+  for (const o of outcomes) console.log(`${o.id} ${o.arm}: ${o.outcome}, $${o.usd.toFixed(2)}, ${o.legs.length} legs${o.question ? ` — unanswered: ${o.question.slice(0, 200)}` : ""}`);
+  console.log(`pass ${common.passId}: ${passDir}`);
+  return 0;
+}
+
+// Subcommand name to handler (argv, root) → exit code.
+export const SUBCOMMANDS = { estimate, run };
+
+const USAGE = "usage: plan-bench.mjs <estimate|run> [--manifest <path>] [--arms status-quo,inline] [--entries <id,…>] [--budget <usd>] [--pass <id>] " +
+  "[run: --go-ahead <token> --plugin-dir <checkout> --model <id> --implementer-model <id> --claude <bin>]";
 
 export function main(argv, root = gitToplevel(process.cwd())) {
   const [sub, ...rest] = argv;
