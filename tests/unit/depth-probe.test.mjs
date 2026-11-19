@@ -217,3 +217,53 @@ test("transcriptReads: a transcript with no tool calls read nothing", () => {
   writeJsonl(file, [{ type: "user", timestamp: "2026-11-19T10:00:00.000Z", message: { content: "go" } }]);
   assert.deepEqual(transcriptReads(file), { sourcePrints: 0, reads: {} });
 });
+
+// One Bash call per entry, each answered with `result`; returns what transcriptReads made of them.
+function readsOf(commands, result = "abcd") {
+  const file = join(makeTempDir("depth-probe"), "agent-reads.jsonl");
+  writeJsonl(file, commands.flatMap((command, i) => toolCall(`c${i}`, "Bash", { command }, result)));
+  return transcriptReads(file);
+}
+
+test("transcriptReads: a heredoc write is not a print and its body words are not read paths", () => {
+  const r = readsOf(["cat > notes.md <<'EOF'\nthe pack lists constructor and toString\nEOF"]);
+  assert.deepEqual(r, { sourcePrints: 0, reads: {} });
+});
+
+test("transcriptReads: a heredoc body is dropped, the command around it still counts", () => {
+  const r = readsOf(["cat <<-EOF > out.md\nbody words\n\tEOF\ncat scripts/a.mjs"]);
+  assert.deepEqual(r, { sourcePrints: 1, reads: { "scripts/a.mjs": 1 } });
+});
+
+test("transcriptReads: an output redirect with no read operand is not a print", () => {
+  assert.deepEqual(readsOf(["cat >> log.txt", "head -n 3 > out.txt"]), { sourcePrints: 0, reads: {} });
+});
+
+test("transcriptReads: a quoted path keeps its spaces", () => {
+  assert.deepEqual(readsOf(['cat "my file.md"']), { sourcePrints: 1, reads: { "my file.md": 1 } });
+});
+
+test("transcriptReads: a quoted sed script holding a semicolon stays one argument", () => {
+  assert.deepEqual(readsOf(["sed -n '1,20p;40,50p' f.md"]), { sourcePrints: 1, reads: { "f.md": 1 } });
+});
+
+test("transcriptReads: sed with -n inside a short-flag cluster is a print", () => {
+  assert.deepEqual(readsOf(["sed -ne 5p f.md", "sed -En 5p g.md"]), { sourcePrints: 2, reads: { "f.md": 1, "g.md": 1 } });
+});
+
+test("transcriptReads: a path named like an Object.prototype member stays an integer count", () => {
+  const r = readsOf(["cat constructor", "cat toString"], "x".repeat(80));
+  assert.equal(r.reads.constructor, 20);
+  assert.equal(r.reads.toString, 20);
+});
+
+test("transcriptReads: a print under .devcycle/ is read but is not a source print", () => {
+  assert.deepEqual(readsOf(["cat .devcycle/plan-work/r/pack.md"]), { sourcePrints: 0, reads: { ".devcycle/plan-work/r/pack.md": 1 } });
+  assert.equal(readsOf(["cat .devcycle/plan-work/r/pack.md scripts/a.mjs"]).sourcePrints, 1);
+});
+
+test("transcriptReads: the recognised print forms still count", () => {
+  assert.deepEqual(readsOf(["sed -n 5p f", "head -n 20 a", "head -20 b", "tail -n 5 c", "cat a.mjs"]), {
+    sourcePrints: 5, reads: { f: 1, a: 1, b: 1, c: 1, "a.mjs": 1 },
+  });
+});
