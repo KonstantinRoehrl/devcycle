@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// One plan gate: eight legs over one plan file, fail-closed on a missing Dispatch Map, one compact
+// One plan gate: ten legs over one plan file, fail-closed on a missing Dispatch Map, one compact
 // line on success. Each leg lives in (and is exported by) the script that still serves it standalone.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -17,6 +17,8 @@ import { budgetFixturesLeg } from "./budget-fixture-check.mjs";
 import { waveDisjointnessLeg } from "./wave-disjointness-check.mjs";
 import { authoredClaimsLeg } from "./authored-claims-check.mjs";
 import { briefFactsLeg } from "./brief-facts-check.mjs";
+import { proportionLeg } from "./proportion-check.mjs";
+import { crossTaskLeg } from "./cross-task-check.mjs";
 
 const RUN_RECORD = fileURLToPath(new URL("./run-record.mjs", import.meta.url));
 const STAGES = new Set(["scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
@@ -32,6 +34,8 @@ export const LEGS = {
   waveDisjointness: waveDisjointnessLeg,
   authoredClaims: authoredClaimsLeg,
   briefFacts: briefFactsLeg,
+  proportion: proportionLeg,
+  crossTask: crossTaskLeg,
 };
 
 // What each leg checks, in LEGS order: `plan-check --help` prints it, so the playbook need only say
@@ -45,6 +49,8 @@ export const LEG_HELP = Object.freeze({
   waveDisjointness: "no two same-wave tasks list the same file.",
   authoredClaims: "every load-bearing plan-authored claim (a file or section target, a count, \"X already does Y\") carries `(verified: <cmd>)` or `(assumption)`.",
   briefFacts: "every path a brief cites resolves, every cited line is within its file, and every fenced block pinned in a task carries a `(verified: <cmd>)` or `(unrun: <reason>)` run marker. It also notes, never failing, a call-shaped span nothing defines.",
+  proportion: "plan bytes stay within 5× the spec's and code fences within 30% of the plan (a note above either); above 8× or 45% it fails unless a `- Proportion override: <reason>` line says why. With no spec (`--spec`, else the state file's `spec:`) it is not measured.",
+  crossTask: "every code span a `- Consumes (Task N):` line pins appears in a Produces line of Task N; no task brief carries a placeholder or a \"similar to Task N\" back-reference outside a code span; a definition two tasks pin with differing text is a note.",
 });
 
 const OVERRIDE_FORMS = [
@@ -52,6 +58,7 @@ const OVERRIDE_FORMS = [
   "- Content-coupling override: Task B → <file> (Task A) — <reason>",
   "- Budget-fixture override: <surface-or-fixture> — <reason>",
   "- Citation override: <path> — <reason>",
+  "- Proportion override: <reason>",
 ];
 
 export function helpText() {
@@ -65,7 +72,7 @@ export function helpText() {
   ].join("\n");
 }
 
-export function planCheck(planText, { planPath, repoRoot, only }) {
+export function planCheck(planText, { planPath, repoRoot, only, specText }) {
   if (parseDispatchMap(planText) === null)
     return { findings: [{ leg: "dispatchMap", text: 'missing "## Dispatch Map" section — every leg needs it' }], notes: [], legs: [] };
   const legs = only ? [only] : Object.keys(LEGS);
@@ -76,7 +83,7 @@ export function planCheck(planText, { planPath, repoRoot, only }) {
     // so the other legs still report and the gate-ran record is still written.
     let r;
     try {
-      r = LEGS[leg](planText, { planPath, repoRoot });
+      r = LEGS[leg](planText, { planPath, repoRoot, specText });
     } catch (err) {
       r = { findings: [`crashed — ${err.message}`] };
     }
@@ -104,7 +111,17 @@ function die(msg) {
   process.exit(1);
 }
 
-const USAGE = "usage: plan-check.mjs <plan-path> [repo-root] [--only <leg>] [--verbose] [--help]";
+const USAGE = "usage: plan-check.mjs <plan-path> [repo-root] [--spec <path>] [--only <leg>] [--verbose] [--help]";
+
+// The spec the proportion leg measures against: the first token of the state file's `spec:` field, when
+// it names a file under the repo root.
+function stateSpecPath(repoRoot) {
+  const stateFile = join(repoRoot, ".devcycle", "state.md");
+  if (!existsSync(stateFile)) return null;
+  const token = (field(readFileSync(stateFile, "utf8"), "spec") ?? "").split(/\s+/)[0];
+  const path = join(repoRoot, token);
+  return token && token !== "none" && existsSync(path) && statSync(path).isFile() ? path : null;
+}
 
 // A passing run stays compact: each leg's notes collapse to one count line unless --verbose asks
 // for them. A failing run always lists them, since a note can explain the finding beside it.
@@ -121,7 +138,7 @@ function printNotes(notes, { listAll }) {
 function main(argv) {
   let parsed;
   try {
-    parsed = parseFlags(argv, { "--only": "value", "--verbose": "none", "--help": "none" },
+    parsed = parseFlags(argv, { "--spec": "value", "--only": "value", "--verbose": "none", "--help": "none" },
       { allowPositionals: true, requireValues: "nonEmpty" });
   } catch (e) {
     die(`${e.message} — ${USAGE}`);
@@ -134,7 +151,11 @@ function main(argv) {
   if (!planPath) die(USAGE);
   if (only && !(only in LEGS)) die(`unknown leg "${only}" — one of ${Object.keys(LEGS).join(", ")}`);
   if (!existsSync(planPath) || !statSync(planPath).isFile()) die(`plan not found: ${planPath}`);
-  const { findings, notes, legs } = planCheck(readFileSync(planPath, "utf8"), { planPath, repoRoot, only });
+  const specFlag = flags["--spec"];
+  if (specFlag && (!existsSync(specFlag) || !statSync(specFlag).isFile())) die(`spec not found: ${specFlag}`);
+  const specPath = specFlag ?? stateSpecPath(repoRoot);
+  const specText = specPath ? readFileSync(specPath, "utf8") : null;
+  const { findings, notes, legs } = planCheck(readFileSync(planPath, "utf8"), { planPath, repoRoot, only, specText });
   printNotes(notes, { listAll: verbose || findings.length > 0 });
   for (const f of findings) console.error(`plan-check: ${f.leg}: ${f.text}`);
   try { recordGateRan(repoRoot, [...new Set(findings.map((f) => f.leg))].sort()); } catch { /* recording is best-effort */ }
