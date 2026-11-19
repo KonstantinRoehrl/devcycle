@@ -61,3 +61,28 @@ test("renderReport: no planning breakdown for a run without planning data", () =
   assert.equal(planningSection(renderReport([summarizeSession(SESSION, [turn], readRunRecords(noPlanning))], ctx)), null);
   assert.equal(planningSection(renderReport([summarizeSession(SESSION, [turn])], ctx)), null);
 });
+
+const gateFail = (legs) => ({ kind: "event", runId: RUN, stage: "planning", event: "gate-ran", result: "fail", legs, ts: TS });
+
+test("renderReport: roles whose subagents ran with no cost row read unknown, not $0.0000", () => {
+  const dir = runsDir([...BASE, { ...PLAN_STATS, subagentUsd: 0 }, depth("a1", 90000)]);
+  const section = planningSection(renderReport([summarizeSession(SESSION, [turn], readRunRecords(dir))], ctx));
+  assert.match(section, /\| drafter \| unknown \|/);
+  assert.match(section, /\| coordinator \| unknown \|/);
+  assert.doesNotMatch(section, /\$0\.0000/);
+});
+
+test("renderReport: the section ends with one corpus-wide line of failing plan-check legs", () => {
+  const dir = runsDir([...BASE, PLAN_STATS, gateFail("Drift,Blast"), gateFail("Drift")]);
+  const section = planningSection(renderReport([summarizeSession(SESSION, [turn], readRunRecords(dir))], ctx));
+  assert.match(section, /Failing plan-check legs: Drift 2, Blast 1\./);
+  assert.match(section, /^Failing plan-check legs, all runs: Drift 2, Blast 1\.$/m);
+  assert.equal((section.match(/all runs/g) ?? []).length, 1);
+});
+
+test("renderReport: no corpus legs line when no run has a failing leg", () => {
+  const dir = runsDir([...BASE, PLAN_STATS, cost("a1", "drafter", 0.001), depth("a1", 90000)]);
+  const section = planningSection(renderReport([summarizeSession(SESSION, [turn], readRunRecords(dir))], ctx));
+  assert.match(section, /Failing plan-check legs: none\./);
+  assert.doesNotMatch(section, /all runs/);
+});

@@ -5,6 +5,24 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-19 — An inline plan's research dispatch opens with `plan-research: `
+
+**Decision:** `playbooks/planning-waves.md` § Reuse before rebuild says the repo-research dispatch's
+`description` opens with `plan-research: `, so an inline plan, which never reads
+`references/delegated-planning.md`, still gets a role on its `agent-cost` row.
+
+**Why:** the prefix was stated only in the delegated-planning reference, read past a delegation
+threshold; an inline run's only planning dispatch carried no role, so doctor listed a `no-role` gap
+and rubric P12 could never pass on the baseline Phase 0 measures.
+
+**Budgets:** the playbook grows by one sentence, one line and 120 bytes; its closure and the runtime
+surface carry it.
+
+```text
+budget: surface-budget.json surfaceTotal 7032
+budget: context-budget.json playbooks/planning-waves.md 90429
+```
+
 ## 2026-11-19 — The agent-cost row says why a cost is unknown
 
 **Decision:** an `agent-cost` row whose `usd` is null carries an optional `measurement` naming the

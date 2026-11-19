@@ -54,11 +54,38 @@ test("drafters is the distinct agentIds of planning drafter rows only", () => {
   assert.equal(planStats({ planText: "", specText: "", rows, strategy: "delegated" }).drafters, 2);
 });
 
-test("subagentUsd sums planning agent-cost rows, is 0 with none, and null when any is null", () => {
-  const s = (rows) => planStats({ planText: "", specText: "", rows, strategy: "delegated" }).subagentUsd;
-  assert.equal(s([]), 0);
+test("subagentUsd sums planning agent-cost rows, is 0 for an inline plan that dispatched nothing, and null when any is null", () => {
+  const s = (rows, strategy = "delegated") => planStats({ planText: "", specText: "", rows, strategy }).subagentUsd;
+  assert.equal(s([], "inline"), 0);
   assert.equal(s([cost({ usd: 0.25 }), cost({ usd: 0.5, role: "checker" }), cost({ usd: 9, stage: "execution" })]), 0.75);
   assert.equal(s([cost({ usd: 0.25 }), cost({ usd: null })]), null);
+});
+
+test("subagentUsd is null, not 0, when planning subagents ran and no agent-cost row priced them", () => {
+  const s = (rows, strategy) => planStats({ planText: "", specText: "", rows, strategy }).subagentUsd;
+  const depth = { kind: "agent-depth", stage: "planning", agentId: "a1" };
+  assert.equal(s([], "delegated"), null);
+  assert.equal(s([depth], "delegated"), null);
+  assert.equal(s([depth], "inline"), null);
+  assert.equal(s([{ ...depth, stage: "execution" }], "inline"), 0);
+  assert.equal(s([depth, cost({ usd: 0.25 })], "inline"), 0.25);
+});
+
+test("fenceShare follows CommonMark pairing: a longer outer fence holds inner triple-backtick blocks", () => {
+  // "intro\n" 6 B + fenced 7+6+2+4+5 = 24 B + "outro\n" 6 B = 36 B; 24 / 36 = 0.667.
+  const planText = "intro\n````md\n```js\nx\n```\n````\noutro\n";
+  const s = planStats({ planText, specText: "", rows: [], strategy: "inline" });
+  assert.equal(s.planBytes, 36);
+  assert.equal(s.fenceShare, 0.667);
+});
+
+test("fenceShare counts a ~~~ block, and neither fence character closes the other", () => {
+  // "intro\n" 6 + "~~~\n" 4 + "code\n" 5 + "~~~\n" 4 + "outro\n" 6 = 25 B; fenced 13 B; 13 / 25 = 0.52.
+  const tilde = "intro\n~~~\ncode\n~~~\noutro\n";
+  assert.equal(planStats({ planText: tilde, specText: "", rows: [], strategy: "inline" }).fenceShare, 0.52);
+  // The ``` line inside the ~~~ block does not close it: "intro\n" 6 B + fenced 4+4+2+4 = 14 B = 20 B; 14 / 20 = 0.7.
+  const mixed = "intro\n~~~\n```\nx\n~~~\n";
+  assert.equal(planStats({ planText: mixed, specText: "", rows: [], strategy: "inline" }).fenceShare, 0.7);
 });
 
 test("specReview is the result of the LAST spec-review event, else null", () => {

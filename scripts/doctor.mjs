@@ -25,7 +25,7 @@ import { eachRecord } from "./jsonl.mjs";
 import { collapseRequests, isTurn } from "./request-collapse.mjs";
 import { SYNTHETIC_MODEL, contextDepth, budgetBand, claudeProjectsDir, findTranscriptFiles, resolveDepth, depthLine } from "./depth-probe.mjs";
 import { usd, markdownTable, deltaText, directionLine, cohortSessionsText, withInferredNote, unpricedMediansNote } from "./doctor-format.mjs";
-import { planningBreakdowns, planningBreakdownLines } from "./doctor-planning.mjs";
+import { planningBreakdowns, planningBreakdownLines, corpusGateLegsLine } from "./doctor-planning.mjs";
 import { buildOverview, renderOverview, renderTrendSummary } from "./doctor-overview.mjs";
 
 export { SYNTHETIC_MODEL, contextDepth, budgetBand, findTranscriptFiles, resolveDepth };
@@ -3235,6 +3235,8 @@ export function renderReport(summaries, ctx) {
   if (planning.length) {
     section("### Planning breakdown (observed)", "planning-breakdown");
     L.push(...planningBreakdownLines(planning));
+    const corpusLegs = corpusGateLegsLine(planning);
+    if (corpusLegs) L.push(corpusLegs, "");
   }
 
   // The raw observed outcome family (spec C3): one row per run carrying a quality signal, its

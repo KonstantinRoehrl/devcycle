@@ -201,7 +201,8 @@ a new abstraction states why no existing one fits. Find them: run the repo-resea
 procedure `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns (`## Research dispatches`) before
 searching file-by-file, with the confirmed scope and affected areas recorded in `.devcycle/scope.md`
 as this stage's relevance filter, starting from implementation-scoped docs (a `frontend.md`,
-`backend.md`, or equivalent).
+`backend.md`, or equivalent). That dispatch's `description` opens with `plan-research: `
+(`references/delegated-planning.md` owns the role prefixes).
 
 ## Handoff — required final output
 

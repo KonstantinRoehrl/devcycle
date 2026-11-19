@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planningBreakdown } from "../../scripts/doctor-planning.mjs";
+import { planningBreakdown, corpusGateLegs, corpusGateLegsLine } from "../../scripts/doctor-planning.mjs";
 
 const cost = (agentId, role, usd, extra = {}) => ({
   kind: "agent-cost", stage: "planning", agentType: "devcycle:implementer", agentId, model: "claude-sonnet-5-5",
@@ -62,6 +62,23 @@ test("byRole: a run with no cost rows whose plan-stats say the subagents cost $0
   const b = planningBreakdown(healthy({ agentCosts: [], agentDepths: [], planStats: stats({ strategy: "inline", drafters: 0, subagentUsd: 0 }) }));
   assert.equal(b.byRole.drafter, 0);
   assert.equal(b.byRole.coordinator, 6);
+});
+
+test("byRole: planning subagents that ran with no cost row are unknown, not $0, and the coordinator is unknown too", () => {
+  // An older plan-stats row carries the 0 that planStats once derived from the missing rows.
+  for (const subagentUsd of [null, 0]) {
+    const b = planningBreakdown(healthy({ agentCosts: [], planStats: stats({ subagentUsd }) }));
+    assert.deepEqual(Object.values(b.byRole), Array(7).fill(null), `subagentUsd ${subagentUsd}`);
+  }
+});
+
+test("corpusGateLegs: sums failing legs across runs, by count then name, and is empty with none", () => {
+  const run = (...legs) => ({ runId: "r", breakdown: { gateLegs: Object.fromEntries(legs) } });
+  assert.deepEqual(corpusGateLegs([run(["Drift", 2], ["Blast", 1]), run(["Blast", 1], ["Zed", 3], ["Alpha", 1])]),
+    [["Zed", 3], ["Blast", 2], ["Drift", 2], ["Alpha", 1]]);
+  assert.deepEqual(corpusGateLegs([run(), run()]), []);
+  assert.equal(corpusGateLegsLine([run(["Drift", 2]), run(["Blast", 1], ["Drift", 1])]), "Failing plan-check legs, all runs: Drift 3, Blast 1.");
+  assert.equal(corpusGateLegsLine([run()]), null);
 });
 
 test("P1: planning dollars per task, bar <= 2.0", () => {

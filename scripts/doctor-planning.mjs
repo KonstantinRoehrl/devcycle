@@ -58,9 +58,10 @@ export function planningBreakdown(run) {
   const events = run.events ?? [];
   const tasks = stats && stats.tasks > 0 ? stats.tasks : null;
 
-  // Without cost rows the subagent dollars are known only when plan-stats says there were none.
-  const subagentKnown = costs.length > 0 || stats?.subagentUsd === 0;
-  const subagentUsd = costs.length > 0 ? sumUsd(costs) : stats?.subagentUsd ?? null;
+  // Without cost rows the subagent dollars are known only when plan-stats says there were none and no
+  // planning agent-depth row says a subagent ran; otherwise they are unknown, the coordinator's too.
+  const subagentKnown = costs.length > 0 || (stats?.subagentUsd === 0 && depths.length === 0);
+  const subagentUsd = costs.length > 0 ? sumUsd(costs) : subagentKnown ? 0 : null;
   const planningUsd = run.planningUsd ?? null;
   const byRole = Object.fromEntries(ROLES.map((r) => [r, subagentKnown ? sumUsd(costs.filter((c) => c.role === r)) : null]));
   byRole.unrolled = subagentKnown ? sumUsd(costs.filter((c) => !c.role)) : null;
@@ -180,13 +181,30 @@ const valueText = (v) => (v !== null && typeof v === "object"
   : typeof v === "number" ? +v.toFixed(3) : v);
 const countText = (n) => (n === null ? "unknown" : n);
 
+/**
+ * Failing plan-check legs summed over every run: [leg, count] pairs, highest count first, ties by name.
+ * @param {{breakdown: PlanningBreakdown}[]} entries planningBreakdowns' result
+ */
+export function corpusGateLegs(entries) {
+  const total = new Map();
+  for (const { breakdown } of entries)
+    for (const [leg, n] of Object.entries(breakdown.gateLegs)) total.set(leg, (total.get(leg) ?? 0) + n);
+  return [...total].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+/** The corpus-wide legs line doctor prints once after the per-run blocks; null when no run has a failing leg. */
+export function corpusGateLegsLine(entries) {
+  const legs = corpusGateLegs(entries);
+  return legs.length ? `Failing plan-check legs, all runs: ${legs.map(([leg, n]) => `${leg} ${n}`).join(", ")}.` : null;
+}
+
 /** The report lines under the section heading, one block per run. */
 export function planningBreakdownLines(entries) {
   const L = [];
   for (const { runId, breakdown: b } of entries) {
     L.push(`**Run ${runId.slice(0, 8)}**`, "");
     L.push(...markdownTable(["Role", "Cost (observed)"],
-      Object.entries(b.byRole).map(([role, dollars]) => [role, dollars === null ? null : usd(dollars)]), "no roles"), "");
+      Object.entries(b.byRole).map(([role, dollars]) => [role, dollars === null ? "unknown" : usd(dollars)]), "no roles"), "");
     L.push(...markdownTable(["Id", "Measure", "Value", "Bar", "Status", "Note"],
       b.rubric.map((r) => [r.id, r.measure, valueText(r.value), r.bar, r.status, r.reason]), "no rubric"), "");
     const legs = Object.entries(b.gateLegs).map(([leg, n]) => `${leg} ${n}`).join(", ");

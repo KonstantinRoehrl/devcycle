@@ -10,23 +10,18 @@ import { isMain } from "./is-main.mjs";
 import { parseFlags } from "./cli-flags.mjs";
 import { field } from "./md-field.mjs";
 import { eachRecord } from "./jsonl.mjs";
-import { parseDispatchMap } from "./task-files.mjs";
+import { parseDispatchMap, lineFences } from "./task-files.mjs";
 import { gitToplevel, recordPath } from "./run-record.mjs";
 
 const RUN_RECORD = fileURLToPath(new URL("./run-record.mjs", import.meta.url));
 const STRATEGIES = ["inline", "delegated"];
 const USAGE = "usage: plan-stats.mjs --state <state.md> --plan <path> --spec <path> --strategy inline|delegated";
 
-// Bytes inside ``` fences, the fence lines themselves included. An unclosed fence runs to the end.
+// Bytes inside code fences, the fence lines themselves included. Pairing is task-files.mjs's
+// fencedBlocks: a ``` or ~~~ fence closes only on its own character, at least as long.
 function fencedBytes(planText) {
-  let inFence = false;
-  let bytes = 0;
-  for (const line of planText.split(/(?<=\n)/)) {
-    const isFence = /^\s*```/.test(line);
-    if (isFence || inFence) bytes += Buffer.byteLength(line);
-    if (isFence) inFence = !inFence;
-  }
-  return bytes;
+  const owners = lineFences(planText);
+  return planText.split(/(?<=\n)/).reduce((bytes, line, i) => bytes + (owners[i] ? Buffer.byteLength(line) : 0), 0);
 }
 
 // The plan template puts "## Dispatch Map" last, and a plan may quote the heading earlier, so the
@@ -41,6 +36,9 @@ export function planStats({ planText, specText, rows, strategy }) {
   const planBytes = Buffer.byteLength(planText);
   const map = lastDispatchMap(planText);
   const planning = rows.filter((r) => r.kind === "agent-cost" && r.stage === "planning");
+  // Planning subagents ran when the plan is delegated or any planning agent-depth row exists; with no
+  // cost row to price them their dollars are unmeasurable, which is null and never 0.
+  const subagentsRan = strategy === "delegated" || rows.some((r) => r.kind === "agent-depth" && r.stage === "planning");
   const reviews = rows.filter((r) => r.kind === "event" && r.event === "spec-review");
   return {
     specBytes: Buffer.byteLength(specText),
@@ -49,7 +47,7 @@ export function planStats({ planText, specText, rows, strategy }) {
     tasks: map ? new Set([...map.values()].flat()).size : (planText.match(/^### Task \d+:/gm) ?? []).length,
     waves: map ? map.size : 0,
     drafters: new Set(planning.filter((r) => r.role === "drafter").map((r) => r.agentId)).size,
-    subagentUsd: planning.some((r) => typeof r.usd !== "number")
+    subagentUsd: planning.some((r) => typeof r.usd !== "number") || (planning.length === 0 && subagentsRan)
       ? null
       : Math.round(planning.reduce((sum, r) => sum + r.usd, 0) * 1e6) / 1e6,
     specReview: reviews.at(-1)?.result ?? null,
