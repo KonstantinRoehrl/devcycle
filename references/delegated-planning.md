@@ -8,7 +8,9 @@ owns only the flow, the context pack and the two brief shapes. A finished plan m
 it was delegated.
 
 Work files are run-scoped, under `.devcycle/plan-work/<run id>/` (the state file's `run:`), and each
-is logged as it lands, per `references/stage-log.md`, so a resume skips what is done. Spikes run as
+is logged as it lands, per `references/stage-log.md`, so a resume skips what is done. The coordinator
+writes `plan-header.md`, the plan header it composed, once, before it dispatches any drafter; the pack,
+spikes, drafts and `merge-findings.md` land as their own sections below say. Spikes run as
 `Explore` and drafters as `devcycle:plan-drafter`. Every planning-stage dispatch, the repo-research
 one `playbooks/planning-waves.md` § Reuse before rebuild runs included, opens its `description` with
 its role: `plan-spike: `, `plan-research: `, `plan-drafter: `, `plan-checker: ` or `plan-repair: `
@@ -51,22 +53,28 @@ cached prefix is measured (doctor's P6), never assumed.
 ## Drafters — 5+ tasks
 
 One `devcycle:plan-drafter` dispatch per task, in parallel. Its brief carries paths, never content:
-the pack and the plan header (whose `## Quality Constraints` section the drafter's `**Quality constraints:**`
-line cites), plus inline only the verdict, its own task's pinned Interfaces and its
+`pack.md` and `plan-header.md` (whose `## Quality Constraints` section the drafter's
+`**Quality constraints:**` line cites), plus inline only the verdict, its own task's pinned Interfaces and its
 dependencies' Produces. The agent reads `references/plan-task-format.md` by its own definition. The
 drafter writes the whole `### Task <n>` block to `drafts/task-<n>.md`, having derived its Files block
 with the template's `--scan`, marked every load-bearing claim it makes, and prototyped and marked
 every fenced block it pins. Before returning it scans its own draft for placeholders (TBD, "write
 tests for the above") and back-references to another task ("similar to Task N"). Its envelope is the
-result-file shape, with any `Blast-radius override` it wrote as the summary. The coordinator sets each
-drafter's tier from the task cut it already holds (its estimated file count, and whether the cut pins
-the task's `**Interfaces:**` and its code) and uses the session tier when it cannot tell; a drafter the
-checker rejects is repaired at its own tier (`references/model-routing.md` § Planning dispatches).
+result-file shape, with any `Blast-radius override` it wrote as the summary. The coordinator picks each
+drafter's tier from the task cut it already holds (its estimated file count, whether the cut pins the
+task's `**Interfaces:**` and its code, whether it adds an abstraction or crosses packages) by
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/model-routing.md planning-dispatches`,
+and falls back as `references/model-routing.md` § Model tiers says; a drafter the checker rejects is
+repaired at its own tier.
+
+A drafter whose summary begins `stopped: <what pin cannot hold>` wrote no draft. The coordinator, who
+owns Interfaces, decides that pin and re-dispatches the task, or drafts it inline.
 
 ## The merge
 
 The coordinator splices by shell concatenation, never by reading a draft: its own plan header, then
-`drafts/task-<n>.md` in task order, then its own Dispatch Map. The cross-task self-review checks —
+`drafts/task-<n>.md` in task order, then its own Dispatch Map. It splices only drafts that exist and
+does not proceed while a dispatched task has none. The cross-task self-review checks —
 spec coverage, type consistency, no count-only enumeration, mirrored-file parity, and a scan of the
 merged plan for placeholders and cross-task back-references — run as one checker dispatch over the
 merged plan's path. The checker writes its findings to

@@ -33,6 +33,20 @@ test("it writes only its own drafts and never stages, commits or pushes", () => 
 test("it returns the result-file envelope and stops on a pinned interface it cannot honour", () => {
   assert.match(agent, /result-file/);
   assert.match(agent, /read-section\.mjs" references\/delegation\.md return-envelopes/);
-  assert.match(agent, /cannot hold, stop and say\s+so in your one-line summary/);
+  assert.match(agent, /cannot hold, stop and say\s+so in a one-line summary beginning `stopped: <what pin cannot hold>`/);
+  assert.match(agent, /write no draft for that\s+task/);
   assert.doesNotMatch(agent, /interface-delta/);
+});
+
+test("it reports per output.md like its sibling agents", () => {
+  assert.match(agent, /^Report per `\$\{CLAUDE_PLUGIN_ROOT\}\/references\/output\.md`\.$/m);
+});
+
+test("delegated planning consumes the stop and names the plan-header work file", () => {
+  const doc = readFileSync(join(root, "references/delegated-planning.md"), "utf8");
+  assert.match(doc, /summary begins `stopped: <what pin cannot hold>` wrote no draft/);
+  assert.match(doc, /splices only drafts that exist\s+and\s+does not proceed while a dispatched task has none/);
+  assert.match(doc, /writes `plan-header\.md`[^]*?before it dispatches any drafter/);
+  assert.match(doc, /`pack\.md` and `plan-header\.md`/);
+  assert.doesNotMatch(doc, /interface-delta/);
 });

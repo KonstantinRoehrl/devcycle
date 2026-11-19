@@ -15,7 +15,8 @@ only when its line is insufficient, and read source with Read (offset and limit)
 a source file through `cat`, `sed -n`, `head` or `tail`.
 
 Reproduce every signature your brief pins verbatim. If a pinned interface cannot hold, stop and say
-so in your one-line summary; the coordinator owns Interfaces.
+so in a one-line summary beginning `stopped: <what pin cannot hold>`, and write no draft for that
+task; the coordinator owns Interfaces.
 
 ## What you write
 
@@ -28,3 +29,5 @@ never stage, **commit** or **push**.
 The result-file envelope, read with
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/delegation.md return-envelopes`: your
 draft paths and any `Blast-radius override` you wrote as the summary.
+
+Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.

@@ -5,6 +5,30 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-19 — Phase 1 review fixes, round 2: the drafter's stop and the plan header
+
+**Decision:** a drafter that cannot hold a pinned interface returns a summary line beginning
+`stopped: <what pin cannot hold>` and writes no draft; the coordinator, who owns Interfaces, decides
+the pin and re-dispatches that task or drafts it inline, and the merge splices only drafts that exist
+and does not proceed while a dispatched task has none. This is deliberately not Phase 2b's
+`interface-delta:` protocol (spec §9.4): no lock, no deltas, no keyword beyond `stopped:`. The
+drafter-tier sentence in `references/delegated-planning.md` now defers to
+`references/model-routing.md` § Planning dispatches and § Model tiers instead of restating a narrower
+subset of the table. The plan header gets its own work file, `plan-header.md`, written once by the
+coordinator before it dispatches drafters, so the drafter brief's by-path reference and the
+`## Quality Constraints` section its `**Quality constraints:**` ids cite have a file to point at.
+`agents/plan-drafter.md` also gains the `output.md` report line its sibling agents carry.
+
+**Why:** the round 2 branch review found the drafter's stop had no reader, the tier sentence
+contradicted the routing table, and the brief named a plan header no work-file list contained.
+
+**Budgets:**
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 64088
+budget: surface-budget.json surfaceTotal 7139
+```
+
 ## 2026-11-19 — Phase 1 review fixes: planning model line and checker tier
 
 **Decision:** a planning dispatch records no `outcome=model … (planning: <role>)` ledger line, which
