@@ -18,7 +18,7 @@ playbook wins, and these rules of that section always override it — the plan h
 line names `playbooks/executing-waves.md` as the executor (never upstream's
 subagent-vs-inline execution choice), the header carries a `**Verification gate:**` line, no task gets a
 commit step, every task is drafted per `references/plan-task-format.md` (§ Drafting each task below),
-and self-review item 6's plan gate runs. Everything outside that one section is unconditional, so a finished plan has
+and self-review item 7's plan gate runs. Everything outside that one section is unconditional, so a finished plan has
 the same shape whichever engine produced it.
 
 ## Feasibility gate — before any detailed planning
@@ -76,7 +76,7 @@ threshold, so the coordinator drafts every task itself; `auto` and `status-quo` 
 
 ## Plan mechanics — the native engine (`lean` / `standard`)
 
-Skip this section at `thorough`, except self-review item 6 (plan gate), which the override list
+Skip this section at `thorough`, except self-review item 7 (plan gate), which the override list
 names; the sub-skill supplies the rest there. **Where the plan goes:**
 `docs/superpowers/plans/YYYY-MM-DD-<topic>.md`, unless the user prefers another location. While planning, on every path, each task is its own work
 file `.devcycle/plan-work/<run id>/tasks/task-<n>.md`, beside `plan-header.md` and `dispatch-map.md`;
@@ -101,18 +101,22 @@ version floors, dependency limits, naming and copy rules, platform requirements 
 copied verbatim, implicitly part of every task's requirements); and `## Quality Constraints` above.
 
 **Self-review — once the plan is complete,** run this checklist yourself (not a subagent dispatch; on the delegated path the cross-task items run
-as the checker dispatch `references/delegated-planning.md` names), fixing what it finds inline as you go; no
+as the edge-checker dispatches `references/delegated-planning.md` names, which the inline path never makes), fixing what it finds inline as you go; no
 re-review pass.
 
 1. **Spec coverage:** point each spec requirement at the task that implements it; add a task for gaps.
 2. **Per-task checks:** every task passed `references/plan-task-format.md` § Per-task checks — run
    them now on each task you drafted inline; a drafter ran them on its own.
 3. **Type consistency:** signatures, method names, and property names later tasks use match what
-   earlier tasks define — `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
+   earlier tasks define — `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug. The
+   plan gate's `crossTask` leg checks every `Consumes (Task N)` code span; what no span pins is yours.
 4. **No count-only enumeration:** never cite an enumeration by count alone ("all four guardrails");
    one that more than one task reproduces belongs in Global Constraints, verbatim in every brief.
-5. **Mirrored-file parity:** diff the pinned blocks where tasks restate logic across mirrored files.
-6. **Plan gate:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-check.mjs" <plan-path>`;
+5. **Mirrored-file parity:** diff the pinned blocks where tasks restate logic across mirrored files;
+   the `crossTask` leg notes a differing mirrored definition.
+6. **Proportion:** the plan stays within 5× the spec's bytes and 30% code fences; above either, cut
+   code to the contract or record `- Proportion override: <reason>`.
+7. **Plan gate:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-check.mjs" <plan-path> --spec <spec-path>`;
    `plan-check.mjs --help` lists its legs and the override line forms. A non-zero exit is a stop —
    fix the plan or record an override, never hand off around it.
 
@@ -130,7 +134,7 @@ The plan ends with a `## Dispatch Map` grouping tasks into waves — `- Wave 1: 
 only dependency-ready, file-disjoint tasks: never place two tasks touching the same file in one
 wave, even if both declare `none`. Execution dispatches by readiness from this map, never by written
 order. That map, the plan header, and the per-task blocks are the whole contract
-`playbooks/executing-waves.md` consumes. Self-review item 6's plan gate checks both a literal
+`playbooks/executing-waves.md` consumes. Self-review item 7's plan gate checks both a literal
 Files-block overlap within one wave and the harder case of two same-wave tasks coupled only because
 one's brief names a file the other edits.
 

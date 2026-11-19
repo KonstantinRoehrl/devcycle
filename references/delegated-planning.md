@@ -14,7 +14,7 @@ spikes, the `tasks/task-<n>.md` files and `merge-findings.md` land as their own 
 `Explore` and drafters as `devcycle:plan-drafter`. Every planning-stage dispatch, the repo-research
 one `playbooks/planning-waves.md` § Reuse before rebuild runs included, opens its `description` with
 its role: `plan-spike: `, `plan-research: `, `plan-drafter: `, `plan-checker: ` or `plan-repair: `
-(a drafter re-dispatched with a finding). `hooks/dispatch-sensor.mjs` reads that prefix into the
+(a drafter's repair of a finding). `hooks/dispatch-sensor.mjs` reads that prefix into the
 `role` of the agent's `agent-cost` row, and doctor's Planning breakdown prices each role from it.
 
 ## Spikes — 3+ independent feasibility unknowns
@@ -57,15 +57,14 @@ One `devcycle:plan-drafter` dispatch per task, in parallel. Its brief carries pa
 `**Quality constraints:**` line cites), plus inline only the verdict, its own task's pinned Interfaces and its
 dependencies' Produces. The agent reads `references/plan-task-format.md` by its own definition. The
 drafter writes the whole `### Task <n>` block to `tasks/task-<n>.md`, having derived its Files block
-with the template's `--scan`, marked every load-bearing claim it makes, and prototyped and marked
-every fenced block it pins. Before returning it scans its own draft for placeholders (TBD, "write
-tests for the above") and back-references to another task ("similar to Task N"). Its envelope is the
+with the template's `--scan`, marked every load-bearing claim it makes, and pinned what the task's
+detail level asks of it. Before returning it runs the per-draft gate, `references/plan-task-format.md`
+§ Per-task checks' last item. Its envelope is the
 result-file shape, with any `Blast-radius override` it wrote as the summary. The coordinator picks each
-drafter's tier from the task cut it already holds (its estimated file count, whether the cut pins the
-task's `**Interfaces:**` and its code, whether it adds an abstraction or crosses packages) by
+drafter's tier from the task cut it already holds (its estimated file count, whether the cut marks the
+task `code-pinned`, whether it adds an abstraction or crosses packages) by
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/model-routing.md planning-dispatches`,
-and falls back as `references/model-routing.md` § Model tiers says; a drafter the checker rejects is
-repaired at its own tier.
+and falls back as `references/model-routing.md` § Model tiers says.
 
 A drafter whose summary begins `stopped: <what pin cannot hold>` wrote no draft. The coordinator, who
 owns Interfaces, decides that pin and re-dispatches the task, or drafts it inline.
@@ -76,13 +75,27 @@ The coordinator writes its own Dispatch Map to `dispatch-map.md`, then assembles
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-assemble.mjs" .devcycle/plan-work/<run id> --out <plan path>`,
 never by reading a task file: the plan header, then `tasks/task-<n>.md` in task order, then the map.
 It assembles only once every dispatched task has its file, and the script fails on a missing or
-duplicate task id. The cross-task self-review checks —
-spec coverage, type consistency, no count-only enumeration, mirrored-file parity, and a scan of the
-merged plan for placeholders and cross-task back-references — run as one checker dispatch over the
-merged plan's path. The checker writes its findings to
-`.devcycle/plan-work/<run id>/merge-findings.md` and returns the result-file shape, its summary the
-finding count; the coordinator reads the file only when the count is above zero. It reads
-`plan-check`'s output, runs the plan gate once, and presents the plan to the user by path with
-`plan-check`'s result and the findings count; it does not read the plan body on this path. A finding
-that opens `Task <n>:` goes back to that task's drafter as a fresh dispatch carrying the finding and
-the draft's path; any other finding is the coordinator's to fix.
+duplicate task id. The cross-task self-review checks are the plan gate's `crossTask` leg, which covers every
+`Consumes (Task N)` code span and the placeholder and back-reference scan, and the edge checker below;
+spec coverage and enumerations stay the coordinator's.
+
+**Edge checker.** After assembly, `plan-assemble.mjs edges .devcycle/plan-work/<run id>` lists the
+producer→consumer pairs, and each pair gets one fast-tier checker dispatch described
+`plan-checker: round <n> — Task <p> → Task <c>`. It reads only the two task files and `pack.md`,
+keeps to a budget of about 40k tokens of context, and writes its findings to
+`.devcycle/plan-work/<run id>/checker/round-<n>/task-<p>-task-<c>.md`; its summary is the finding
+count, and the coordinator logs `checker-round-<n>` when the round's dispatches are done. No dispatch
+holds the whole plan. The coordinator reads a findings file only when its count is above zero, runs
+the plan gate once, and presents the plan to the user by path with `plan-check`'s result and the
+findings count; it does not read the plan body on this path.
+
+**Patch, not redraft.** A finding opening `Task <n>:` goes back to that task's original drafter by
+`SendMessage`, its agent id logged as `agentId` in the `plan-draft-<n>` stage-log line. A one-line
+fix is the coordinator's own `Edit` of the task file. A finding never goes to a fresh dispatch; after
+a resume, when the drafter can no longer be reached, the coordinator edits the task file itself. Any
+other finding is the coordinator's to fix.
+
+**Round cap.** One checker round, one repair round, then the task files are re-assembled and the plan
+gate re-run. A finding the repair left open, or a gate failure that would need a second repair round,
+stops and goes to the user in one AskUserQuestion with the residual findings; an Other answer
+appends `user-correction-at-gate` (`references/ledger.md` owns the condition).

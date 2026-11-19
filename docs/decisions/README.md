@@ -5,6 +5,47 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-19 — Contract-only plans: the 0.32.0 full-code default reversed (#446, #448)
+
+**Decision:** a plan pins the contract, not the implementation. A `red-green` task pins its full
+`**Interfaces:**` block, its complete failing test code in a fenced block and its exact gate commands
+with expected red and green output; its implementation steps are prose. `**Detail:** code-pinned —
+<reason>` opts a task into a full implementation body, and `interface-pinned — <reason>` stays accepted
+as the older form of the default (spec §9.1). A plan no longer has every fenced block prototyped, a run
+marker (`(verified:)` or `(unrun:)`) on each fence, or the `briefFacts` marker check; execution proves
+pinned test code red, then green. The `proportion` leg of `scripts/plan-check.mjs` warns above 5× the
+spec's bytes or 30% code fences and fails above 8× or 45% unless a `- Proportion override: <reason>` line
+says why; those figures are initial, to be tuned in Phase 2b. After assembly a fast-tier edge checker runs
+once per producer→consumer pair, reading only the two task files and `pack.md`. A finding goes back to its
+task's drafter by `SendMessage` and never to a fresh dispatch (patch, not redraft), and one checker round
+plus one repair round is the cap, after which residual findings go to the user. Decision D2: a checker
+dispatch's description is `plan-checker: round <n> — Task <p> → Task <c>`, the dispatch sensor writes
+`round` on its `agent-cost` row, and doctor's P9 counts distinct rounds. Decision D3: the edge checker runs
+on the delegated path only; an inline coordinator relies on the `crossTask` leg.
+
+**Why:** the full-code default made the plan larger than the work it described, and prototyping every
+block cost more than the implementer's own red and green proves (#446, #448).
+
+**Supersedes:** the 0.32.0 rule that every plan step carries its implementation code and every fenced
+block a run marker.
+
+P1–P12 deltas: pending the Phase 2a benchmark pass
+
+**Budgets:**
+
+```text
+budget: context-budget.json commands/continue.md 76096
+budget: context-budget.json commands/cycle.md 89021
+budget: context-budget.json playbooks/maintaining-the-repo.md 68826
+budget: context-budget.json playbooks/planning-waves.md 66128
+budget: context-budget.json playbooks/reviewing-the-branch.md 61535
+budget: context-budget.json playbooks/scoping-the-request.md 36873
+budget: context-budget.json playbooks/taking-the-fast-path.md 54943
+budget: context-budget.json playbooks/verifying-on-device.md 66849
+budget: context-budget.json references/model-routing.md 10574
+budget: surface-budget.json surfaceTotal 7163
+```
+
 ## 2026-11-19 — Per-task plan work files and the assembler (#448)
 
 **Decision:** while planning, on every path, each task is its own work file,
