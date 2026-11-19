@@ -260,6 +260,7 @@
         "agentId": { "type": "string", "pattern": "^[0-9a-z]{1,40}$" },
         "model": { "type": "string", "pattern": "^[A-Za-z0-9:_.\\[\\]-]{1,80}$" },
         "role": { "enum": ["spike", "research", "drafter", "checker", "repair"] },
+        "round": { "type": "integer", "minimum": 1 },
         "inputTokens": { "type": "integer", "minimum": 0 },
         "cacheWriteTokens": { "type": "integer", "minimum": 0 },
         "cacheReadTokens": { "type": "integer", "minimum": 0 },

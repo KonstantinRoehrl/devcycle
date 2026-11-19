@@ -35,6 +35,9 @@ export const depthOf = (tokens) => (tokens > DEPTH_BREACH ? "breach" : tokens > 
 // The planning role a dispatch description names: the `plan-<role>: ` prefix and nothing else.
 const ROLE_PREFIX = /^plan-(spike|research|drafter|checker|repair): /;
 export const roleOf = (description) => (typeof description === "string" ? ROLE_PREFIX.exec(description)?.[1] ?? null : null);
+// A checker dispatch's "plan-checker: round <n>" tag: the n-th re-check of one plan, so doctor counts rounds, not agents.
+const ROUND_TAG = /^plan-checker: round (\d+)\b/;
+export const roundOf = (description) => (typeof description === "string" ? Number(ROUND_TAG.exec(description)?.[1] ?? NaN) || null : null);
 
 // `unpriced-model:<id>` is the longest measurement; the id is cleaned to MODEL_CHARS and 80 characters first.
 const MEASUREMENT_MAX = 120;
@@ -149,6 +152,7 @@ function main() {
     if (!agentId) return;
     const sidecar = readSidecar(transcriptPath);
     const role = roleOf(sidecar.description);
+    const round = role === "checker" ? roundOf(sidecar.description) : null;
     const priced = priceTranscript(transcriptPath);
     // A planning dispatch also records what it read; `reads` is written even when empty, so its
     // presence says the row was measured.
@@ -159,6 +163,7 @@ function main() {
       "--agentType", clean(input.agent_type, AGENT_TYPE_CHARS, 80) || "unknown",
       "--agentId", agentId,
       "--model", clean(stats.model, MODEL_CHARS, 80) || "unknown",
+      ...(round !== null ? ["--round", String(round)] : []),
       ...(role ? ["--role", role, "--sourcePrints", String(cost.sourcePrints), "--reads", JSON.stringify(cost.reads)] : []),
       "--explicitModel", String(typeof sidecar.model === "string" && sidecar.model !== ""),
       "--inputTokens", String(cost.inputTokens), "--cacheWriteTokens", String(cost.cacheWriteTokens),

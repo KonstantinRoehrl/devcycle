@@ -140,7 +140,7 @@ test("P8: plan/spec bytes <= 5 and fenceShare <= 0.30", () => {
   assert.equal(row(planningBreakdown(healthy({ planStats: null })), "P8").status, "n/a");
 });
 
-test("P9: planning gate-ran fails <= 2 and distinct checker agents <= 1", () => {
+test("P9: planning gate-ran fails <= 2 and checker rounds <= 1", () => {
   const events = (n) => Array.from({ length: n }, () => gate("fail", "Drift"));
   const fails = (n, costs) => row(planningBreakdown(healthy({ events: events(n), ...(costs ? { agentCosts: costs } : {}) })), "P9");
   assert.equal(fails(2).status, "pass");
@@ -269,4 +269,13 @@ test("tierFit: a spike, research or checker dispatch above the fast tier is flag
   assert.deepEqual(planningBreakdown(healthy({ agentCosts: rows }), { tierTable: TIERS }).tierFit,
     [{ role: "checker", agentId: "c1", model: "claude-opus-5" }]);
   assert.deepEqual(planningBreakdown(healthy({ agentCosts: rows })).tierFit, [], "no tier table ranks nothing");
+});
+
+test("P9: checker rounds count round tags, and each untagged checker as its own round", () => {
+  const p9 = (costs) => row(planningBreakdown(healthy({ events: [], agentCosts: costs })), "P9");
+  const pair = (id, round) => cost(id, "checker", 0.1, { round });
+  assert.deepEqual(p9([pair("c1", 1), pair("c2", 1), pair("c3", 1)]).value, { gateFails: 0, checkerRounds: 1 });
+  assert.equal(p9([pair("c1", 1), pair("c2", 1), pair("c3", 1)]).status, "pass");
+  assert.deepEqual(p9([pair("c1", 1), pair("c2", 2)]).value, { gateFails: 0, checkerRounds: 2 });
+  assert.deepEqual(p9([pair("c1", 1), cost("c9", "checker", 0.1)]).value, { gateFails: 0, checkerRounds: 2 });
 });

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { roleOf, costDelta } from "../../hooks/dispatch-sensor.mjs";
+import { roleOf, roundOf, costDelta } from "../../hooks/dispatch-sensor.mjs";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
 import { repoSlug, gitToplevel, hashSession } from "../../scripts/run-record.mjs";
@@ -504,4 +504,24 @@ test("a role row that read nothing still records empty reads; a row without a ro
   const [row] = costRows(plain);
   assert.equal(row.role, undefined);
   assert.ok(!("sourcePrints" in row) && !("reads" in row), JSON.stringify(row));
+});
+
+test("roundOf reads the checker round tag and nothing else", () => {
+  assert.equal(roundOf("plan-checker: round 2 — Task 1 → Task 3"), 2);
+  assert.equal(roundOf("plan-checker: Task 1 → Task 3"), null);
+  assert.equal(roundOf("plan-drafter: round 2"), null);
+  assert.equal(roundOf(undefined), null);
+});
+
+test("a checker dispatch's round tag lands on its agent-cost row; a drafter's row has no round", () => {
+  const tagged = fixture();
+  writeSidecar(tagged, { agentType: "Explore", description: "plan-checker: round 2 — Task 1 → Task 3", model: "haiku" });
+  callHook(tagged);
+  const [row] = costRows(tagged);
+  assert.equal(row.role, "checker");
+  assert.equal(row.round, 2);
+  const untagged = fixture();
+  writeSidecar(untagged, { agentType: "devcycle:plan-drafter", description: "plan-drafter: draft task 3", model: "sonnet" });
+  callHook(untagged);
+  assert.equal(Object.hasOwn(costRows(untagged)[0], "round"), false);
 });
