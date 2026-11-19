@@ -919,7 +919,7 @@ test("harvested: onboarding-a-repo/stop-on-existing-scaffold — an existing sca
 
 test("harvested: planning-waves/dependency-declarations — the three declaration forms and the dispatch map are pinned", () => {
   const t = read("playbooks/planning-waves.md");
-  assert.match(t, /line takes exactly one of `none \(completely independent\)`, `Task 2 \(consumes its X interface\)`, or\s+`Tasks 1\+4 committed`/);
+  assert.match(read("references/plan-task-format.md"), /line takes exactly one of `none \(completely independent\)`, `Task 2 \(consumes its X interface\)`, or\s+`Tasks 1\+4 committed`/);
   assert.match(t, /## Dispatch Map — required final section/);
   assert.match(t, /never place two tasks touching the same file in one\s+wave, even if both declare `none`/);
   assert.match(t, /pin exact interfaces — signatures, names, values/);
@@ -1227,7 +1227,7 @@ test("the per-task cycle folds the reviewer brief into intake and the commit int
   assert.match(review, /`task-verdict\.mjs --round <n> --findings <that path> --evidence-class <evidenceClass> --plan <plan> --test-cmd "<gateCmd>" --subject "<subject>"`/,
     "step 5's verdict call must carry the commit's flags");
   assert.ok(!waves.includes("--match --stage execution"), "step 2 still resolves lessons by hand; task-dispatch.mjs fills them");
-  assert.match(read("playbooks/planning-waves.md"), /filled with the task's matched lessons by `task-dispatch\.mjs`/);
+  assert.match(read("references/plan-task-format.md"), /filled with the task's matched lessons by `task-dispatch\.mjs`/);
   assert.match(read("references/commit-convention.md"), /an accepted verdict commits in-process/);
   const scripts = read("references/ledger.md");
   assert.match(scripts, /\[--agent-id <id>\] \[--compose-review\]/);

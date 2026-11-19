@@ -155,7 +155,7 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
      here rather than silently re-specified. Add three longitudinal sections to the findings
      document: **Previously known (persisting)**, **Resolved since last pass**, **Trending**. Every
      lifecycle transition rendered is backed by this pass's live re-detection (verify-before-stating,
-     `planning-waves.md` item 4), never a prior pass's wording.
+     `references/evidence.md` § Authored claims), never a prior pass's wording.
    - **Commit gate.** Under a veto, ask nothing and cut no branch: run `apply-pass --root <checkout>`,
      with `--resolve` exactly when the user confirmed it, and each accepted `dismiss` in the
      checkout, and leave the store uncommitted. Otherwise ask one question: *commit the store on

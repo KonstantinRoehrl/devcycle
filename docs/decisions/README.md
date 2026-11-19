@@ -5,6 +5,26 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-19 — Planning splits its drafter rules into `references/plan-task-format.md`
+
+**Decision:** `playbooks/planning-waves.md` keeps the coordinator's work (feasibility gate, Quality
+Constraints, the cut, the strategy choice, the Dispatch Map, the handoff); the task block, the three
+per-task declaration lines, Files derivation, No placeholders and the per-task checks move to the new
+`references/plan-task-format.md`, which whoever drafts reads. Self-review item 8's description of the
+plan-check legs moves into `plan-check.mjs --help`, single-section citations become `read-section.mjs`
+reads, and the feasibility gate starts from `spec-claims.mjs check`.
+
+**Why:** a drafter needs the task rules, never the coordinator's playbook, and the planning closure
+carried whole references for one section each (#445; spec §9.3, budget target ≤ 70 KB).
+
+**Budgets:**
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 60860
+budget: context-budget.json playbooks/maintaining-the-repo.md 67297
+budget: surface-budget.json surfaceTotal 7053
+```
+
 ## 2026-11-19 — The planning benchmark replays headless, answers gates by resuming, and clones
 
 **Decision:** `scripts/plan-bench.mjs` replays a gitignored corpus of specs through headless
