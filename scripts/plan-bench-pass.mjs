@@ -40,10 +40,17 @@ export function classifyLeg({ phase, stateText, leg }) {
   return handoffReady(stateText) ? "next" : "question";
 }
 
-/** The first answer not yet used whose `match` (case-insensitive) finds the question; -1 when none does. */
+/**
+ * The first answer whose `match` (case-insensitive) finds the question and that is still available;
+ * -1 when none does. A per-gate answer is available once; a `standing` answer, the benchmark's default,
+ * stays available for every later gate.
+ */
 export function pickAnswer(answers, used, text) {
-  return answers.findIndex((a, i) => !used.has(i) && new RegExp(a.match, "i").test(text));
+  return answers.findIndex((a, i) => (a.standing || !used.has(i)) && new RegExp(a.match, "i").test(text));
 }
+
+// The driver's floor (scripts/drive-execution.mjs sessionArgs): a remainder under half a cent must not render as a 0.00 cap.
+const MIN_LEG_BUDGET_USD = 0.01;
 
 /**
  * The argv of one headless leg — the driver's flags (docs/platform-notes.md § (k)) plus the bench
@@ -54,7 +61,7 @@ export function legArgs({ prompt, resume, pluginDir, settings, model, maxBudgetU
     "-p", prompt, ...(resume ? ["--resume", resume] : []),
     "--plugin-dir", pluginDir, "--settings", JSON.stringify(settings),
     "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-    "--model", model, "--max-budget-usd", maxBudgetUsd.toFixed(2),
+    "--model", model, "--max-budget-usd", Math.max(maxBudgetUsd, MIN_LEG_BUDGET_USD).toFixed(2),
     "--permission-mode", "auto", "--output-format", "stream-json", "--verbose",
   ];
 }
@@ -86,7 +93,8 @@ const round2 = (n) => Math.round(n * 100) / 100;
  * @param {{execute: boolean, prompt: string, answers: {match: string, reply: string}[], budgetUsd: number,
  *   spawnLeg: (args: {prompt: string, resume: string|null, maxBudgetUsd: number}) => string, readState: () => string}} input
  * @returns {{outcome: "planned"|"executed"|"no-go"|"unanswered"|"error"|"budget-stop"|"leg-cap", usd: number,
- *   legs: {phase: string, sessionId: string|null, costUsd: number, denials: number, verdict: string}[], question: string|null}}
+ *   legs: {phase: string, sessionId: string|null, costUsd: number, denials: number, verdict: string}[], question: string|null,
+ *   error: string|null}} `error` carries the reason a leg could not launch; every other outcome leaves it null
  */
 export function runEntryArm({ execute, prompt, answers, budgetUsd, spawnLeg, readState }) {
   const legs = [];
@@ -95,10 +103,11 @@ export function runEntryArm({ execute, prompt, answers, budgetUsd, spawnLeg, rea
   let resume = null;
   let next = prompt;
   let spent = 0;
-  const end = (outcome, question = null) => ({ outcome, usd: round2(spent), legs, question });
+  const end = (outcome, question = null, error = null) => ({ outcome, usd: round2(spent), legs, question, error });
   while (legs.length < LEG_CAP) {
     if (spent >= budgetUsd) return end("budget-stop");
-    const leg = parseLeg(spawnLeg({ prompt: next, resume, maxBudgetUsd: budgetUsd - spent }));
+    let leg;
+    try { leg = parseLeg(spawnLeg({ prompt: next, resume, maxBudgetUsd: budgetUsd - spent })); } catch (err) { return end("error", null, err.message); }
     spent += leg.costUsd;
     const verdict = classifyLeg({ phase, stateText: readState(), leg });
     legs.push({ phase, sessionId: leg.sessionId, costUsd: leg.costUsd, denials: leg.denials, verdict });
@@ -138,6 +147,9 @@ export function collectTranscripts({ projectsRoot, sessionIds, dest }) {
   return found;
 }
 
+/** Where an entry's spec is read from: an absolute path as is, a relative one inside the entry's repo. */
+export const specSource = ({ repoPath, specPath }) => (isAbsolute(specPath) ? specPath : join(repoPath, specPath));
+
 /**
  * A scratch clone of `repoPath` detached at `baseSha`, with the entry's spec copied in. A clone, not a
  * worktree: a replay's execution leg cuts branches, which must never land in the source repo.
@@ -152,7 +164,7 @@ export function cutClone({ repoPath, baseSha, specPath, parent }) {
   git(["clone", "--quiet", "--no-checkout", repoPath, dir]);
   git(["-C", dir, "checkout", "--quiet", "--detach", baseSha]);
   const specRel = isAbsolute(specPath) ? join("docs", "superpowers", "specs", basename(specPath)) : specPath;
-  const source = isAbsolute(specPath) ? specPath : join(repoPath, specPath);
+  const source = specSource({ repoPath, specPath });
   mkdirSync(join(dir, specRel, ".."), { recursive: true });
   cpSync(source, join(dir, specRel));
   return { dir, specRel };
@@ -161,7 +173,9 @@ export function cutClone({ repoPath, baseSha, specPath, parent }) {
 /**
  * Runs every entry × arm of one pass in order, stopping once the budget is spent, and writes each
  * replay's artifacts under `<passDir>/<id>--<arm>/`: leg-<n>.jsonl, state.md, runs/ (the
- * DEVCYCLE_RUNS_DIR the session wrote), corpus/ (its transcripts) and outcome.json.
+ * DEVCYCLE_RUNS_DIR the session wrote), corpus/ (its transcripts) and outcome.json. `<passDir>/pass.json`
+ * names the replays the pass was started with, which is what scoring counts. A replay that cannot start
+ * or whose leg cannot launch is recorded as an `error` outcome and the pass carries on with the next one.
  * @param {{entries: object[], arms: string[], answers: {prompt: string|null, answers: object[]}[], budget: number}} common
  * @param {{passDir: string, pluginDir: string, model: string, settingsFor: (arm: string) => object, projectsRoot: string,
  *   spawn: (args: string[], options: {cwd: string, env: object}) => string, env?: object}} opts
@@ -170,35 +184,45 @@ export function cutClone({ repoPath, baseSha, specPath, parent }) {
 export function runPass(common, { passDir, pluginDir, model, settingsFor, projectsRoot, spawn, env = process.env }) {
   const outcomes = [];
   let spent = 0;
+  mkdirSync(passDir, { recursive: true });
+  writeFileSync(join(passDir, "pass.json"), JSON.stringify({ replays: common.entries.flatMap((e) => common.arms.map((arm) => `${e.id}--${arm}`)) }) + "\n");
   for (const [i, entry] of common.entries.entries())
     for (const arm of common.arms) {
       const budgetUsd = common.budget - spent;
       if (budgetUsd <= 0) return outcomes;
       const out = join(passDir, `${entry.id}--${arm}`);
       mkdirSync(join(out, "runs"), { recursive: true });
-      const { dir, specRel } = cutClone({ ...entry, parent: makeTempDir("plan-bench-") });
-      const legEnv = { ...env, DEVCYCLE_RUNS_DIR: join(out, "runs"), CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0" };
-      const statePath = join(dir, ".devcycle", "state.md");
-      let n = 0;
-      const result = runEntryArm({
-        execute: entry.execute,
-        prompt: common.answers[i].prompt ?? planPrompt(specRel),
-        answers: common.answers[i].answers,
-        budgetUsd,
-        readState: () => (existsSync(statePath) ? readFileSync(statePath, "utf8") : ""),
-        spawnLeg: ({ prompt, resume, maxBudgetUsd }) => {
-          const stdout = spawn(legArgs({ prompt, resume, pluginDir, settings: settingsFor(arm), model, maxBudgetUsd }), { cwd: dir, env: legEnv });
-          writeFileSync(join(out, `leg-${++n}.jsonl`), stdout);
-          return stdout;
-        },
-      });
-      if (existsSync(statePath)) cpSync(statePath, join(out, "state.md"));
-      const sessions = collectTranscripts({ projectsRoot, sessionIds: result.legs.map((l) => l.sessionId), dest: join(out, "corpus") });
-      const outcome = { id: entry.id, size: entry.size, arm, ...result, sessions };
+      const outcome = replay({ entry, arm, answers: common.answers[i], budgetUsd, out, pluginDir, model, settingsFor, projectsRoot, spawn, env });
       writeFileSync(join(out, "outcome.json"), JSON.stringify(outcome, null, 2) + "\n");
       outcomes.push(outcome);
-      spent += result.usd;
-      if (result.outcome === "budget-stop") return outcomes;
+      spent += outcome.usd;
+      if (outcome.outcome === "budget-stop") return outcomes;
     }
   return outcomes;
+}
+
+// One replay's outcome; a throw before or between legs becomes an `error` outcome instead of ending the pass.
+function replay({ entry, arm, answers, budgetUsd, out, pluginDir, model, settingsFor, projectsRoot, spawn, env }) {
+  const fail = (err) => ({ id: entry.id, size: entry.size, arm, outcome: "error", usd: 0, legs: [], question: null, error: err.message, sessions: 0 });
+  let dir;
+  let specRel;
+  try { ({ dir, specRel } = cutClone({ ...entry, parent: makeTempDir("plan-bench-") })); } catch (err) { return fail(err); }
+  const legEnv = { ...env, DEVCYCLE_RUNS_DIR: join(out, "runs"), CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0" };
+  const statePath = join(dir, ".devcycle", "state.md");
+  let n = 0;
+  const result = runEntryArm({
+    execute: entry.execute,
+    prompt: answers.prompt ?? planPrompt(specRel),
+    answers: answers.answers,
+    budgetUsd,
+    readState: () => (existsSync(statePath) ? readFileSync(statePath, "utf8") : ""),
+    spawnLeg: ({ prompt, resume, maxBudgetUsd }) => {
+      const stdout = spawn(legArgs({ prompt, resume, pluginDir, settings: settingsFor(arm), model, maxBudgetUsd }), { cwd: dir, env: legEnv });
+      writeFileSync(join(out, `leg-${++n}.jsonl`), stdout);
+      return stdout;
+    },
+  });
+  if (existsSync(statePath)) cpSync(statePath, join(out, "state.md"));
+  const sessions = collectTranscripts({ projectsRoot, sessionIds: result.legs.map((l) => l.sessionId), dest: join(out, "corpus") });
+  return { id: entry.id, size: entry.size, arm, ...result, sessions };
 }

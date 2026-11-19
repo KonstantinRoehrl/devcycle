@@ -7,14 +7,14 @@
 // launches a session.
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isMain } from "./is-main.mjs";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { gitToplevel } from "./run-record.mjs";
 import { claudeProjectsDir } from "./depth-probe.mjs";
 import { readPluginList } from "./drive-surface.mjs";
-import { runPass } from "./plan-bench-pass.mjs";
+import { runPass, specSource } from "./plan-bench-pass.mjs";
 import { resultsMarkdown, scorePass } from "./plan-bench-score.mjs";
 
 export const ARMS = ["status-quo", "inline"];
@@ -26,9 +26,10 @@ export const DEFAULT_TASKS = { small: 3, medium: 7, large: 12 };
 export const RATES = { planning: { "status-quo": 5.3, inline: 1.4 }, execution: 1.8 };
 export const DEFAULT_BUDGET = 150;
 export const BENCH_DIR = ".devcycle/plan-bench";
-// Every gate the benchmark cannot answer from an entry's answer file gets this standing reply.
+// Every gate the benchmark cannot answer from an entry's answer file gets this standing reply: it matches
+// any question and, being `standing`, answers every gate of the replay, not just the first.
 export const DEFAULT_ANSWERS = [
-  { match: "triage|entry stage|confirm", reply: "Confirm: enter planning against the approved spec as a feature. For any other question, take the option you recommend." },
+  { match: "[\\s\\S]", standing: true, reply: "Confirm: enter planning against the approved spec as a feature. For any other question, take the option you recommend." },
 ];
 
 const ID = /^[a-z0-9][a-z0-9-]*$/;
@@ -143,6 +144,39 @@ export function benchSettings({ plugins, knobs }) {
 
 export class PlanBenchError extends Error {}
 
+const gitOk = (args) => spawnSync("git", args, { stdio: "ignore" }).status === 0;
+
+/**
+ * What would make a pass die after money is spent: a pass directory that already holds a run, and per
+ * entry a repoPath that is no git repository, a baseSha its repo does not have, a spec file that is not
+ * there. Checked before the estimate prints a go-ahead token, so nothing is paid for an unrunnable pass.
+ * @param {{entries: {id: string, repoPath: string, baseSha: string, specPath: string}[], passDir: string}} input
+ * @returns {string[]} one message per problem, empty when the pass can start
+ */
+export function preflight({ entries, passDir }) {
+  const problems = [];
+  if (existsSync(passDir) && readdirSync(passDir).length > 0) problems.push(`pass directory ${passDir} already holds a run; pick a new --pass id`);
+  for (const e of entries) {
+    if (!gitOk(["-C", e.repoPath, "rev-parse", "--git-dir"])) {
+      problems.push(`${e.id}: repoPath ${e.repoPath} is not a git repository`);
+      continue;
+    }
+    if (!gitOk(["-C", e.repoPath, "cat-file", "-e", `${e.baseSha}^{commit}`])) problems.push(`${e.id}: baseSha ${e.baseSha.slice(0, 7)} does not exist in ${e.repoPath}`);
+    const spec = specSource(e);
+    if (!existsSync(spec)) problems.push(`${e.id}: spec file ${e.specPath} not found (looked at ${spec})`);
+  }
+  return problems;
+}
+
+const passDirOf = (root, passId) => join(root, BENCH_DIR, "passes", passId);
+
+// Prints the preflight problems and returns true when the pass cannot start.
+function refusedByPreflight(common, root) {
+  const problems = preflight({ entries: common.entries, passDir: passDirOf(root, common.passId) });
+  for (const p of problems) console.error(`plan-bench: ${p}`);
+  return problems.length > 0;
+}
+
 const KNOWN_FLAGS = {
   "--manifest": "value", "--arms": "value", "--entries": "value", "--budget": "value", "--pass": "value",
 };
@@ -195,7 +229,9 @@ export function estimateLines(common) {
 
 function estimate(argv, root) {
   const { flags } = parseFlags(argv, KNOWN_FLAGS);
-  const { lines, within } = estimateLines(readCommon(flags, root));
+  const common = readCommon(flags, root);
+  if (refusedByPreflight(common, root)) return 2;
+  const { lines, within } = estimateLines(common);
   console.log(lines.join("\n"));
   return within ? 0 : 2;
 }
@@ -207,12 +243,13 @@ const RUN_FLAGS = {
   ...KNOWN_FLAGS, "--go-ahead": "value", "--plugin-dir": "value", "--model": "value", "--implementer-model": "value", "--claude": "value",
 };
 
-// The paid subcommand. Order is the consent contract: the estimate prints first, a pass over budget is
-// refused, a pass whose go-ahead token does not match the printed estimate is refused, and under
+// The paid subcommand. Order is the consent contract: a pass that cannot start is refused, the estimate prints
+// next, a pass over budget is refused, a pass whose go-ahead token does not match the printed estimate is refused, and under
 // `node --test` the real `claude` is never launched.
 function run(argv, root) {
   const { flags } = parseFlags(argv, RUN_FLAGS);
   const common = readCommon(flags, root);
+  if (refusedByPreflight(common, root)) return 2;
   const { lines, token, within } = estimateLines(common);
   console.log(lines.join("\n"));
   if (!within) return 2;
@@ -225,7 +262,7 @@ function run(argv, root) {
   const list = readPluginList({ bin: claude, cwd: root });
   if (!list.ok) console.error("plan-bench: warning: plugin list unavailable — replays load every enabled plugin");
   const implementerModel = requireValue(flags, "--implementer-model", "a model id") ?? IMPLEMENTER_MODEL;
-  const passDir = join(root, BENCH_DIR, "passes", common.passId);
+  const passDir = passDirOf(root, common.passId);
   const outcomes = runPass(common, {
     passDir,
     pluginDir: requireValue(flags, "--plugin-dir") ?? root,
@@ -234,7 +271,7 @@ function run(argv, root) {
     projectsRoot: claudeProjectsDir(),
     spawn: (args, { cwd, env }) => spawnSync(claude, args, { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 30 }).stdout ?? "",
   });
-  for (const o of outcomes) console.log(`${o.id} ${o.arm}: ${o.outcome}, $${o.usd.toFixed(2)}, ${o.legs.length} legs${o.question ? ` — unanswered: ${o.question.slice(0, 200)}` : ""}`);
+  for (const o of outcomes) console.log(`${o.id} ${o.arm}: ${o.outcome}, $${o.usd.toFixed(2)}, ${o.legs.length} legs${o.question ? ` — unanswered: ${o.question.slice(0, 200)}` : ""}${o.error ? ` — error: ${o.error.slice(0, 200)}` : ""}`);
   console.log(`pass ${common.passId}: ${passDir}`);
   if (outcomes.length) console.log("\n" + resultsMarkdown(scorePass(passDir)));
   return 0;
@@ -244,7 +281,7 @@ function run(argv, root) {
 function score(argv, root) {
   const { flags } = parseFlags(argv, { "--pass": "value" });
   const passId = requireValue(flags, "--pass", "a pass id") ?? "1";
-  const passDir = join(root, BENCH_DIR, "passes", passId);
+  const passDir = passDirOf(root, passId);
   if (!existsSync(passDir)) throw new PlanBenchError(`no pass ${passId} at ${passDir}`);
   console.log(resultsMarkdown(scorePass(passDir)));
   return 0;

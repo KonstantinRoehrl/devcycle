@@ -56,13 +56,15 @@ export function resultsMarkdown(results) {
 }
 
 /**
- * Scores every replay under a pass directory, in name order, and writes results.json and results.md
- * beside them.
+ * Scores the replays of a pass directory, in name order, and writes results.json and results.md beside
+ * them. The replays are the ones `pass.json` names, so an outcome left by an earlier run of the same pass
+ * id is not counted; a pass directory with no `pass.json` is scored by every outcome it holds.
  * @returns {object[]} the results
  */
 export function scorePass(passDir, breakdownsOf = replayBreakdowns) {
+  const started = existsSync(join(passDir, "pass.json")) ? new Set(JSON.parse(readFileSync(join(passDir, "pass.json"), "utf8")).replays) : null;
   const replays = existsSync(passDir)
-    ? readdirSync(passDir).filter((d) => existsSync(join(passDir, d, "outcome.json"))).sort()
+    ? readdirSync(passDir).filter((d) => (!started || started.has(d)) && existsSync(join(passDir, d, "outcome.json"))).sort()
     : [];
   const results = replays.map((d) => scoreReplay(join(passDir, d), breakdownsOf));
   writeFileSync(join(passDir, "results.json"), JSON.stringify(results, null, 2) + "\n");

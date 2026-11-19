@@ -123,16 +123,21 @@ gitignored `.devcycle/plan-bench/`:
   `manifest.proposed.json`; rename it once you have checked it.
 - `answers/<id>.json` — `{"prompt"?, "answers": [{match, reply}]}`. A headless session cannot ask,
   so a gate ends the session with its question as text; the first unused answer whose `match` (a
-  case-insensitive regular expression) finds the question is sent back on the same session.
-  Without a file, one standing answer confirms triage and takes the recommended option elsewhere.
+  case-insensitive regular expression) finds the question is sent back on the same session, and
+  each listed answer is used once. Without a file, one standing answer matches every gate, so it
+  confirms triage and takes the recommended option at every later gate too.
 - `passes/<pass>/<id>--<arm>/` — each replay's legs, state file, run record, transcripts and
   `outcome.json`, and per pass `results.md`, the P1–P12 table.
 
-`node scripts/plan-bench.mjs estimate` prints what a pass would cost and a go-ahead token.
+`node scripts/plan-bench.mjs estimate` prints what a pass would cost and a go-ahead token. Both
+`estimate` and `run` first refuse (exit 2, naming the entry) a pass whose repo, `baseSha` or spec
+is missing, or whose pass id already holds a run, so a pass is never started that would die after
+spending: pick a new `--pass` to rerun.
 `run --go-ahead <token>` spends money, so it runs only with the token of an estimate the user
 approved: it refuses past `--budget` (default $150) and stops spending once the budget is gone. Each
 replay plans in a scratch clone at `baseSha` loaded with `--plugin-dir` on the checkout under test, so
-nothing it does touches the source repo. `score --pass <pass>` re-scores a finished pass for free, and
+nothing it does touches the source repo. A replay that cannot start is recorded as an `error` outcome
+and the pass carries on. `score --pass <pass>` re-scores a finished pass for free, counting only the replays the pass started, and
 `node scripts/cost-model-fit.mjs --runs <runs dir>` fits the cost model's per-role F, t, r and o from
 the `agent-cost` rows a pass collected. [`docs/platform-notes.md`](../../platform-notes.md) § (r)
 records how a headless session is driven through its gates.

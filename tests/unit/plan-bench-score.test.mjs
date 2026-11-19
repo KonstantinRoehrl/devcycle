@@ -75,6 +75,14 @@ test("scorePass scores every replay in name order and writes results.json and re
   assert.match(readFileSync(join(pass, "results.md"), "utf8"), /^\| Entry \| Arm \|/);
 });
 
+test("scorePass counts only the replays the pass was run with, never a stale outcome from an earlier run", () => {
+  const pass = makeTempDir("plan-bench-pass-");
+  replay(pass, "small-1--inline");
+  replay(pass, "stale-9--inline");
+  writeInto(pass, "pass.json", JSON.stringify({ replays: ["small-1--inline", "small-1--status-quo"] }));
+  assert.deepEqual(scorePass(pass).map((r) => `${r.id}--${r.arm}`), ["small-1--inline"]);
+});
+
 test("cli score re-scores a pass without launching anything, and names a missing pass", () => {
   const root = makeRepo();
   replay(join(root, ".devcycle/plan-bench/passes/2"), "small-1--inline");

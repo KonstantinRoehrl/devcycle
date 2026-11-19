@@ -1,11 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { writeInto } from "./helpers.mjs";
+import { commitAll, makeFakeBin, makeRepo, sh, writeInto } from "./helpers.mjs";
 import {
   ARMS, DEFAULT_TASKS, RATES, DEFAULT_ANSWERS, validateManifest, validateAnswers, estimatePass, goAheadToken,
-  benchKnobs, benchSettings,
+  benchKnobs, benchSettings, preflight,
 } from "../../scripts/plan-bench.mjs";
 
 const SCRIPT = new URL("../../scripts/plan-bench.mjs", import.meta.url).pathname;
@@ -91,6 +93,18 @@ test("benchSettings turns off every enabled plugin but superpowers and stores th
   });
 });
 
+// A manifest entry whose repo, base sha and spec exist, so a pass over it clears the preflight.
+let gitRepo;
+function gitEntry(over) {
+  if (!gitRepo) {
+    const root = makeRepo();
+    writeInto(root, "docs/s.md", "# spec\n");
+    commitAll(root, "spec");
+    gitRepo = { repoPath: root, baseSha: sh("git", ["rev-parse", "HEAD"], { cwd: root }).trim() };
+  }
+  return entry({ ...gitRepo, ...over });
+}
+
 const cli = (args, cwd) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: "utf8" });
 
 function benchRoot(manifest) {
@@ -100,7 +114,7 @@ function benchRoot(manifest) {
 }
 
 test("cli estimate prints the table, the estimate and a go-ahead token, exit 0 within budget", () => {
-  const root = benchRoot({ entries: [entry(), entry({ id: "med-1", size: "medium" })] });
+  const root = benchRoot({ entries: [gitEntry(), gitEntry({ id: "med-1", size: "medium" })] });
   const r = cli(["estimate", "--manifest", `${root}/.devcycle/plan-bench/manifest.json`], root);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^\| Entry \| Arm \| Tasks \| Planning \$ \| Execution \$ \| Total \$ \|$/m);
@@ -110,7 +124,7 @@ test("cli estimate prints the table, the estimate and a go-ahead token, exit 0 w
 });
 
 test("cli estimate refuses past --budget with exit 2 and prints no token", () => {
-  const root = benchRoot({ entries: [entry(), entry({ id: "med-1", size: "medium" })] });
+  const root = benchRoot({ entries: [gitEntry(), gitEntry({ id: "med-1", size: "medium" })] });
   const r = cli(["estimate", "--manifest", `${root}/.devcycle/plan-bench/manifest.json`, "--budget", "50"], root);
   assert.equal(r.status, 2);
   assert.match(r.stdout, /^refused: the estimate exceeds --budget \$50\.00$/m);
@@ -118,16 +132,73 @@ test("cli estimate refuses past --budget with exit 2 and prints no token", () =>
 });
 
 test("cli estimate narrows by --arms and --entries, and rejects an unknown arm, entry or bad manifest", () => {
-  const root = benchRoot({ entries: [entry(), entry({ id: "med-1", size: "medium" })] });
+  const root = benchRoot({ entries: [gitEntry(), gitEntry({ id: "med-1", size: "medium" })] });
   const m = `${root}/.devcycle/plan-bench/manifest.json`;
   const r = cli(["estimate", "--manifest", m, "--arms", "inline", "--entries", "small-1"], root);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^estimate: \$4\.20 for pass 1/m);
   assert.equal(cli(["estimate", "--manifest", m, "--arms", "grouped"], root).status, 1);
   assert.match(cli(["estimate", "--manifest", m, "--entries", "nope"], root).stderr, /no manifest entry nope/);
-  const bad = benchRoot({ entries: [entry({ size: "huge" })] });
+  const bad = benchRoot({ entries: [gitEntry({ size: "huge" })] });
   const b = cli(["estimate", "--manifest", `${bad}/.devcycle/plan-bench/manifest.json`], bad);
   assert.equal(b.status, 1);
   assert.match(b.stderr, /entries\[0\]\.size: expected one of small, medium, large/);
   assert.equal(cli(["bogus"], root).status, 1);
+});
+
+test("the standing default answer is reusable and no per-gate answer is", () => {
+  assert.ok(DEFAULT_ANSWERS.every((a) => a.standing === true));
+  assert.ok(validateAnswers({ answers: [{ match: "a", reply: "b", standing: true }] }).answers.every((a) => a.standing === undefined));
+});
+
+test("preflight names each entry's missing repo, base sha, spec and a pass directory that already holds a run", () => {
+  const good = gitEntry();
+  const none = makeTempDir("plan-bench-none-");
+  const problems = preflight({
+    entries: [
+      good,
+      gitEntry({ id: "gone-sha", baseSha: "0123456789abcdef0123456789abcdef01234567" }),
+      gitEntry({ id: "no-spec", specPath: "docs/missing.md" }),
+      gitEntry({ id: "no-repo", repoPath: join(none, "absent") }),
+      gitEntry({ id: "not-git", repoPath: none }),
+    ],
+    passDir: join(none, "pass"),
+  });
+  assert.equal(problems.length, 4, problems.join("\n"));
+  assert.match(problems[0], /^gone-sha: baseSha 0123456 does not exist in /);
+  assert.match(problems[1], /^no-spec: spec file docs\/missing\.md not found/);
+  assert.match(problems[2], /^no-repo: repoPath .* is not a git repository/);
+  assert.match(problems[3], /^not-git: repoPath .* is not a git repository/);
+  mkdirSync(join(none, "pass", "x--inline"), { recursive: true });
+  assert.match(preflight({ entries: [good], passDir: join(none, "pass") })[0], /^pass directory .* already holds a run; pick a new --pass id/);
+});
+
+const STUB = `
+require("node:fs").appendFileSync(process.env.PB_STUB_LOG, process.argv.slice(2).join(" ") + "\\n");
+console.log("[]");
+`;
+
+test("cli estimate and run refuse a manifest with a vanished base sha (exit 2), before any token or claude call", () => {
+  const root = benchRoot({ entries: [gitEntry(), gitEntry({ id: "gone-sha", baseSha: "0123456789abcdef0123456789abcdef01234567" })] });
+  const log = join(makeTempDir("plan-bench-log-"), "calls.jsonl");
+  const bin = join(makeFakeBin("claude", STUB), "claude");
+  const env = { ...process.env, PB_STUB_LOG: log };
+  const est = spawnSync(process.execPath, [SCRIPT, "estimate"], { cwd: root, encoding: "utf8", env });
+  assert.equal(est.status, 2, est.stderr);
+  assert.match(est.stderr, /^plan-bench: gone-sha: baseSha 0123456 does not exist in /m);
+  assert.doesNotMatch(est.stdout, /go-ahead:/);
+  const run = spawnSync(process.execPath, [SCRIPT, "run", "--claude", bin, "--go-ahead", "000000000000"], { cwd: root, encoding: "utf8", env });
+  assert.equal(run.status, 2, run.stderr);
+  assert.match(run.stderr, /gone-sha: baseSha/);
+  assert.equal(existsSync(log), false, "claude never spawned");
+});
+
+test("cli refuses a pass id that already holds a run (exit 2) and accepts a fresh one", () => {
+  const root = benchRoot({ entries: [gitEntry()] });
+  mkdirSync(join(root, ".devcycle/plan-bench/passes/1/small-1--inline"), { recursive: true });
+  const r = spawnSync(process.execPath, [SCRIPT, "estimate"], { cwd: root, encoding: "utf8" });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /already holds a run; pick a new --pass id/);
+  const fresh = spawnSync(process.execPath, [SCRIPT, "estimate", "--pass", "2"], { cwd: root, encoding: "utf8" });
+  assert.equal(fresh.status, 0, fresh.stderr);
 });

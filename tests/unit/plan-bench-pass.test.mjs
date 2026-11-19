@@ -1,13 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeFakeBin, makeRepo, commitAll, writeInto, sh } from "./helpers.mjs";
 import {
-  LEG_CAP, classifyLeg, pickAnswer, legArgs, parseLeg, runEntryArm, collectTranscripts, cutClone, planPrompt,
+  LEG_CAP, classifyLeg, pickAnswer, legArgs, parseLeg, runEntryArm, runPass, collectTranscripts, cutClone, planPrompt,
 } from "../../scripts/plan-bench-pass.mjs";
+import { DEFAULT_ANSWERS } from "../../scripts/plan-bench.mjs";
 
 const SCRIPT = new URL("../../scripts/plan-bench.mjs", import.meta.url).pathname;
 const state = (rows) => `# devcycle state\n${Object.entries(rows).map(([k, v]) => `- ${k}: ${v}`).join("\n")}\n`;
@@ -113,6 +114,71 @@ test("runEntryArm ends on a NO-GO, an unanswered gate, an error, the budget and 
   const loop = scripted(Array.from({ length: LEG_CAP }, () => ({ state: ASKING, text: "triage" })));
   const many = Array.from({ length: LEG_CAP }, () => ANSWERS[0]);
   assert.deepEqual([runEntryArm({ execute: false, prompt: "go", answers: many, budgetUsd: 100, ...loop }).outcome, loop.calls.length], ["leg-cap", LEG_CAP]);
+});
+
+test("a standing answer keeps answering later gates; a per-gate answer is consumed once", () => {
+  const answers = [{ match: "triage", reply: "Confirm.", standing: true }, { match: "cut", reply: "Take it." }];
+  assert.equal(pickAnswer(answers, new Set([0]), "triage again?"), 0);
+  assert.equal(pickAnswer(answers, new Set([1]), "the cut?"), -1);
+});
+
+test("runEntryArm answers two distinct gates from the one standing default answer", () => {
+  const s = scripted([
+    { state: ASKING, text: "Triage: confirm entry stage?" },
+    { state: ASKING, text: "Spec review found 2 issues. Confirm the task cut and drafting estimate?" },
+    { state: PLANNED },
+  ]);
+  const r = runEntryArm({ execute: false, prompt: "go", answers: DEFAULT_ANSWERS, budgetUsd: 10, ...s });
+  assert.equal(r.outcome, "planned");
+  assert.deepEqual(s.calls.map((c) => c.prompt), ["go", DEFAULT_ANSWERS[0].reply, DEFAULT_ANSWERS[0].reply]);
+});
+
+test("runEntryArm keeps the legs and spend of a replay whose next leg cannot launch", () => {
+  let n = 0;
+  const r = runEntryArm({
+    execute: false, prompt: "go", answers: ANSWERS, budgetUsd: 10, readState: () => ASKING,
+    spawnLeg: () => {
+      if (n++) throw new Error("spawn EAGAIN");
+      return result({ result: "Triage?" });
+    },
+  });
+  assert.deepEqual([r.outcome, r.usd, r.legs.length, r.error], ["error", 0.5, 1, "spawn EAGAIN"]);
+});
+
+test("legArgs never renders a spend cap below one cent", () => {
+  const cap = (maxBudgetUsd) => { const a = legArgs({ prompt: "x", resume: null, pluginDir: "/p", settings: {}, model: "m", maxBudgetUsd }); return a[a.indexOf("--max-budget-usd") + 1]; };
+  assert.equal(cap(0.001), "0.01");
+  assert.equal(cap(0), "0.01");
+  assert.equal(cap(2.5), "2.50");
+});
+
+test("runPass records a replay that cannot start as an error and still runs the entries after it", () => {
+  const good = benchRepo();
+  const repoPath = good;
+  const baseSha = sh("git", ["rev-parse", "HEAD"], { cwd: good }).trim();
+  const entries = [
+    { id: "bad-1", size: "small", repoPath, baseSha: "0123456789abcdef0123456789abcdef01234567", specPath: "docs/superpowers/specs/s-design.md", tasks: 1, execute: false },
+    { id: "good-1", size: "small", repoPath, baseSha, specPath: "docs/superpowers/specs/s-design.md", tasks: 1, execute: false },
+  ];
+  const passDir = join(makeTempDir("plan-bench-passdir-"), "1");
+  const spawned = [];
+  const outcomes = runPass(
+    { entries, arms: ["inline"], answers: entries.map(() => ({ prompt: null, answers: DEFAULT_ANSWERS })), budget: 50 },
+    {
+      passDir, pluginDir: "/p", model: "m", settingsFor: () => ({}), projectsRoot: makeTempDir("plan-bench-projects-"),
+      spawn: (args, { cwd }) => {
+        spawned.push(cwd);
+        mkdirSync(join(cwd, ".devcycle"), { recursive: true });
+        writeFileSync(join(cwd, ".devcycle", "state.md"), PLANNED);
+        return result({});
+      },
+    },
+  );
+  assert.deepEqual(outcomes.map((o) => [o.id, o.outcome]), [["bad-1", "error"], ["good-1", "planned"]]);
+  assert.match(outcomes[0].error, /git .*checkout/);
+  assert.equal(spawned.length, 1);
+  assert.equal(JSON.parse(readFileSync(join(passDir, "bad-1--inline", "outcome.json"), "utf8")).outcome, "error");
+  assert.deepEqual(JSON.parse(readFileSync(join(passDir, "pass.json"), "utf8")), { replays: ["bad-1--inline", "good-1--inline"] });
 });
 
 test("collectTranscripts copies each session's transcript and subagent directory under its project dir", () => {
