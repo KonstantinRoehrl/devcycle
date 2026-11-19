@@ -152,7 +152,7 @@ configured default subagent model cannot take it over. The role is the `descript
 | Checker | `checker` | fast |
 | Coordinator | — | session (unchanged) |
 
-Where a ledger exists each dispatch records `outcome=model fast:<id> (planning: <role>)` or
-`outcome=model <orchestrator id> (planning: <role>, session)`. Doctor's Planning breakdown flags a
+A planning dispatch's audit record is its `agent-cost` run-record row: the `model` and `explicitModel`
+fields the dispatch sensor writes. Doctor's Planning breakdown reads them and flags a
 `spike`, `research` or `checker` dispatch that ran outside the fast tier (`tier-fit:`) and lists each
 drafter's turns and model (`drafters:`), since a cheaper model can take more turns.

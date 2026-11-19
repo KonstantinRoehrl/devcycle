@@ -11,8 +11,10 @@ declares one path per alternative, and outside the comma list right after a `Cre
 label an extensionless path counts only as a code span); `**Interfaces:**` (Consumes
 — what this task uses from earlier tasks, exact signatures; Produces — what later tasks rely on, exact
 function names and parameter and return types); the declaration lines below, an optional
-`**Detail:**` line (No placeholders), plus the
-`**Quality constraints:**` line above and a `**Lessons:**` line right after it — emitted empty by
+`**Detail:**` line (No placeholders), plus a
+`**Quality constraints:**` line — the ids (`QC1, QC3`) of the plan header's `## Quality Constraints`
+section whose subject the task's own `**Files:**` touch, or `none` when no id's subject is touched — and
+a `**Lessons:**` line right after it, emitted empty by
 planning and filled with the task's matched lessons by `task-dispatch.mjs` at dispatch; then
 `- [ ]` steps carrying the actual code, the exact command, and the expected output inline.
 

@@ -5,6 +5,31 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-19 — Phase 1 review fixes: planning model line and checker tier
+
+**Decision:** a planning dispatch records no `outcome=model … (planning: <role>)` ledger line, which
+departs from spec §9.5 bullet 1: `.devcycle/ledger.md` is created by `playbooks/executing-waves.md`,
+after planning, a planning dispatch has no task id, and `references/ledger.md`'s event line does not
+define the two strings. Its audit record is its `agent-cost` run-record row (`model`, `explicitModel`),
+which doctor's tier-fit check already reads. The Phase 1 checker stays routed fast: it reviews the whole
+merged plan, where spec §9.5's "unless the edge crosses Files > 5" escape belongs to Phase 2a's
+cross-task edge checker, but §9.5 classifies the checker role as fast and doctor's tier-fit rule keys on
+role. The escape and the per-edge scope arrive with Phase 2a; the benchmark's P7 bar is where a quality
+loss from this choice would show, and a loss reopens it. The Quality-constraints line rule moves into
+`references/plan-task-format.md`, `agents/plan-drafter.md` drops the `interface-delta:` protocol
+until Phase 2b (spec §9.4) has a consumer for it, and the coordinator sets a drafter's tier from the
+task cut it holds.
+
+**Why:** the Phase 1 branch review found the drafter could not read the Quality-constraints rule it was
+told to follow, the model line had no writer or reader, and `interface-delta:` had no coordinator rule.
+
+**Budgets:**
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 63490
+budget: surface-budget.json surfaceTotal 7128
+```
+
 ## 2026-11-19 — Planning names its models and runs spikes as capped fast-tier `Explore`
 
 **Decision:** `references/model-routing.md` gains § Planning dispatches: every planning dispatch

@@ -30,7 +30,9 @@ test("it writes only its own drafts and never stages, commits or pushes", () => 
   assert.ok(/\bstages?\b/i.test(agent) && /\bcommits?\b/i.test(agent) && /\bpush(es)?\b/i.test(agent));
 });
 
-test("it returns the result-file envelope and reports interface deltas instead of changing Interfaces", () => {
+test("it returns the result-file envelope and stops on a pinned interface it cannot honour", () => {
   assert.match(agent, /result-file/);
-  assert.match(agent, /interface-delta: <task> <what>/);
+  assert.match(agent, /read-section\.mjs" references\/delegation\.md return-envelopes/);
+  assert.match(agent, /cannot hold, stop and say\s+so in your one-line summary/);
+  assert.doesNotMatch(agent, /interface-delta/);
 });

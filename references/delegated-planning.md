@@ -51,13 +51,17 @@ cached prefix is measured (doctor's P6), never assumed.
 ## Drafters — 5+ tasks
 
 One `devcycle:plan-drafter` dispatch per task, in parallel. Its brief carries paths, never content:
-the pack and the plan header, plus inline only the verdict, its own task's pinned Interfaces and its
+the pack and the plan header (whose `## Quality Constraints` section the drafter's `**Quality constraints:**`
+line cites), plus inline only the verdict, its own task's pinned Interfaces and its
 dependencies' Produces. The agent reads `references/plan-task-format.md` by its own definition. The
 drafter writes the whole `### Task <n>` block to `drafts/task-<n>.md`, having derived its Files block
 with the template's `--scan`, marked every load-bearing claim it makes, and prototyped and marked
 every fenced block it pins. Before returning it scans its own draft for placeholders (TBD, "write
 tests for the above") and back-references to another task ("similar to Task N"). Its envelope is the
-result-file shape, with any `Blast-radius override` it wrote as the summary.
+result-file shape, with any `Blast-radius override` it wrote as the summary. The coordinator sets each
+drafter's tier from the task cut it already holds (its estimated file count, and whether the cut pins
+the task's `**Interfaces:**` and its code) and uses the session tier when it cannot tell; a drafter the
+checker rejects is repaired at its own tier (`references/model-routing.md` § Planning dispatches).
 
 ## The merge
 

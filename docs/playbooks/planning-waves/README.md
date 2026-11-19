@@ -18,12 +18,13 @@ catalog derived this" stays visible.
 Task boundaries are then drawn to two goals held together, not traded off: maximize parallelism
 (file-disjoint, dependency-free tracks) and minimize each implementer's context (every brief
 self-contained, with exact interfaces pinned so concurrent implementers never need each other's
-history). The task template lives in `references/plan-task-format.md`, which whoever drafts a task reads
-under every engine; at `lean`/`standard` the playbook's Plan Mechanics section supplies the rest —
-`Files`, `Interfaces`, the three per-task declaration lines (`Dependencies` derived
-from what's actually consumed, `Evidence` in one of the three classes evidence.md owns, and an
-optional `Execution: sweep` marker for one uniform edit rule) — directly; at `thorough` the same
-template comes from the `superpowers:writing-plans` sub-skill instead, with rules this playbook
+history). Every task is drafted per `references/plan-task-format.md` under every engine: it owns the
+template (`Files`, `Interfaces`, the `Quality constraints` line and the three per-task declaration
+lines: `Dependencies` derived from what's actually consumed, `Evidence` in one of the three classes
+evidence.md owns, and an optional `Execution: sweep` marker for one uniform edit rule), No
+placeholders and the per-task checks. At `lean`/`standard` the playbook's Plan Mechanics section
+supplies the plan header and the self-review; at `thorough` the `superpowers:writing-plans`
+sub-skill supplies those mechanics instead, with rules this playbook
 always keeps regardless: the executor named in the plan header is always `executing-waves.md`,
 the header names the repo's whole verification gate as one `**Verification gate:**` command — the
 single command every test-class task's evidence captures and the green gate re-runs — no task

@@ -14,8 +14,8 @@ lines, Files derivation, No placeholders and the per-task checks. Never read
 only when its line is insufficient, and read source with Read (offset and limit) or Grep — never print
 a source file through `cat`, `sed -n`, `head` or `tail`.
 
-Reproduce every signature your brief pins verbatim. If a pinned interface cannot hold, keep drafting
-against it and report `interface-delta: <task> <what>`; the coordinator owns Interfaces.
+Reproduce every signature your brief pins verbatim. If a pinned interface cannot hold, stop and say
+so in your one-line summary; the coordinator owns Interfaces.
 
 ## What you write
 
@@ -25,5 +25,6 @@ never stage, **commit** or **push**.
 
 ## What you return
 
-The result-file envelope (`references/delegation.md` § Return envelopes): your draft paths, any
-`Blast-radius override` you wrote as the summary, and each `interface-delta:` line.
+The result-file envelope, read with
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/delegation.md return-envelopes`: your
+draft paths and any `Blast-radius override` you wrote as the summary.

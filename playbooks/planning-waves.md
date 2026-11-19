@@ -48,8 +48,8 @@ a `## Quality Constraints` section into the plan: one line per applicable constr
 `QC<n>`, shaped `QC1 — <do or don't> (measured against: <repo convention or named source>)`. That
 section is **not** `## Global Constraints`: those lines are copied verbatim from the spec, these are
 derived from the criteria catalog, and the precedence rule requires the difference to stay visible,
-so the two never merge. Each task then carries a `**Quality constraints:**` line — `QC1, QC3`, or
-`none` — naming the ids whose subject its own `**Files:**` touch, and
+so the two never merge. Each task then carries a `**Quality constraints:**` line, which
+`references/plan-task-format.md` § The task block defines, and
 `playbooks/executing-waves.md` resolves them back to verbatim lines when it
 slices each brief, so an implementer is told up front what a later audit would flag it for.
 
