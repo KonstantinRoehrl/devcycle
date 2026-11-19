@@ -653,3 +653,35 @@ evidence stays outside version control, in `.devcycle/diagnosis.md` § 2.
 **Consequence.** `references/delegation.md` § One Bash call per response owns the rule. A response
 that holds a `Bash` call holds no other tool call, and a call refused this way is
 reissued once, verbatim, alone. `playbooks/executing-waves.md` and `agents/on-device-driver.md` point to it.
+
+## (r) Driving headless planning through its gates
+
+**What was tried.** A spike on 2026-11-19 against Claude Code 2.1.328 (#449), model `claude-haiku-5-5`,
+in a scratch repo outside this checkout holding a one-paragraph spec with an open point: a probe
+plugin rendering one `${user_config.*}` value under `--plugin-dir`, with and without `--settings`;
+`claude -p "/devcycle:cycle …" --plugin-dir <checkout>` under the driver's flags, `DEVCYCLE_RUNS_DIR`
+pointed at a scratch directory and an `enabledPlugins` override; the same session resumed with
+`--resume <session_id>` and the gate answers as its prompt; then `claude -p "/devcycle:continue"`.
+The raw output stayed outside version control.
+
+**Exact result.**
+
+- `--settings '{"pluginConfigs":{"<name>@inline":{"options":{…}}}}'` renders the configured value in
+  a `--plugin-dir` load's command text, where § (h) found only literal placeholders without it.
+  The installed copy loads beside the checkout unless the same override disables it.
+- `AskUserQuestion` is still absent from `-p` tools: `/devcycle:cycle` asked its triage gate, and
+  the spec's open point, as plain result text and exited with `handoff: pending`.
+- `--resume <session_id>` with the answers as the prompt continued the same session id: it recorded
+  triage, planned, ran plan-check and `plan-stats.mjs`, and wrote `stage: execution` with
+  `handoff: ready`.
+- `/devcycle:continue` with `executionMode=manual` walked the wave in the session, cut a branch,
+  committed and handed off at branch review; two auto-mode denials on reads into the `--plugin-dir`
+  checkout did not stop it.
+- The run record went only to `DEVCYCLE_RUNS_DIR`; transcripts went to the projects directory named
+  after the scratch repo's path, subagents under `<session id>/subagents/`. Doctor's Planning
+  breakdown read a copy of both.
+
+**Consequence.** `scripts/plan-bench.mjs` replays a spec with the arm under test in a `--settings`
+`pluginConfigs` override, answers each gate from the entry's answer file by resuming the session,
+and scores what it collected with doctor's own rubric (`docs/playbooks/planning-waves/README.md`
+§ Benchmarking planning strategies).

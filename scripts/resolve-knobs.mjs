@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Resolves devcycle's userConfig knobs from the placeholders an entry command renders. Only command
 // text is templated -- a playbook or reference a stage opens with Read never sees a substituted
-// value -- so every entry command passes all eighteen rendered placeholders here and stages read the
+// value -- so every entry command passes all nineteen rendered placeholders here and stages read the
 // printed `knobs:` line. references/config.md states the resolution order; this file is its
 // executable form, and ROSTER is the roster's fifth hand-kept copy that golden-path holds in parity.
 // Its enum `values` own each fixed set: validate.mjs holds plugin.json's `options` lists to them.
@@ -28,6 +28,7 @@ export const ROSTER = [
   { key: "taskReviewerModel", kind: "model", fallback: "auto" },
   { key: "branchReviewModel", kind: "model", fallback: "auto" },
   { key: "walkthroughModel", kind: "model", fallback: "auto" },
+  { key: "planningStrategy", kind: "enum", values: ["auto", "status-quo", "inline"], fallback: "auto" },
   { key: "learnStalenessSessions", kind: "count", min: 0, fallback: "5" },
   { key: "learnStalenessDays", kind: "count", min: 0, fallback: "14" },
   { key: "learnSessionCap", kind: "count", min: 1, fallback: "100" },

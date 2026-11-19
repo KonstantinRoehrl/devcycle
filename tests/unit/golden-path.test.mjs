@@ -2824,3 +2824,10 @@ test("continue names action: \"drive\" before its execution-resume gates and wal
   assert.ok(manual?.includes("re-runs `wave-setup.mjs` and takes only `tasks`, `dispatchable`, `wave` and `entryLines`"),
     "a written manual row no longer re-runs wave-setup for its walk fields");
 });
+
+test("planning-waves honours planningStrategy: inline never trips the drafter threshold", () => {
+  const section = read("playbooks/planning-waves.md").split("## Delegated planning — thresholds")[1]?.split(/\n## /)[0] ?? "";
+  assert.match(section, /`planningStrategy` on the `knobs:` line forces the drafting arm/);
+  assert.match(section, /`inline` never trips the drafter\s+threshold/);
+  assert.match(section, /`auto` and `status-quo` apply both as written/);
+});

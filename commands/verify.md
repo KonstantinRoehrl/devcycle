@@ -23,6 +23,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
   --taskReviewerModel '${user_config.taskReviewerModel}' \
   --branchReviewModel '${user_config.branchReviewModel}' \
   --walkthroughModel '${user_config.walkthroughModel}' \
+  --planningStrategy '${user_config.planningStrategy}' \
   --learnStalenessSessions '${user_config.learnStalenessSessions}' \
   --learnStalenessDays '${user_config.learnStalenessDays}' \
   --learnSessionCap '${user_config.learnSessionCap}' \

@@ -74,6 +74,17 @@
       "default": "auto",
       "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let the coordinator derive per task. A pool routes by task complexity; no value ever dispatches above the orchestrator's own model tier. Default: auto."
     },
+    "planningStrategy": {
+      "type": "string",
+      "title": "Planning strategy",
+      "default": "auto",
+      "options": [
+        "auto",
+        "status-quo",
+        "inline"
+      ],
+      "description": "How the planning stage drafts a plan. auto (default) and status-quo apply the delegation thresholds (per-task drafters from 5 tasks); inline always drafts in the planning session itself. Forces an arm for the planning benchmark. One of: auto, status-quo, inline. Default: auto."
+    },
     "reviewDepth": {
       "type": "string",
       "title": "Review depth",

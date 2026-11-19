@@ -107,3 +107,51 @@ flowchart TD
 
 Playbook-internal — for where Planning sits in the pipeline, see
 [docs/pipeline/](../../pipeline/README.md).
+
+## Benchmarking planning strategies
+
+`planningStrategy` forces how planning drafts: `status-quo` keeps the delegation thresholds,
+`inline` drafts every task in the planning session. The replay benchmark (#449) runs the same specs
+through both arms and scores each run against the P1–P12 planning rubric doctor prints, so a
+planning change is measured before it ships. Everything it reads and writes stays under the
+gitignored `.devcycle/plan-bench/`:
+
+- `manifest.json` — `{"entries": [{id, size, repoPath, baseSha, specPath, tasks?, execute?}]}`.
+  `size` is `small`, `medium` or `large`. `tasks`, the planned task count the estimate prices, defaults
+  by size, and `execute` defaults to true for `medium`, whose plans are also executed so P2 and P10 are
+  measured. `node scripts/plan-bench-corpus.mjs` proposes one from this repo's archived cycles as
+  `manifest.proposed.json`; rename it once you have checked it.
+- `answers/<id>.json` — `{"prompt"?, "answers": [{match, reply}]}`. A headless session cannot ask,
+  so a gate ends the session with its question as text; the first unused answer whose `match` (a
+  case-insensitive regular expression) finds the question is sent back on the same session, and
+  each listed answer is used once. Without a file, one standing answer matches every gate, so it
+  confirms triage and takes the recommended option at every later gate too.
+- `passes/<pass>/<id>--<arm>/` — each replay's legs, state file, run record, transcripts and
+  `outcome.json`, and per pass `results.md`, the P1–P12 table.
+
+`node scripts/plan-bench.mjs estimate` prints what a pass would cost and a go-ahead token. Both
+`estimate` and `run` first refuse (exit 2, naming the entry) a pass whose repo, `baseSha` or spec
+is missing, or whose pass id already holds a run, so a pass is never started that would die after
+spending: pick a new `--pass` to rerun.
+`run --go-ahead <token>` spends money, so it runs only with the token of an estimate the user
+approved: it refuses past `--budget` (default $150) and stops spending once the budget is gone. The
+estimate takes the upper ends of #442's per-task rates, so one `small`, one `medium` and one `large`
+entry at their default sizes estimates $172.60 and is refused at the default budget; the refusal names
+the two ways forward, a smaller corpus (fewer `--entries`, a smaller `size` or `tasks`) or an explicit
+`--budget` above the estimate, which is the user's decision, not the harness's. `run` also refuses to
+start in a driven (unattended) session, where `DEVCYCLE_DRIVE_TOKEN` is set (`estimate` stays allowed),
+and refuses when the installed plugin list cannot be read, since the arm could then not be forced.
+`PLAN_BENCH_STUB_ONLY=1` makes `run` refuse the real `claude` and demand `--claude <stub>`; the tests set
+it, so no test can launch a paid pass however it is started. `--leg-timeout <seconds>` (default 7200)
+kills a leg that outlives it and records its replay as an `error`. A leg that never reports its cost, one
+killed at that timeout or one that ends with no result event, is charged the spend cap it ran under, which is the
+budget still unspent, so a pass that loses a leg stops there and its total stays within `--budget`. Each replay plans in a scratch clone
+at `baseSha`, with no remote to push to, loaded with `--plugin-dir` on the checkout under test, so
+nothing it does touches the source repo, and its leg environment drops the driver variables
+(`DEVCYCLE_DRIVE_TOKEN` and the nested-run ones). A replay that cannot start is recorded as an `error`
+outcome and the pass carries on. `score --pass <pass>` re-scores a finished pass for free, counting only the replays the pass started, and
+flags in the Outcome column a replay whose state file's `knobs:` line resolved a `planningStrategy` other
+than its arm (`arm-mismatch`) or none (`arm-unverified`; the run record does not carry that knob), and
+`node scripts/cost-model-fit.mjs --runs <runs dir>` fits the cost model's per-role F, t, r and o from
+the `agent-cost` rows a pass collected. [`docs/platform-notes.md`](../../platform-notes.md) § (r)
+records how a headless session is driven through its gates.

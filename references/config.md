@@ -37,7 +37,7 @@ Only command text is templated — `${user_config.KEY}` substitutes in a command
 loads, never in a file a stage opens with Read — so knobs reach stages through one channel:
 
 - **Commands resolve.** Every entry command except `/devcycle:doctor`, which consumes no knob,
-  runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs"` with all eighteen rendered
+  runs `node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs"` with all nineteen rendered
   placeholders as its first configuration step. That invocation is the only place a
   `${user_config.<key>}` may appear; `scripts/validate.mjs` fails one anywhere else. It prints
   `knobs: <key>=<value> …` in roster order and `explicit: <the keys that won at step 1>`. A
@@ -91,6 +91,7 @@ carry the same keys; without it the copies drift one release at a time.
 | `taskReviewerModel` | `playbooks/executing-waves.md` | `auto` — `references/model-routing.md` derives it per task |
 | `branchReviewModel` | `playbooks/reviewing-the-branch.md` | `auto` — the session's own model |
 | `walkthroughModel` | `playbooks/verifying-on-device.md` | `auto` — a fast model |
+| `planningStrategy` | `playbooks/planning-waves.md` | `auto` — the delegation thresholds, as `status-quo` |
 | `learnStalenessSessions` | § Learn staleness | `5` |
 | `learnStalenessDays` | § Learn staleness | `14` |
 | `learnSessionCap` | § Learn staleness | `100` |
