@@ -135,3 +135,27 @@ test("priceTranscript: the token sums are 0 when the transcript is missing or ha
     assert.deepEqual([r.inputTokens, r.cacheWriteTokens, r.cacheReadTokens, r.outputTokens], [0, 0, 0, 0], file);
   }
 });
+
+// Claude Code writes one assistant record per content block; the records of one request share a
+// requestId and one usage block, so a request is priced and counted once.
+test("priceTranscript: a request written as several records is one turn, priced and summed once", () => {
+  const block = (requestId, usage) => JSON.stringify({ type: "assistant", requestId, message: { model: "claude-sonnet-5", usage } });
+  const first = { input_tokens: 1000, cache_creation_input_tokens: 400, cache_read_input_tokens: 2000, output_tokens: 500 };
+  const second = { input_tokens: 10, cache_creation: { ephemeral_1h_input_tokens: 100, ephemeral_5m_input_tokens: 50 }, output_tokens: 20 };
+  const slug = slugDirWith({
+    "agent-b1": {
+      meta: impl("Task 1"),
+      lines: [block("req-1", first), block("req-1", first), block("req-1", first), block("req-2", second), block("req-2", second)],
+    },
+  });
+  const [row] = pricedDispatches(slug);
+  assert.equal(row.turns, 2, "two requests, five records");
+  assert.deepEqual(
+    [row.inputTokens, row.cacheWriteTokens, row.cacheReadTokens, row.outputTokens],
+    [1010, 550, 2000, 520],
+  );
+  // claude-sonnet-5: $2 in / $10 out, cache read 0.1x in, 5m write 1.25x, 1h write 2x, per million.
+  // req-1: 1000*2 + 400*2*1.25 + 2000*2*0.1 + 500*10 = 2000 + 1000 + 400 + 5000 = 8400
+  // req-2: 10*2 + 100*2*2 + 50*2*1.25 + 20*10 = 20 + 400 + 125 + 200 = 745
+  assert.ok(Math.abs(row.usd - (8400 + 745) / 1e6) < 1e-12, `expected ${(8400 + 745) / 1e6}, got ${row.usd}`);
+});

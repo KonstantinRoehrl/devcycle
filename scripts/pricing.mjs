@@ -90,23 +90,38 @@ export function provisionalPriceFor(model) {
 export const CACHE_WRITE_1H_MULTIPLIER = 2.0;
 export const CACHE_WRITE_5M_MULTIPLIER = 1.25;
 
+// The four token counts one usage block stands for. The cache-write count is the TTL breakdown
+// when it names any tokens, and only otherwise the flat counter: both pricing and the per-agent
+// token sums read it here, so the two cannot disagree about which one wins.
+export function usageTokens(usage) {
+  const cc = usage.cache_creation ?? {};
+  const ttlWrite = (cc.ephemeral_1h_input_tokens ?? 0) + (cc.ephemeral_5m_input_tokens ?? 0);
+  return {
+    inputTokens: usage.input_tokens ?? 0,
+    cacheWriteTokens: ttlWrite > 0 ? ttlWrite : usage.cache_creation_input_tokens ?? 0,
+    cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+    outputTokens: usage.output_tokens ?? 0,
+  };
+}
+
 // Dollars for one usage record against a given price row. Both the strict and the provisional
 // entry points go through it, so the two can never disagree about how a record is priced.
 function priceUsage(usage, p) {
   const cc = usage.cache_creation ?? {};
   const h1 = cc.ephemeral_1h_input_tokens ?? 0;
   const m5 = cc.ephemeral_5m_input_tokens ?? 0;
-  // 39% of observed cache writes are 1h (2.00x). Only when no TTL breakdown is present does
-  // the flat counter stand in, billed at the 5m rate.
+  const tokens = usageTokens(usage);
+  // 39% of observed cache writes are 1h (2.00x); the 5m rate applies to the flat counter, which
+  // stands in only when no TTL breakdown is present.
   const write =
     h1 + m5 > 0
       ? h1 * p.in * CACHE_WRITE_1H_MULTIPLIER + m5 * p.in * CACHE_WRITE_5M_MULTIPLIER
-      : (usage.cache_creation_input_tokens ?? 0) * p.in * CACHE_WRITE_5M_MULTIPLIER;
+      : tokens.cacheWriteTokens * p.in * CACHE_WRITE_5M_MULTIPLIER;
   const perMillion =
-    (usage.input_tokens ?? 0) * p.in +
+    tokens.inputTokens * p.in +
     write +
-    cacheReadDollars(usage.cache_read_input_tokens ?? 0, p) +
-    (usage.output_tokens ?? 0) * p.out;
+    cacheReadDollars(tokens.cacheReadTokens, p) +
+    tokens.outputTokens * p.out;
   return perMillion / 1e6;
 }
 

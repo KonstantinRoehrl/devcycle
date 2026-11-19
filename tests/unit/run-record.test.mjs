@@ -1104,3 +1104,17 @@ test("append event gate-ran carries the failing plan-check legs", () => {
 test("validateCulprit accepts plan-defect from the shipped vocabulary", () => {
   assert.deepEqual(validateCulprit("plan-defect"), []);
 });
+
+test("append agent-cost carries a measurement string beside a null usd, and refuses one with characters outside the pattern", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/cost4");
+  const args = [...AGENT_COST_ARGS.map((a) => (a === "0.4125" ? "null" : a)), "--measurement", "unpriced-model:claude-foo"];
+  const ok = run(["append", "--run", runId, "--repo", "/tmp/cost4", ...args], runs);
+  assert.strictEqual(ok.status, 0, ok.stderr);
+  const row = lastLine("/tmp/cost4", runId);
+  assert.strictEqual(row.usd, null);
+  assert.strictEqual(row.measurement, "unpriced-model:claude-foo");
+  const bad = run(["append", "--run", runId, "--repo", "/tmp/cost4", ...args.slice(0, -1), "bad value!"], runs);
+  assert.notStrictEqual(bad.status, 0);
+  assert.match(bad.stderr, /"measurement" does not match/);
+});

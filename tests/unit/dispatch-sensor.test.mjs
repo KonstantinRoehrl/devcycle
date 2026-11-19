@@ -439,3 +439,16 @@ test("a sidecar with no model key or an unreadable body is explicitModel false, 
   assert.equal(costRows(anonymous).length, 0, "per-agent deltas need an agentId to key on");
   assert.equal(rows(anonymous.repo, anonymous.runsDir).filter((o) => o.kind === "agent-depth").length, 1);
 });
+
+test("an unpriced model leaves a null-usd agent-cost row that names why; a priced row carries no measurement", () => {
+  const unpriced = fixture({ model: "claude-foo-9" });
+  callHook(unpriced);
+  const [row] = costRows(unpriced);
+  assert.equal(row.usd, null);
+  assert.equal(row.measurement, "unpriced-model:claude-foo-9");
+  const priced = fixture();
+  callHook(priced);
+  const [ok] = costRows(priced);
+  assert.equal(typeof ok.usd, "number");
+  assert.ok(!("measurement" in ok));
+});

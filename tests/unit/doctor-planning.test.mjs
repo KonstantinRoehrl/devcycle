@@ -207,3 +207,11 @@ test("raw: execution blocked, rejected and retried counts; null when unknown", (
   assert.deepEqual(planningBreakdown(healthy({ events, blocked: 3, retried: 1 })).raw, { blocked: 3, rejected: 2, retried: 1 });
   assert.deepEqual(planningBreakdown(healthy({ blocked: null, retried: null })).raw, { blocked: null, rejected: 0, retried: null });
 });
+
+test("sensorGaps: a null-usd cost row names its measurement as the cause, once per agent; a priced row or one with no measurement adds none", () => {
+  const b = planningBreakdown(healthy({
+    agentCosts: [cost("a1", "drafter", 1), cost("a2", "checker", null, { measurement: "unpriced-model:claude-foo" }),
+      cost("a2", "checker", null, { measurement: "unpriced-model:claude-foo", continuationOf: 1 }), cost("a3", "checker", null)],
+  }));
+  assert.deepEqual(b.sensorGaps, [{ agentId: "a2", cause: "null-usd:unpriced-model:claude-foo" }]);
+});

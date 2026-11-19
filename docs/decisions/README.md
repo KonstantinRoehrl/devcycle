@@ -5,6 +5,24 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-19 — The agent-cost row says why a cost is unknown
+
+**Decision:** an `agent-cost` row whose `usd` is null carries an optional `measurement` naming the
+reason (`unpriced-model:<id>`, `no-priced-turns`, `multi-model`, `missing-transcript`,
+`earlier-row-unpriced`), and doctor's sensor-gap list reports it as `null-usd:<measurement>`.
+
+**Why:** the branch review found a null cost indistinguishable from a model with no price row, while
+the spec asks for sensor gaps with a cause.
+
+**Budgets:** the `agent-cost` row description in `references/ledger.md` grows by the field, which
+every closure that cites the ledger carries.
+
+```text
+budget: context-budget.json commands/continue.md 75758
+budget: context-budget.json commands/cycle.md 88165
+budget: context-budget.json playbooks/executing-waves.md 120290
+```
+
 ## 2026-11-18 — Planning dispatches name their role
 
 **Decision:** every planning-stage dispatch opens its `description` with `plan-<role>: `, one of

@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import {
-  PRICING, priceFor, provisionalPriceFor, cacheReadDollars, costUSD, provisionalCostUSD,
+  PRICING, priceFor, provisionalPriceFor, cacheReadDollars, costUSD, provisionalCostUSD, usageTokens,
   CACHE_WRITE_5M_MULTIPLIER, CACHE_WRITE_1H_MULTIPLIER,
 } from "../../scripts/pricing.mjs";
 import { collectModelIds, formatFixture, readFixture, unpricedIds } from "../../scripts/refresh-observed-models.mjs";
@@ -446,4 +446,14 @@ test("provisionalCostUSD: a model the table prices exactly returns null", () => 
 test("dispatch-cost prices through scripts/pricing.mjs and never imports the 206 KB doctor.mjs", () => {
   const source = readFileSync(fileURLToPath(new URL("../../scripts/dispatch-cost.mjs", import.meta.url)), "utf8");
   assert.doesNotMatch(source, /from\s+["']\.\/doctor\.mjs["']/);
+});
+
+test("usageTokens: the TTL breakdown wins over the flat cache-write counter, which stands in when there is none", () => {
+  const flat = { input_tokens: 5, cache_creation_input_tokens: 300, cache_read_input_tokens: 70, output_tokens: 9 };
+  assert.deepEqual(usageTokens(flat), { inputTokens: 5, cacheWriteTokens: 300, cacheReadTokens: 70, outputTokens: 9 });
+  const ttl = { ...flat, cache_creation: { ephemeral_1h_input_tokens: 100, ephemeral_5m_input_tokens: 40 } };
+  assert.equal(usageTokens(ttl).cacheWriteTokens, 140);
+  const emptyTtl = { ...flat, cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 } };
+  assert.equal(usageTokens(emptyTtl).cacheWriteTokens, 300);
+  assert.deepEqual(usageTokens({}), { inputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 });
 });

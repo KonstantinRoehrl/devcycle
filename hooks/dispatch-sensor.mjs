@@ -36,6 +36,8 @@ export const depthOf = (tokens) => (tokens > DEPTH_BREACH ? "breach" : tokens > 
 const ROLE_PREFIX = /^plan-(spike|research|drafter|checker|repair): /;
 export const roleOf = (description) => (typeof description === "string" ? ROLE_PREFIX.exec(description)?.[1] ?? null : null);
 
+// `unpriced-model:<id>` is the longest measurement; the id is cleaned to MODEL_CHARS and 80 characters first.
+const MEASUREMENT_MAX = 120;
 const COST_COUNTS = ["inputTokens", "cacheWriteTokens", "cacheReadTokens", "outputTokens", "turns"];
 
 // What an agent spent since its earlier agent-cost rows of this run: its transcript is cumulative,
@@ -140,6 +142,8 @@ function main() {
     const role = roleOf(sidecar.description);
     const priced = priceTranscript(transcriptPath);
     const cost = costDelta(priced, earlierCostRows(repoRoot, run, agentId));
+    // A null usd says why: the transcript's own measurement, or, when only an earlier row was unpriced, that.
+    const measurement = cost.usd === null ? clean(priced.usd === null ? priced.measurement : "earlier-row-unpriced", MODEL_CHARS, MEASUREMENT_MAX) : "";
     append(["--kind", "agent-cost", "--stage", stage,
       "--agentType", clean(input.agent_type, AGENT_TYPE_CHARS, 80) || "unknown",
       "--agentId", agentId,
@@ -148,7 +152,7 @@ function main() {
       "--explicitModel", String(typeof sidecar.model === "string" && sidecar.model !== ""),
       "--inputTokens", String(cost.inputTokens), "--cacheWriteTokens", String(cost.cacheWriteTokens),
       "--cacheReadTokens", String(cost.cacheReadTokens), "--outputTokens", String(cost.outputTokens),
-      "--usd", String(cost.usd), "--turns", String(cost.turns), "--continuationOf", String(cost.continuationOf)]);
+      "--usd", String(cost.usd), ...(measurement ? ["--measurement", measurement] : []), "--turns", String(cost.turns), "--continuationOf", String(cost.continuationOf)]);
   } catch { /* observe-only */ }
 }
 

@@ -1,6 +1,6 @@
 {
-  "commands/continue.md": 75618,
-  "commands/cycle.md": 88025,
+  "commands/continue.md": 75758,
+  "commands/cycle.md": 88165,
   "commands/doctor.md": 2161,
   "commands/learn.md": 17578,
   "commands/maintain.md": 18757,
@@ -9,7 +9,7 @@
   "commands/review.md": 25933,
   "commands/stop.md": 4312,
   "commands/verify.md": 25031,
-  "playbooks/executing-waves.md": 120150,
+  "playbooks/executing-waves.md": 120290,
   "playbooks/finishing-the-cycle.md": 53275,
   "playbooks/learning-from-sessions.md": 66547,
   "playbooks/maintaining-the-repo.md": 67169,

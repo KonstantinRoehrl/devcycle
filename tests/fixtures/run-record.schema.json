@@ -265,6 +265,7 @@
         "cacheReadTokens": { "type": "integer", "minimum": 0 },
         "outputTokens": { "type": "integer", "minimum": 0 },
         "usd": { "type": ["number", "null"], "minimum": 0 },
+        "measurement": { "type": "string", "pattern": "^[A-Za-z0-9:_.\\[\\]-]{1,120}$" },
         "turns": { "type": "integer", "minimum": 0 },
         "explicitModel": { "type": "boolean" },
         "continuationOf": { "type": "integer", "minimum": 0 },

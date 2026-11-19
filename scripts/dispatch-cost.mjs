@@ -8,8 +8,8 @@
 // failure of the two, because it reads as a complete figure.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { SYNTHETIC_MODEL } from "./depth-probe.mjs";
-import { costUSD, priceFor } from "./pricing.mjs";
+import { costUSD, priceFor, usageTokens } from "./pricing.mjs";
+import { collapseRequests, isTurn } from "./request-collapse.mjs";
 import { hashSession } from "./run-record.mjs";
 import { eachRecord } from "./jsonl.mjs";
 
@@ -29,35 +29,35 @@ function entriesOrNone(dir) {
   }
 }
 
-// Sums one subagent transcript at each turn's own model. Streams via eachRecord rather than
+// Sums one subagent transcript at each request's own model. Streams via eachRecord rather than
 // reading the whole file: the corpus is thousands of transcripts, and peak memory should track
-// the work, not the largest file. The four token sums cover exactly the turns counted, so a
-// per-agent cost row can show what the dollars were spent on.
+// the work, not the largest file. A request is written as one record per content block, all
+// sharing one usage block, and the request is what is billed and counted
+// (scripts/request-collapse.mjs), so the turn records are gathered first; only those are kept.
+// The four token sums cover exactly the requests counted, so a per-agent cost row can show what
+// the dollars were spent on.
 export function priceTranscript(file) {
   const none = { inputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 };
   if (!existsSync(file))
     return { usd: null, turns: 0, models: [], measurement: "missing-transcript", ...none };
 
-  let usd = 0, turns = 0, unpriced = null;
+  const records = [];
+  // isTurn skips `<synthetic>`, a harness artifact that must not make a dispatch unmeasurable; a
+  // usage record naming no model is not a priced turn either.
+  eachRecord(file, (r) => { if (isTurn(r) && r.message.model) records.push(r); });
+
+  let usd = 0, unpriced = null;
   const sums = { ...none };
   const models = new Set();
-  eachRecord(file, (r) => {
-    const usage = r.message?.usage, model = r.message?.model;
-    // `<synthetic>` is a harness artifact rather than a model turn — scripts/doctor.mjs's own
-    // turn predicate skips it the same way, so it must not make a dispatch unmeasurable.
-    if (r.type !== "assistant" || !usage || !model || model === SYNTHETIC_MODEL) return;
-    turns += 1;
+  const requests = collapseRequests(records);
+  for (const { message: { usage, model } } of requests) {
     models.add(model);
-    // The same cache-write rule pricing.mjs applies: the TTL breakdown when present, else the flat counter.
-    const cc = usage.cache_creation ?? {};
-    const ttlWrite = (cc.ephemeral_1h_input_tokens ?? 0) + (cc.ephemeral_5m_input_tokens ?? 0);
-    sums.inputTokens += usage.input_tokens ?? 0;
-    sums.cacheWriteTokens += ttlWrite > 0 ? ttlWrite : usage.cache_creation_input_tokens ?? 0;
-    sums.cacheReadTokens += usage.cache_read_input_tokens ?? 0;
-    sums.outputTokens += usage.output_tokens ?? 0;
-    if (!priceFor(model)) { unpriced ??= model; return; }
+    const tokens = usageTokens(usage);
+    for (const key of Object.keys(sums)) sums[key] += tokens[key];
+    if (!priceFor(model)) { unpriced ??= model; continue; }
     usd += costUSD(usage, model) ?? 0;
-  });
+  }
+  const turns = requests.length;
 
   const list = [...models];
   if (unpriced) return { usd: null, turns, models: list, measurement: `unpriced-model:${unpriced}`, ...sums };

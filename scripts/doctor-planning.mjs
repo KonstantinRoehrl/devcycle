@@ -27,7 +27,7 @@ import { usd, markdownTable } from "./doctor-format.mjs";
  * @property {number} planDefects rows attributing culprit `plan-defect`
  * @property {{blocked: number|null, rejected: number, retried: number|null}} raw execution counts
  * @property {Record<string, number>} gateLegs failing plan-check leg to the number of planning gate fails naming it
- * @property {{agentId: string|null, cause: "no-cost-row"|"no-role"}[]} sensorGaps
+ * @property {{agentId: string|null, cause: string}[]} sensorGaps `no-cost-row`, `no-role`, or `null-usd:<measurement>`
  */
 
 const ROLES = ["spike", "research", "drafter", "checker", "repair"];
@@ -79,6 +79,13 @@ export function planningBreakdown(run) {
     if (!d.agentId || !allCostIds.has(d.agentId)) sensorGaps.push({ agentId: d.agentId ?? null, cause: "no-cost-row" });
   for (const id of new Set(costs.map((c) => c.agentId)))
     if (!rolledIds.has(id)) sensorGaps.push({ agentId: id ?? null, cause: "no-role" });
+  // A row the sensor could not price names why in its `measurement`; one without it adds no gap.
+  const unpricedIds = new Set();
+  for (const c of costs) {
+    if (c.usd !== null || !c.measurement || unpricedIds.has(c.agentId)) continue;
+    unpricedIds.add(c.agentId);
+    sensorGaps.push({ agentId: c.agentId ?? null, cause: `null-usd:${c.measurement}` });
+  }
 
   const planningGateFails = events.filter((e) => e.event === "gate-ran" && e.stage === "planning" && e.result === "fail");
   const gateLegs = {};
