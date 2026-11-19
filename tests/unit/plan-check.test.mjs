@@ -14,7 +14,7 @@ const task = (n, files) => [
   `### Task ${n}: Thing ${n}`, "", "**Files:**", ...files.map((f) => `- Modify: ${f}`), "",
   "**Interfaces:**", "- Consumes: nothing.", "- Produces: nothing.", "",
   "**Dependencies:** none (completely independent)", "**Evidence:** red-green",
-  "**Quality constraints:** none", "**Lessons:**", "", "- [ ] step", "",
+  "**Quality constraints:** none", "**Lessons:**", "", "- [ ] step", "```js", "assert.ok(true);", "```", "",
 ].join("\n");
 const plan = (body, map = "## Dispatch Map\n\n- Wave 1: Task 1, Task 2 (file-disjoint, no dependencies)\n") =>
   `# P Implementation Plan\n\n**Verification gate:** \`npm test\`\n\n${body}\n${map}`;
@@ -302,7 +302,8 @@ test("--help prints every leg's check in LEGS order and the five override forms,
   assert.equal(lines[1], "");
   assert.deepEqual(lines.slice(2, 12).map((l) => l.split(":")[0]), Object.keys(planCheck.LEGS));
   assert.match(r.stdout, /^budgetFixtures: .*docs\/decisions\/README\.md/m);
-  assert.deepEqual(lines.slice(12, 19), ["", "Overrides (each needs a reason):",
+  assert.equal(lines[12], "--draft: the path is one drafted task file; runs codeBlocks, briefCompleteness, budgetFixtures, authoredClaims, briefFacts and records nothing.");
+  assert.deepEqual(lines.slice(13, 20), ["", "Overrides (each needs a reason):",
     "- Blast-radius override: <changed-file> [→ <referencer>] — <reason>",
     "- Content-coupling override: Task B → <file> (Task A) — <reason>",
     "- Budget-fixture override: <surface-or-fixture> — <reason>",
@@ -322,4 +323,57 @@ test("--spec feeds the proportion leg; without it the state file's spec: line do
   const missing = run(big, { repo, args: ["--spec", join(repo, "nope.md")] });
   assert.equal(missing.status, 1);
   assert.match(missing.stderr, /plan-check: spec not found: /);
+});
+
+const draftRun = (repo, file, args = []) => spawnSync(process.execPath, [SCRIPT, "--draft", file, repo, ...args],
+  { encoding: "utf8", cwd: repo, env: { ...process.env, DEVCYCLE_RUNS_DIR: makeTempDir("plan-check-runs") } });
+
+test("--draft gates one task file with the per-task legs, needs no Dispatch Map and records nothing", () => {
+  const repo = realpathSync(makeTempDir("plan-check-draft"));
+  writeInto(repo, "src/a.txt", "");
+  writeInto(repo, ".devcycle/state.md", "# devcycle state\n- stage: planning\n- run: 0123456789abcdef\n");
+  writeInto(repo, "tasks/task-1.md", task(1, ["src/a.txt"]));
+  const runs = makeTempDir("plan-check-draft-runs");
+  const r = spawnSync(process.execPath, [SCRIPT, "--draft", join(repo, "tasks/task-1.md"), repo],
+    { encoding: "utf8", cwd: repo, env: { ...process.env, DEVCYCLE_RUNS_DIR: runs } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), "plan-check: ok — draft, 5 leg(s): codeBlocks, briefCompleteness, budgetFixtures, authoredClaims, briefFacts");
+  assert.deepEqual(readdirSync(runs, { recursive: true }), [], "a draft run records no gate-ran event");
+  const bad = draftRun(repo, join(repo, "tasks/task-1.md"), ["--only", "proportion"]);
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /plan-check: --draft runs only codeBlocks, briefCompleteness, budgetFixtures, authoredClaims, briefFacts/);
+});
+
+test("--draft still fails a task missing a field", () => {
+  const repo = realpathSync(makeTempDir("plan-check-draft-field"));
+  writeInto(repo, "src/a.txt", "");
+  writeInto(repo, "tasks/task-1.md", task(1, ["src/a.txt"]).replace("**Quality constraints:** none\n", ""));
+  const r = draftRun(repo, join(repo, "tasks/task-1.md"));
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /plan-check: briefCompleteness: Task 1: missing \*\*Quality constraints:\*\* field/);
+});
+
+test("--draft resolves a path a sibling task file creates or the draft's Consumes (Task N) line names", () => {
+  const repo = realpathSync(makeTempDir("plan-check-draft-sibling"));
+  const consumer = task(3, ["src/new.mjs"]);
+  writeInto(repo, "tasks/task-3.md", consumer);
+  assert.match(draftRun(repo, join(repo, "tasks/task-3.md")).stderr, /briefFacts: .*src\/new\.mjs/);
+  writeInto(repo, "tasks/task-2.md", task(2, []).replace("**Files:**\n", "**Files:**\n- Create: src/new.mjs\n"));
+  assert.equal(draftRun(repo, join(repo, "tasks/task-3.md")).status, 0);
+  const alone = realpathSync(makeTempDir("plan-check-draft-consumes"));
+  writeInto(alone, "tasks/task-3.md", consumer.replace("- Consumes: nothing.", "- Consumes (Task 2): `src/new.mjs` exports `x()`."));
+  assert.equal(draftRun(alone, join(alone, "tasks/task-3.md")).status, 0);
+});
+
+test("--draft leaves the required-checks manifest to the assembled plan", () => {
+  const repo = realpathSync(makeTempDir("plan-check-draft-manifest"));
+  writeInto(repo, "src/a.txt", "");
+  writeInto(repo, "tests/fixtures/required-gate-checks.json", '["node --test"]');
+  const convention = task(1, ["src/a.txt"]).replace("**Evidence:** red-green", "**Evidence:** convention (`npm run lint`)");
+  writeInto(repo, "tasks/task-1.md", convention);
+  assert.equal(draftRun(repo, join(repo, "tasks/task-1.md")).status, 0);
+  writeInto(repo, "plan.md", plan(convention));
+  const whole = spawnSync(process.execPath, [SCRIPT, join(repo, "plan.md"), repo, "--only", "briefCompleteness"], { encoding: "utf8", cwd: repo,
+    env: { ...process.env, DEVCYCLE_RUNS_DIR: makeTempDir("plan-check-runs") } });
+  assert.match(whole.stderr, /omits required gate check "node --test"/);
 });

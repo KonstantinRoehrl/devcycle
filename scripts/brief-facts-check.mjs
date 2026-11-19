@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 // Plan gate leg `briefFacts` (#334): what a task brief cites about the repo holds before anything is
 // dispatched. Every cited path resolves and every cited line is within its file, or a
-// `- Citation override:` line says why not, and every fenced block pinned in a task's brief carries a run marker,
-// and a call-shaped span nothing defines is a note.
+// `- Citation override:` line says why not, and a call-shaped span nothing defines is a note. Under
+// `draft` (one task file, checked before the plan is assembled) a path a sibling `task-*.md` creates, or
+// the draft's own `- Consumes (Task N):` items name in a code span, counts as created.
 // See references/plan-task-format.md § Per-task checks; `plan-check.mjs --help` lists the legs.
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { taskBlocks, filesFieldValue, extractFiles, createdFiles, modifiedFiles, testFiles, lineFences, fencedBlocks } from "./task-files.mjs";
-import { LINE_REF_RE, VERIFIED_MARKER_RE, UNRUN_MARKER_RE } from "./authored-claims-check.mjs";
+import { taskBlocks, filesFieldValue, extractFiles, createdFiles, modifiedFiles, testFiles, lineFences, interfaceLines } from "./task-files.mjs";
+import { LINE_REF_RE } from "./authored-claims-check.mjs";
 import { GRAMMAR_DIRS, PLUGIN_ROOT_PATH } from "./citation-grammar.mjs";
 import { isMain } from "./is-main.mjs";
 
@@ -78,38 +79,34 @@ function namesInTree(names, { repoRoot, planPath }) {
   return r.status === 0 ? new Set(r.stdout.split("\n").filter(Boolean)) : null;
 }
 
-// #314: expected output and doc text to paste run nowhere; every other fence, untagged included, does.
-const EXEMPT_FENCE_INFO = new Set(["text", "txt", "markdown", "md"]);
+// A Test path counts as created: a new test file is listed under Test:, not Create:.
+const createdByTasks = (planText) => taskBlocks(planText).flatMap(({ text }) => {
+  const files = filesFieldValue(text) ?? "";
+  return [...createdFiles(files), ...testFiles(files)];
+});
 
-// The marker sits on the nearest non-blank line above the opening fence only, so a marker between two
-// blocks clears just the one below it (references/evidence.md § Authored claims).
-function pinnedBlockErrors(lines, blocks, taskOf) {
-  const errors = [];
-  for (const { open, info } of blocks) {
-    if (taskOf[open] === null || EXEMPT_FENCE_INFO.has(info)) continue;
-    let above = open - 1;
-    while (above >= 0 && lines[above].trim() === "") above--;
-    const marker = above >= 0 ? lines[above] : "";
-    const unrun = marker.match(UNRUN_MARKER_RE);
-    if (VERIFIED_MARKER_RE.test(marker) || unrun?.[1].trim()) continue;
-    const block = `Task ${taskOf[open]}: pinned ${info || "untagged"} block at plan line ${open + 1}`;
-    errors.push(unrun
-      ? `${block} has an (unrun:) marker with no reason — say why it was not run`
-      : `${block} has no (verified: <cmd>) or (unrun: <reason>) marker on the nearest line above it`);
+// A draft is one task of a plan not yet assembled, so the paths its siblings create, and the code spans
+// its own Consumes items name, stand in for the files those tasks will have written.
+function draftCreatedPaths(planText, planPath) {
+  const paths = new Set();
+  const dir = dirname(resolve(planPath));
+  let siblings = [];
+  try { siblings = readdirSync(dir).filter((name) => /^task-.+\.md$/.test(name)); } catch { /* an unreadable directory has no siblings */ }
+  for (const name of siblings) {
+    try { for (const path of createdByTasks(readFileSync(join(dir, name), "utf8"))) paths.add(path); } catch { /* an unreadable sibling creates nothing */ }
   }
-  return errors;
+  for (const { text } of taskBlocks(planText))
+    for (const { text: item } of interfaceLines(text).consumes)
+      for (const [, span] of item.matchAll(SPAN_RE)) paths.add(span);
+  return paths;
 }
 
-export function briefFactsLeg(planText, { planPath, repoRoot = process.cwd() }) {
+export function briefFactsLeg(planText, { planPath, repoRoot = process.cwd(), draft = false }) {
   const lines = planText.split("\n");
   const fences = lineFences(planText);
   const taskOf = taskOfLine(planText);
   const blocks = taskBlocks(planText);
-  // A Test path counts as created: a new test file is listed under Test:, not Create:.
-  const created = new Set(blocks.flatMap(({ text }) => {
-    const files = filesFieldValue(text) ?? "";
-    return [...createdFiles(files), ...testFiles(files)];
-  }));
+  const created = new Set([...createdByTasks(planText), ...(draft ? draftCreatedPaths(planText, planPath) : [])]);
   const findings = [];
   const notes = [];
 
@@ -172,7 +169,6 @@ export function briefFactsLeg(planText, { planPath, repoRoot = process.cwd() }) 
   for (const name of inTree ? undefinedCalls.filter((n) => !inTree.has(n)) : [])
     notes.push(`${who(calls.get(name))}: names ${name}() — no working-tree file mentions it and no fenced block in the plan defines it`);
 
-  findings.push(...pinnedBlockErrors(lines, fencedBlocks(planText), taskOf));
   return { findings, ok: `ok — every path and line ${planPath} cites resolves`, notes };
 }
 

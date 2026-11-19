@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // One plan gate: ten legs over one plan file, fail-closed on a missing Dispatch Map, one compact
-// line on success. Each leg lives in (and is exported by) the script that still serves it standalone.
+// line on success. `--draft` gates one drafted task file with the per-task legs instead. Each leg lives in (and is exported by) the script that still serves it standalone.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -38,17 +38,20 @@ export const LEGS = {
   crossTask: crossTaskLeg,
 };
 
+// The legs that read one task's own brief, the ones `--draft` runs on a task file before the plan exists.
+export const DRAFT_LEGS = Object.freeze(["codeBlocks", "briefCompleteness", "budgetFixtures", "authoredClaims", "briefFacts"]);
+
 // What each leg checks, in LEGS order: `plan-check --help` prints it, so the playbook need only say
 // "run it; fix or override".
 export const LEG_HELP = Object.freeze({
   codeBlocks: "pasted JS/mjs code blocks parse.",
-  briefCompleteness: "every task carries Files / Interfaces / Dependencies / a valid Evidence class / Quality constraints, the header carries one `**Verification gate:**` code span, pinned gates run every required-checks manifest entry, a `red-green` task creating a non-test source file mentions a stub, an interface-pinned task gives a reason, is `red-green` and pins a fenced block, and the Dispatch Map lists every task. It also notes, never failing, each prescribed git command the dispatch guard denies.",
+  briefCompleteness: "every task carries Files / Interfaces / Dependencies / a valid Evidence class / Quality constraints, a `red-green` task pins its failing test code in a fenced block and mentions a stub when it creates a non-test source file, and a `**Detail:**` line reads `code-pinned — <reason>` (or the older `interface-pinned — <reason>`, `red-green` only); outside `--draft`, the header carries one `**Verification gate:**` code span, pinned gates run every required-checks manifest entry, and the Dispatch Map lists every task. It also notes, never failing, each prescribed git command the dispatch guard denies.",
   blastRadius: "every JS/TS/Python file naming a changed file's basename, test or not, sits in some Files block, each finding opening with the task that declares the changed file.",
   contentCoupling: "no same-wave task's brief names a file another same-wave task edits.",
   budgetFixtures: "a task touching a budgeted surface (`playbooks/`, `commands/`, `agents/`, `references/` markdown) also touches its budget fixtures and `docs/decisions/README.md`; `references/` and `agents/` markdown match the context budget too: every entry point pays for the references it cites, and agents count toward a reference's fan-in.",
   waveDisjointness: "no two same-wave tasks list the same file.",
   authoredClaims: "every load-bearing plan-authored claim (a file or section target, a count, \"X already does Y\") carries `(verified: <cmd>)` or `(assumption)`.",
-  briefFacts: "every path a brief cites resolves, every cited line is within its file, and every fenced block pinned in a task carries a `(verified: <cmd>)` or `(unrun: <reason>)` run marker. It also notes, never failing, a call-shaped span nothing defines.",
+  briefFacts: "every path a brief cites resolves and every cited line is within its file; under `--draft`, a path a sibling task file creates or the draft's own Consumes (Task N) line names counts as created. It also notes, never failing, a call-shaped span nothing defines.",
   proportion: "plan bytes stay within 5× the spec's and code fences within 30% of the plan (a note above either); above 8× or 45% it fails unless a `- Proportion override: <reason>` line says why. With no spec (`--spec`, else the state file's `spec:`) it is not measured.",
   crossTask: "every code span a `- Consumes (Task N):` line pins appears in a Produces line of Task N; no task brief carries a placeholder or a \"similar to Task N\" back-reference outside a code span; a definition two tasks pin with differing text is a note.",
 });
@@ -66,16 +69,17 @@ export function helpText() {
     USAGE,
     "",
     ...Object.keys(LEGS).map((leg) => `${leg}: ${LEG_HELP[leg]}`),
+    `--draft: the path is one drafted task file; runs ${DRAFT_LEGS.join(", ")} and records nothing.`,
     "",
     "Overrides (each needs a reason):",
     ...OVERRIDE_FORMS,
   ].join("\n");
 }
 
-export function planCheck(planText, { planPath, repoRoot, only, specText }) {
-  if (parseDispatchMap(planText) === null)
+export function planCheck(planText, { planPath, repoRoot, only, specText, draft = false }) {
+  if (!draft && parseDispatchMap(planText) === null)
     return { findings: [{ leg: "dispatchMap", text: 'missing "## Dispatch Map" section — every leg needs it' }], notes: [], legs: [] };
-  const legs = only ? [only] : Object.keys(LEGS);
+  const legs = only ? [only] : draft ? [...DRAFT_LEGS] : Object.keys(LEGS);
   const findings = [];
   const notes = [];
   for (const leg of legs) {
@@ -83,7 +87,7 @@ export function planCheck(planText, { planPath, repoRoot, only, specText }) {
     // so the other legs still report and the gate-ran record is still written.
     let r;
     try {
-      r = LEGS[leg](planText, { planPath, repoRoot, specText });
+      r = LEGS[leg](planText, { planPath, repoRoot, specText, draft });
     } catch (err) {
       r = { findings: [`crashed — ${err.message}`] };
     }
@@ -111,7 +115,7 @@ function die(msg) {
   process.exit(1);
 }
 
-const USAGE = "usage: plan-check.mjs <plan-path> [repo-root] [--spec <path>] [--only <leg>] [--verbose] [--help]";
+const USAGE = "usage: plan-check.mjs <plan-path> [repo-root] [--draft] [--spec <path>] [--only <leg>] [--verbose] [--help]";
 
 // The spec the proportion leg measures against: the first token of the state file's `spec:` field, when
 // it names a file under the repo root.
@@ -138,7 +142,7 @@ function printNotes(notes, { listAll }) {
 function main(argv) {
   let parsed;
   try {
-    parsed = parseFlags(argv, { "--spec": "value", "--only": "value", "--verbose": "none", "--help": "none" },
+    parsed = parseFlags(argv, { "--draft": "none", "--spec": "value", "--only": "value", "--verbose": "none", "--help": "none" },
       { allowPositionals: true, requireValues: "nonEmpty" });
   } catch (e) {
     die(`${e.message} — ${USAGE}`);
@@ -146,21 +150,24 @@ function main(argv) {
   const { flags, positionals } = parsed;
   if (flags["--help"] === true) return void console.log(helpText());
   const only = flags["--only"];
+  const draft = flags["--draft"] === true;
   const verbose = flags["--verbose"] === true;
   const [planPath, repoRoot = process.cwd()] = positionals;
   if (!planPath) die(USAGE);
   if (only && !(only in LEGS)) die(`unknown leg "${only}" — one of ${Object.keys(LEGS).join(", ")}`);
+  if (draft && only && !DRAFT_LEGS.includes(only)) die(`--draft runs only ${DRAFT_LEGS.join(", ")}`);
   if (!existsSync(planPath) || !statSync(planPath).isFile()) die(`plan not found: ${planPath}`);
   const specFlag = flags["--spec"];
   if (specFlag && (!existsSync(specFlag) || !statSync(specFlag).isFile())) die(`spec not found: ${specFlag}`);
   const specPath = specFlag ?? stateSpecPath(repoRoot);
   const specText = specPath ? readFileSync(specPath, "utf8") : null;
-  const { findings, notes, legs } = planCheck(readFileSync(planPath, "utf8"), { planPath, repoRoot, only, specText });
+  const { findings, notes, legs } = planCheck(readFileSync(planPath, "utf8"), { planPath, repoRoot, only, specText, draft });
   printNotes(notes, { listAll: verbose || findings.length > 0 });
   for (const f of findings) console.error(`plan-check: ${f.leg}: ${f.text}`);
-  try { recordGateRan(repoRoot, [...new Set(findings.map((f) => f.leg))].sort()); } catch { /* recording is best-effort */ }
+  // A draft is a work file, not the gate of record: only the assembled plan's run is recorded.
+  if (!draft) try { recordGateRan(repoRoot, [...new Set(findings.map((f) => f.leg))].sort()); } catch { /* recording is best-effort */ }
   if (findings.length) process.exit(1);
-  console.log(`plan-check: ok — ${legs.length} leg(s): ${legs.join(", ")}`);
+  console.log(`plan-check: ok — ${draft ? "draft, " : ""}${legs.length} leg(s): ${legs.join(", ")}`);
 }
 
 if (isMain(import.meta.url, process.argv[1])) main(process.argv.slice(2));

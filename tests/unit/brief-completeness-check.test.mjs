@@ -36,6 +36,9 @@ const COMPLETE = `# Plan
 **Lessons:**
 - [ ] Write a minimal stub for \`a.mjs\`
 - [ ] step
+\`\`\`js
+test("x", () => {});
+\`\`\`
 ## Dispatch Map
 - Wave 1: Task 1 (no deps)
 `;
@@ -468,16 +471,35 @@ test("fails an interface-pinned task whose evidence class is not red-green", () 
   assert.match(r.out, /Task 1: \*\*Detail:\*\* interface-pinned is allowed only on a red-green task/);
 });
 
-test("fails an interface-pinned task whose brief pins no fenced code", () => {
-  const r = run(PINNED.replace("- [ ] Write the failing test:\n```js\ntest(\"x\", () => {});\n```\n", "- [ ] Write the failing test\n"));
+test("fails any red-green task whose brief pins no fenced block", () => {
+  const r = run(COMPLETE.replace('- [ ] step\n```js\ntest("x", () => {});\n```\n', "- [ ] step\n"));
   assert.equal(r.code, 1);
-  assert.match(r.out, /Task 1: \*\*Detail:\*\* interface-pinned still pins the complete failing test code in a fenced block/);
+  assert.match(r.out, /Task 1: a red-green task pins its complete failing test code in a fenced block, and this brief has none/);
+});
+
+test("passes a code-pinned task with a reason, on any evidence class", () => {
+  const pinned = COMPLETE.replace("**Evidence:** red-green\n", "**Evidence:** red-green\n**Detail:** code-pinned — the merge order is not fixed by the tests\n");
+  assert.equal(run(pinned).code, 0, run(pinned).out);
+  const green = pinned.replace("**Evidence:** red-green", "**Evidence:** green-green (behavior-preserving)");
+  assert.equal(run(green).code, 0, run(green).out);
+});
+
+test("fails a code-pinned task with no reason after the dash", () => {
+  const r = run(COMPLETE.replace("**Evidence:** red-green\n", "**Evidence:** red-green\n**Detail:** code-pinned\n"));
+  assert.equal(r.code, 1);
+  assert.match(r.out, /Task 1: \*\*Detail:\*\* code-pinned needs a reason after the dash/);
+});
+
+test("a green-green task needs no fenced block", () => {
+  const r = run(COMPLETE.replace("**Evidence:** red-green", "**Evidence:** green-green (behavior-preserving)")
+    .replace('- [ ] step\n```js\ntest("x", () => {});\n```\n', "- [ ] step\n"));
+  assert.equal(r.code, 0, r.out);
 });
 
 test("fails an unknown Detail value", () => {
   const r = run(PINNED.replace("interface-pinned — new interception layer, design-heavy", "sketch — too big to write"));
   assert.equal(r.code, 1);
-  assert.match(r.out, /Task 1: \*\*Detail:\*\* must be `interface-pinned — <reason>`, got: sketch — too big to write/);
+  assert.match(r.out, /Task 1: \*\*Detail:\*\* must be `code-pinned — <reason>`, got: sketch — too big to write/);
 });
 
 test("a brief that quotes the Detail form mid-line declares nothing", () => {

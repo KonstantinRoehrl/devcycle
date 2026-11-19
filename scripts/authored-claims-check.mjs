@@ -13,13 +13,10 @@ import { isMain } from "./is-main.mjs";
 // Exported with its /g flag: a consumer reads it with matchAll, never .test or .exec on the shared object.
 export const LINE_REF_RE = /(?<![\w./-])([\w./-]+\.[a-z0-9]{1,6}):(\d+)(?:-\d+)?(?![\d.])/g;
 const COUNT_RE = /\b(\d+)\s+(files?|occurrences?|tests?|sessions?|lines?|callers?|places?|instances?|references?|tasks?|waves?)\b/gi;
-// The verified form, shared by the claim marker and a pinned plan block's run marker
-// (references/evidence.md § Authored claims).
+// The verified form (references/evidence.md § Authored claims).
 const VERIFIED = String.raw`verified:[^)]*`;
 export const MARKER_RE = new RegExp(String.raw`\((?:${VERIFIED}|assumption)\)`, "i");
 export const VERIFIED_MARKER_RE = new RegExp(String.raw`\(${VERIFIED}\)`, "i");
-// A pinned plan block's "deliberately not run" marker; group 1 is the reason. It never clears a claim.
-export const UNRUN_MARKER_RE = /\(unrun:([^)]*)\)/i;
 const FENCE_RE = /^\s*```/;
 const INLINE_CODE_RE = /`[^`]*`/g;
 const URL_RE = /https?:\/\/\S+/g;

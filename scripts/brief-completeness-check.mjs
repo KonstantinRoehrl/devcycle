@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Pre-flight check for a devcycle plan: every "### Task N" block must carry the required
 // dispatch fields, the Evidence value must name a valid class, a red-green task that creates a
-// non-test source file must carry a stub step, an interface-pinned task must say why and still pin
-// its failing test code, "## Dispatch Map" must list every task, every
+// non-test source file must carry a stub step, a red-green task must pin its failing test code in a
+// fenced block, a Detail line must say why, "## Dispatch Map" must list every task (outside a draft), every
 // pinned gate command must run the repo's required checks, and a Files block that edits a budgeted file must list the size baselines that edit trips and the decisions log
 // that holds them, and a git command a step prescribes that the dispatch guard denies an
 // implementer is reported as a note, never a failure. Modeled on wave-disjointness-check.mjs; a
@@ -169,8 +169,10 @@ const SOURCE_EXTENSIONS = new Set([".mjs", ".cjs", ".js", ".jsx", ".ts", ".tsx",
 const DECLARATION_FILE_RE = /\.d\.[mc]?ts$/i;
 const STUB_RE = /\bstub/i;
 
+const isRedGreen = (block) => (fieldValue(block, "Evidence") ?? "").split(/\s+/)[0] === "red-green";
+
 function stubErrors(num, block) {
-  if ((fieldValue(block, "Evidence") ?? "").split(/\s+/)[0] !== "red-green") return [];
+  if (!isRedGreen(block)) return [];
   const files = filesFieldValue(block);
   if (!files) return [];
   const created = [...createdFiles(files)].filter((path) => SOURCE_EXTENSIONS.has(extname(path).toLowerCase()) && !DECLARATION_FILE_RE.test(path) && !isTestPath(path));
@@ -182,13 +184,13 @@ function stubErrors(num, block) {
   ];
 }
 
-// #331: `**Detail:** interface-pinned — <reason>` lets a red-green task describe its implementation
-// in prose, provided its interfaces, failing test code and gate commands stay pinned
-// (references/plan-task-format.md § No placeholders). This checks the declaration and that some code
-// is still pinned; the task reviewer judges behaviour the tests leave open. Only a line that opens
-// with the label declares it: a brief that quotes the form mid-sentence, as a plan about this very
-// check does, declares nothing.
-export const DETAIL_VALUES = ["interface-pinned"];
+// `**Detail:** code-pinned — <reason>` marks a task whose pinned code leaves behaviour the tests do not
+// fix; the older `interface-pinned — <reason>` (#331) lets a red-green task describe its implementation
+// in prose while its interfaces, failing test code and gate commands stay pinned
+// (references/plan-task-format.md § No placeholders). This checks the declaration; the task reviewer
+// judges behaviour the tests leave open. Only a line that opens with the label declares it: a brief that
+// quotes the form mid-sentence, as a plan about this very check does, declares nothing.
+export const DETAIL_VALUES = ["code-pinned", "interface-pinned"];
 const DETAIL_LINE_RE = /^\*\*Detail:\*\*[ \t]*(.*)$/m;
 const DETAIL_RE = /^(\S+)(?:\s+(?:—|--|-)\s*(.*))?$/;
 
@@ -198,24 +200,30 @@ function detailErrors(num, block) {
   const detail = line[1].trim();
   const m = detail.match(DETAIL_RE);
   if (!m || !DETAIL_VALUES.includes(m[1]))
-    return [`Task ${num}: **Detail:** must be \`interface-pinned — <reason>\`, got: ${detail || "(empty)"}`];
+    return [`Task ${num}: **Detail:** must be \`code-pinned — <reason>\`, got: ${detail || "(empty)"}`];
   const errors = [];
-  if (!m[2]?.trim()) errors.push(`Task ${num}: **Detail:** interface-pinned needs a reason after the dash, e.g. \`interface-pinned — new interception layer, design-heavy\``);
-  if ((fieldValue(block, "Evidence") ?? "").split(/\s+/)[0] !== "red-green")
+  if (!m[2]?.trim()) errors.push(`Task ${num}: **Detail:** ${m[1]} needs a reason after the dash, e.g. \`code-pinned — the recovery order is not fixed by the tests\``);
+  if (m[1] === "interface-pinned" && !isRedGreen(block))
     errors.push(`Task ${num}: **Detail:** interface-pinned is allowed only on a red-green task, whose failing test pins the behaviour`);
-  if (fencedBlocks(block).length === 0)
-    errors.push(`Task ${num}: **Detail:** interface-pinned still pins the complete failing test code in a fenced block, and this brief has none`);
   return errors;
 }
 
-// repoRoot is the work tree whose required-checks manifest applies; plan-check passes its own.
-export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cwd() }, { includeBudgetFixtures = true } = {}) {
+// A red-green task's brief is where its failing test lives: the implementer works test-first from it
+// (references/plan-task-format.md § No placeholders).
+function fenceErrors(num, block) {
+  if (!isRedGreen(block) || fencedBlocks(block).length > 0) return [];
+  return [`Task ${num}: a red-green task pins its complete failing test code in a fenced block, and this brief has none (references/plan-task-format.md § No placeholders)`];
+}
+
+// repoRoot is the work tree whose required-checks manifest applies; plan-check passes its own. A `draft` is
+// one task file: the plan-level header gate, required-checks and Dispatch Map checks wait for the assembled plan.
+export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cwd(), draft = false }, { includeBudgetFixtures = true } = {}) {
   const errors = [];
   const blocks = taskBlocks(planText);
   if (blocks.length === 0) {
     return { findings: [`no "### Task N" blocks found in ${planPath}`], ok: "", notes: [] };
   }
-  errors.push(...gateLineErrors(planText), ...requiredCheckErrors(planText, blocks, repoRoot));
+  if (!draft) errors.push(...gateLineErrors(planText), ...requiredCheckErrors(planText, blocks, repoRoot));
 
   // The stub and guard legs read only a task's own brief; the other legs keep the whole-block read.
   const ownBriefs = taskBlocks(planText, { stopAtPlanSection: true });
@@ -238,7 +246,7 @@ export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cw
         );
       }
     }
-    errors.push(...stubErrors(num, ownBriefs[index].text), ...detailErrors(num, ownBriefs[index].text));
+    errors.push(...stubErrors(num, ownBriefs[index].text), ...fenceErrors(num, ownBriefs[index].text), ...detailErrors(num, ownBriefs[index].text));
   }
 
   // An incomplete Files block is not only a missing field: a brief that mandates doc growth but
@@ -255,10 +263,10 @@ export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cw
     }
   }
 
-  const waves = parseDispatchMap(planText);
+  const waves = draft ? undefined : parseDispatchMap(planText);
   if (waves === null) {
     errors.push('missing "## Dispatch Map" section');
-  } else {
+  } else if (waves) {
     const mapped = new Set([...waves.values()].flat());
     for (const { num } of blocks) {
       if (!mapped.has(num)) errors.push(`Task ${num}: not listed in the ## Dispatch Map`);
