@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { planningBreakdown, corpusGateLegs, corpusGateLegsLine } from "../../scripts/doctor-planning.mjs";
+import { loadTable } from "../../scripts/model-pool.mjs";
 
 const cost = (agentId, role, usd, extra = {}) => ({
   kind: "agent-cost", stage: "planning", agentType: "devcycle:implementer", agentId, model: "claude-sonnet-5-5",
@@ -121,14 +122,6 @@ test("P4: p95 of each planning dispatch's final depth, bar <= 150000", () => {
   assert.equal(row(planningBreakdown(healthy({ agentDepths: [depth("e", 900000, { stage: "execution" })] })), "P4").status, "n/a");
 });
 
-test("P5 and P6 are n/a until the phases that record them land", () => {
-  const b = planningBreakdown(healthy());
-  assert.equal(row(b, "P5").status, "n/a");
-  assert.match(row(b, "P5").reason, /Phase 3/);
-  assert.equal(row(b, "P6").status, "n/a");
-  assert.match(row(b, "P6").reason, /Phase 1/);
-});
-
 test("P7: share of planning dispatches with an explicit model, bar 100%", () => {
   assert.equal(row(planningBreakdown(healthy()), "P7").status, "pass");
   const one = planningBreakdown(healthy({ agentCosts: [cost("a1", "drafter", 1), cost("a2", "checker", 1, { explicitModel: false })] }));
@@ -231,4 +224,49 @@ test("sensorGaps: a null-usd cost row names its measurement as the cause, once p
       cost("a2", "checker", null, { measurement: "unpriced-model:claude-foo", continuationOf: 1 }), cost("a3", "checker", null)],
   }));
   assert.deepEqual(b.sensorGaps, [{ agentId: "a2", cause: "null-usd:unpriced-model:claude-foo" }]);
+});
+
+const TIERS = loadTable();
+const reading = (agentId, role, reads, extra = {}) =>
+  cost(agentId, role, 0.1, { inputTokens: 4000, cacheWriteTokens: 1000, sourcePrints: 2, reads, ...extra });
+const PACK = ".devcycle/plan-work/r/pack.md";
+
+test("P6: tokens re-read from another planning dispatch over their input, the plan-work pack excluded, bar 20%", () => {
+  const two = [reading("a1", "drafter", { "scripts/plan-check.mjs": 1000, [PACK]: 2000 }),
+    reading("a2", "drafter", { "scripts/plan-check.mjs": 1000, [PACK]: 2000 })];
+  const b = planningBreakdown(healthy({ agentCosts: two }));
+  assert.equal(b.p6, 0.1);
+  assert.equal(row(b, "P6").status, "pass");
+  assert.equal(row(b, "P6").bar, "<= 20%");
+  const three = [...two, reading("a3", "checker", { "scripts/plan-check.mjs": 3000 })];
+  assert.equal(row(planningBreakdown(healthy({ agentCosts: three })), "P6").status, "fail");
+  const own = [reading("a1", "drafter", { "a.mjs": 1000 }), reading("a1", "drafter", { "a.mjs": 1000 }, { continuationOf: 1 })];
+  assert.equal(planningBreakdown(healthy({ agentCosts: own })).p6, 0, "an agent re-reading its own path is not shared context");
+});
+
+test("P6 is n/a when a planning dispatch row carries no reads; P5 stays n/a until Phase 3", () => {
+  const b = planningBreakdown(healthy({ agentCosts: [reading("a1", "drafter", { "a.mjs": 10 }), cost("a2", "checker", 0.5)] }));
+  assert.equal(b.p6, null);
+  assert.equal(row(b, "P6").status, "n/a");
+  assert.match(row(b, "P6").reason, /without reads/);
+  assert.equal(row(b, "P5").status, "n/a");
+  assert.match(row(b, "P5").reason, /Phase 3/);
+});
+
+test("drafterTurns and sourcePrints: turns summed per drafter in first-seen order; prints null unless every dispatch row has them", () => {
+  const rows = [reading("a1", "drafter", {}, { turns: 2 }), reading("a2", "drafter", {}, { turns: 5, model: "claude-opus-5" }),
+    reading("a1", "drafter", {}, { turns: 1, continuationOf: 1 }), reading("c1", "checker", {}, { model: "claude-haiku-4-5" })];
+  const b = planningBreakdown(healthy({ agentCosts: rows }));
+  assert.deepEqual(b.drafterTurns, [{ agentId: "a1", model: "claude-sonnet-5-5", turns: 3 }, { agentId: "a2", model: "claude-opus-5", turns: 5 }]);
+  assert.equal(b.sourcePrints, 8);
+  assert.equal(planningBreakdown(healthy()).sourcePrints, null);
+});
+
+test("tierFit: a spike, research or checker dispatch above the fast tier is flagged; drafters and unrankable models are not", () => {
+  const rows = [cost("c1", "checker", 0.1, { model: "claude-opus-5" }), cost("c1", "checker", 0.1, { model: "claude-opus-5", continuationOf: 1 }),
+    cost("c2", "checker", 0.1, { model: "claude-sonnet-5-5" }), cost("s1", "spike", 0.1, { model: "claude-haiku-4-5" }),
+    cost("r1", "research", 0.1, { model: "gpt-unknown" }), cost("d1", "drafter", 0.1, { model: "claude-opus-5" })];
+  assert.deepEqual(planningBreakdown(healthy({ agentCosts: rows }), { tierTable: TIERS }).tierFit,
+    [{ role: "checker", agentId: "c1", model: "claude-opus-5" }]);
+  assert.deepEqual(planningBreakdown(healthy({ agentCosts: rows })).tierFit, [], "no tier table ranks nothing");
 });
