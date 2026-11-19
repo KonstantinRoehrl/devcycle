@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { transcriptStats, resolveDepth, windowFor, depthLine, ASSUMED_WINDOW } from "../../scripts/depth-probe.mjs";
+import { transcriptReads, transcriptStats, resolveDepth, windowFor, depthLine, ASSUMED_WINDOW } from "../../scripts/depth-probe.mjs";
 
 const SCRIPT = new URL("../../scripts/depth-probe.mjs", import.meta.url).pathname;
 const usage = (i, cc, cr, o) => ({ input_tokens: i, cache_creation_input_tokens: cc, cache_read_input_tokens: cr, output_tokens: o });
@@ -183,4 +183,37 @@ test("import: an entry path that does not exist does not throw", () => {
     ["--input-type=module", "-e", `await import(${JSON.stringify(pathToFileURL(SCRIPT).href)})`, "no-such-entry"],
     { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
+});
+
+// One tool call and its result, as a subagent transcript records them.
+const toolCall = (id, name, input, content, cwd = "/w/repo") => [
+  { type: "assistant", cwd, timestamp: "2026-11-19T10:00:00.000Z", message: { model: "claude-sonnet-5-5", content: [{ type: "tool_use", id, name, input }] } },
+  { type: "user", cwd, timestamp: "2026-11-19T10:00:01.000Z", message: { content: [{ type: "tool_result", tool_use_id: id, content }] } },
+];
+
+test("transcriptReads: Read results and Bash source prints become per-path token estimates", () => {
+  const dir = makeTempDir("depth-probe");
+  const file = join(dir, "agent-a4.jsonl");
+  writeJsonl(file, [
+    ...toolCall("r1", "Read", { file_path: "/w/repo/scripts/a.mjs" }, "x".repeat(401)),
+    ...toolCall("b1", "Bash", { command: "cat scripts/b.mjs | head -5" }, "y".repeat(8)),
+    ...toolCall("b2", "Bash", { command: "sed -n '1,20p' scripts/c.mjs" }, "abcd"),
+    ...toolCall("b3", "Bash", { command: "git log --oneline | head -5" }, "z".repeat(40)),
+    ...toolCall("b4", "Bash", { command: "cd /w/repo && head -n 20 notes.txt 2>/dev/null" }, "n".repeat(10)),
+    ...toolCall("b5", "Bash", { command: "sed 's/a/b/' scripts/d.mjs" }, "d".repeat(40)),
+    ...toolCall("b6", "Bash", { command: "cat /elsewhere/x.md scripts/a.mjs" }, "w".repeat(16)),
+    ...toolCall("r2", "Read", { file_path: "/w/repo/scripts/e.mjs" }, [{ type: "text", text: "abcd" }, { type: "text", text: "efgh" }]),
+    ...toolCall("g1", "Grep", { pattern: "x" }, "g".repeat(400)),
+  ]);
+  assert.deepEqual(transcriptReads(file), {
+    sourcePrints: 4,
+    reads: { "scripts/a.mjs": 103, "scripts/b.mjs": 2, "scripts/c.mjs": 1, "notes.txt": 3, "/elsewhere/x.md": 2, "scripts/e.mjs": 2 },
+  });
+});
+
+test("transcriptReads: a transcript with no tool calls read nothing", () => {
+  const dir = makeTempDir("depth-probe");
+  const file = join(dir, "agent-a5.jsonl");
+  writeJsonl(file, [{ type: "user", timestamp: "2026-11-19T10:00:00.000Z", message: { content: "go" } }]);
+  assert.deepEqual(transcriptReads(file), { sourcePrints: 0, reads: {} });
 });

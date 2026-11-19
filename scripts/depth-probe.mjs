@@ -3,7 +3,7 @@
 // window. The depth gate calls this file directly so it no longer loads doctor's import closure;
 // `doctor.mjs --depth` stays as an adapter over the same functions.
 import { existsSync, readdirSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { claudeConfigHome, resolveEffort } from "./claude-settings.mjs";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { eachRecord } from "./jsonl.mjs";
@@ -63,6 +63,68 @@ export function transcriptStats(file) {
     depth: contextDepth(last.usage), model: last.model, toolUses,
     durationMs: first !== null && end !== null ? end - first : 0,
   };
+}
+
+// Bash calls that print a file into the transcript: `cat`, `head`, `tail`, and `sed` only with `-n`.
+const PRINTERS = new Set(["cat", "head", "tail", "sed"]);
+const SEGMENT_SPLIT = /\|\||&&|[|;]/;
+const REDIRECTION = /^\d*[<>]/;
+const unquote = (word) => word.replace(/^['"]|['"]$/g, "");
+
+// The files one shell segment prints, or [] when it is not a source print.
+function printedFiles(segment) {
+  const [command, ...args] = segment.trim().split(/\s+/).filter(Boolean).map(unquote);
+  if (!PRINTERS.has(command) || (command === "sed" && !args.includes("-n"))) return [];
+  const files = [];
+  let scriptPending = command === "sed" && !args.includes("-e");
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (REDIRECTION.test(arg)) {
+      if (/^\d*[<>]+$/.test(arg)) i += 1; // a bare `>` takes its target from the next word
+    } else if ((command === "head" || command === "tail") && (arg === "-n" || arg === "-c")) i += 1;
+    else if (command === "sed" && arg === "-e") i += 1;
+    else if (arg.startsWith("-")) continue;
+    else if (scriptPending) scriptPending = false;
+    else files.push(arg);
+  }
+  return files;
+}
+
+const resultText = (content) => (typeof content === "string" ? content
+  : Array.isArray(content) ? content.reduce((text, c) => text + (c?.type === "text" && typeof c.text === "string" ? c.text : ""), "") : "");
+
+// A path as the agent saw it: relative to its working directory when inside it, else absolute.
+function readKey(path, cwd) {
+  if (typeof cwd !== "string" || !cwd) return path;
+  const absolute = resolve(cwd, path);
+  const inside = relative(cwd, absolute);
+  return inside && !inside.startsWith("..") && !isAbsolute(inside) ? inside : absolute;
+}
+
+// What one transcript read: how many Bash calls printed a source file, and the estimated tokens
+// (characters / 4) each path's Read or print results put into the context.
+export function transcriptReads(file) {
+  let sourcePrints = 0;
+  const reads = {};
+  const pending = new Map();
+  eachRecord(file, (r) => {
+    for (const c of Array.isArray(r.message?.content) ? r.message.content : []) {
+      if (c?.type === "tool_use" && c.name === "Read" && typeof c.input?.file_path === "string")
+        pending.set(c.id, [readKey(c.input.file_path, r.cwd)]);
+      else if (c?.type === "tool_use" && c.name === "Bash" && typeof c.input?.command === "string") {
+        const files = c.input.command.split(SEGMENT_SPLIT).flatMap(printedFiles);
+        if (!files.length) continue;
+        sourcePrints += 1;
+        pending.set(c.id, files.map((f) => readKey(f, r.cwd)));
+      } else if (c?.type === "tool_result" && pending.has(c.tool_use_id)) {
+        const paths = pending.get(c.tool_use_id);
+        pending.delete(c.tool_use_id);
+        const share = Math.ceil(resultText(c.content).length / 4 / paths.length);
+        for (const p of paths) reads[p] = (reads[p] ?? 0) + share;
+      }
+    }
+  });
+  return { sourcePrints, reads };
 }
 
 // CLAUDE_DOCTOR_PROJECTS overrides the transcript root; it exists so the probe is testable

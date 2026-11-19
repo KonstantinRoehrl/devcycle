@@ -269,6 +269,8 @@
         "turns": { "type": "integer", "minimum": 0 },
         "explicitModel": { "type": "boolean" },
         "continuationOf": { "type": "integer", "minimum": 0 },
+        "sourcePrints": { "type": "integer", "minimum": 0 },
+        "reads": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
         "ts": { "type": "string", "format": "date-time" }
       },
       "required": ["kind", "runId", "stage", "agentType", "model", "inputTokens", "cacheWriteTokens",
