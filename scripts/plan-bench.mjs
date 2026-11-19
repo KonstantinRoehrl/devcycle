@@ -7,7 +7,7 @@
 // launches a session.
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isMain } from "./is-main.mjs";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
@@ -15,6 +15,7 @@ import { gitToplevel } from "./run-record.mjs";
 import { claudeProjectsDir } from "./depth-probe.mjs";
 import { readPluginList } from "./drive-surface.mjs";
 import { runPass } from "./plan-bench-pass.mjs";
+import { resultsMarkdown, scorePass } from "./plan-bench-score.mjs";
 
 export const ARMS = ["status-quo", "inline"];
 export const SIZES = ["small", "medium", "large"];
@@ -235,13 +236,24 @@ function run(argv, root) {
   });
   for (const o of outcomes) console.log(`${o.id} ${o.arm}: ${o.outcome}, $${o.usd.toFixed(2)}, ${o.legs.length} legs${o.question ? ` — unanswered: ${o.question.slice(0, 200)}` : ""}`);
   console.log(`pass ${common.passId}: ${passDir}`);
+  if (outcomes.length) console.log("\n" + resultsMarkdown(scorePass(passDir)));
+  return 0;
+}
+
+// Re-scores a finished pass from what it collected; launches nothing.
+function score(argv, root) {
+  const { flags } = parseFlags(argv, { "--pass": "value" });
+  const passId = requireValue(flags, "--pass", "a pass id") ?? "1";
+  const passDir = join(root, BENCH_DIR, "passes", passId);
+  if (!existsSync(passDir)) throw new PlanBenchError(`no pass ${passId} at ${passDir}`);
+  console.log(resultsMarkdown(scorePass(passDir)));
   return 0;
 }
 
 // Subcommand name to handler (argv, root) → exit code.
-export const SUBCOMMANDS = { estimate, run };
+export const SUBCOMMANDS = { estimate, run, score };
 
-const USAGE = "usage: plan-bench.mjs <estimate|run> [--manifest <path>] [--arms status-quo,inline] [--entries <id,…>] [--budget <usd>] [--pass <id>] " +
+const USAGE = "usage: plan-bench.mjs <estimate|run|score> [--manifest <path>] [--arms status-quo,inline] [--entries <id,…>] [--budget <usd>] [--pass <id>] " +
   "[run: --go-ahead <token> --plugin-dir <checkout> --model <id> --implementer-model <id> --claude <bin>]";
 
 export function main(argv, root = gitToplevel(process.cwd())) {
