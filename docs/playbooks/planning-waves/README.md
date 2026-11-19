@@ -36,11 +36,20 @@ text code file, not only JS/TS/Python, that matches the symbols each file declar
 `subclass` or `consumer`, and prints which extensions it read and which files are not on disk. A `red-green` task may declare `**Detail:** interface-pinned — <reason>` and
 describe its implementation in prose, as long as its interfaces, its complete failing test code and
 its gate commands stay pinned verbatim. And a large plan is delegated: 3+ independent feasibility
-unknowns run as parallel spikes, and 5+ tasks as parallel per-task drafters, each writing a file under
+unknowns run as parallel spikes, each a fast-tier `Explore` dispatch returning at most fifteen lines
+(an unknown that needs only reading rides the research dispatch instead), and 5+ tasks as parallel
+`devcycle:plan-drafter` dispatches, one per task. Drafters read a context pack,
+`.devcycle/plan-work/<run id>/pack.md` (about 8k tokens, stable content first), and
+`references/plan-task-format.md` instead of this playbook, and each writes a file under
 `.devcycle/plan-work/<run id>/` that the coordinator splices into the plan by shell concatenation without reading the drafts, then
 checks across tasks (including a scan for placeholders and cross-task back-references) in one checker
 dispatch that writes its findings to a file and returns the path and a count, per
-[`references/delegated-planning.md`](../../../references/delegated-planning.md). Below both
+[`references/delegated-planning.md`](../../../references/delegated-planning.md). Every planning
+dispatch names its model, at the tier
+[`references/model-routing.md`](../../../references/model-routing.md) § Planning dispatches assigns,
+and doctor's Planning breakdown reports it: `drafters:` lists each drafter's turns and model,
+`source prints:` counts Bash calls that printed a source file, and `tier-fit:` flags a spike,
+research or checker dispatch that ran outside the fast tier. Below both
 thresholds planning runs inline, and the finished plan looks the same either way.
 
 Once the plan is drafted, planning runs a six-item self-review — spec coverage, the per-task

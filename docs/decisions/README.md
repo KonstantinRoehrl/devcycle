@@ -5,6 +5,44 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-19 — Planning names its models and runs spikes as capped fast-tier `Explore`
+
+**Decision:** `references/model-routing.md` gains § Planning dispatches: every planning dispatch
+names its model, a session-tier one the orchestrator's own id, at the tier its table assigns (research,
+spike and checker fast; a drafter fast only for an interface-pinned task with Files ≤ 5). Spikes run
+as `Explore` and return at most fifteen lines, which the coordinator persists; an unknown that only
+needs reading rides the research dispatch. Drafters read a context pack of about 8k tokens,
+`.devcycle/plan-work/<run id>/pack.md`, written stable content first. The "fifth of the price"
+figure gives way to `scripts/pricing.mjs`, and `references/ledger.md` documents `agent-cost`'s
+`sourcePrints` and `reads`.
+
+**Why:** planning dispatches inherited the session model, or a configured default subagent model,
+and spikes ran as `general-purpose` at the session tier (#444, #406; spec §9.5, §9.7). The section
+sits in `references/model-routing.md`, which seven closures read, so each of them grows by its bytes;
+`playbooks/planning-waves.md` section-reads it for the repo-research dispatch, and
+`references/delegation.md` § Research dispatches, in eight closures, excepts planning dispatches
+from its omit-the-override rule.
+
+**Budgets:**
+
+```text
+budget: context-budget.json commands/continue.md 75975
+budget: context-budget.json commands/cycle.md 88750
+budget: context-budget.json playbooks/executing-waves.md 122013
+budget: context-budget.json playbooks/learning-from-sessions.md 66781
+budget: context-budget.json playbooks/maintaining-the-repo.md 68749
+budget: context-budget.json playbooks/planning-waves.md 62924
+budget: context-budget.json playbooks/receiving-review.md 125362
+budget: context-budget.json playbooks/reviewing-code.md 103944
+budget: context-budget.json playbooks/reviewing-the-branch.md 61308
+budget: context-budget.json playbooks/scoping-the-request.md 36723
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 96225
+budget: context-budget.json playbooks/taking-the-fast-path.md 54866
+budget: context-budget.json references/delegation.md 12832
+budget: context-budget.json references/model-routing.md 10497
+budget: surface-budget.json surfaceTotal 7121
+```
+
 ## 2026-11-19 — Planning drafters run as `devcycle:plan-drafter`
 
 **Decision:** delegated planning dispatches its drafters as the new `devcycle:plan-drafter` agent

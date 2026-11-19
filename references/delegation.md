@@ -70,7 +70,8 @@ Repo research — locating code, mapping surfaces, tracing usage, discovering do
 subagent dispatch that returns **a map, not file dumps**. Every dispatch resolves its model
 per `references/model-routing.md` — the tier, the ceiling that stops any dispatch resolving above
 the orchestrator's own tier, and the session tier, whose dispatch omits the override and logs
-`outcome=model session`.
+`outcome=model session`, except a planning dispatch, which names its model at either tier per
+`references/model-routing.md` § Planning dispatches.
 It names its agent type explicitly too: read-only search, mapping and tracing go to `Explore`,
 never `general-purpose` — measured at a 13955 startup floor against a 32711 median, ~2.3× per
 dispatch. `general-purpose` is for work that must also write or judge.
