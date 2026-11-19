@@ -205,8 +205,10 @@ plugin ships. Start there.
   cycle's own session sees a subagent finish. The hooks module (`hooks/devcycle-mod.mjs`) adds an
   `agent-trace` row per finished subagent turn, which doctor cross-checks against those depth rows.
   The same sensor prices each finished subagent into an `agent-cost` row, and with the `plan-stats` row
-  the planning handoff writes, doctor prints a per-run Planning breakdown: dollars by planning role and
-  the P1–P12 planning rubric. `scripts/plan-bench.mjs` replays past specs through headless planning,
+  the planning handoff writes, doctor prints a per-run Planning breakdown: dollars by planning role,
+  each drafter's turns and model, source-file prints, a tier-fit flag and the P1–P12 planning rubric.
+  Delegated planning drafts each task through the `devcycle:plan-drafter` agent, which reads a shared
+  context pack and `references/plan-task-format.md` rather than the whole planning playbook. `scripts/plan-bench.mjs` replays past specs through headless planning,
   once per `planningStrategy` arm, and scores each replay on that rubric
   ([`docs/playbooks/planning-waves/README.md`](docs/playbooks/planning-waves/README.md) § Benchmarking
   planning strategies).

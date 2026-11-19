@@ -28,7 +28,7 @@ function walk(dir, acc = []) {
   return acc;
 }
 
-// The resolution planning-waves.md documents: a planner acknowledges a referencer (test or
+// The resolution references/plan-task-format.md documents: a planner acknowledges a referencer (test or
 // non-test) that does not need updating, with a reason, and the gate clears rather than being
 // walked around in prose.
 //   - Blast-radius override: <changed-file> [→ <referencer>] — <reason>
@@ -125,8 +125,8 @@ export function blastRadiusLeg(planText, { planPath, repoRoot }) {
   };
 }
 
-// --scan: the planner's pass while deriving a task's Files block (playbooks/planning-waves.md task
-// template). Wider than the gate on purpose -- any text code file, declared symbols as well as the
+// --scan: the planner's pass while deriving a task's Files block (references/plan-task-format.md
+// § The task block). Wider than the gate on purpose -- any text code file, declared symbols as well as the
 // basename -- and advisory: it exits 0 whatever it finds, and the gate stays the authority at merge.
 export const SCAN_CODE_EXT = new Set([
   ...CODE_EXT, ".cjs", ".cs", ".java", ".kt", ".kts", ".go", ".rs", ".rb", ".php", ".swift", ".scala",

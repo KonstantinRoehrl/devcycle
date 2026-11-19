@@ -14,7 +14,7 @@ import { dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { AGENT_ID_CHARS, AGENT_TYPE_CHARS, MODEL_CHARS, clean, runContext, sessionJoined } from "./lib/run-context.mjs";
-import { transcriptStats } from "../scripts/depth-probe.mjs";
+import { transcriptReads, transcriptStats } from "../scripts/depth-probe.mjs";
 import { priceTranscript } from "../scripts/dispatch-cost.mjs";
 import { holdStop, holdTurnEnd, markEnded, markStopped } from "../scripts/dispatch-health.mjs";
 import { holdsDriveToken } from "../scripts/drive-lock.mjs";
@@ -38,16 +38,25 @@ export const roleOf = (description) => (typeof description === "string" ? ROLE_P
 
 // `unpriced-model:<id>` is the longest measurement; the id is cleaned to MODEL_CHARS and 80 characters first.
 const MEASUREMENT_MAX = 120;
-const COST_COUNTS = ["inputTokens", "cacheWriteTokens", "cacheReadTokens", "outputTokens", "turns"];
+const COST_COUNTS = ["inputTokens", "cacheWriteTokens", "cacheReadTokens", "outputTokens", "turns", "sourcePrints"];
 
 // What an agent spent since its earlier agent-cost rows of this run: its transcript is cumulative,
 // so a resumed agent's later stop must not count the first stop's turns again. A null usd on either
 // side makes the difference unknowable; a count is clamped because a transcript can only shrink by
-// being rewritten, and a row's schema forbids negatives.
+// being rewritten, and a row's schema forbids negatives. A count the totals do not carry is not
+// measured, and an earlier row written before a count existed contributes nothing to it. `reads` is
+// a delta per path: a path whose estimate did not grow is dropped.
 export function costDelta(totals, earlier) {
   const delta = { continuationOf: earlier.length };
-  for (const key of COST_COUNTS)
-    delta[key] = Math.max(0, totals[key] - earlier.reduce((sum, row) => sum + row[key], 0));
+  for (const key of COST_COUNTS.filter((k) => k in totals))
+    delta[key] = Math.max(0, totals[key] - earlier.reduce((sum, row) => sum + (row[key] ?? 0), 0));
+  if (totals.reads) {
+    delta.reads = {};
+    for (const [path, tokens] of Object.entries(totals.reads)) {
+      const grown = tokens - earlier.reduce((sum, row) => sum + (row.reads?.[path] ?? 0), 0);
+      if (grown > 0) delta.reads[path] = grown;
+    }
+  }
   delta.usd = totals.usd === null || earlier.some((row) => row.usd === null)
     ? null
     : Math.max(0, totals.usd - earlier.reduce((sum, row) => sum + row.usd, 0));
@@ -141,14 +150,16 @@ function main() {
     const sidecar = readSidecar(transcriptPath);
     const role = roleOf(sidecar.description);
     const priced = priceTranscript(transcriptPath);
-    const cost = costDelta(priced, earlierCostRows(repoRoot, run, agentId));
+    // A planning dispatch also records what it read; `reads` is written even when empty, so its
+    // presence says the row was measured.
+    const cost = costDelta(role ? { ...priced, ...transcriptReads(transcriptPath) } : priced, earlierCostRows(repoRoot, run, agentId));
     // A null usd says why: the transcript's own measurement, or, when only an earlier row was unpriced, that.
     const measurement = cost.usd === null ? clean(priced.usd === null ? priced.measurement : "earlier-row-unpriced", MODEL_CHARS, MEASUREMENT_MAX) : "";
     append(["--kind", "agent-cost", "--stage", stage,
       "--agentType", clean(input.agent_type, AGENT_TYPE_CHARS, 80) || "unknown",
       "--agentId", agentId,
       "--model", clean(stats.model, MODEL_CHARS, 80) || "unknown",
-      ...(role ? ["--role", role] : []),
+      ...(role ? ["--role", role, "--sourcePrints", String(cost.sourcePrints), "--reads", JSON.stringify(cost.reads)] : []),
       "--explicitModel", String(typeof sidecar.model === "string" && sidecar.model !== ""),
       "--inputTokens", String(cost.inputTokens), "--cacheWriteTokens", String(cost.cacheWriteTokens),
       "--cacheReadTokens", String(cost.cacheReadTokens), "--outputTokens", String(cost.outputTokens),

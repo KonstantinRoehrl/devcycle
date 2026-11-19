@@ -5,6 +5,150 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-19 — Phase 1 review fixes, round 2: the drafter's stop and the plan header
+
+**Decision:** a drafter that cannot hold a pinned interface returns a summary line beginning
+`stopped: <what pin cannot hold>` and writes no draft; the coordinator, who owns Interfaces, decides
+the pin and re-dispatches that task or drafts it inline, and the merge splices only drafts that exist
+and does not proceed while a dispatched task has none. This is deliberately not Phase 2b's
+`interface-delta:` protocol (spec §9.4): no lock, no deltas, no keyword beyond `stopped:`. The
+drafter-tier sentence in `references/delegated-planning.md` now defers to
+`references/model-routing.md` § Planning dispatches and § Model tiers instead of restating a narrower
+subset of the table. The plan header gets its own work file, `plan-header.md`, written once by the
+coordinator before it dispatches drafters, so the drafter brief's by-path reference and the
+`## Quality Constraints` section its `**Quality constraints:**` ids cite have a file to point at.
+`agents/plan-drafter.md` also gains the `output.md` report line its sibling agents carry.
+
+**Why:** the round 2 branch review found the drafter's stop had no reader, the tier sentence
+contradicted the routing table, and the brief named a plan header no work-file list contained.
+
+**Budgets:**
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 64088
+budget: surface-budget.json surfaceTotal 7139
+```
+
+## 2026-11-19 — Phase 1 review fixes: planning model line and checker tier
+
+**Decision:** a planning dispatch records no `outcome=model … (planning: <role>)` ledger line, which
+departs from spec §9.5 bullet 1: `.devcycle/ledger.md` is created by `playbooks/executing-waves.md`,
+after planning, a planning dispatch has no task id, and `references/ledger.md`'s event line does not
+define the two strings. Its audit record is its `agent-cost` run-record row (`model`, `explicitModel`),
+which doctor's tier-fit check already reads. The Phase 1 checker stays routed fast: it reviews the whole
+merged plan, where spec §9.5's "unless the edge crosses Files > 5" escape belongs to Phase 2a's
+cross-task edge checker, but §9.5 classifies the checker role as fast and doctor's tier-fit rule keys on
+role. The escape and the per-edge scope arrive with Phase 2a; the benchmark's P7 bar is where a quality
+loss from this choice would show, and a loss reopens it. The Quality-constraints line rule moves into
+`references/plan-task-format.md`, `agents/plan-drafter.md` drops the `interface-delta:` protocol
+until Phase 2b (spec §9.4) has a consumer for it, and the coordinator sets a drafter's tier from the
+task cut it holds.
+
+**Why:** the Phase 1 branch review found the drafter could not read the Quality-constraints rule it was
+told to follow, the model line had no writer or reader, and `interface-delta:` had no coordinator rule.
+
+**Budgets:**
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 63490
+budget: surface-budget.json surfaceTotal 7128
+```
+
+## 2026-11-19 — Planning names its models and runs spikes as capped fast-tier `Explore`
+
+**Decision:** `references/model-routing.md` gains § Planning dispatches: every planning dispatch
+names its model, a session-tier one the orchestrator's own id, at the tier its table assigns (research,
+spike and checker fast; a drafter fast only for an interface-pinned task with Files ≤ 5). Spikes run
+as `Explore` and return at most fifteen lines, which the coordinator persists; an unknown that only
+needs reading rides the research dispatch. Drafters read a context pack of about 8k tokens,
+`.devcycle/plan-work/<run id>/pack.md`, written stable content first. The "fifth of the price"
+figure gives way to `scripts/pricing.mjs`, and `references/ledger.md` documents `agent-cost`'s
+`sourcePrints` and `reads`.
+
+**Why:** planning dispatches inherited the session model, or a configured default subagent model,
+and spikes ran as `general-purpose` at the session tier (#444, #406; spec §9.5, §9.7). The section
+sits in `references/model-routing.md`, which seven closures read, so each of them grows by its bytes;
+`playbooks/planning-waves.md` section-reads it for the repo-research dispatch, and
+`references/delegation.md` § Research dispatches, in eight closures, excepts planning dispatches
+from its omit-the-override rule.
+
+**Budgets:**
+
+```text
+budget: context-budget.json commands/continue.md 75975
+budget: context-budget.json commands/cycle.md 88750
+budget: context-budget.json playbooks/executing-waves.md 122013
+budget: context-budget.json playbooks/learning-from-sessions.md 66781
+budget: context-budget.json playbooks/maintaining-the-repo.md 68749
+budget: context-budget.json playbooks/planning-waves.md 62924
+budget: context-budget.json playbooks/receiving-review.md 125362
+budget: context-budget.json playbooks/reviewing-code.md 103944
+budget: context-budget.json playbooks/reviewing-the-branch.md 61308
+budget: context-budget.json playbooks/scoping-the-request.md 36723
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 96225
+budget: context-budget.json playbooks/taking-the-fast-path.md 54866
+budget: context-budget.json references/delegation.md 12832
+budget: context-budget.json references/model-routing.md 10497
+budget: surface-budget.json surfaceTotal 7121
+```
+
+## 2026-11-19 — Planning drafters run as `devcycle:plan-drafter`
+
+**Decision:** delegated planning dispatches its drafters as the new `devcycle:plan-drafter` agent
+(tools Read, Grep, Glob, Bash, Write; no model pin), which reads the context pack, the plan header and
+`references/plan-task-format.md`, never `playbooks/planning-waves.md`, and writes only its own draft
+files. It is not in `GUARDED_AGENT_TYPES`: the git guard denies `git worktree add`, which prototyping
+needs, so the agent forbids staging, committing and pushing in its own text until Phase 2a drops
+prototyping.
+
+**Why:** a general-purpose drafter loaded the whole playbook and its closure for one task's rules;
+a named agent with a narrow reading list lowers each drafter's startup floor (#445; spec §9.3
+"Drafter agent").
+
+**Budgets:**
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 60784
+budget: surface-budget.json surfaceTotal 7085
+```
+
+## 2026-11-19 — Brainstorm persists the spec reviewer's confirmed claims
+
+**Decision:** after `devcycle:spec-reviewer`'s last pass, `commands/cycle.md` step 4 writes the
+reviewer's Verified list to `.devcycle/spec-verified.md` and stamps it through `spec-claims.mjs write`;
+the reviewer's Verified entries take the one-line shape `parseVerified` reads. The reviewer stays
+read-only: the coordinator writes both files.
+
+**Why:** planning's feasibility gate re-verified every claim the reviewer had just confirmed (#445;
+spec §9.7).
+
+**Budgets:**
+
+```text
+budget: context-budget.json commands/cycle.md 88590
+budget: surface-budget.json surfaceTotal 7057
+```
+
+## 2026-11-19 — Planning splits its drafter rules into `references/plan-task-format.md`
+
+**Decision:** `playbooks/planning-waves.md` keeps the coordinator's work (feasibility gate, Quality
+Constraints, the cut, the strategy choice, the Dispatch Map, the handoff); the task block, the three
+per-task declaration lines, Files derivation, No placeholders and the per-task checks move to the new
+`references/plan-task-format.md`, which whoever drafts reads. Self-review item 8's description of the
+plan-check legs moves into `plan-check.mjs --help`, single-section citations become `read-section.mjs`
+reads, and the feasibility gate starts from `spec-claims.mjs check`.
+
+**Why:** a drafter needs the task rules, never the coordinator's playbook, and the planning closure
+carried whole references for one section each (#445; spec §9.3, budget target ≤ 70 KB).
+
+**Budgets:**
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 60860
+budget: context-budget.json playbooks/maintaining-the-repo.md 67297
+budget: surface-budget.json surfaceTotal 7053
+```
+
 ## 2026-11-19 — The planning benchmark replays headless, answers gates by resuming, and clones
 
 **Decision:** `scripts/plan-bench.mjs` replays a gitignored corpus of specs through headless

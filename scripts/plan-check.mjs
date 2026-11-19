@@ -34,6 +34,37 @@ export const LEGS = {
   briefFacts: briefFactsLeg,
 };
 
+// What each leg checks, in LEGS order: `plan-check --help` prints it, so the playbook need only say
+// "run it; fix or override".
+export const LEG_HELP = Object.freeze({
+  codeBlocks: "pasted JS/mjs code blocks parse.",
+  briefCompleteness: "every task carries Files / Interfaces / Dependencies / a valid Evidence class / Quality constraints, the header carries one `**Verification gate:**` code span, pinned gates run every required-checks manifest entry, a `red-green` task creating a non-test source file mentions a stub, an interface-pinned task gives a reason, is `red-green` and pins a fenced block, and the Dispatch Map lists every task. It also notes, never failing, each prescribed git command the dispatch guard denies.",
+  blastRadius: "every JS/TS/Python file naming a changed file's basename, test or not, sits in some Files block, each finding opening with the task that declares the changed file.",
+  contentCoupling: "no same-wave task's brief names a file another same-wave task edits.",
+  budgetFixtures: "a task touching a budgeted surface (`playbooks/`, `commands/`, `agents/`, `references/` markdown) also touches its budget fixtures and `docs/decisions/README.md`; `references/` and `agents/` markdown match the context budget too: every entry point pays for the references it cites, and agents count toward a reference's fan-in.",
+  waveDisjointness: "no two same-wave tasks list the same file.",
+  authoredClaims: "every load-bearing plan-authored claim (a file or section target, a count, \"X already does Y\") carries `(verified: <cmd>)` or `(assumption)`.",
+  briefFacts: "every path a brief cites resolves, every cited line is within its file, and every fenced block pinned in a task carries a `(verified: <cmd>)` or `(unrun: <reason>)` run marker. It also notes, never failing, a call-shaped span nothing defines.",
+});
+
+const OVERRIDE_FORMS = [
+  "- Blast-radius override: <changed-file> [→ <referencer>] — <reason>",
+  "- Content-coupling override: Task B → <file> (Task A) — <reason>",
+  "- Budget-fixture override: <surface-or-fixture> — <reason>",
+  "- Citation override: <path> — <reason>",
+];
+
+export function helpText() {
+  return [
+    USAGE,
+    "",
+    ...Object.keys(LEGS).map((leg) => `${leg}: ${LEG_HELP[leg]}`),
+    "",
+    "Overrides (each needs a reason):",
+    ...OVERRIDE_FORMS,
+  ].join("\n");
+}
+
 export function planCheck(planText, { planPath, repoRoot, only }) {
   if (parseDispatchMap(planText) === null)
     return { findings: [{ leg: "dispatchMap", text: 'missing "## Dispatch Map" section — every leg needs it' }], notes: [], legs: [] };
@@ -73,7 +104,7 @@ function die(msg) {
   process.exit(1);
 }
 
-const USAGE = "usage: plan-check.mjs <plan-path> [repo-root] [--only <leg>] [--verbose]";
+const USAGE = "usage: plan-check.mjs <plan-path> [repo-root] [--only <leg>] [--verbose] [--help]";
 
 // A passing run stays compact: each leg's notes collapse to one count line unless --verbose asks
 // for them. A failing run always lists them, since a note can explain the finding beside it.
@@ -90,12 +121,13 @@ function printNotes(notes, { listAll }) {
 function main(argv) {
   let parsed;
   try {
-    parsed = parseFlags(argv, { "--only": "value", "--verbose": "none" },
+    parsed = parseFlags(argv, { "--only": "value", "--verbose": "none", "--help": "none" },
       { allowPositionals: true, requireValues: "nonEmpty" });
   } catch (e) {
     die(`${e.message} — ${USAGE}`);
   }
   const { flags, positionals } = parsed;
+  if (flags["--help"] === true) return void console.log(helpText());
   const only = flags["--only"];
   const verbose = flags["--verbose"] === true;
   const [planPath, repoRoot = process.cwd()] = positionals;

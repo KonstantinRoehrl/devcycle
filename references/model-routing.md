@@ -36,7 +36,7 @@ model id written here, because ids in playbook prose rot as models change:
   free of a `model:` key. **Caveat:** that inheritance is what "no override"
   assumes, and it does NOT hold for a subagent when a default subagent model
   is configured — a dispatch with no override then resolves to that default,
-  not to the orchestrator's own model, and **nothing mitigates that today**:
+  not to the orchestrator's own model, and **outside planning nothing mitigates that today**:
   with one configured, every dispatch that resolves to this tier runs at that
   default instead. The escape hatch is implemented, unwired, and **narrower than
   this caveat** — `resolveModel` in `scripts/model-pool.mjs` takes a
@@ -71,8 +71,8 @@ Derivation predicates (dispatch-time-observable inputs only):
   round on this task returned blocking findings (escalate on retry, never on
   the first attempt). Measured, fast-tier implementers did the same raw work
   as session-tier ones (785k vs 794k context units, 18k vs 20k output tokens
-  per run) at a fifth of the price, and a wrong cheap guess costs at most one
-  review round.
+  per run) at the lower per-token rates `scripts/pricing.mjs` holds, and a wrong cheap guess
+  costs at most one review round.
 - **task-reviewer**: fast tier iff the task diff is ≤400 changed lines
   and ≤5 files; else session tier.
 - **research / exploration dispatch** (`references/delegation.md` §
@@ -135,3 +135,24 @@ forms need an escalation: a pin that falls through instead records
 caveat above, which also records that no caller passes that flag — so neither form can appear in a
 ledger this version writes. An escalation always names the signal that fired. Research dispatches
 that run before any ledger exists log nothing; where a ledger exists, same shape.
+
+## Planning dispatches
+
+Planning names the model of every dispatch it makes: a fast-tier dispatch names the fast-tier id,
+and a session-tier one names the orchestrator's own id rather than omitting the override, so a
+configured default subagent model cannot take it over. The role is the `description` prefix
+`references/delegated-planning.md` owns.
+
+| Dispatch | Role | Tier |
+| --- | --- | --- |
+| Research map, spike | `research`, `spike` | fast; `Explore`, since neither writes a file (the coordinator persists the result) |
+| Drafter of an interface-pinned task with Files ≤ 5 | `drafter` | fast |
+| Drafter of a task that pins its code, adds an abstraction, lists Files > 5 or crosses packages | `drafter` | session |
+| Repair, a drafter re-dispatched with a finding | `repair` | the tier of the drafter it repairs |
+| Checker | `checker` | fast |
+| Coordinator | — | session (unchanged) |
+
+A planning dispatch's audit record is its `agent-cost` run-record row: the `model` and `explicitModel`
+fields the dispatch sensor writes. Doctor's Planning breakdown reads them and flags a
+`spike`, `research` or `checker` dispatch that ran outside the fast tier (`tier-fit:`) and lists each
+drafter's turns and model (`drafters:`), since a cheaper model can take more turns.

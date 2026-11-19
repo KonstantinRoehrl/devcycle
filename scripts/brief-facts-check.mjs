@@ -3,7 +3,7 @@
 // dispatched. Every cited path resolves and every cited line is within its file, or a
 // `- Citation override:` line says why not, and every fenced block pinned in a task's brief carries a run marker,
 // and a call-shaped span nothing defines is a note.
-// See playbooks/planning-waves.md item 8.
+// See references/plan-task-format.md § Per-task checks; `plan-check.mjs --help` lists the legs.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";

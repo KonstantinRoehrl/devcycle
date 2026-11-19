@@ -282,3 +282,22 @@ test("the same task passes once a step writes the stub", () => {
   const r = run(plan(task(1, ["src/a.txt"]) + creates));
   assert.equal(r.status, 0, r.stderr);
 });
+
+test("--help prints every leg's check in LEGS order and the four override forms, exit 0", async () => {
+  const planCheck = await import("../../scripts/plan-check.mjs");
+  assert.deepEqual(Object.keys(planCheck.LEG_HELP ?? {}), Object.keys(planCheck.LEGS));
+  assert.ok(Object.isFrozen(planCheck.LEG_HELP));
+  const r = spawnSync(process.execPath, [SCRIPT, "--help"], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, `${planCheck.helpText?.()}\n`);
+  const lines = r.stdout.split("\n");
+  assert.match(lines[0], /^usage: plan-check\.mjs .*\[--help\]$/);
+  assert.equal(lines[1], "");
+  assert.deepEqual(lines.slice(2, 10).map((l) => l.split(":")[0]), Object.keys(planCheck.LEGS));
+  assert.match(r.stdout, /^budgetFixtures: .*docs\/decisions\/README\.md/m);
+  assert.deepEqual(lines.slice(10, 16), ["", "Overrides (each needs a reason):",
+    "- Blast-radius override: <changed-file> [→ <referencer>] — <reason>",
+    "- Content-coupling override: Task B → <file> (Task A) — <reason>",
+    "- Budget-fixture override: <surface-or-fixture> — <reason>",
+    "- Citation override: <path> — <reason>"]);
+});

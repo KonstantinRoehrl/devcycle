@@ -26,6 +26,7 @@ import { collapseRequests, isTurn } from "./request-collapse.mjs";
 import { SYNTHETIC_MODEL, contextDepth, budgetBand, claudeProjectsDir, findTranscriptFiles, resolveDepth, depthLine } from "./depth-probe.mjs";
 import { usd, markdownTable, deltaText, directionLine, cohortSessionsText, withInferredNote, unpricedMediansNote } from "./doctor-format.mjs";
 import { planningBreakdowns, planningBreakdownLines, corpusGateLegsLine } from "./doctor-planning.mjs";
+import { loadTable } from "./model-pool.mjs";
 import { buildOverview, renderOverview, renderTrendSummary } from "./doctor-overview.mjs";
 
 export { SYNTHETIC_MODEL, contextDepth, budgetBand, findTranscriptFiles, resolveDepth };
@@ -3231,7 +3232,7 @@ export function renderReport(summaries, ctx) {
     "no agent-depth records (the dispatch-sensor hook writes one per finished subagent)",
   ));
 
-  const planning = planningBreakdowns(summaries);
+  const planning = planningBreakdowns(summaries, { tierTable: loadTable() });
   if (planning.length) {
     section("### Planning breakdown (observed)", "planning-breakdown");
     L.push(...planningBreakdownLines(planning));

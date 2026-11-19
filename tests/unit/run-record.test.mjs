@@ -1118,3 +1118,26 @@ test("append agent-cost carries a measurement string beside a null usd, and refu
   assert.notStrictEqual(bad.status, 0);
   assert.match(bad.stderr, /"measurement" does not match/);
 });
+
+test("append agent-cost carries a source-print count and a JSON map of read estimates", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/cost5");
+  const r = run(["append", "--run", runId, "--repo", "/tmp/cost5", ...AGENT_COST_ARGS,
+    "--sourcePrints", "2", "--reads", '{"scripts/a.mjs":10,"/elsewhere/x.md":0}'], runs);
+  assert.strictEqual(r.status, 0, r.stderr);
+  const row = lastLine("/tmp/cost5", runId);
+  assert.strictEqual(row.sourcePrints, 2);
+  assert.deepEqual(row.reads, { "scripts/a.mjs": 10, "/elsewhere/x.md": 0 });
+});
+
+test("append agent-cost refuses reads that are not JSON, not an object, or not non-negative integers, and writes nothing", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/cost6");
+  for (const [reads, why] of [["nope", /--reads must be JSON, got "nope"/], ["[1]", /"reads" must be an object/],
+    ['{"a.mjs":-1}', /"reads\.a\.mjs" must be >= 0, got -1/], ['{"a.mjs":1.5}', /"reads\.a\.mjs" must be an integer/]]) {
+    const r = run(["append", "--run", runId, "--repo", "/tmp/cost6", ...AGENT_COST_ARGS, "--reads", reads], runs);
+    assert.notStrictEqual(r.status, 0, reads);
+    assert.match(r.stderr, why);
+  }
+  assert.strictEqual(readFileSync(recordPath("/tmp/cost6", runId), "utf8").split("\n").filter(Boolean).length, 1);
+});

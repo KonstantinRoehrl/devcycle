@@ -10,24 +10,27 @@ Read `${CLAUDE_PLUGIN_ROOT}/references/stage-log.md` now, and log and skip as it
 
 ## Engine selection (keyed to `profile`)
 
-Read `profile` from the `knobs:` line per `${CLAUDE_PLUGIN_ROOT}/references/config.md` § Knob
-channel. At **`lean` / `standard`** do NOT
+Read `profile` from the `knobs:` line per
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/config.md knob-channel`. At **`lean` / `standard`** do NOT
 load `superpowers:writing-plans` — the Plan mechanics section below is self-contained. At
 **`thorough`** it is a REQUIRED SUB-SKILL for all plan-writing mechanics; where the two disagree this
 playbook wins, and these rules of that section always override it — the plan header's "For agentic workers"
 line names `playbooks/executing-waves.md` as the executor (never upstream's
 subagent-vs-inline execution choice), the header carries a `**Verification gate:**` line, no task gets a
-commit step, a `red-green` task that creates its module under test writes a stub before its failing test,
-an interface-pinned task keeps every pin the No placeholders exception names, every Files block is
-derived by the task template's `--scan`, every pinned fenced block carries a run marker (item 7), and item 8's plan gate runs. Everything outside that one section is unconditional, so a finished plan has
+commit step, every task is drafted per `references/plan-task-format.md` (§ Drafting each task below),
+and self-review item 6's plan gate runs. Everything outside that one section is unconditional, so a finished plan has
 the same shape whichever engine produced it.
 
 ## Feasibility gate — before any detailed planning
 
 Run a short feasibility pass and record an explicit verdict before writing any task:
 
-- Can this be built here, with what actually exists? Verify every API, module, tool, document
-  section, and convention the spec names against real docs or code — never assume one exists.
+- Can this be built here, with what actually exists? Run
+  `node "${CLAUDE_PLUGIN_ROOT}/scripts/spec-claims.mjs" check --spec <spec-path>` first (skip it with
+  `spec: none`): a claim on a `verified:` line was confirmed by the spec reviewer against this spec
+  and cites files unchanged since, so it stands. Verify every `reverify:` line, every claim the spec
+  makes that neither list names, and all of them when it prints `verify every claim`, against real
+  docs or code — never assume an API, module, tool, document section or convention exists.
 - What are the real unknowns? Spike the riskiest bit if a quick spike can settle it; the
   thresholds below (Delegated planning) say when spikes run as parallel dispatches.
 - Verdict: **GO**, or **NO-GO** — a stop, not a footnote, since a risk noted inside a detailed plan
@@ -45,8 +48,8 @@ a `## Quality Constraints` section into the plan: one line per applicable constr
 `QC<n>`, shaped `QC1 — <do or don't> (measured against: <repo convention or named source>)`. That
 section is **not** `## Global Constraints`: those lines are copied verbatim from the spec, these are
 derived from the criteria catalog, and the precedence rule requires the difference to stay visible,
-so the two never merge. Each task then carries a `**Quality constraints:**` line — `QC1, QC3`, or
-`none` — naming the ids whose subject its own `**Files:**` touch, and
+so the two never merge. Each task then carries a `**Quality constraints:**` line, which
+`references/plan-task-format.md` § The task block defines, and
 `playbooks/executing-waves.md` resolves them back to verbatim lines when it
 slices each brief, so an implementer is told up front what a later audit would flag it for.
 
@@ -73,8 +76,8 @@ threshold, so the coordinator drafts every task itself; `auto` and `status-quo` 
 
 ## Plan mechanics — the native engine (`lean` / `standard`)
 
-Skip this section at `thorough`, except the task template, the No placeholders paragraph, the Derive each Files block paragraph and
-self-review items 7 (run markers) and 8 (plan gate), which the override list names and every engine follows; the sub-skill supplies the rest there. **Where the plan goes:**
+Skip this section at `thorough`, except self-review item 6 (plan gate), which the override list
+names; the sub-skill supplies the rest there. **Where the plan goes:**
 `docs/superpowers/plans/YYYY-MM-DD-<topic>.md`, unless the user prefers another location. A spec
 covering multiple independent subsystems should have been split into sub-project specs during
 brainstorming; if it wasn't, suggest one plan per subsystem, each producing working, testable
@@ -83,11 +86,7 @@ software on its own.
 **Task right-sizing and step granularity.** A task is the smallest unit that carries its own test cycle
 and is worth a fresh reviewer's gate, ending in an independently testable deliverable: fold setup,
 configuration, scaffolding, and documentation steps into the task whose deliverable needs them, and
-split only where a reviewer could reject one task while approving its neighbor. Each step is one action,
-2–5 minutes of work, ordered as the evidence class requires — for `red-green`: write the failing test /
-run it and confirm red / write the minimal code / run it and confirm green, opened by a step that writes a minimal
-stub when the task creates the module under test, so the red is an assertion failure and not a missing module; for `green-green`, the baseline
-suite run is step 1. Never a commit step.
+split only where a reviewer could reject one task while approving its neighbor. How each task's steps are written is `references/plan-task-format.md`'s.
 
 **Plan header — every plan starts with it:** an H1 `<Feature Name> Implementation Plan`; a blockquote
 for agentic workers naming `playbooks/executing-waves.md` as the REQUIRED
@@ -98,91 +97,28 @@ exact shell command in one code span; `references/evidence.md` § File-backed ev
 version floors, dependency limits, naming and copy rules, platform requirements — one line each,
 copied verbatim, implicitly part of every task's requirements); and `## Quality Constraints` above.
 
-**Task template — each task carries, in this order:** an H3 `Task N: <Component Name>`; `**Files:**`
-(Create / Modify, with `path.py:123-145` line ranges where they help / Test; a `{a,b}` brace list
-declares one path per alternative, and outside the comma list right after a `Create:`/`Modify:`/`Test:`
-label an extensionless path counts only as a code span); `**Interfaces:**` (Consumes
-— what this task uses from earlier tasks, exact signatures; Produces — what later tasks rely on, exact
-function names and parameter and return types); the declaration lines below, an optional
-`**Detail:**` line (No placeholders), plus the
-`**Quality constraints:**` line above and a `**Lessons:**` line right after it — emitted empty by
-planning and filled with the task's matched lessons by `task-dispatch.mjs` at dispatch; then
-`- [ ]` steps carrying the actual code, the exact command, and the expected output inline.
-
-**Derive each Files block.** Before writing a task's `**Files:**`, run
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/blast-radius-check.mjs" --scan <changed-file…> [--symbol <name>…]`
-on the files it modifies. It walks every text code file and matches each declared symbol and the
-basename, with or without its extension; `--symbol` adds a name it misses. Every consumer, subclass
-and test it lists goes into the block, or gets a `Blast-radius override` line with a reason. It is
-advisory: item 8's gate still checks the block.
-
-**No placeholders.** Every step carries the actual content the implementer needs; none of these may
-appear: "TBD", "TODO", "implement later", "fill in details"; "add appropriate error handling" / "add
-validation" / "handle edge cases"; "write tests for the above" without the test code; "similar to
-Task N" instead of the repeated code (tasks are read out of order, and concurrently); a step that
-says what to do without showing how (code steps need code blocks); a reference to a type, function,
-or method no task defines. One exception: a `red-green` task may declare `**Detail:** interface-pinned
-— <reason>` and write its implementation steps as prose, provided it still pins verbatim its full
-`**Interfaces:**` block with exact signatures and constants, the complete failing test code (every
-case) in a fenced block, and the exact gate commands with their expected red and green output.
-
 **Self-review — once the plan is complete,** run this checklist yourself (not a subagent dispatch; on the delegated path the cross-task items run
 as the checker dispatch `references/delegated-planning.md` names), fixing what it finds inline as you go; no
 re-review pass.
 
 1. **Spec coverage:** point each spec requirement at the task that implements it; add a task for gaps.
-2. **Placeholder scan:** search the plan for the failures above and fix them.
+2. **Per-task checks:** every task passed `references/plan-task-format.md` § Per-task checks — run
+   them now on each task you drafted inline; a drafter ran them on its own.
 3. **Type consistency:** signatures, method names, and property names later tasks use match what
    earlier tasks define — `clearLayers()` in Task 3 but `clearFullLayers()` in Task 7 is a bug.
-4. **Factual-claim accuracy:** every load-bearing plan-authored claim — file/section targets,
-   locked "must show no changes" regions, verification greps, counts — was checked by running
-   the proving command/grep and citing its result, or is marked an assumption; never stated as
-   bare fact (`references/evidence.md` § Authored claims). Its mechanized backstop is item 8's
-   `authoredClaims` leg — a blocking lint that flags an unguarded `path.ext:line` reference or a
-   bare count claim, cleared by a `(verified: <cmd>)` or `(assumption)` marker on the same or an
-   adjacent line.
-5. **No count-only enumeration:** never cite an enumeration by count alone ("all four guardrails");
+4. **No count-only enumeration:** never cite an enumeration by count alone ("all four guardrails");
    one that more than one task reproduces belongs in Global Constraints, verbatim in every brief.
-6. **Mirrored-file parity:** diff the pinned blocks where tasks restate logic across mirrored files.
-7. **Assumed-tooling and pinned-code cross-check:** every tool or pattern a brief assumes (mock approach, a lint gate such as `prettier --check`, a named test-helper identifier) exists and is accepted by this repo's toolchain — an invented identifier or a rejected pattern is an unverified authored claim (item 4). Verify each against the repo before dispatch. Every command a step prescribes must also be one a guarded dispatch may run: `hooks/block-destructive-git.mjs` decides, and item 8's `briefCompleteness` leg notes each one it denies. For each task, run every side-effect-free command a brief pins, inline or fenced; prototype or test every pinned code block on a scratch copy or worktree; and compare each block with the quality-constraint ids its task lists. An interface-pinned task's pinned blocks are its test code, which must fail red against the stub. Then mark each fenced block, on the nearest non-blank line above it, `(verified: <cmd>)` or `(unrun: <reason>)` (`references/evidence.md` § Authored claims); a `js` block's `(verified:)` cites more than `node --check`, which `codeBlocks` already runs. Inline commands carry no gate, so dry-running them is this item's job alone, and `briefCompleteness` checks only that fields are present, so the two never overlap.
-8. **Plan gate:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-check.mjs" <plan-path>` — one command,
-   eight legs: pasted JS/mjs code blocks parse (`codeBlocks`); every task carries
-   Files / Interfaces / Dependencies / a valid Evidence class / Quality constraints, the header carries
-   one `**Verification gate:**` code span, pinned gates run every required-checks manifest entry, a `red-green` task creating a non-test source file
-   mentions a stub, an interface-pinned task gives a reason, is `red-green` and pins a fenced block, and the Dispatch Map lists every task (`briefCompleteness`, which also notes, never failing,
-   each prescribed git command the dispatch guard denies); every JS/TS/Python file naming a changed file's basename, test or not,
-   sits in some Files block, each finding opening with the task that declares the changed file (`blastRadius`); no same-wave task's brief names a file another same-wave task edits
-   (`contentCoupling`); a task touching a budgeted surface (`playbooks/`, `commands/`, `agents/`,
-   `references/` markdown) also touches its budget fixtures and `docs/decisions/README.md` —
-   `references/` and `agents/` markdown match the context budget too: every
-   entry point pays for the references it cites, and agents count toward a reference's fan-in
-   (`budgetFixtures`); no two same-wave tasks list the same file (`waveDisjointness`); item 4's
-   claims (`authoredClaims`); and every path a brief cites resolves, every cited line is within its file,
-   and every fenced block pinned in a task carries item 7's run marker (`briefFacts`, which also notes,
-   never failing, a call-shaped span nothing defines). A plan with no `## Dispatch Map` fails before any
-   leg runs. Four findings clear by an explicit override line instead of a fix, each reasonless form a hard error:
-   `- Blast-radius override: <changed-file> [→ <referencer>] — <reason>` (e.g. referenced only in a
-   comment), `- Content-coupling override: Task B → <file> (Task A) — <reason>` (or a real
-   dependency), `- Budget-fixture override: <surface-or-fixture> — <reason>`, and `- Citation override: <path> — <reason>` (e.g. a file the host generates at build time). A non-zero exit is
-   a stop, resolved by fixing the plan or recording an override — never by handing off around it.
+5. **Mirrored-file parity:** diff the pinned blocks where tasks restate logic across mirrored files.
+6. **Plan gate:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-check.mjs" <plan-path>`;
+   `plan-check.mjs --help` lists its legs and the override line forms. A non-zero exit is a stop —
+   fix the plan or record an override, never hand off around it.
 
-## The three per-task declaration lines
+## Drafting each task
 
-- `**Dependencies:**` — **derived, not decreed**: a task depends on exactly the tasks whose produced
-  interfaces or files it consumes, nothing more, unless a real ordering constraint exists that
-  consumption doesn't capture (a migration before schema users, a destructive step last), declared
-  with its reason like any other dependency; anything not forced into sequence stays parallel. The
-  line takes exactly one of `none (completely independent)`, `Task 2 (consumes its X interface)`, or
-  `Tasks 1+4 committed`.
-- `**Evidence:**` — read the three classes and their exact declaration forms from
-  `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § The three evidence classes; use those forms verbatim.
-- `**Execution:** sweep` — optional, and declared only when the task is one uniform edit rule applied
-  identically across its whole file list AND the task body pins all three sweep parameters verbatim:
-  the instruction, the concrete file list, and the verifyCommand. Executing-waves then runs the task
-  through `workflows/mechanical-sweep.js` instead of dispatching an implementer, so the evidence
-  class stays orthogonal and is typically `green-green (behavior-preserving)`. Any per-file judgment
-  in the rule disqualifies the marker — leave the line off and let a normal implementer take the
-  task. Wave placement rules are unchanged.
+Whoever drafts a task — this session inline, or a drafter on the delegated path — reads
+`${CLAUDE_PLUGIN_ROOT}/references/plan-task-format.md` and follows it whatever the engine: the task
+template, the three per-task declaration lines, Files derivation, No placeholders and the per-task
+checks.
 
 ## Dispatch Map — required final section
 
@@ -191,7 +127,7 @@ The plan ends with a `## Dispatch Map` grouping tasks into waves — `- Wave 1: 
 only dependency-ready, file-disjoint tasks: never place two tasks touching the same file in one
 wave, even if both declare `none`. Execution dispatches by readiness from this map, never by written
 order. That map, the plan header, and the per-task blocks are the whole contract
-`playbooks/executing-waves.md` consumes. Self-review item 8's plan gate checks both a literal
+`playbooks/executing-waves.md` consumes. Self-review item 6's plan gate checks both a literal
 Files-block overlap within one wave and the harder case of two same-wave tasks coupled only because
 one's brief names a file the other edits.
 
@@ -200,11 +136,14 @@ one's brief names a file the other edits.
 What planning does with the rule `references/quality-criteria.md` (§Reuse before rebuild) owns:
 each task names the existing modules, helpers, or components it extends, and a task introducing
 a new abstraction states why no existing one fits. Find them: run the repo-research
-procedure `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns (`## Research dispatches`) before
+procedure
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/delegation.md research-dispatches` owns before
 searching file-by-file, with the confirmed scope and affected areas recorded in `.devcycle/scope.md`
 as this stage's relevance filter, starting from implementation-scoped docs (a `frontend.md`,
 `backend.md`, or equivalent). That dispatch's `description` opens with `plan-research: `
-(`references/delegated-planning.md` owns the role prefixes).
+(`references/delegated-planning.md` owns the role prefixes), and the dispatch names its model at
+the tier `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/model-routing.md planning-dispatches`
+assigns.
 
 ## Handoff — required final output
 
@@ -223,7 +162,7 @@ run — walked or unattended — is settled at execution start, never here (`ref
 
 Committing the saved plan is gated the way the spec's commit is: read
 `docTrackingPolicy` from the `knobs:` line and check it against
-`${CLAUDE_PLUGIN_ROOT}/references/config.md` § Doc tracking, then `git check-ignore` the plan's path, and commit with an explicit pathspec only when
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/config.md doc-tracking-what-each-policy-commits`, then `git check-ignore` the plan's path, and commit with an explicit pathspec only when
 both permit it — otherwise the plan stays written and uncommitted. This paragraph is outside the
 Plan mechanics section, so it binds at `thorough` too, where the upstream skill has no
 plan-commit step of its own and `all-tracked` would otherwise never track a plan. A new

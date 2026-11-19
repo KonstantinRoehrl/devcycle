@@ -116,6 +116,7 @@ node scripts/risk-calibration.mjs --repo <label>,<ref>,<path>…   # the built-i
 node scripts/plan-bench.mjs estimate   # the planning benchmark's spend estimate for one pass over .devcycle/plan-bench/manifest.json; `run --go-ahead <token>` replays it (paid: only on the user's go-ahead) and `score` re-scores a finished pass — local
 node scripts/cost-model-fit.mjs --runs <dir>   # the planning cost model's F, t, r and o per role, fitted from the agent-cost rows of a runs directory — local
 node scripts/plan-bench-corpus.mjs    # proposes the benchmark manifest from this repo's archived cycles, as manifest.proposed.json for the user to confirm — local
+node scripts/spec-claims.mjs check --spec <spec-path>   # which of the spec reviewer's confirmed claims in .devcycle/spec-claims.md still hold at HEAD; `write --spec <path> --verified <file>` records them — local
 node --test tests/unit/*.test.mjs     # the whole unit suite, golden path included (stubbed CLIs, keyless) — CI
 claude plugin validate . --strict     # the plugin under Claude Code's real loader (CI also validates .claude-plugin/plugin.json) — CI, on the floor and current pins
 claude plugin test .                  # the hooks module's TypeScript tests under tests/mod/ — CI, on the floor and current pins

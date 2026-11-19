@@ -86,3 +86,17 @@ test("renderReport: no corpus legs line when no run has a failing leg", () => {
   assert.match(section, /Failing plan-check legs: none\./);
   assert.doesNotMatch(section, /all runs/);
 });
+
+test("renderReport: per-drafter turns with models, the source-print count and the tier-fit flag follow the sensor gaps", () => {
+  const measured = (agentId, role, model, turns) => ({ ...cost(agentId, role, 0.001), model, turns, sourcePrints: 2, reads: {} });
+  const dir = runsDir([...BASE, PLAN_STATS, measured("a1", "drafter", "claude-sonnet-5-5", 3), measured("a3", "drafter", "claude-opus-5", 3),
+    measured("a2", "checker", "claude-opus-5", 1), depth("a1", 90000)]);
+  const section = planningSection(renderReport([summarizeSession(SESSION, [turn], readRunRecords(dir))], ctx));
+  assert.match(section, /^Sensor gaps: .*\.\ndrafters: 2 · turns 3 \(claude-sonnet-5-5\), 3 \(claude-opus-5\)\nsource prints: 6\ntier-fit: checker a2 ran claude-opus-5, fast tier expected\n/m);
+});
+
+test("renderReport: a run recorded before reads shows no drafters, an unknown print count and tier-fit ok", () => {
+  const dir = runsDir([...BASE, PLAN_STATS, cost("a2", "checker", 0.0005), depth("a2", 60000)]);
+  const section = planningSection(renderReport([summarizeSession(SESSION, [turn], readRunRecords(dir))], ctx));
+  assert.match(section, /^drafters: 0\nsource prints: —\ntier-fit: ok$/m);
+});

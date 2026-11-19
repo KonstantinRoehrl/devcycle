@@ -184,7 +184,7 @@ function stubErrors(num, block) {
 
 // #331: `**Detail:** interface-pinned — <reason>` lets a red-green task describe its implementation
 // in prose, provided its interfaces, failing test code and gate commands stay pinned
-// (playbooks/planning-waves.md § No placeholders). This checks the declaration and that some code
+// (references/plan-task-format.md § No placeholders). This checks the declaration and that some code
 // is still pinned; the task reviewer judges behaviour the tests leave open. Only a line that opens
 // with the label declares it: a brief that quotes the form mid-sentence, as a plan about this very
 // check does, declares nothing.

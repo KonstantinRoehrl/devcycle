@@ -452,3 +452,56 @@ test("an unpriced model leaves a null-usd agent-cost row that names why; a price
   assert.equal(typeof ok.usd, "number");
   assert.ok(!("measurement" in ok));
 });
+
+// Appends one Read or Bash call and its result to a fixture's transcript, run in the fixture repo.
+function appendCall(fx, id, name, input, text) {
+  const call = [
+    { type: "assistant", cwd: fx.repo, timestamp: "2026-10-07T07:19:00.000Z", message: { model: "claude-haiku-4-5-20251001", usage: usage(10, 0, 0, 1), content: [{ type: "tool_use", id, name, input }] } },
+    { type: "user", cwd: fx.repo, timestamp: "2026-10-07T07:19:01.000Z", message: { content: [{ type: "tool_result", tool_use_id: id, content: text }] } },
+  ];
+  writeFileSync(fx.transcript, readFileSync(fx.transcript, "utf8") + call.map((r) => JSON.stringify(r)).join("\n") + "\n");
+}
+
+test("costDelta: sourcePrints and reads are deltas; an earlier row written without them counts as nothing", () => {
+  const totals = { inputTokens: 10, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 1, usd: 0.5, turns: 3,
+    sourcePrints: 3, reads: { "a.mjs": 300, "b.mjs": 40, "c.mjs": 5 } };
+  const legacy = { inputTokens: 4, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0, usd: 0.25, turns: 1 };
+  const measured = { ...legacy, sourcePrints: 1, reads: { "a.mjs": 100, "b.mjs": 40, "c.mjs": 9 } };
+  const delta = costDelta(totals, [legacy, measured]);
+  assert.equal(delta.sourcePrints, 2);
+  assert.deepEqual(delta.reads, { "a.mjs": 200 });
+  assert.equal(costDelta(totals, [legacy]).sourcePrints, 3);
+});
+
+test("a planning role row records its source prints and the tokens each path's reads cost; a continuation records only the growth", () => {
+  const fx = fixture();
+  writeSidecar(fx, { agentType: "devcycle:plan-drafter", description: "plan-drafter: draft task 3", model: "sonnet" });
+  appendCall(fx, "r1", "Read", { file_path: join(fx.repo, "scripts/a.mjs") }, "x".repeat(400));
+  appendCall(fx, "b1", "Bash", { command: "cat scripts/b.mjs" }, "y".repeat(40));
+  assert.equal(callHook(fx).status, 0);
+  appendCall(fx, "r2", "Read", { file_path: join(fx.repo, "scripts/a.mjs") }, "x".repeat(400));
+  callHook(fx);
+  const [first, second, ...rest] = costRows(fx);
+  assert.equal(rest.length, 0);
+  assert.equal(first.role, "drafter");
+  assert.equal(first.sourcePrints, 1);
+  assert.deepEqual(first.reads, { "scripts/a.mjs": 100, "scripts/b.mjs": 10 });
+  assert.equal(second.sourcePrints, 0);
+  assert.deepEqual(second.reads, { "scripts/a.mjs": 100 });
+});
+
+test("a role row that read nothing still records empty reads; a row without a role records neither field", () => {
+  const roleFx = fixture();
+  writeSidecar(roleFx, { agentType: "Explore", description: "plan-spike: time the parser", model: "haiku" });
+  callHook(roleFx);
+  const [spike] = costRows(roleFx);
+  assert.equal(spike.sourcePrints, 0);
+  assert.deepEqual(spike.reads, {});
+  const plain = fixture();
+  writeSidecar(plain, { agentType: "devcycle:implementer", description: "Task 3: implement", model: "sonnet" });
+  appendCall(plain, "b1", "Bash", { command: "cat scripts/b.mjs" }, "y".repeat(40));
+  callHook(plain);
+  const [row] = costRows(plain);
+  assert.equal(row.role, undefined);
+  assert.ok(!("sourcePrints" in row) && !("reads" in row), JSON.stringify(row));
+});
