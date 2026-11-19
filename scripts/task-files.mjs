@@ -434,3 +434,55 @@ export function parseDispatchMap(planText) {
   }
   return waves;
 }
+
+const integersIn = (text) => [...text.matchAll(/\d+/g)].map((m) => Number(m[0]));
+
+// The tasks a task waits on: the integers on the first line of its **Dependencies:** value, before
+// that line's first `(`, which opens an explanation that may name other tasks. Only the first line
+// counts because the last task's value otherwise runs on into the sections after the plan's tasks.
+export function taskDependencies(block) {
+  const line = (fieldValue(block, "Dependencies") ?? "").split("\n")[0].split("(")[0];
+  return [...new Set(integersIn(line))];
+}
+
+const INTERFACE_ITEM_RE = /^-\s*(Consumes|Produces)\b(\s*\([^)]*\))?\s*:\s*(.*)$/;
+
+// The items of a task's **Interfaces:** value, split by kind. An item runs over the indented lines
+// below it; the producing tasks of a Consumes item are the integers in its `(Task N; ...)` label,
+// ahead of the label's first `;`, which separates them from a note.
+export function interfaceLines(block) {
+  const consumes = [];
+  const produces = [];
+  let open = null;
+  for (const line of (fieldValue(block, "Interfaces") ?? "").split("\n")) {
+    const item = line.match(INTERFACE_ITEM_RE);
+    if (item) {
+      const owners = (item[2] ?? "").split(";")[0];
+      open = { from: /\bTasks?\b/.test(owners) ? integersIn(owners) : [], text: item[3].trim() };
+      (item[1] === "Consumes" ? consumes : produces).push(open);
+    } else if (open && /^\s+\S/.test(line)) open.text = `${open.text} ${line.trim()}`;
+    else open = null;
+  }
+  return { consumes, produces: produces.map(({ text }) => text) };
+}
+
+// One edge per dependency a task names that is itself another task of the plan.
+export function planEdges(planText) {
+  const blocks = taskBlocks(planText);
+  const defined = new Set(blocks.map((b) => b.num));
+  const edges = new Map();
+  for (const { num, text } of blocks)
+    for (const producer of taskDependencies(text))
+      if (producer !== num && defined.has(producer)) edges.set(`${num}<${producer}`, { producer, consumer: num });
+  return [...edges.values()].sort((a, b) => a.consumer - b.consumer || a.producer - b.producer);
+}
+
+// Bytes inside code fences, the fence lines themselves included, as a share of all bytes. Pairing is
+// fencedBlocks': a ``` or ~~~ fence closes only on its own character, at least as long.
+export function fenceShare(text) {
+  const total = Buffer.byteLength(text);
+  if (total === 0) return 0;
+  const owners = lineFences(text);
+  const fenced = text.split(/(?<=\n)/).reduce((bytes, line, i) => bytes + (owners[i] ? Buffer.byteLength(line) : 0), 0);
+  return Math.round((fenced / total) * 1000) / 1000;
+}

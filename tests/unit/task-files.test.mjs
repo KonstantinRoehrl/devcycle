@@ -552,3 +552,84 @@ test("testFiles reads only the paths a Test label declares", () => {
 test("modifiedFiles reads only the paths a Modify label declares, not an annotation behind one", () => {
   assert.deepEqual([...modifiedFiles("- Create: `src/a.mjs`\n- Modify: `src/b.mjs` (drop `x.y` from the list)\n- Test: `tests/unit/a.test.mjs`")], ["src/b.mjs"]);
 });
+
+import { taskDependencies, interfaceLines, planEdges, fenceShare } from "../../scripts/task-files.mjs";
+
+const depBlock = (deps) => `### Task 9: X\n\n**Files:**\n- Modify: a.mjs\n\n**Dependencies:** ${deps}\n**Evidence:** red-green\n`;
+
+test("taskDependencies reads the task numbers on the first line, before its first parenthesis", () => {
+  assert.deepEqual(taskDependencies(depBlock("none (completely independent)")), []);
+  assert.deepEqual(taskDependencies(depBlock("Task 2 (consumes its X interface from Task 7)")), [2]);
+  assert.deepEqual(taskDependencies(depBlock("Tasks 1+4 committed")), [1, 4]);
+  assert.deepEqual(taskDependencies(depBlock("Tasks 3+3 committed")), [3]);
+  assert.deepEqual(taskDependencies("### Task 1: no field\n"), []);
+  // The last task's value would otherwise run into a following section's numbers.
+  assert.deepEqual(taskDependencies(`${depBlock("Tasks 1+4 committed").replace("\n**Evidence:** red-green\n", "")}\n## Dispatch Map\n\n- Wave 3: Task 7\n`), [1, 4]);
+});
+
+const ifaceBlock = [
+  "### Task 5: Y", "", "**Files:**", "- Modify: b.mjs", "",
+  "**Interfaces:**",
+  "- Consumes: `now()` from `scripts/stamp.mjs`.",
+  "- Consumes (Task 2): `export function f(a)` → `number`;",
+  "  continued on the next line.",
+  "- Consumes (Tasks 3+4; verified: x.mjs:19 read): `g()`.",
+  "- Produces: `export const K = 1`.",
+  "- Produces (D2): `h(x)` → string, per field:",
+  "  - `a` → 1",
+  "",
+  "**Dependencies:** Tasks 2+3+4 committed",
+  "**Evidence:** red-green", "",
+].join("\n");
+
+test("interfaceLines splits Consumes and Produces items, their task labels and continuation lines", () => {
+  assert.deepEqual(interfaceLines(ifaceBlock), {
+    consumes: [
+      { from: [], text: "`now()` from `scripts/stamp.mjs`." },
+      { from: [2], text: "`export function f(a)` → `number`; continued on the next line." },
+      { from: [3, 4], text: "`g()`." },
+    ],
+    produces: ["`export const K = 1`.", "`h(x)` → string, per field: - `a` → 1"],
+  });
+  assert.deepEqual(interfaceLines("### Task 1: none\n\n**Files:**\n- Modify: a\n"), { consumes: [], produces: [] });
+});
+
+test("planEdges lists producer→consumer pairs only for dependencies the plan defines", () => {
+  const plan = [
+    "# P", "",
+    "### Task 1: A", "**Dependencies:** none (completely independent)", "",
+    "### Task 2: B", "**Dependencies:** Task 1 (consumes its A)", "",
+    "### Task 3: C", "**Dependencies:** Tasks 2+1+9 committed", "",
+    "## Dispatch Map", "", "- Wave 1: Task 1", "",
+  ].join("\n");
+  assert.deepEqual(planEdges(plan), [
+    { producer: 1, consumer: 2 },
+    { producer: 1, consumer: 3 },
+    { producer: 2, consumer: 3 },
+  ]);
+  assert.deepEqual(planEdges("# P\n"), []);
+});
+
+test("fenceShare counts fenced bytes, fence lines included, rounded to three decimals", () => {
+  assert.equal(fenceShare(""), 0);
+  assert.equal(fenceShare("abc\n"), 0);
+  // "```js\n" (6) + "x\n" (2) + "```\n" (4) = 12 of 18 bytes.
+  assert.equal(fenceShare("prose\n```js\nx\n```\n"), 0.667);
+});
+
+test("planEdges ignores a task naming itself, and interfaceLines ends an item at a blank line", () => {
+  assert.deepEqual(planEdges("### Task 1: A\n**Dependencies:** Tasks 1+2 committed\n\n### Task 2: B\n**Dependencies:** none\n"), [
+    { producer: 2, consumer: 1 },
+  ]);
+  assert.deepEqual(interfaceLines("### Task 1: A\n**Interfaces:**\n- Produces: `f()`.\n\n  stray indented line\n"), {
+    consumes: [],
+    produces: ["`f()`."],
+  });
+});
+
+test("interfaceLines reads producing tasks only from a Task or Tasks label, never from other digits in it", () => {
+  assert.deepEqual(interfaceLines("### Task 1: A\n**Interfaces:**\n- Consumes (D2): `k()`.\n- Consumes (verified: x.mjs:19): `m()`.\n"), {
+    consumes: [{ from: [], text: "`k()`." }, { from: [], text: "`m()`." }],
+    produces: [],
+  });
+});

@@ -18,7 +18,7 @@ import { settleFormat } from "./cycle-format.mjs";
 import { parseHandoff } from "./handoff-mark.mjs";
 import { compareKnobs, parseRecordedLine, resolveKnobs } from "./resolve-knobs.mjs";
 import { resolveDepth } from "./depth-probe.mjs";
-import { TEST_FILE_SUFFIXES, fieldValue, gateCommand, parseDispatchMap, taskBlocks, taskFileMap } from "./task-files.mjs";
+import { TEST_FILE_SUFFIXES, fieldValue, gateCommand, parseDispatchMap, taskBlocks, taskDependencies, taskFileMap } from "./task-files.mjs";
 import {
   isNoVerdict, ledgerPlan, nextReviewRound, noVerdictReason, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot, UsageError,
 } from "./task-ledger.mjs";
@@ -101,7 +101,7 @@ function readLedger(ledgerPath, plan, slot) {
 
 // The declaration forms playbooks/planning-waves.md allows — `none (…)`, `Task 2 (…)`, `Tasks 1+4
 // committed`: the numbers before any parenthesis are the tasks that must be committed first.
-const dependenciesOf = (block) => [...(fieldValue(block, "Dependencies") ?? "").split("(")[0].matchAll(/\d+/g)].map((m) => m[0]);
+const dependenciesOf = (block) => taskDependencies(block).map(String);
 
 // The task's own test run as its steps spell it: the last code span in a step that names one of its
 // Test files and carries arguments. null when no step names one; the coordinator derives it then.
