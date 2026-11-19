@@ -20,7 +20,7 @@ task; the coordinator owns Interfaces.
 
 ## What you write
 
-Only your own `.devcycle/plan-work/<run id>/drafts/task-<n>.md` files. Prototype pinned code in a
+Only your own `.devcycle/plan-work/<run id>/tasks/task-<n>.md` files. Prototype pinned code in a
 scratch worktree outside the repo and remove it when done. You never edit a tracked file, and you
 never stage, **commit** or **push**.
 

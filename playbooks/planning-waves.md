@@ -78,8 +78,11 @@ threshold, so the coordinator drafts every task itself; `auto` and `status-quo` 
 
 Skip this section at `thorough`, except self-review item 6 (plan gate), which the override list
 names; the sub-skill supplies the rest there. **Where the plan goes:**
-`docs/superpowers/plans/YYYY-MM-DD-<topic>.md`, unless the user prefers another location. A spec
-covering multiple independent subsystems should have been split into sub-project specs during
+`docs/superpowers/plans/YYYY-MM-DD-<topic>.md`, unless the user prefers another location. While planning, on every path, each task is its own work
+file `.devcycle/plan-work/<run id>/tasks/task-<n>.md`, beside `plan-header.md` and `dispatch-map.md`;
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-assemble.mjs" .devcycle/plan-work/<run id> --out <plan path>`
+assembles the plan (it fails on a missing or duplicate task id), and a later change goes into the task
+file and is re-assembled. A spec covering multiple independent subsystems should have been split into sub-project specs during
 brainstorming; if it wasn't, suggest one plan per subsystem, each producing working, testable
 software on its own.
 

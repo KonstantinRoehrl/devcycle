@@ -26,7 +26,7 @@ test("it never prints a source file through cat, sed -n, head or tail", () => {
 });
 
 test("it writes only its own drafts and never stages, commits or pushes", () => {
-  assert.match(agent, /drafts\/task-<n>\.md/);
+  assert.match(agent, /tasks\/task-<n>\.md/);
   assert.ok(/\bstages?\b/i.test(agent) && /\bcommits?\b/i.test(agent) && /\bpush(es)?\b/i.test(agent));
 });
 
@@ -45,7 +45,7 @@ test("it reports per output.md like its sibling agents", () => {
 test("delegated planning consumes the stop and names the plan-header work file", () => {
   const doc = readFileSync(join(root, "references/delegated-planning.md"), "utf8");
   assert.match(doc, /summary begins `stopped: <what pin cannot hold>` wrote no draft/);
-  assert.match(doc, /splices only drafts that exist\s+and\s+does not proceed while a dispatched task has none/);
+  assert.match(doc, /assembles only once every dispatched task has its file/);
   assert.match(doc, /writes `plan-header\.md`[^]*?before it dispatches any drafter/);
   assert.match(doc, /`pack\.md` and `plan-header\.md`/);
   assert.doesNotMatch(doc, /interface-delta/);

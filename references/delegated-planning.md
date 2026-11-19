@@ -10,7 +10,7 @@ it was delegated.
 Work files are run-scoped, under `.devcycle/plan-work/<run id>/` (the state file's `run:`), and each
 is logged as it lands, per `references/stage-log.md`, so a resume skips what is done. The coordinator
 writes `plan-header.md`, the plan header it composed, once, before it dispatches any drafter; the pack,
-spikes, drafts and `merge-findings.md` land as their own sections below say. Spikes run as
+spikes, the `tasks/task-<n>.md` files and `merge-findings.md` land as their own sections below say. Spikes run as
 `Explore` and drafters as `devcycle:plan-drafter`. Every planning-stage dispatch, the repo-research
 one `playbooks/planning-waves.md` § Reuse before rebuild runs included, opens its `description` with
 its role: `plan-spike: `, `plan-research: `, `plan-drafter: `, `plan-checker: ` or `plan-repair: `
@@ -56,7 +56,7 @@ One `devcycle:plan-drafter` dispatch per task, in parallel. Its brief carries pa
 `pack.md` and `plan-header.md` (whose `## Quality Constraints` section the drafter's
 `**Quality constraints:**` line cites), plus inline only the verdict, its own task's pinned Interfaces and its
 dependencies' Produces. The agent reads `references/plan-task-format.md` by its own definition. The
-drafter writes the whole `### Task <n>` block to `drafts/task-<n>.md`, having derived its Files block
+drafter writes the whole `### Task <n>` block to `tasks/task-<n>.md`, having derived its Files block
 with the template's `--scan`, marked every load-bearing claim it makes, and prototyped and marked
 every fenced block it pins. Before returning it scans its own draft for placeholders (TBD, "write
 tests for the above") and back-references to another task ("similar to Task N"). Its envelope is the
@@ -72,9 +72,11 @@ owns Interfaces, decides that pin and re-dispatches the task, or drafts it inlin
 
 ## The merge
 
-The coordinator splices by shell concatenation, never by reading a draft: its own plan header, then
-`drafts/task-<n>.md` in task order, then its own Dispatch Map. It splices only drafts that exist and
-does not proceed while a dispatched task has none. The cross-task self-review checks —
+The coordinator writes its own Dispatch Map to `dispatch-map.md`, then assembles the plan with
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-assemble.mjs" .devcycle/plan-work/<run id> --out <plan path>`,
+never by reading a task file: the plan header, then `tasks/task-<n>.md` in task order, then the map.
+It assembles only once every dispatched task has its file, and the script fails on a missing or
+duplicate task id. The cross-task self-review checks —
 spec coverage, type consistency, no count-only enumeration, mirrored-file parity, and a scan of the
 merged plan for placeholders and cross-task back-references — run as one checker dispatch over the
 merged plan's path. The checker writes its findings to

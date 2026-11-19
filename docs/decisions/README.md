@@ -5,6 +5,29 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-19 — Per-task plan work files and the assembler (#448)
+
+**Decision:** while planning, on every path, each task is its own work file,
+`.devcycle/plan-work/<run id>/tasks/task-<n>.md`, beside `plan-header.md` and `dispatch-map.md`.
+`scripts/plan-assemble.mjs` assembles the plan from them and fails on a missing or duplicate task id,
+replacing the shell concatenation of `drafts/task-<n>.md`. The task file is canonical while planning,
+so a later change goes into it and the plan is re-assembled; the assembled plan keeps the shape
+`playbooks/executing-waves.md` reads.
+
+**Why:** a plan cut from per-task files gives a repair pass one file per task and the merge a check on
+ids that concatenation never made (#448).
+
+**Budgets:**
+
+```text
+budget: context-budget.json commands/cycle.md 88838
+budget: context-budget.json playbooks/planning-waves.md 64754
+budget: context-budget.json playbooks/reviewing-the-branch.md 61394
+budget: context-budget.json playbooks/scoping-the-request.md 36811
+budget: context-budget.json playbooks/verifying-on-device.md 66787
+budget: surface-budget.json surfaceTotal 7144
+```
+
 ## 2026-11-19 — Phase 1 review fixes, round 2: the drafter's stop and the plan header
 
 **Decision:** a drafter that cannot hold a pinned interface returns a summary line beginning
