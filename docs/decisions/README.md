@@ -5,6 +5,44 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-19 — `planningStrategy` forces the planning stage's drafting arm
+
+**Decision:** a nineteenth knob, `planningStrategy` (`auto` | `status-quo` | `inline`, default `auto`),
+resolved like every other knob through `scripts/resolve-knobs.mjs` and passed by every entry command.
+`status-quo` keeps the delegation thresholds, `inline` never fans out per-task drafters, and `auto`
+is `status-quo` until the planning decision table (spec §8, Phase 2b) gives it a meaning of its own.
+
+**Why:** the planning benchmark (#449) compares arms like for like, so a replay must be able to force
+one; spec §8 names the knob. Only the two arms that exist as behaviour are accepted, so no value
+promises an arm that is not built; later phases add theirs with a config-changelog record.
+
+**Budgets:** each entry command grows by one resolver line and `references/config.md` by one roster
+row, which every closure citing it carries; `commands/continue.md` passes its 185-line ceiling.
+
+```text
+budget: surface-budget.json surfaceTotal 7041
+budget: surface-budget.json commandMax 186
+budget: context-budget.json commands/continue.md 75815
+budget: context-budget.json commands/cycle.md 88333
+budget: context-budget.json commands/learn.md 17746
+budget: context-budget.json commands/maintain.md 18925
+budget: context-budget.json commands/onboard.md 18034
+budget: context-budget.json commands/reconcile.md 25471
+budget: context-budget.json commands/review.md 26101
+budget: context-budget.json commands/verify.md 25199
+budget: context-budget.json playbooks/executing-waves.md 120401
+budget: context-budget.json playbooks/finishing-the-cycle.md 53386
+budget: context-budget.json playbooks/learning-from-sessions.md 66658
+budget: context-budget.json playbooks/maintaining-the-repo.md 67280
+budget: context-budget.json playbooks/onboarding-a-repo.md 31636
+budget: context-budget.json playbooks/planning-waves.md 90540
+budget: context-budget.json playbooks/receiving-review.md 123910
+budget: context-budget.json playbooks/reviewing-code.md 102492
+budget: context-budget.json playbooks/reviewing-the-branch.md 59979
+budget: context-budget.json playbooks/verifying-on-device.md 66699
+budget: context-budget.json references/config.md 15163
+```
+
 ## 2026-11-19 — An inline plan's research dispatch opens with `plan-research: `
 
 **Decision:** `playbooks/planning-waves.md` § Reuse before rebuild says the repo-research dispatch's

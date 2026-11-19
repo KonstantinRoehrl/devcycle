@@ -96,6 +96,7 @@ and silently runs every knob at its fallback. [`docs/platform-notes.md`](../plat
 | `taskReviewerModel` | Model for per-task reviewers | `auto` / model id / comma-separated pool | `auto` (derived per task; set a model id to pin) |
 | `branchReviewModel` | Model for the whole-branch review | `auto` / model id / comma-separated pool | `auto` (inherits your session's model; set a model id to pin) |
 | `walkthroughModel` | Model for the on-device walkthrough session | `auto` / model id / comma-separated pool | `auto` (a fast model; set a model id to pin) |
+| `planningStrategy` | How the planning stage drafts a plan | `auto` / `status-quo` / `inline` | `auto` (as `status-quo`: per-task drafters from 5 tasks; `inline` drafts every task in the planning session) |
 | `learnStalenessSessions` | Unmined sessions since the last `/devcycle:learn` before the finish stage nudges you to run it again | integer `0` or more (`0` nudges every cycle) | `5` |
 | `learnStalenessDays` | Days since the last `/devcycle:learn` before the finish stage nudges you to run it again | integer `0` or more (`0` nudges every cycle) | `14` |
 | `learnSessionCap` | How many sessions one `/devcycle:learn` run may mine | integer `1` or more (`0` is refused, not a no-op run) | `100` |
@@ -107,7 +108,7 @@ and silently runs every knob at its fallback. [`docs/platform-notes.md`](../plat
 
 ## Other options
 
-The remaining seventeen knobs above are secondary to `profile` — most runs never touch them.
+The remaining eighteen knobs above are secondary to `profile` — most runs never touch them.
 
 **`gitPolicy`** is the pipeline's blast radius: `local-commits-only` means it only ever
 commits on a local branch and hands it to you (never pushes); `push-allowed` lets it push

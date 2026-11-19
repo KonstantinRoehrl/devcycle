@@ -19,16 +19,30 @@ const cli = (args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding:
 const STANDARD_DEFAULTS =
   "knobs: profile=standard gitPolicy=local-commits-only docTrackingPolicy=standard reviewDepth=auto " +
   "crossModelReview=false onDeviceGate=auto implementerModel=auto taskReviewerModel=auto " +
-  "branchReviewModel=auto walkthroughModel=auto learnStalenessSessions=5 learnStalenessDays=14 learnSessionCap=100 subagentBudget=warn " +
+  "branchReviewModel=auto walkthroughModel=auto planningStrategy=auto learnStalenessSessions=5 learnStalenessDays=14 learnSessionCap=100 subagentBudget=warn " +
   "handoffNotification=off executionMode=ask driveWatch=end drivePlugins=none";
 
-test("the roster carries the 18 shipped knobs in config.md's roster order", () => {
+test("the roster carries the 19 shipped knobs in config.md's roster order", () => {
   assert.deepEqual(ROSTER.map(({ key }) => key), [
     "profile", "gitPolicy", "docTrackingPolicy", "reviewDepth", "crossModelReview", "onDeviceGate",
-    "implementerModel", "taskReviewerModel", "branchReviewModel", "walkthroughModel",
+    "implementerModel", "taskReviewerModel", "branchReviewModel", "walkthroughModel", "planningStrategy",
     "learnStalenessSessions", "learnStalenessDays", "learnSessionCap", "subagentBudget", "handoffNotification", "executionMode",
     "driveWatch", "drivePlugins",
   ]);
+});
+
+test("planningStrategy is a non-live enum, auto unless set, and compares like any recorded knob", () => {
+  assert.deepEqual(ROSTER.find((e) => e.key === "planningStrategy"),
+    { key: "planningStrategy", kind: "enum", values: ["auto", "status-quo", "inline"], fallback: "auto" });
+  for (const value of ["status-quo", "inline"]) {
+    const { knobs, explicit } = resolveKnobs(with_({ planningStrategy: value }));
+    assert.deepEqual([knobs.planningStrategy, explicit], [value, ["planningStrategy"]], value);
+  }
+  const { knobs, explicit, warnings } = resolveKnobs(with_({ planningStrategy: "grouped" }));
+  assert.deepEqual([knobs.planningStrategy, explicit], ["auto", []]);
+  assert.deepEqual(warnings, ["planningStrategy=grouped is not one of auto | status-quo | inline; using auto"]);
+  assert.deepEqual(compareKnobs({ planningStrategy: "auto" }, resolveKnobs(with_({ planningStrategy: "inline" })).knobs),
+    [{ key: "planningStrategy", old: "auto", new: "inline" }]);
 });
 
 test("empty, a literal placeholder and auto are the three unset forms", () => {
