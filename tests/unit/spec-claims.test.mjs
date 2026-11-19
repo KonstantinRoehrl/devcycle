@@ -185,3 +185,39 @@ test("write: a claim whose cited file is untracked or gitignored while present i
   assert.match(r.stderr, /bundle is small/);
   assert.deepEqual(parseClaims(readFileSync(join(repo, DEFAULT_CLAIMS_PATH), "utf8")).claims.map((c) => c.claim), ["probe is stable"]);
 });
+
+test("write: a claim citing a glob path is dropped, since a glob cannot be compared literally", () => {
+  const repo = reviewedRepo();
+  const r = writeVerified(repo, [claimOn("lib modules are small", "lib/*.mjs"), claimOn("probe is stable", "scripts/probe.mjs")]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^spec-claims: wrote 1 claims to /);
+  assert.match(r.stderr, /dropped "lib modules are small" — lib\/\*\.mjs: it holds glob characters/);
+  assert.doesNotMatch(r.stderr, /probe is stable/);
+});
+
+test("check: a stamped claim citing a glob path is re-verified even though nothing changed", () => {
+  const repo = reviewedRepo();
+  writeVerified(repo, [claimOn("legs exported", "lib/legs.mjs")]);
+  const text = readFileSync(join(repo, DEFAULT_CLAIMS_PATH), "utf8");
+  for (const glob of ["lib/*.mjs", "lib/leg?.mjs", "lib/[l].mjs"]) {
+    writeInto(repo, DEFAULT_CLAIMS_PATH, text.replace("paths: lib/legs.mjs", `paths: ${glob}`));
+    assert.deepEqual(checkLines(repo), [`reverify: legs exported · paths: ${glob}`]);
+  }
+});
+
+test("write: a claim whose cited path sits under a regular file is dropped without crashing", () => {
+  const repo = reviewedRepo();
+  const r = writeVerified(repo, [claimOn("legs has a child", "lib/legs.mjs/x"), claimOn("probe is stable", "scripts/probe.mjs")]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^spec-claims: wrote 1 claims to /);
+  assert.match(r.stderr, /dropped "legs has a child" — lib\/legs\.mjs\/x: /);
+  assert.deepEqual(parseClaims(readFileSync(join(repo, DEFAULT_CLAIMS_PATH), "utf8")).claims.map((c) => c.claim), ["probe is stable"]);
+});
+
+test("write and check: a plain tracked unchanged path is still verified", () => {
+  const repo = reviewedRepo();
+  const r = writeVerified(repo, [claimOn("probe is stable", "scripts/probe.mjs")]);
+  assert.match(r.stdout, /^spec-claims: wrote 1 claims to /);
+  assert.equal(r.stderr, "");
+  assert.deepEqual(checkLines(repo), ["verified: probe is stable · paths: scripts/probe.mjs"]);
+});

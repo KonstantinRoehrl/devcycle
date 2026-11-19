@@ -69,10 +69,15 @@ const git = (root, args) => spawnSync("git", ["-C", root, ...args], { encoding: 
 // for a path that is untracked, ignored or absent, so each case is asked separately; any git call that
 // does not exit as documented counts as a change.
 function changeSince(root, head, path) {
+  if (/[*?[]/.test(path)) return "it holds glob characters, so it cannot be compared literally";
   const tracked = git(root, ["ls-tree", "-r", "--name-only", head, "--", path]);
   if (tracked.status !== 0) return "git could not list it";
   if (tracked.stdout.trim() === "") {
-    return lstatSync(resolve(root, path), { throwIfNoEntry: false }) === undefined ? null : "it exists but was not tracked at that HEAD";
+    try {
+      return lstatSync(resolve(root, path), { throwIfNoEntry: false }) === undefined ? null : "it exists but was not tracked at that HEAD";
+    } catch {
+      return "the filesystem could not be read";
+    }
   }
   if (git(root, ["diff", "--quiet", head, "--", path]).status !== 0) return "it differs from that HEAD";
   const untracked = git(root, ["ls-files", "--others", "--exclude-standard", "--", path]);
