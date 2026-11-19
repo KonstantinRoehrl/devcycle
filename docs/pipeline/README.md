@@ -149,7 +149,10 @@ see `docs/design/`.
    undiagnosed problem.
 4. **Brainstorm** — collaborative design (upstream `superpowers:brainstorming`); ends with a
    spec you approve. Before you are asked to approve it, an independent reviewer checks the spec's
-   claims about your repo against your code.
+   claims about your repo against your code. After the reviewer's last pass, brainstorm saves its
+   Verified list and stamps it with `scripts/spec-claims.mjs write` (spec hash and HEAD) into
+   `.devcycle/spec-claims.md`, so planning's feasibility gate re-verifies only claims whose files
+   changed.
 5. **Planning** — a feasibility check, then an implementation plan that doubles as the
    execution strategy: the work is cut into small, self-contained tasks — each implementable
    from its own brief alone, so every subagent works with a small context — dependencies are

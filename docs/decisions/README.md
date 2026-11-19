@@ -5,6 +5,23 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-19 — Brainstorm persists the spec reviewer's confirmed claims
+
+**Decision:** after `devcycle:spec-reviewer`'s last pass, `commands/cycle.md` step 4 writes the
+reviewer's Verified list to `.devcycle/spec-verified.md` and stamps it through `spec-claims.mjs write`;
+the reviewer's Verified entries take the one-line shape `parseVerified` reads. The reviewer stays
+read-only: the coordinator writes both files.
+
+**Why:** planning's feasibility gate re-verified every claim the reviewer had just confirmed (#445;
+spec §9.7).
+
+**Budgets:**
+
+```text
+budget: context-budget.json commands/cycle.md 88590
+budget: surface-budget.json surfaceTotal 7057
+```
+
 ## 2026-11-19 — Planning splits its drafter rules into `references/plan-task-format.md`
 
 **Decision:** `playbooks/planning-waves.md` keeps the coordinator's work (feasibility gate, Quality

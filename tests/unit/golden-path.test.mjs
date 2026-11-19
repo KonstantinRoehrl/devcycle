@@ -2384,6 +2384,10 @@ test("cycle.md's brainstorm step dispatches the spec-claims reviewer at the sess
     step.indexOf("authored-claims-check.mjs") < step.indexOf("devcycle:spec-reviewer"),
     "the spec-claims review must be ordered after the authored-claims lint"
   );
+  assert.match(step, /spec-claims\.mjs" write\s+--spec <spec-path> --verified \.devcycle\/spec-verified\.md/,
+    "step 4 must persist the reviewer's Verified list through spec-claims.mjs write");
+  assert.match(read("agents/spec-reviewer.md"), /- <claim> · paths: <repo path>\[, <repo path>…\] · cmd: `<command that confirmed it>`/,
+    "the reviewer's Verified line must be the shape spec-claims.mjs parseVerified reads");
 });
 
 test("the browser guard is named by DESIGN.md's blueprint and the hub's inventory", () => {
