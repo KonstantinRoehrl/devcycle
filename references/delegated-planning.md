@@ -6,9 +6,9 @@ Every dispatch here follows `references/delegation.md`'s envelope and model-rout
 owns only the flow and the two brief shapes. A finished plan must not show whether it was delegated.
 
 Work files are run-scoped, under `.devcycle/plan-work/<run id>/` (the state file's `run:`), and each
-is logged as it lands, per `references/stage-log.md`, so a resume skips what is done. Spikes and
-drafters dispatch as `general-purpose` at the session tier: both are planning judgment, and both
-write a file. Every planning-stage dispatch, the repo-research one `playbooks/planning-waves.md`
+is logged as it lands, per `references/stage-log.md`, so a resume skips what is done. Spikes
+dispatch as `general-purpose` and drafters as `devcycle:plan-drafter`, both at the session tier:
+both are planning judgment, and both write a file. Every planning-stage dispatch, the repo-research one `playbooks/planning-waves.md`
 § Reuse before rebuild runs included, opens its `description` with its role: `plan-spike: `,
 `plan-research: `, `plan-drafter: `, `plan-checker: ` or `plan-repair: ` (a drafter re-dispatched with
 a finding). `hooks/dispatch-sensor.mjs` reads that prefix into the `role` of the agent's `agent-cost`
@@ -39,9 +39,8 @@ section.
 ## Drafters — 5+ tasks
 
 One dispatch per task, in parallel. Its brief carries paths, never content: the spec, the relevant
-spike files, and the installed `playbooks/planning-waves.md` for the task template, the Derive each Files block
-paragraph, the No placeholders rule and self-review items 7 and 8, which it reads whichever engine
-the coordinator runs. Inline it carries only the verdict, its own task's pinned Interfaces and its
+spike files; the agent reads `references/plan-task-format.md` by its own definition, whichever
+engine the coordinator runs. Inline it carries only the verdict, its own task's pinned Interfaces and its
 dependencies' Produces. The drafter writes the whole `### Task <n>` block to `drafts/task-<n>.md`,
 having derived its Files block with the template's `--scan`, marked every load-bearing claim it
 makes, and prototyped and marked every fenced block it pins. Before returning it scans its own draft

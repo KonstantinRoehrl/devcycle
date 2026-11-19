@@ -5,6 +5,26 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-19 — Planning drafters run as `devcycle:plan-drafter`
+
+**Decision:** delegated planning dispatches its drafters as the new `devcycle:plan-drafter` agent
+(tools Read, Grep, Glob, Bash, Write; no model pin), which reads the context pack, the plan header and
+`references/plan-task-format.md`, never `playbooks/planning-waves.md`, and writes only its own draft
+files. It is not in `GUARDED_AGENT_TYPES`: the git guard denies `git worktree add`, which prototyping
+needs, so the agent forbids staging, committing and pushing in its own text until Phase 2a drops
+prototyping.
+
+**Why:** a general-purpose drafter loaded the whole playbook and its closure for one task's rules;
+a named agent with a narrow reading list lowers each drafter's startup floor (#445; spec §9.3
+"Drafter agent").
+
+**Budgets:**
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 60784
+budget: surface-budget.json surfaceTotal 7085
+```
+
 ## 2026-11-19 — Brainstorm persists the spec reviewer's confirmed claims
 
 **Decision:** after `devcycle:spec-reviewer`'s last pass, `commands/cycle.md` step 4 writes the

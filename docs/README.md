@@ -135,6 +135,7 @@ The read-only or single-task subagents a stage dispatches.
 | [`on-device-driver`](../agents/on-device-driver.md) | Drives claude-in-chrome for the on-device stage, selecting the connected browser on this computer; never decides whether an item passes. |
 | [`history-inspector`](../agents/history-inspector.md) | Read-only git-history lens for `/devcycle:maintain`. |
 | [`spec-reviewer`](../agents/spec-reviewer.md) | Read-only check of a written spec's repo claims against live code, before the brainstorm approval question. |
+| [`plan-drafter`](../agents/plan-drafter.md) | Drafts delegated planning's tasks from the context pack and `references/plan-task-format.md`; writes only its own draft files, never commits. |
 
 ## References
 
