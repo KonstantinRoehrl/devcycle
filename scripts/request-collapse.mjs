@@ -14,9 +14,9 @@ export function isTurn(r) {
 // depth figure is counted per request, so this is the one place the records collapse. A request
 // takes its first record's fields (stage, timestamp, side), the usage of the record with the most
 // output tokens, and the content of all its records; a record with neither a requestId nor a
-// message.id stands for itself. In the local transcripts checked, a request's records carried
-// identical usage; taking the greatest output_tokens is the guard for streaming partials, on the
-// assumption that the final block carries the final usage.
+// message.id stands for itself. A request's records mostly carry the same usage but can differ in
+// output_tokens (streaming partials: 10044 of 31039 real requests); taking the greatest
+// output_tokens assumes the final block carries the final usage.
 export function collapseRequests(records) {
   const byKey = new Map();
   const requests = [];

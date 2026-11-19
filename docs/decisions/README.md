@@ -26,7 +26,7 @@ budget: context-budget.json playbooks/planning-waves.md 90429
 ## 2026-11-19 — The agent-cost row says why a cost is unknown
 
 **Decision:** an `agent-cost` row whose `usd` is null carries an optional `measurement` naming the
-reason (`unpriced-model:<id>`, `no-priced-turns`, `multi-model`, `missing-transcript`,
+reason (`unpriced-model:<id>`, `no-priced-turns`, `missing-transcript`,
 `earlier-row-unpriced`), and doctor's sensor-gap list reports it as `null-usd:<measurement>`.
 
 **Why:** the branch review found a null cost indistinguishable from a model with no price row, while
