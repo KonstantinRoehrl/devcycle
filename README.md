@@ -204,6 +204,9 @@ plugin ships. Start there.
   depth per stage from the per-subagent depth rows `hooks/dispatch-sensor.mjs` writes whenever a
   cycle's own session sees a subagent finish. The hooks module (`hooks/devcycle-mod.mjs`) adds an
   `agent-trace` row per finished subagent turn, which doctor cross-checks against those depth rows.
+  The same sensor prices each finished subagent into an `agent-cost` row, and with the `plan-stats` row
+  the planning handoff writes, doctor prints a per-run Planning breakdown: dollars by planning role and
+  the P1–P12 planning rubric.
   The depth gate runs `scripts/depth-probe.mjs`, which
   measures one transcript without loading doctor. Every `/devcycle:doctor` cost-analysis reply
   carries a per-version and per-stage overview, rendered by `scripts/doctor-overview.mjs` from

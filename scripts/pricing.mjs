@@ -84,3 +84,58 @@ export function provisionalPriceFor(model) {
   if (!best || compareSegments(parsed.version, best.version) < 0) return null;
   return { price: best.price, basedOn: best.id };
 }
+
+// A 1h cache write costs 2.00x the input price, a 5m write 1.25x. Named once, beside the other
+// module-level constants, because the same two numbers price the exact path and both band edges.
+export const CACHE_WRITE_1H_MULTIPLIER = 2.0;
+export const CACHE_WRITE_5M_MULTIPLIER = 1.25;
+
+// The four token counts one usage block stands for. The cache-write count is the TTL breakdown
+// when it names any tokens, and only otherwise the flat counter: both pricing and the per-agent
+// token sums read it here, so the two cannot disagree about which one wins.
+export function usageTokens(usage) {
+  const cc = usage.cache_creation ?? {};
+  const ttlWrite = (cc.ephemeral_1h_input_tokens ?? 0) + (cc.ephemeral_5m_input_tokens ?? 0);
+  return {
+    inputTokens: usage.input_tokens ?? 0,
+    cacheWriteTokens: ttlWrite > 0 ? ttlWrite : usage.cache_creation_input_tokens ?? 0,
+    cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+    outputTokens: usage.output_tokens ?? 0,
+  };
+}
+
+// Dollars for one usage record against a given price row. Both the strict and the provisional
+// entry points go through it, so the two can never disagree about how a record is priced.
+function priceUsage(usage, p) {
+  const cc = usage.cache_creation ?? {};
+  const h1 = cc.ephemeral_1h_input_tokens ?? 0;
+  const m5 = cc.ephemeral_5m_input_tokens ?? 0;
+  const tokens = usageTokens(usage);
+  // 39% of observed cache writes are 1h (2.00x); the 5m rate applies to the flat counter, which
+  // stands in only when no TTL breakdown is present.
+  const write =
+    h1 + m5 > 0
+      ? h1 * p.in * CACHE_WRITE_1H_MULTIPLIER + m5 * p.in * CACHE_WRITE_5M_MULTIPLIER
+      : tokens.cacheWriteTokens * p.in * CACHE_WRITE_5M_MULTIPLIER;
+  const perMillion =
+    tokens.inputTokens * p.in +
+    write +
+    cacheReadDollars(tokens.cacheReadTokens, p) +
+    tokens.outputTokens * p.out;
+  return perMillion / 1e6;
+}
+
+// Dollars for one request. Returns null when the model is not in the pricing table, so the
+// caller can report it and exclude it instead of silently defaulting to a price. Strict on
+// purpose: dispatch-cost and the routing advisories call this and present the result as measured.
+export function costUSD(usage, model) {
+  const p = priceFor(model);
+  return p ? priceUsage(usage, p) : null;
+}
+
+// The estimate for a model newer than anything priced in its family (provisionalPriceFor above owns
+// the rule). Never folded into a measured figure: summarizeSession tallies it on its own.
+export function provisionalCostUSD(usage, model) {
+  const provisional = provisionalPriceFor(model);
+  return provisional ? { dollars: priceUsage(usage, provisional.price), basedOn: provisional.basedOn } : null;
+}

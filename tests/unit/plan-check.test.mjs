@@ -84,6 +84,43 @@ test("with a run in .devcycle/state.md, each run appends one gate-ran event with
   assert.deepEqual(events.map((e) => [e.event, e.stage, e.result]), [["gate-ran", "planning", "fail"]]);
 });
 
+// The gate-ran rows one plan-check run appended for a repo whose state file names a run.
+function gateRan(planText, prepare = () => {}) {
+  const repo = makeRepo();
+  prepare(repo);
+  writeInto(repo, ".devcycle/state.md", "# devcycle state\n- stage: planning\n- run: 00000000000000d4\n");
+  const runsDir = makeTempDir("plan-check-runs");
+  run(planText, { repo, env: { DEVCYCLE_RUNS_DIR: runsDir } });
+  const dir = join(runsDir, repoSlug(gitToplevel(repo)));
+  return readdirSync(dir).flatMap((f) => readFileSync(join(dir, f), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)))
+    .filter((o) => o.kind === "event" && o.event === "gate-ran");
+}
+
+test("a failing plan records gate-ran fail with the sorted, unique failing legs", () => {
+  // blastRadius crashes on a dangling link and Task 2 drops its Evidence line (briefCompleteness).
+  // LEGS runs briefCompleteness first; the record must still list them sorted, each once.
+  const noEvidence = task(2, ["src/b.txt"]).replace("**Evidence:** red-green\n", "");
+  const events = gateRan(plan(task(1, ["src/a.txt"]) + noEvidence), (repo) => {
+    mkdirSync(join(repo, ".venv", "bin"), { recursive: true });
+    symlinkSync(join(repo, "gone", "python3"), join(repo, ".venv", "bin", "python"));
+  });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].result, "fail");
+  assert.equal(events[0].legs, "blastRadius,briefCompleteness");
+});
+
+test("a plan with no Dispatch Map records its failing leg as dispatchMap", () => {
+  const events = gateRan(plan(task(1, ["src/a.txt"]), ""));
+  assert.deepEqual(events.map((e) => [e.result, e.legs]), [["fail", "dispatchMap"]]);
+});
+
+test("a passing plan records gate-ran pass with no legs field", () => {
+  const events = gateRan(plan(task(1, ["src/a.txt"]) + task(2, ["src/b.txt"])));
+  assert.equal(events.length, 1);
+  assert.equal(events[0].result, "pass");
+  assert.ok(!("legs" in events[0]), "a pass carries no legs");
+});
+
 function referencerRepo() {
   const repo = realpathSync(makeTempDir("plan-check-repo"));
   writeInto(repo, "lib/use.mjs", 'import data from "./a.txt";\n');

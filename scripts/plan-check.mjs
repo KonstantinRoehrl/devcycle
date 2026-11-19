@@ -55,7 +55,8 @@ export function planCheck(planText, { planPath, repoRoot, only }) {
   return { findings, notes, legs };
 }
 
-function recordGateRan(repoRoot, failed) {
+// failedLegs is the sorted, unique names of the legs that reported a finding; it is empty on a pass.
+function recordGateRan(repoRoot, failedLegs) {
   const stateFile = join(repoRoot, ".devcycle", "state.md");
   if (!existsSync(stateFile)) return;
   const state = readFileSync(stateFile, "utf8");
@@ -63,7 +64,8 @@ function recordGateRan(repoRoot, failed) {
   const stage = field(state, "stage");
   if (!/^[0-9a-f]{16}$/.test(run ?? "") || !STAGES.has(stage)) return;
   spawnSync(process.execPath, [RUN_RECORD, "append", "--run", run, "--kind", "event",
-    "--event", "gate-ran", "--stage", stage, "--result", failed ? "fail" : "pass"], { cwd: repoRoot, encoding: "utf8" });
+    "--event", "gate-ran", "--stage", stage, "--result", failedLegs.length ? "fail" : "pass",
+    ...(failedLegs.length ? ["--legs", failedLegs.join(",")] : [])], { cwd: repoRoot, encoding: "utf8" });
 }
 
 function die(msg) {
@@ -103,7 +105,7 @@ function main(argv) {
   const { findings, notes, legs } = planCheck(readFileSync(planPath, "utf8"), { planPath, repoRoot, only });
   printNotes(notes, { listAll: verbose || findings.length > 0 });
   for (const f of findings) console.error(`plan-check: ${f.leg}: ${f.text}`);
-  try { recordGateRan(repoRoot, findings.length > 0); } catch { /* recording is best-effort */ }
+  try { recordGateRan(repoRoot, [...new Set(findings.map((f) => f.leg))].sort()); } catch { /* recording is best-effort */ }
   if (findings.length) process.exit(1);
   console.log(`plan-check: ok — ${legs.length} leg(s): ${legs.join(", ")}`);
 }

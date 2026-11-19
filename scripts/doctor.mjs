@@ -12,7 +12,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 // The one owner of CLI flag parsing across the scripts; an unrecognised flag is fatal here rather
 // than a silent no-op that would profile the default corpus instead of the one asked for.
 import { parseFlags, requireValue } from "./cli-flags.mjs";
-import { PRICING, priceFor, provisionalPriceFor, cacheReadDollars } from "./pricing.mjs";
+import { PRICING, priceFor, costUSD, provisionalCostUSD, CACHE_WRITE_1H_MULTIPLIER, CACHE_WRITE_5M_MULTIPLIER } from "./pricing.mjs";
 // The one reader of this repo's promotion records; doctor's Cost-by-version "Shipped" column
 // names what each version shipped rather than parsing those records a second time here.
 import { readPromotions } from "./promotions.mjs";
@@ -22,8 +22,10 @@ import { atomicWrite } from "./atomic-write.mjs";
 // doctor renders these, never recomputes them — the configDrift engine/renderer precedent.
 import { verify, installedVersion, releaseDates, defaultRunCheck } from "./verification.mjs";
 import { eachRecord } from "./jsonl.mjs";
+import { collapseRequests, isTurn } from "./request-collapse.mjs";
 import { SYNTHETIC_MODEL, contextDepth, budgetBand, claudeProjectsDir, findTranscriptFiles, resolveDepth, depthLine } from "./depth-probe.mjs";
 import { usd, markdownTable, deltaText, directionLine, cohortSessionsText, withInferredNote, unpricedMediansNote } from "./doctor-format.mjs";
+import { planningBreakdowns, planningBreakdownLines, corpusGateLegsLine } from "./doctor-planning.mjs";
 import { buildOverview, renderOverview, renderTrendSummary } from "./doctor-overview.mjs";
 
 export { SYNTHETIC_MODEL, contextDepth, budgetBand, findTranscriptFiles, resolveDepth };
@@ -237,46 +239,6 @@ export function isDevcycleSession(records) {
     }
   }
   return false;
-}
-
-// A 1h cache write costs 2.00x the input price, a 5m write 1.25x. Named once, beside the other
-// module-level constants, because the same two numbers price the exact path and both band edges.
-const CACHE_WRITE_1H_MULTIPLIER = 2.0;
-const CACHE_WRITE_5M_MULTIPLIER = 1.25;
-
-// Dollars for one usage record against a given price row. Both the strict and the provisional
-// entry points go through it, so the two can never disagree about how a record is priced.
-function priceUsage(usage, p) {
-  const cc = usage.cache_creation ?? {};
-  const h1 = cc.ephemeral_1h_input_tokens ?? 0;
-  const m5 = cc.ephemeral_5m_input_tokens ?? 0;
-  // 39% of observed cache writes are 1h (2.00x). Only when no TTL breakdown is present does
-  // the flat counter stand in, billed at the 5m rate.
-  const write =
-    h1 + m5 > 0
-      ? h1 * p.in * CACHE_WRITE_1H_MULTIPLIER + m5 * p.in * CACHE_WRITE_5M_MULTIPLIER
-      : (usage.cache_creation_input_tokens ?? 0) * p.in * CACHE_WRITE_5M_MULTIPLIER;
-  const perMillion =
-    (usage.input_tokens ?? 0) * p.in +
-    write +
-    cacheReadDollars(usage.cache_read_input_tokens ?? 0, p) +
-    (usage.output_tokens ?? 0) * p.out;
-  return perMillion / 1e6;
-}
-
-// Dollars for one request. Returns null when the model is not in the pricing table, so the
-// caller can report it and exclude it instead of silently defaulting to a price. Strict on
-// purpose: dispatch-cost and the routing advisories call this and present the result as measured.
-export function costUSD(usage, model) {
-  const p = priceFor(model);
-  return p ? priceUsage(usage, p) : null;
-}
-
-// The estimate for a model newer than anything priced in its family (scripts/pricing.mjs owns
-// the rule). Never folded into a measured figure: summarizeSession tallies it on its own.
-export function provisionalCostUSD(usage, model) {
-  const provisional = provisionalPriceFor(model);
-  return provisional ? { dollars: priceUsage(usage, provisional.price), basedOn: provisional.basedOn } : null;
 }
 
 // Requests a model's absence from the price table kept out of (unpriced) or estimated apart from
@@ -986,40 +948,6 @@ function stripQuotes(s) {
   return t.replace(/^"(.*)"$/, "$1");
 }
 
-// Only assistant-side records carrying a message.usage count as turns. Synthetic placeholders
-// carry an all-zero usage block and are not requests, so they never reach the counters.
-function isTurn(r) {
-  return r.type === "assistant" && r.message && r.message.usage && r.message.model !== SYNTHETIC_MODEL;
-}
-
-// Claude Code writes one assistant record per content block, so a request of thinking + text +
-// tool_use is three records sharing one requestId and one usage block. Every per-turn, dollar and
-// depth figure is counted per request, so this is the one place the records collapse. A request
-// takes its first record's fields (stage, timestamp, side), the usage of the record with the most
-// output tokens, and the content of all its records; a record with neither a requestId nor a
-// message.id stands for itself. In the local transcripts checked, a request's records carried
-// identical usage; taking the greatest output_tokens is the guard for streaming partials, on the
-// assumption that the final block carries the final usage.
-function collapseRequests(records) {
-  const byKey = new Map();
-  const requests = [];
-  for (const r of records) {
-    const id = r.requestId ?? r.message.id;
-    const key = id ? `${r.isSidechain ? "subagent" : "main"}\0${id}` : null;
-    const request = key === null ? undefined : byKey.get(key);
-    if (!request) {
-      const first = { ...r, message: { ...r.message } };
-      if (key !== null) byKey.set(key, first);
-      requests.push(first);
-      continue;
-    }
-    if ((r.message.usage.output_tokens ?? 0) > (request.message.usage.output_tokens ?? 0)) request.message.usage = r.message.usage;
-    if (Array.isArray(r.message.content))
-      request.message.content = [...(Array.isArray(request.message.content) ? request.message.content : []), ...r.message.content];
-  }
-  return requests;
-}
-
 // Who made the request: the dispatched agent type when attributed, otherwise which side of
 // the main/subagent split it came from.
 function agentTypeOf(r) {
@@ -1113,7 +1041,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         } else if (o.kind === "session") {
           current = o.sessionHash;
           if (!windows.has(current))
-            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [], workloads: [], lensCosts: [], commits: [], agentDepths: [], agentTraces: [] });
+            windows.set(current, { stages: [], dispatches: [], verdicts: [], events: [], workloads: [], lensCosts: [], commits: [], agentDepths: [], agentTraces: [], agentCosts: [], planStats: [] });
         } else if (o.kind === "stage") { if (current) windows.get(current).stages.push(o); }
         else if (o.kind === "dispatch") { if (current) windows.get(current).dispatches.push(o); }
         else if (o.kind === "verdict") { if (current) windows.get(current).verdicts.push(o); }
@@ -1129,6 +1057,8 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         else if (o.kind === "lens-cost") { if (current) windows.get(current).lensCosts.push(o); }
         else if (o.kind === "agent-depth") { if (current) windows.get(current).agentDepths.push(o); }
         else if (o.kind === "agent-trace") { if (current) windows.get(current).agentTraces.push(o); }
+        else if (o.kind === "agent-cost") { if (current) windows.get(current).agentCosts.push(o); }
+        else if (o.kind === "plan-stats") { if (current) windows.get(current).planStats.push(o); }
         else if (o.kind === "commit") { if (current) windows.get(current).commits.push(o); }
         else if (o.kind === "triage") { triage = { requestKind: o.requestKind, entryStage: o.entryStage }; }
         else if (o.kind === "drive") drives.push(o);
@@ -1171,6 +1101,8 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
               commits: [...prior.commits, ...rec.commits],
               agentDepths: [...prior.agentDepths, ...rec.agentDepths],
               agentTraces: [...prior.agentTraces, ...rec.agentTraces],
+              agentCosts: [...prior.agentCosts, ...rec.agentCosts],
+              planStats: [...prior.planStats, ...rec.planStats],
               planningRuns: [...prior.planningRuns, ...rec.planningRuns],
               traceRuns: [...prior.traceRuns, ...rec.traceRuns],
               driveRuns: [...prior.driveRuns, ...rec.driveRuns],
@@ -1302,6 +1234,21 @@ function culpritsByKey(record) {
     (out[key] ??= new Set()).add(e.culprit);
   }
   return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, [...v].sort()]));
+}
+
+// What doctor-planning.mjs needs from one session's window, joined per run there; null without a record.
+function planningRowsOf(record) {
+  if (!record) return null;
+  const planning = (record.stages ?? []).filter((s) => s.stage === "planning");
+  return {
+    hasPlanning: planning.length > 0,
+    planningMs: planning.reduce((n, s) => n + (Date.parse(s.endedAt) - Date.parse(s.startedAt)), 0),
+    agentCosts: record.agentCosts ?? [],
+    planStats: record.planStats ?? [],
+    events: journalEvents(record),
+    blocked: (record.dispatches ?? []).filter((d) => d.outcome === "blocked").length,
+    retried: (record.dispatches ?? []).filter((d) => (d.retryIndex ?? 0) > 0).length,
+  };
 }
 
 export function summarizeSession(sessionId, records, runRecords = new Map()) {
@@ -1446,6 +1393,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     costByAgentType,
     costByLens,
     agentDepths: record?.agentDepths ?? [],
+    planningRows: planningRowsOf(record),
     traceGaps: (record?.traceRuns ?? []).filter((r) => r.depthRows > 0 && r.traceRows > 0 && r.onlyInDepth + r.onlyInTrace > 0),
     bandCounts,
     startupFloor,
@@ -2882,6 +2830,9 @@ const GLOSSES = {
   "agent-depth":
     "How deep each subagent ran, per stage, from the agent-depth rows the dispatch-sensor hook writes — " +
     "warn above 150k tokens, breach above 200k.",
+  "planning-breakdown":
+    "Where each run's planning dollars went by role, and how planning scored against its P1-P12 bars — " +
+    "from the agent-cost and plan-stats rows the planning stage writes.",
   culprits:
     "Recurring problems, priced. The dollar figure is what each one actually cost you, summed " +
     "over every occurrence — not a severity guess. The Δ and Trend are per-session (derived), so " +
@@ -3279,6 +3230,14 @@ export function renderReport(summaries, ctx) {
     agentDepthTable(summaries).map((r) => [r.stage, r.count, r.p50, r.max, r.warns, r.breaches]),
     "no agent-depth records (the dispatch-sensor hook writes one per finished subagent)",
   ));
+
+  const planning = planningBreakdowns(summaries);
+  if (planning.length) {
+    section("### Planning breakdown (observed)", "planning-breakdown");
+    L.push(...planningBreakdownLines(planning));
+    const corpusLegs = corpusGateLegsLine(planning);
+    if (corpusLegs) L.push(corpusLegs, "");
+  }
 
   // The raw observed outcome family (spec C3): one row per run carrying a quality signal, its
   // raw verdicts/counts straight off the run records. conformancePass is null exactly when no

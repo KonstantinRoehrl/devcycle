@@ -1017,3 +1017,104 @@ test("run-record finds its schema under a plugin root whose path holds a space",
     "--sessionId", "s", "--repo", makeTempDir("run-record-repo-")], { encoding: "utf8", env: { ...process.env, DEVCYCLE_RUNS_DIR: makeTempDir("run-record-space-runs-") } });
   assert.equal(r.status, 0, r.stderr);
 });
+
+// Planning telemetry kinds: agent-cost, plan-stats, and the event kind's `legs` field.
+const AGENT_COST_ARGS = ["--kind", "agent-cost", "--stage", "planning", "--agentType", "devcycle:plan-drafter",
+  "--agentId", "a27cbd72da7b3b62f", "--model", "claude-sonnet-5-5", "--role", "drafter",
+  "--inputTokens", "1200", "--cacheWriteTokens", "3400", "--cacheReadTokens", "56000", "--outputTokens", "880",
+  "--usd", "0.4125", "--turns", "7", "--explicitModel", "true", "--continuationOf", "0"];
+
+test("append agent-cost round-trips integer, number and boolean fields and fills ts", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/cost1");
+  const r = run(["append", "--run", runId, "--repo", "/tmp/cost1", ...AGENT_COST_ARGS], runs);
+  assert.strictEqual(r.status, 0, r.stderr);
+  const row = lastLine("/tmp/cost1", runId);
+  assert.strictEqual(row.kind, "agent-cost");
+  assert.strictEqual(row.role, "drafter");
+  assert.strictEqual(row.agentId, "a27cbd72da7b3b62f");
+  assert.strictEqual(row.inputTokens, 1200);
+  assert.strictEqual(row.cacheWriteTokens, 3400);
+  assert.strictEqual(row.cacheReadTokens, 56000);
+  assert.strictEqual(row.outputTokens, 880);
+  assert.strictEqual(row.usd, 0.4125);
+  assert.strictEqual(row.turns, 7);
+  assert.strictEqual(row.explicitModel, true);
+  assert.strictEqual(row.continuationOf, 0);
+  assert.match(row.ts, /^\d{4}-\d\d-\d\dT/);
+});
+
+test("append agent-cost --usd null writes JSON null for an unpriced model", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/cost2");
+  const args = AGENT_COST_ARGS.map((a) => (a === "0.4125" ? "null" : a));
+  const r = run(["append", "--run", runId, "--repo", "/tmp/cost2", ...args], runs);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(lastLine("/tmp/cost2", runId).usd, null);
+});
+
+test("append agent-cost refuses a role outside the enum and writes nothing", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/cost3");
+  const args = AGENT_COST_ARGS.map((a) => (a === "drafter" ? "bogus" : a));
+  const r = run(["append", "--run", runId, "--repo", "/tmp/cost3", ...args], runs);
+  assert.notStrictEqual(r.status, 0);
+  assert.match(r.stderr, /"role" value "bogus" is not one of/);
+  assert.strictEqual(readFileSync(recordPath("/tmp/cost3", runId), "utf8").split("\n").filter(Boolean).length, 1);
+});
+
+test("append plan-stats round-trips counts, the fence share and a null review result", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/stats1");
+  const r = run(
+    ["append", "--run", runId, "--repo", "/tmp/stats1", "--kind", "plan-stats", "--stage", "planning",
+     "--specBytes", "9120", "--planBytes", "48211", "--fenceShare", "0.61", "--tasks", "8", "--waves", "4",
+     "--strategy", "delegated", "--drafters", "3", "--subagentUsd", "null", "--specReview", "null"],
+    runs
+  );
+  assert.strictEqual(r.status, 0, r.stderr);
+  const row = lastLine("/tmp/stats1", runId);
+  assert.strictEqual(row.kind, "plan-stats");
+  assert.strictEqual(row.specBytes, 9120);
+  assert.strictEqual(row.planBytes, 48211);
+  assert.strictEqual(row.fenceShare, 0.61);
+  assert.strictEqual(row.tasks, 8);
+  assert.strictEqual(row.waves, 4);
+  assert.strictEqual(row.strategy, "delegated");
+  assert.strictEqual(row.drafters, 3);
+  assert.strictEqual(row.subagentUsd, null);
+  assert.strictEqual(row.specReview, null);
+  assert.match(row.ts, /^\d{4}-\d\d-\d\dT/);
+});
+
+test("append event gate-ran carries the failing plan-check legs", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/legs1");
+  const r = run(
+    ["append", "--run", runId, "--repo", "/tmp/legs1", "--kind", "event", "--event", "gate-ran",
+     "--stage", "planning", "--result", "fail", "--legs", "blastRadius,authoredClaims"],
+    runs
+  );
+  assert.strictEqual(r.status, 0, r.stderr);
+  const row = lastLine("/tmp/legs1", runId);
+  assert.strictEqual(row.result, "fail");
+  assert.strictEqual(row.legs, "blastRadius,authoredClaims");
+});
+
+test("validateCulprit accepts plan-defect from the shipped vocabulary", () => {
+  assert.deepEqual(validateCulprit("plan-defect"), []);
+});
+
+test("append agent-cost carries a measurement string beside a null usd, and refuses one with characters outside the pattern", () => {
+  const runs = makeTempDir("runs-");
+  const runId = newRun(runs, "/tmp/cost4");
+  const args = [...AGENT_COST_ARGS.map((a) => (a === "0.4125" ? "null" : a)), "--measurement", "unpriced-model:claude-foo"];
+  const ok = run(["append", "--run", runId, "--repo", "/tmp/cost4", ...args], runs);
+  assert.strictEqual(ok.status, 0, ok.stderr);
+  const row = lastLine("/tmp/cost4", runId);
+  assert.strictEqual(row.usd, null);
+  assert.strictEqual(row.measurement, "unpriced-model:claude-foo");
+  const bad = run(["append", "--run", runId, "--repo", "/tmp/cost4", ...args.slice(0, -1), "bad value!"], runs);
+  assert.notStrictEqual(bad.status, 0);
+  assert.match(bad.stderr, /"measurement" does not match/);
+});

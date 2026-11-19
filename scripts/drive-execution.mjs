@@ -18,7 +18,6 @@ import { EFFORT_LEVELS, resolveEffort } from "./claude-settings.mjs";
 import { parseFlags, requireCount, requireValue } from "./cli-flags.mjs";
 import { contextDepth, OVER_BUDGET, windowFor } from "./depth-bands.mjs";
 import { DISPATCH_ENDED, dispatchHealth, recordDeath, sessionSlugDir } from "./dispatch-health.mjs";
-import { costUSD, provisionalCostUSD } from "./doctor.mjs";
 import { acquireDriveLock, DRIVE_LOCK_REL, driveLockUnavailable, driveTokenHash, lockNamesState, readDriveLockHolder, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
 import { buildProgress, removeProgress, writeProgress } from "./drive-progress.mjs";
 import { holderLiveness, LOG_REL, markResultHandled, noProgressEndsAfter, RESULT_REL, STOP_REQUEST_REL, writeCrashedResult, writeDriveResult } from "./drive-result.mjs";
@@ -31,7 +30,7 @@ import { UNREADABLE_PLUGIN_VERSION, installedVersion } from "./verification.mjs"
 import { field } from "./md-field.mjs";
 import { gitToplevel, hashSession } from "./run-record.mjs";
 import { eachRecord } from "./jsonl.mjs";
-import { PRICING } from "./pricing.mjs";
+import { costUSD, PRICING, provisionalCostUSD } from "./pricing.mjs";
 import { allowedSet, inSet, ROSTER } from "./resolve-knobs.mjs";
 import { now } from "./stamp.mjs";
 import { parseDispatchMap, taskFileMap } from "./task-files.mjs";

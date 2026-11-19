@@ -5,6 +5,95 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-19 — An inline plan's research dispatch opens with `plan-research: `
+
+**Decision:** `playbooks/planning-waves.md` § Reuse before rebuild says the repo-research dispatch's
+`description` opens with `plan-research: `, so an inline plan, which never reads
+`references/delegated-planning.md`, still gets a role on its `agent-cost` row.
+
+**Why:** the prefix was stated only in the delegated-planning reference, read past a delegation
+threshold; an inline run's only planning dispatch carried no role, so doctor listed a `no-role` gap
+and rubric P12 could never pass on the baseline Phase 0 measures.
+
+**Budgets:** the playbook grows by one sentence, one line and 120 bytes; its closure and the runtime
+surface carry it.
+
+```text
+budget: surface-budget.json surfaceTotal 7032
+budget: context-budget.json playbooks/planning-waves.md 90429
+```
+
+## 2026-11-19 — The agent-cost row says why a cost is unknown
+
+**Decision:** an `agent-cost` row whose `usd` is null carries an optional `measurement` naming the
+reason (`unpriced-model:<id>`, `no-priced-turns`, `missing-transcript`,
+`earlier-row-unpriced`), and doctor's sensor-gap list reports it as `null-usd:<measurement>`.
+
+**Why:** the branch review found a null cost indistinguishable from a model with no price row, while
+the spec asks for sensor gaps with a cause.
+
+**Budgets:** the `agent-cost` row description in `references/ledger.md` grows by the field, which
+every closure that cites the ledger carries.
+
+```text
+budget: context-budget.json commands/continue.md 75758
+budget: context-budget.json commands/cycle.md 88165
+budget: context-budget.json playbooks/executing-waves.md 120290
+```
+
+## 2026-11-18 — Planning dispatches name their role
+
+**Decision:** every planning-stage dispatch opens its `description` with `plan-<role>: `, one of
+spike, research, drafter, checker or repair, and the dispatch sensor copies that role onto the
+agent's `agent-cost` row.
+
+**Why:** doctor's Planning breakdown prices planning by role; a description prefix needs no new
+hook input and costs one sentence in `references/delegated-planning.md`.
+
+**Budgets:** `references/delegated-planning.md` grows by that sentence, which
+`playbooks/planning-waves.md` carries through its citation.
+
+```text
+budget: surface-budget.json surfaceTotal 7031
+budget: context-budget.json playbooks/planning-waves.md 90309
+```
+
+## 2026-11-18 — Planning's handoff records the plan's shape
+
+**Decision:** the planning handoff runs `scripts/plan-stats.mjs`, which appends one `plan-stats`
+run-record row: spec and plan bytes, fenced-code share, task and wave counts, strategy, drafter count,
+subagent dollars and the spec-review result.
+
+**Why:** the planning-stage overhaul (#442) is weighed against these figures, and a CLI that no surface
+invokes is dead code to the golden-path check, so the script and its one caller land together.
+
+**Budgets:** the handoff paragraph of `playbooks/planning-waves.md` grows by its invocation.
+
+```text
+budget: surface-budget.json surfaceTotal 7027
+budget: context-budget.json playbooks/planning-waves.md 89864
+```
+
+## 2026-11-18 — The run record carries planning cost and plan-shape telemetry
+
+**Decision:** the run record gains an `agent-cost` kind (one row per released `SubagentStop`, with
+per-agent token and dollar deltas), a `plan-stats` kind (one row at the planning handoff), a `legs`
+field on the `gate-ran` event naming the failing plan-check legs, and the `plan-defect` culprit for an
+execution task traced to plan content.
+
+**Why:** planning's cost and shape were unmeasured, so a plan that was expensive to draft or that
+later blocked execution could not be told apart from one that was cheap and sound.
+
+**Budgets:** `references/ledger.md` § The run record gains two rows, which every closure that cites it
+carries. The figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 7024
+budget: context-budget.json commands/continue.md 75618
+budget: context-budget.json commands/cycle.md 88025
+budget: context-budget.json playbooks/executing-waves.md 120150
+```
+
 ## 2026-11-17 — The `single` review engine runs one reviewer per lens (#438)
 
 **Decision:** `reviewDepth=single` dispatches one fresh-context `devcycle:red-team-reviewer` per lens,
