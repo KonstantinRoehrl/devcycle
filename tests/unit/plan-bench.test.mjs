@@ -105,7 +105,10 @@ function gitEntry(over) {
   return entry({ ...gitRepo, ...over });
 }
 
-const cli = (args, cwd) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: "utf8" });
+// The environment a child plan-bench starts with: this process's, minus the drive token a driven session sets, which
+// would make every `run` refuse before the behavior under test; the refusal's own test sets it back explicitly.
+const undriven = (extra = {}) => ({ ...process.env, DEVCYCLE_DRIVE_TOKEN: undefined, ...extra });
+const cli = (args, cwd) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: "utf8", env: undriven() });
 
 function benchRoot(manifest) {
   const root = makeTempDir("plan-bench-root-");
@@ -191,7 +194,7 @@ test("cli run refuses inside a driven session (DEVCYCLE_DRIVE_TOKEN), before any
   const root = benchRoot({ entries: [gitEntry()] });
   const log = join(makeTempDir("plan-bench-log-"), "calls.jsonl");
   const bin = join(makeFakeBin("claude", STUB), "claude");
-  const env = { ...process.env, PB_STUB_LOG: log, DEVCYCLE_DRIVE_TOKEN: "drive-token" };
+  const env = undriven({ PB_STUB_LOG: log, DEVCYCLE_DRIVE_TOKEN: "drive-token" });
   const run = spawnSync(process.execPath, [SCRIPT, "run", "--claude", bin, "--go-ahead", "000000000000"], { cwd: root, encoding: "utf8", env });
   assert.notEqual(run.status, 0);
   assert.match(run.stderr, /^plan-bench: run never starts inside a driven session/m);
@@ -206,7 +209,7 @@ test("cli estimate and run refuse a manifest with a vanished base sha (exit 2), 
   const root = benchRoot({ entries: [gitEntry(), gitEntry({ id: "gone-sha", baseSha: "0123456789abcdef0123456789abcdef01234567" })] });
   const log = join(makeTempDir("plan-bench-log-"), "calls.jsonl");
   const bin = join(makeFakeBin("claude", STUB), "claude");
-  const env = { ...process.env, PB_STUB_LOG: log };
+  const env = undriven({ PB_STUB_LOG: log });
   const est = spawnSync(process.execPath, [SCRIPT, "estimate"], { cwd: root, encoding: "utf8", env });
   assert.equal(est.status, 2, est.stderr);
   assert.match(est.stderr, /^plan-bench: gone-sha: baseSha 0123456 does not exist in /m);
@@ -220,9 +223,9 @@ test("cli estimate and run refuse a manifest with a vanished base sha (exit 2), 
 test("cli refuses a pass id that already holds a run (exit 2) and accepts a fresh one", () => {
   const root = benchRoot({ entries: [gitEntry()] });
   mkdirSync(join(root, ".devcycle/plan-bench/passes/1/small-1--inline"), { recursive: true });
-  const r = spawnSync(process.execPath, [SCRIPT, "estimate"], { cwd: root, encoding: "utf8" });
+  const r = cli(["estimate"], root);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /already holds a run; pick a new --pass id/);
-  const fresh = spawnSync(process.execPath, [SCRIPT, "estimate", "--pass", "2"], { cwd: root, encoding: "utf8" });
+  const fresh = cli(["estimate", "--pass", "2"], root);
   assert.equal(fresh.status, 0, fresh.stderr);
 });

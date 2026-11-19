@@ -71,7 +71,7 @@ export function legArgs({ prompt, resume, pluginDir, settings, model, maxBudgetU
   ];
 }
 
-/** A leg's stream-json output, reduced to what the replay needs. No result event reads as an error. */
+/** A leg's stream-json output, reduced to what the replay needs. No result event reads as an error whose cost is unknown (`costUsd: null`). */
 export function parseLeg(stdout) {
   let init = null;
   let result = null;
@@ -81,7 +81,7 @@ export function parseLeg(stdout) {
     if (e?.type === "system" && e.subtype === "init") init = e;
     if (e?.type === "result") result = e;
   }
-  if (!result) return { sessionId: init?.session_id ?? null, costUsd: 0, text: null, isError: true, denials: 0 };
+  if (!result) return { sessionId: init?.session_id ?? null, costUsd: null, text: null, isError: true, denials: 0 };
   return {
     sessionId: result.session_id ?? init?.session_id ?? null,
     costUsd: typeof result.total_cost_usd === "number" ? result.total_cost_usd : 0,
@@ -111,8 +111,17 @@ export function runEntryArm({ execute, prompt, answers, budgetUsd, spawnLeg, rea
   const end = (outcome, question = null, error = null) => ({ outcome, usd: round2(spent), legs, question, error });
   while (legs.length < LEG_CAP) {
     if (spent >= budgetUsd) return end("budget-stop");
+    // A leg that never reports its cost (killed at --leg-timeout, or ended with no result event) may have spent up to the
+    // cap it ran under, so it is charged that cap: real spend stays within the budget however many legs die.
+    const cap = Math.max(budgetUsd - spent, MIN_LEG_BUDGET_USD);
+    const charged = (sessionId, reason) => {
+      spent += cap;
+      legs.push({ phase, sessionId, costUsd: cap, denials: 0, verdict: "error" });
+      return end("error", null, `${reason}; charged its $${cap.toFixed(2)} spend cap`);
+    };
     let leg;
-    try { leg = parseLeg(spawnLeg({ prompt: next, resume, maxBudgetUsd: budgetUsd - spent })); } catch (err) { return end("error", null, err.message); }
+    try { leg = parseLeg(spawnLeg({ prompt: next, resume, maxBudgetUsd: cap })); } catch (err) { return err.killed ? charged(null, err.message) : end("error", null, err.message); }
+    if (leg.costUsd === null) return charged(leg.sessionId, "the leg ended with no result event");
     spent += leg.costUsd;
     const verdict = classifyLeg({ phase, stateText: readState(), leg });
     legs.push({ phase, sessionId: leg.sessionId, costUsd: leg.costUsd, denials: leg.denials, verdict });

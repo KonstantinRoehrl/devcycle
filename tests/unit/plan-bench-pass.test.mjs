@@ -56,7 +56,7 @@ test("parseLeg reads the last result event, and a missing one is an error carryi
     result({ session_id: "s1", total_cost_usd: 1.25, result: "Question?", permission_denials: [{}, {}] })].join("\n");
   assert.deepEqual(parseLeg(out), { sessionId: "s1", costUsd: 1.25, text: "Question?", isError: false, denials: 2 });
   assert.deepEqual(parseLeg(JSON.stringify({ type: "system", subtype: "init", session_id: "s0" })),
-    { sessionId: "s0", costUsd: 0, text: null, isError: true, denials: 0 });
+    { sessionId: "s0", costUsd: null, text: null, isError: true, denials: 0 });
 });
 
 // A scripted replay: each leg returns its stdout and leaves the state text the next readState() sees.
@@ -143,6 +143,48 @@ test("runEntryArm keeps the legs and spend of a replay whose next leg cannot lau
     },
   });
   assert.deepEqual([r.outcome, r.usd, r.legs.length, r.error], ["error", 0.5, 1, "spawn EAGAIN"]);
+});
+
+const killed = () => Object.assign(new Error("a leg ran past --leg-timeout 1 seconds and was killed"), { killed: true });
+
+test("runEntryArm charges a killed leg the spend cap it was given, keeping the earlier legs' spend", () => {
+  let n = 0;
+  const caps = [];
+  const r = runEntryArm({
+    execute: false, prompt: "go", answers: ANSWERS, budgetUsd: 10, readState: () => ASKING,
+    spawnLeg: ({ maxBudgetUsd }) => {
+      caps.push(maxBudgetUsd);
+      if (n++) throw killed();
+      return result({ result: "Triage?" });
+    },
+  });
+  assert.deepEqual(caps, [10, 9.5]);
+  assert.deepEqual([r.outcome, r.usd, r.legs.length], ["error", 10, 2]);
+  assert.deepEqual(r.legs[1], { phase: "plan", sessionId: null, costUsd: 9.5, denials: 0, verdict: "error" });
+  assert.match(r.error, /was killed; charged its \$9\.50 spend cap/);
+});
+
+test("runEntryArm charges a leg that ended without a result event its spend cap too", () => {
+  const r = runEntryArm({ execute: false, prompt: "go", answers: ANSWERS, budgetUsd: 10, spawnLeg: () => "", readState: () => "" });
+  assert.deepEqual([r.outcome, r.usd, r.legs.length], ["error", 10, 1]);
+  assert.match(r.error, /no result event; charged its \$10\.00 spend cap/);
+});
+
+test("runPass stops spending once a killed leg has been charged its cap, so the pass total stays within --budget", () => {
+  const repoPath = benchRepo();
+  const baseSha = sh("git", ["rev-parse", "HEAD"], { cwd: repoPath }).trim();
+  const entries = ["a-1", "b-1"].map((id) => ({ id, size: "small", repoPath, baseSha, specPath: "docs/superpowers/specs/s-design.md", tasks: 1, execute: false }));
+  const caps = [];
+  const outcomes = runPass(
+    { entries, arms: ["inline"], answers: entries.map(() => ({ prompt: null, answers: DEFAULT_ANSWERS })), budget: 20 },
+    {
+      passDir: join(makeTempDir("plan-bench-passdir-"), "1"), pluginDir: "/p", model: "m", settingsFor: () => ({}),
+      projectsRoot: makeTempDir("plan-bench-projects-"),
+      spawn: (args) => { caps.push(args[args.indexOf("--max-budget-usd") + 1]); throw killed(); },
+    },
+  );
+  assert.deepEqual(caps, ["20.00"]);
+  assert.deepEqual(outcomes.map((o) => [o.id, o.outcome, o.usd]), [["a-1", "error", 20]]);
 });
 
 test("legArgs never renders a spend cap below one cent", () => {
@@ -248,9 +290,10 @@ function benchRepo() {
 }
 
 // Every run starts with PLAN_BENCH_STUB_ONLY, so no test here can launch the real claude however the file is
-// launched; an `undefined` value drops that variable from the child's environment.
+// launched; an `undefined` value drops that variable from the child's environment. The drive token a driven session
+// sets is dropped too: it would make every `run` refuse before the behavior under test.
 function cli(args, cwd, env = {}) {
-  const merged = { ...process.env, PLAN_BENCH_STUB_ONLY: "1", ...env };
+  const merged = { ...process.env, DEVCYCLE_DRIVE_TOKEN: undefined, PLAN_BENCH_STUB_ONLY: "1", ...env };
   for (const [key, value] of Object.entries(merged)) if (value === undefined) delete merged[key];
   return spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: "utf8", env: merged });
 }
@@ -311,8 +354,9 @@ test("cli run ends a leg that outlives --leg-timeout as an error outcome naming 
   const est = cli(["estimate"], root, env);
   const r = cli(["run", "--claude", bin, "--go-ahead", token(est.stdout), "--leg-timeout", "1"], root, env);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^small-1 status-quo: error, \$0\.00, 0 legs — error: .*--leg-timeout 1/m);
-  assert.match(r.stdout, /^small-1 inline: error, \$0\.00, 0 legs — error: .*--leg-timeout 1/m);
+  // The killed leg is charged the whole cap it ran under, which here is the pass budget, so the pass stops after it.
+  assert.match(r.stdout, /^small-1 status-quo: error, \$150\.00, 1 legs — error: .*--leg-timeout 1.* seconds and was killed; charged its \$150\.00 spend cap/m);
+  assert.doesNotMatch(r.stdout, /small-1 inline/);
   assert.match(cli(["run", "--leg-timeout", "0"], root, env).stderr, /--leg-timeout 0: expected a positive number of seconds/);
 });
 

@@ -143,7 +143,9 @@ start in a driven (unattended) session, where `DEVCYCLE_DRIVE_TOKEN` is set (`es
 and refuses when the installed plugin list cannot be read, since the arm could then not be forced.
 `PLAN_BENCH_STUB_ONLY=1` makes `run` refuse the real `claude` and demand `--claude <stub>`; the tests set
 it, so no test can launch a paid pass however it is started. `--leg-timeout <seconds>` (default 7200)
-kills a leg that outlives it and records its replay as an `error`. Each replay plans in a scratch clone
+kills a leg that outlives it and records its replay as an `error`. A leg that never reports its cost, one
+killed at that timeout or one that ends with no result event, is charged the spend cap it ran under, which is the
+budget still unspent, so a pass that loses a leg stops there and its total stays within `--budget`. Each replay plans in a scratch clone
 at `baseSha`, with no remote to push to, loaded with `--plugin-dir` on the checkout under test, so
 nothing it does touches the source repo, and its leg environment drops the driver variables
 (`DEVCYCLE_DRIVE_TOKEN` and the nested-run ones). A replay that cannot start is recorded as an `error`

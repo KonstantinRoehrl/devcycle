@@ -295,7 +295,7 @@ function run(argv, root) {
         cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 30, windowsHide: true,
         timeout: legTimeoutSeconds * 1000, killSignal: "SIGKILL", ...spec.options,
       });
-      if (r.error?.code === "ETIMEDOUT") throw new Error(`a leg ran past --leg-timeout ${legTimeoutSeconds} seconds and was killed`);
+      if (r.error?.code === "ETIMEDOUT") throw Object.assign(new Error(`a leg ran past --leg-timeout ${legTimeoutSeconds} seconds and was killed`), { killed: true });
       if (r.error) throw new Error(`claude did not run: ${r.error.message}`);
       return r.stdout ?? "";
     },
