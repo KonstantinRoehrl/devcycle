@@ -4,7 +4,7 @@
 // claim only while the spec is byte-identical and no path the claim cites has changed since that
 // HEAD, and re-verifies everything else. A claim citing no path can never be shown unchanged.
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { atomicWrite } from "./atomic-write.mjs";
@@ -65,6 +65,23 @@ export function parseClaims(text) {
 const sha256Of = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
 const git = (root, args) => spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
 
+// Why `path` is not what the claim saw at `head`, or null when it is. `git diff --quiet` alone exits 0
+// for a path that is untracked, ignored or absent, so each case is asked separately; any git call that
+// does not exit as documented counts as a change.
+function changeSince(root, head, path) {
+  const tracked = git(root, ["ls-tree", "-r", "--name-only", head, "--", path]);
+  if (tracked.status !== 0) return "git could not list it";
+  if (tracked.stdout.trim() === "") {
+    return lstatSync(resolve(root, path), { throwIfNoEntry: false }) === undefined ? null : "it exists but was not tracked at that HEAD";
+  }
+  if (git(root, ["diff", "--quiet", head, "--", path]).status !== 0) return "it differs from that HEAD";
+  const untracked = git(root, ["ls-files", "--others", "--exclude-standard", "--", path]);
+  if (untracked.status !== 0) return "git could not list its untracked files";
+  return untracked.stdout.trim() === "" ? null : "an untracked file sits under it";
+}
+
+const pathsUnchangedSince = (root, head, paths) => paths.length > 0 && paths.every((p) => changeSince(root, head, p) === null);
+
 export function checkClaims({ specPath, claimsPath = DEFAULT_CLAIMS_PATH, root = process.cwd() }) {
   const file = resolve(root, claimsPath);
   const stamped = existsSync(file) ? parseClaims(readFileSync(file, "utf8")) : null;
@@ -77,8 +94,7 @@ export function checkClaims({ specPath, claimsPath = DEFAULT_CLAIMS_PATH, root =
   const verified = [];
   const reverify = [];
   for (const c of stamped.claims) {
-    const unchanged = c.paths.length > 0 && git(root, ["diff", "--quiet", stamped.head, "--", ...c.paths]).status === 0;
-    (unchanged ? verified : reverify).push(c);
+    (pathsUnchangedSince(root, stamped.head, c.paths) ? verified : reverify).push(c);
   }
   return { status: "ok", verified, reverify };
 }
@@ -97,8 +113,14 @@ function write(flags) {
   for (const p of [specPath, verifiedPath]) if (!existsSync(p)) usageError(`not found: ${p}`);
   const head = git(process.cwd(), ["rev-parse", "HEAD"]);
   if (head.status !== 0) usageError(`no git HEAD in ${process.cwd()}`);
-  const stamp = { specPath, specSha256: sha256Of(specPath), head: head.stdout.trim(), written: now(),
-    claims: parseVerified(readFileSync(verifiedPath, "utf8")) };
+  const root = process.cwd();
+  const claims = [];
+  for (const c of parseVerified(readFileSync(verifiedPath, "utf8"))) {
+    const changed = c.paths.map((p) => [p, changeSince(root, head.stdout.trim(), p)]).find(([, why]) => why !== null);
+    if (changed) console.error(`spec-claims: dropped "${c.claim}" — ${changed[0]}: ${changed[1]}, so the claim could not be trusted later`);
+    else claims.push(c);
+  }
+  const stamp = { specPath, specSha256: sha256Of(specPath), head: head.stdout.trim(), written: now(), claims };
   mkdirSync(dirname(resolve(out)), { recursive: true });
   atomicWrite(resolve(out), renderClaims(stamp));
   console.log(`spec-claims: wrote ${stamp.claims.length} claims to ${out} (spec ${stamp.specSha256.slice(0, 12)}, head ${stamp.head.slice(0, 12)})`);

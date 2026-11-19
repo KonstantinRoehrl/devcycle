@@ -116,3 +116,72 @@ test("a usage error exits 2: no subcommand, an unknown flag, a missing --spec or
     assert.match(r.stderr, /^spec-claims: /);
   }
 });
+
+// Re-points the reviewer's Verified list at `lines` and stamps it, returning the write result.
+const writeVerified = (repo, lines) => {
+  writeInto(repo, ".devcycle/spec-verified.md", lines.join("\n"));
+  return writeClaims(repo);
+};
+const claimOn = (claim, paths) => `- ${claim} · paths: ${paths} · cmd: \`true\``;
+const checkLines = (repo) => cli(repo, "check", "--spec", SPEC).stdout.split("\n").slice(1).filter(Boolean);
+
+test("check: a does-not-exist claim stays verified only while the path is absent", () => {
+  const repo = reviewedRepo();
+  writeVerified(repo, [claimOn("new.mjs does not exist", "scripts/new.mjs")]);
+  assert.deepEqual(checkLines(repo), ["verified: new.mjs does not exist · paths: scripts/new.mjs"]);
+  writeInto(repo, "scripts/new.mjs", "export {};\n");
+  assert.deepEqual(checkLines(repo), ["reverify: new.mjs does not exist · paths: scripts/new.mjs"]);
+});
+
+test("check: a gitignored file appearing at a cited path re-verifies the claim", () => {
+  const repo = reviewedRepo();
+  writeInto(repo, ".gitignore", "out/\n");
+  commitAll(repo, "ignore out");
+  writeVerified(repo, [claimOn("no build output", "out/bundle.js")]);
+  assert.deepEqual(checkLines(repo), ["verified: no build output · paths: out/bundle.js"]);
+  writeInto(repo, "out/bundle.js", "x\n");
+  assert.deepEqual(checkLines(repo), ["reverify: no build output · paths: out/bundle.js"]);
+});
+
+test("check: a new untracked file under a cited directory re-verifies the claim", () => {
+  const repo = reviewedRepo();
+  writeVerified(repo, [claimOn("lib holds one module", "lib")]);
+  assert.deepEqual(checkLines(repo), ["verified: lib holds one module · paths: lib"]);
+  writeInto(repo, "lib/extra.mjs", "export {};\n");
+  assert.deepEqual(checkLines(repo), ["reverify: lib holds one module · paths: lib"]);
+});
+
+test("check: a claim on a tracked file re-verifies while edited and reads verified again once reverted", () => {
+  const repo = reviewedRepo();
+  writeVerified(repo, [claimOn("legs exported", "lib/legs.mjs")]);
+  writeInto(repo, "lib/legs.mjs", "export const LEGS = { a: 1 };\n");
+  assert.deepEqual(checkLines(repo), ["reverify: legs exported · paths: lib/legs.mjs"]);
+  writeInto(repo, "lib/legs.mjs", "export const LEGS = {};\n");
+  assert.deepEqual(checkLines(repo), ["verified: legs exported · paths: lib/legs.mjs"]);
+});
+
+test("write: a claim whose cited file is dirty is dropped, so reverting the file cannot make it read verified", () => {
+  const repo = reviewedRepo();
+  writeInto(repo, "lib/legs.mjs", "export const LEGS = { dirty: true };\n");
+  const r = writeVerified(repo, [claimOn("legs are dirty", "lib/legs.mjs"), claimOn("probe is stable", "scripts/probe.mjs")]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^spec-claims: wrote 1 claims to /);
+  assert.match(r.stderr, /legs are dirty/);
+  assert.doesNotMatch(r.stderr, /probe is stable/);
+  assert.deepEqual(parseClaims(readFileSync(join(repo, DEFAULT_CLAIMS_PATH), "utf8")).claims.map((c) => c.claim), ["probe is stable"]);
+  writeInto(repo, "lib/legs.mjs", "export const LEGS = {};\n");
+  assert.deepEqual(checkLines(repo), ["verified: probe is stable · paths: scripts/probe.mjs"]);
+});
+
+test("write: a claim whose cited file is untracked or gitignored while present is dropped", () => {
+  const repo = reviewedRepo();
+  writeInto(repo, ".gitignore", "out/\n");
+  commitAll(repo, "ignore out");
+  writeInto(repo, "scripts/fresh.mjs", "export {};\n");
+  writeInto(repo, "out/bundle.js", "x\n");
+  const r = writeVerified(repo, [claimOn("fresh is small", "scripts/fresh.mjs"), claimOn("bundle is small", "out/bundle.js"), claimOn("probe is stable", "scripts/probe.mjs")]);
+  assert.match(r.stdout, /^spec-claims: wrote 1 claims to /);
+  assert.match(r.stderr, /fresh is small/);
+  assert.match(r.stderr, /bundle is small/);
+  assert.deepEqual(parseClaims(readFileSync(join(repo, DEFAULT_CLAIMS_PATH), "utf8")).claims.map((c) => c.claim), ["probe is stable"]);
+});
