@@ -221,3 +221,23 @@ test("write and check: a plain tracked unchanged path is still verified", () => 
   assert.equal(r.stderr, "");
   assert.deepEqual(checkLines(repo), ["verified: probe is stable · paths: scripts/probe.mjs"]);
 });
+
+test("write: a claim citing a magic pathspec is dropped, since git would not read it literally", () => {
+  const repo = reviewedRepo();
+  writeInto(repo, "x.mjs", "untracked\n");
+  const r = writeVerified(repo, [claimOn("x is stable", ":/x.mjs"), claimOn("probe is stable", "scripts/probe.mjs")]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^spec-claims: wrote 1 claims to /);
+  assert.match(r.stderr, /dropped "x is stable" — :\/x\.mjs: it starts with ":", a git magic pathspec/);
+});
+
+test("check: a stamped claim citing a magic pathspec is re-verified", () => {
+  const repo = reviewedRepo();
+  writeInto(repo, "x.mjs", "untracked\n");
+  writeVerified(repo, [claimOn("legs exported", "lib/legs.mjs")]);
+  const text = readFileSync(join(repo, DEFAULT_CLAIMS_PATH), "utf8");
+  for (const magic of [":/x.mjs", ":(top)x.mjs"]) {
+    writeInto(repo, DEFAULT_CLAIMS_PATH, text.replace("paths: lib/legs.mjs", `paths: ${magic}`));
+    assert.deepEqual(checkLines(repo), [`reverify: legs exported · paths: ${magic}`]);
+  }
+});

@@ -267,3 +267,13 @@ test("transcriptReads: the recognised print forms still count", () => {
     sourcePrints: 5, reads: { f: 1, a: 1, b: 1, c: 1, "a.mjs": 1 },
   });
 });
+
+test("an apostrophe inside a shell comment does not drop the command's prints", () => {
+  assert.deepEqual(readsOf(["cat scripts/a.mjs # don't worry"]), { sourcePrints: 1, reads: { "scripts/a.mjs": 1 } });
+  assert.deepEqual(readsOf(["# it's a note\ncat scripts/b.mjs"]), { sourcePrints: 1, reads: { "scripts/b.mjs": 1 } });
+});
+
+test("an in-place sed edit is not a source print", () => {
+  assert.deepEqual(readsOf(["sed -ni 's/a/b/p' f.md", "sed -i -n 5p g.md", "sed --in-place -n 5p h.md", "sed --in-place=.bak -n 5p k.md"]), { sourcePrints: 0, reads: {} });
+  assert.deepEqual(readsOf(["sed -n 5p f.md"]), { sourcePrints: 1, reads: { "f.md": 1 } });
+});
