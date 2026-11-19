@@ -134,10 +134,22 @@ gitignored `.devcycle/plan-bench/`:
 is missing, or whose pass id already holds a run, so a pass is never started that would die after
 spending: pick a new `--pass` to rerun.
 `run --go-ahead <token>` spends money, so it runs only with the token of an estimate the user
-approved: it refuses past `--budget` (default $150) and stops spending once the budget is gone. Each
-replay plans in a scratch clone at `baseSha` loaded with `--plugin-dir` on the checkout under test, so
-nothing it does touches the source repo. A replay that cannot start is recorded as an `error` outcome
-and the pass carries on. `score --pass <pass>` re-scores a finished pass for free, counting only the replays the pass started, and
+approved: it refuses past `--budget` (default $150) and stops spending once the budget is gone. The
+estimate takes the upper ends of #442's per-task rates, so one `small`, one `medium` and one `large`
+entry at their default sizes estimates $172.60 and is refused at the default budget; the refusal names
+the two ways forward, a smaller corpus (fewer `--entries`, a smaller `size` or `tasks`) or an explicit
+`--budget` above the estimate, which is the user's decision, not the harness's. `run` also refuses to
+start in a driven (unattended) session, where `DEVCYCLE_DRIVE_TOKEN` is set (`estimate` stays allowed),
+and refuses when the installed plugin list cannot be read, since the arm could then not be forced.
+`PLAN_BENCH_STUB_ONLY=1` makes `run` refuse the real `claude` and demand `--claude <stub>`; the tests set
+it, so no test can launch a paid pass however it is started. `--leg-timeout <seconds>` (default 7200)
+kills a leg that outlives it and records its replay as an `error`. Each replay plans in a scratch clone
+at `baseSha`, with no remote to push to, loaded with `--plugin-dir` on the checkout under test, so
+nothing it does touches the source repo, and its leg environment drops the driver variables
+(`DEVCYCLE_DRIVE_TOKEN` and the nested-run ones). A replay that cannot start is recorded as an `error`
+outcome and the pass carries on. `score --pass <pass>` re-scores a finished pass for free, counting only the replays the pass started, and
+flags in the Outcome column a replay whose state file's `knobs:` line resolved a `planningStrategy` other
+than its arm (`arm-mismatch`) or none (`arm-unverified`; the run record does not carry that knob), and
 `node scripts/cost-model-fit.mjs --runs <runs dir>` fits the cost model's per-role F, t, r and o from
 the `agent-cost` rows a pass collected. [`docs/platform-notes.md`](../../platform-notes.md) § (r)
 records how a headless session is driven through its gates.

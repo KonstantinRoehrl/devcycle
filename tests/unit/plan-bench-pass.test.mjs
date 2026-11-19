@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeFakeBin, makeRepo, commitAll, writeInto, sh } from "./helpers.mjs";
 import {
@@ -204,6 +204,7 @@ test("cutClone detaches a clone at baseSha with the spec copied in, leaving the 
   assert.equal(specRel, "docs/superpowers/specs/s-design.md");
   assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "one\n");
   assert.equal(readFileSync(join(dir, specRel), "utf8"), "# spec\n");
+  assert.equal(sh("git", ["remote"], { cwd: dir }).trim(), "", "the clone keeps no remote to push to");
   sh("git", ["switch", "-qc", "feat/x"], { cwd: dir });
   assert.equal(sh("git", ["branch", "--list", "feat/x"], { cwd: repo }).trim(), "");
   assert.equal(planPrompt(specRel), "/devcycle:cycle Plan the approved spec at docs/superpowers/specs/s-design.md. It is approved: enter planning against it and stop at the planning handoff.");
@@ -216,7 +217,13 @@ const { appendFileSync, mkdirSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const args = process.argv.slice(2);
 appendFileSync(process.env.PB_STUB_LOG, JSON.stringify({ args, runs: process.env.DEVCYCLE_RUNS_DIR, ceiling: process.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS }) + "\\n");
-if (args[0] === "plugin") { console.log("[]"); process.exit(0); }
+if (args[0] === "plugin") {
+  if (process.env.PB_PLUGIN_FAIL) process.exit(1);
+  console.log("[]");
+  process.exit(0);
+}
+if (process.env.PB_HANG) setInterval(() => {}, 1000);
+else {
 mkdirSync(".devcycle", { recursive: true });
 const resumed = args.includes("--resume");
 writeFileSync(".devcycle/state.md", resumed
@@ -226,6 +233,7 @@ const project = join(process.env.CLAUDE_CONFIG_DIR, "projects", "-fake");
 mkdirSync(project, { recursive: true });
 writeFileSync(join(project, "sid-1.jsonl"), "{}\\n");
 console.log(JSON.stringify({ type: "result", session_id: "sid-1", total_cost_usd: 0.25, result: resumed ? "Planned." : "Triage: confirm?", is_error: false, permission_denials: [] }));
+}
 `;
 
 function benchRepo() {
@@ -239,7 +247,13 @@ function benchRepo() {
   return root;
 }
 
-const cli = (args, cwd, env = {}) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: "utf8", env: { ...process.env, ...env } });
+// Every run starts with PLAN_BENCH_STUB_ONLY, so no test here can launch the real claude however the file is
+// launched; an `undefined` value drops that variable from the child's environment.
+function cli(args, cwd, env = {}) {
+  const merged = { ...process.env, PLAN_BENCH_STUB_ONLY: "1", ...env };
+  for (const [key, value] of Object.entries(merged)) if (value === undefined) delete merged[key];
+  return spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: "utf8", env: merged });
+}
 const token = (stdout) => /^go-ahead: ([0-9a-f]{12})$/m.exec(stdout)?.[1];
 
 test("cli run prints the estimate and refuses without the matching go-ahead (exit 3), spawning nothing", () => {
@@ -255,13 +269,79 @@ test("cli run prints the estimate and refuses without the matching go-ahead (exi
   assert.equal(existsSync(log), false, "no claude call before a go-ahead");
 });
 
-test("cli run refuses past --budget (exit 2) and refuses the real claude under node --test (exit 1)", () => {
+test("cli run refuses past --budget (exit 2)", () => {
+  assert.equal(cli(["run", "--budget", "1"], benchRepo()).status, 2);
+});
+
+test("cli run never reaches the real claude when PLAN_BENCH_STUB_ONLY is set, even launched directly with no node --test variable", () => {
   const root = benchRepo();
-  assert.equal(cli(["run", "--budget", "1"], root).status, 2);
-  const est = cli(["estimate"], root);
-  const r = cli(["run", "--go-ahead", token(est.stdout)], root);
+  const log = join(makeTempDir("plan-bench-log-"), "calls.jsonl");
+  // A claude on PATH stands in for the real one: any call to it is a call the guard let through.
+  const path = `${makeFakeBin("claude", FAKE_CLAUDE)}${delimiter}${process.env.PATH}`;
+  const env = { PB_STUB_LOG: log, PATH: path, NODE_TEST_CONTEXT: undefined, CLAUDE_CONFIG_DIR: makeTempDir("plan-bench-config-") };
+  const est = cli(["estimate"], root, env);
+  const r = cli(["run", "--go-ahead", token(est.stdout)], root, env);
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /refusing to launch the real claude under node --test/);
+  assert.match(r.stderr, /refusing to launch the real claude: PLAN_BENCH_STUB_ONLY is set; pass --claude <stub>/);
+  assert.equal(existsSync(log), false, "no claude call");
+  // Without the switch the same run reaches the claude on PATH: the real-run path is unchanged.
+  const real = cli(["run", "--go-ahead", token(est.stdout)], root, { ...env, PLAN_BENCH_STUB_ONLY: undefined });
+  assert.equal(real.status, 0, real.stderr);
+  assert.ok(existsSync(log), "claude on PATH was launched");
+});
+
+test("cli run refuses (exit 1) when the plugin list cannot be read, before any leg launches", () => {
+  const root = benchRepo();
+  const log = join(makeTempDir("plan-bench-log-"), "calls.jsonl");
+  const bin = join(makeFakeBin("claude", FAKE_CLAUDE), "claude");
+  const env = { PB_STUB_LOG: log, PB_PLUGIN_FAIL: "1" };
+  const est = cli(["estimate"], root, env);
+  const r = cli(["run", "--claude", bin, "--go-ahead", token(est.stdout)], root, env);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /plan-bench: cannot read `claude plugin list --json`.*installed devcycle would load beside the checkout/);
+  const legs = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter((l) => JSON.parse(l).args[0] === "-p") : [];
+  assert.equal(legs.length, 0, "no leg launched");
+});
+
+test("cli run ends a leg that outlives --leg-timeout as an error outcome naming the timeout, and carries on", () => {
+  const root = benchRepo();
+  const log = join(makeTempDir("plan-bench-log-"), "calls.jsonl");
+  const bin = join(makeFakeBin("claude", FAKE_CLAUDE), "claude");
+  const env = { PB_STUB_LOG: log, PB_HANG: "1" };
+  const est = cli(["estimate"], root, env);
+  const r = cli(["run", "--claude", bin, "--go-ahead", token(est.stdout), "--leg-timeout", "1"], root, env);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^small-1 status-quo: error, \$0\.00, 0 legs — error: .*--leg-timeout 1/m);
+  assert.match(r.stdout, /^small-1 inline: error, \$0\.00, 0 legs — error: .*--leg-timeout 1/m);
+  assert.match(cli(["run", "--leg-timeout", "0"], root, env).stderr, /--leg-timeout 0: expected a positive number of seconds/);
+});
+
+test("runPass strips the driver's variables from a replay leg's environment and keeps the rest", () => {
+  const repoPath = benchRepo();
+  const baseSha = sh("git", ["rev-parse", "HEAD"], { cwd: repoPath }).trim();
+  const entries = [{ id: "good-1", size: "small", repoPath, baseSha, specPath: "docs/superpowers/specs/s-design.md", tasks: 1, execute: false }];
+  const seen = [];
+  const driven = {
+    PATH: "/usr/bin", KEEP: "1", DEVCYCLE_DRIVE_TOKEN: "t", DEVCYCLE_DRIVER_PLUGIN_VERSION: "0.33.0",
+    DEVCYCLE_NESTED_RUN: "1", CLAUDECODE: "1", CLAUDE_EFFORT: "high",
+  };
+  runPass(
+    { entries, arms: ["inline"], answers: [{ prompt: null, answers: DEFAULT_ANSWERS }], budget: 50 },
+    {
+      passDir: join(makeTempDir("plan-bench-passdir-"), "1"), pluginDir: "/p", model: "m", settingsFor: () => ({}),
+      projectsRoot: makeTempDir("plan-bench-projects-"), env: driven,
+      spawn: (args, { cwd, env }) => {
+        seen.push(env);
+        mkdirSync(join(cwd, ".devcycle"), { recursive: true });
+        writeFileSync(join(cwd, ".devcycle", "state.md"), PLANNED);
+        return result({});
+      },
+    },
+  );
+  assert.equal(seen.length, 1);
+  for (const key of ["DEVCYCLE_DRIVE_TOKEN", "DEVCYCLE_DRIVER_PLUGIN_VERSION", "DEVCYCLE_NESTED_RUN", "CLAUDECODE", "CLAUDE_EFFORT"]) assert.equal(key in seen[0], false, key);
+  assert.equal(seen[0].KEEP, "1");
+  assert.match(seen[0].DEVCYCLE_RUNS_DIR, /good-1--inline[\\/]runs$/);
 });
 
 test("cli run with a go-ahead replays each arm through the gate and collects its artifacts", () => {

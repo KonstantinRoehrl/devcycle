@@ -4,18 +4,22 @@
 // owns the manifest and answer-file shapes, the spend estimate, the budget refusal and the go-ahead
 // token; scripts/plan-bench-pass.mjs runs a pass and scripts/plan-bench-score.mjs scores one.
 // Nothing here spends money: only `run`, given a go-ahead token that matches the printed estimate,
-// launches a session.
+// launches a session, and never from a driven (unattended) session. PLAN_BENCH_STUB_ONLY=1 makes `run`
+// refuse the real `claude` and demand --claude <stub>; the tests set it.
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isMain } from "./is-main.mjs";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
+import agentCli from "../workflows/lib/agent-cli.js";
 import { gitToplevel } from "./run-record.mjs";
 import { claudeProjectsDir } from "./depth-probe.mjs";
 import { readPluginList } from "./drive-surface.mjs";
 import { runPass, specSource } from "./plan-bench-pass.mjs";
 import { resultsMarkdown, scorePass } from "./plan-bench-score.mjs";
+
+const { spawnSpec } = agentCli;
 
 export const ARMS = ["status-quo", "inline"];
 export const SIZES = ["small", "medium", "large"];
@@ -24,7 +28,12 @@ export const DEFAULT_TASKS = { small: 3, medium: 7, large: 12 };
 // USD per planned task (assumption: #442's 0.32.x figures, upper ends) until cost-model-fit
 // calibrates them: status-quo $4.4-5.3 planning, inline $0.4-1.4, execution about a third of status-quo.
 export const RATES = { planning: { "status-quo": 5.3, inline: 1.4 }, execution: 1.8 };
+// The default stays at the user's target: a small, a medium and a large entry at default sizes estimates
+// $172.60 (the estimate takes the upper ends of #442's rates on purpose), so such a pass needs a smaller
+// corpus or an explicit --budget above the target, which is the user's call.
 export const DEFAULT_BUDGET = 150;
+// Seconds one headless leg may run before it is killed and its replay recorded as an error.
+export const DEFAULT_LEG_TIMEOUT_SECONDS = 7200;
 export const BENCH_DIR = ".devcycle/plan-bench";
 // Every gate the benchmark cannot answer from an entry's answer file gets this standing reply: it matches
 // any question and, being `standing`, answers every gate of the replay, not just the first.
@@ -118,12 +127,12 @@ export function goAheadToken({ manifestText, answersTexts, arms, passId, budget,
  * everything else fixed so arms differ only in planningStrategy.
  * @param {string} arm one of ARMS
  * @param {{implementerModel: string}} opts
- * @returns {Record<string, string>}
+ * @returns {Record<string, string|boolean>} each value typed as .claude-plugin/plugin.json declares its knob
  */
 export function benchKnobs(arm, { implementerModel }) {
   return {
     profile: "standard", gitPolicy: "local-commits-only", docTrackingPolicy: "all-local", reviewDepth: "single",
-    crossModelReview: "false", onDeviceGate: "auto-ok", implementerModel, handoffNotification: "off",
+    crossModelReview: false, onDeviceGate: "auto-ok", implementerModel, handoffNotification: "off",
     executionMode: "manual", subagentBudget: "warn", planningStrategy: arm,
   };
 }
@@ -223,7 +232,12 @@ export function estimateLines(common) {
   for (const r of rows) lines.push(`| ${r.id} | ${r.arm} | ${r.tasks} | ${r.planningUsd.toFixed(2)} | ${r.executionUsd.toFixed(2)} | ${r.usd.toFixed(2)} |`);
   lines.push("", `estimate: $${totalUsd.toFixed(2)} for pass ${common.passId} (budget $${common.budget.toFixed(2)})`);
   const within = totalUsd <= common.budget;
-  lines.push(within ? `go-ahead: ${token}` : `refused: the estimate exceeds --budget $${common.budget.toFixed(2)}`);
+  if (within) lines.push(`go-ahead: ${token}`);
+  else
+    lines.push(
+      `refused: the estimate exceeds --budget $${common.budget.toFixed(2)}`,
+      "next: either shrink the corpus (fewer --entries, a smaller `size` or `tasks` in the manifest), or rerun with an explicit --budget above the estimate, which is the user's decision to make",
+    );
   return { lines, token, within, totalUsd };
 }
 
@@ -241,13 +255,19 @@ export const IMPLEMENTER_MODEL = "claude-sonnet-5-5";
 
 const RUN_FLAGS = {
   ...KNOWN_FLAGS, "--go-ahead": "value", "--plugin-dir": "value", "--model": "value", "--implementer-model": "value", "--claude": "value",
+  "--leg-timeout": "value",
 };
 
 // The paid subcommand. Order is the consent contract: a pass that cannot start is refused, the estimate prints
-// next, a pass over budget is refused, a pass whose go-ahead token does not match the printed estimate is refused, and under
-// `node --test` the real `claude` is never launched.
+// next, a pass over budget is refused, a pass whose go-ahead token does not match the printed estimate is refused, and with
+// PLAN_BENCH_STUB_ONLY set the real `claude` is never launched. A driven session never gets this far: spec §9.9, unattended
+// execution never launches a paid pass on its own.
 function run(argv, root) {
+  if (process.env.DEVCYCLE_DRIVE_TOKEN) throw new PlanBenchError("run never starts inside a driven session: a paid pass needs the user's go-ahead in an interactive session (estimate is still allowed)");
   const { flags } = parseFlags(argv, RUN_FLAGS);
+  const legTimeoutText = requireValue(flags, "--leg-timeout", "a number of seconds") ?? String(DEFAULT_LEG_TIMEOUT_SECONDS);
+  const legTimeoutSeconds = Number(legTimeoutText);
+  if (!(legTimeoutSeconds > 0)) throw new PlanBenchError(`--leg-timeout ${legTimeoutText}: expected a positive number of seconds`);
   const common = readCommon(flags, root);
   if (refusedByPreflight(common, root)) return 2;
   const { lines, token, within } = estimateLines(common);
@@ -258,18 +278,27 @@ function run(argv, root) {
     return 3;
   }
   const claude = requireValue(flags, "--claude", "a claude binary") ?? "claude";
-  if (process.env.NODE_TEST_CONTEXT && !("--claude" in flags)) throw new PlanBenchError("refusing to launch the real claude under node --test; pass --claude <stub>");
+  if (process.env.PLAN_BENCH_STUB_ONLY && !("--claude" in flags)) throw new PlanBenchError("refusing to launch the real claude: PLAN_BENCH_STUB_ONLY is set; pass --claude <stub>");
   const list = readPluginList({ bin: claude, cwd: root });
-  if (!list.ok) console.error("plan-bench: warning: plugin list unavailable — replays load every enabled plugin");
+  if (!list.ok) throw new PlanBenchError("cannot read `claude plugin list --json`, so the arm cannot be forced: the installed devcycle would load beside the checkout under test (docs/platform-notes.md § (r)); fix the claude install or --claude and rerun");
   const implementerModel = requireValue(flags, "--implementer-model", "a model id") ?? IMPLEMENTER_MODEL;
   const passDir = passDirOf(root, common.passId);
   const outcomes = runPass(common, {
     passDir,
     pluginDir: requireValue(flags, "--plugin-dir") ?? root,
     model: requireValue(flags, "--model", "a model id") ?? SESSION_MODEL,
-    settingsFor: (arm) => benchSettings({ plugins: list.ok ? list.plugins : [], knobs: benchKnobs(arm, { implementerModel }) }),
+    settingsFor: (arm) => benchSettings({ plugins: list.plugins, knobs: benchKnobs(arm, { implementerModel }) }),
     projectsRoot: claudeProjectsDir(),
-    spawn: (args, { cwd, env }) => spawnSync(claude, args, { cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 30 }).stdout ?? "",
+    spawn: (args, { cwd, env }) => {
+      const spec = spawnSpec(claude, args, env);
+      const r = spawnSync(spec.file, spec.args, {
+        cwd, env, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], maxBuffer: 1 << 30, windowsHide: true,
+        timeout: legTimeoutSeconds * 1000, killSignal: "SIGKILL", ...spec.options,
+      });
+      if (r.error?.code === "ETIMEDOUT") throw new Error(`a leg ran past --leg-timeout ${legTimeoutSeconds} seconds and was killed`);
+      if (r.error) throw new Error(`claude did not run: ${r.error.message}`);
+      return r.stdout ?? "";
+    },
   });
   for (const o of outcomes) console.log(`${o.id} ${o.arm}: ${o.outcome}, $${o.usd.toFixed(2)}, ${o.legs.length} legs${o.question ? ` — unanswered: ${o.question.slice(0, 200)}` : ""}${o.error ? ` — error: ${o.error.slice(0, 200)}` : ""}`);
   console.log(`pass ${common.passId}: ${passDir}`);
@@ -291,7 +320,7 @@ function score(argv, root) {
 export const SUBCOMMANDS = { estimate, run, score };
 
 const USAGE = "usage: plan-bench.mjs <estimate|run|score> [--manifest <path>] [--arms status-quo,inline] [--entries <id,…>] [--budget <usd>] [--pass <id>] " +
-  "[run: --go-ahead <token> --plugin-dir <checkout> --model <id> --implementer-model <id> --claude <bin>]";
+  "[run: --go-ahead <token> --plugin-dir <checkout> --model <id> --implementer-model <id> --claude <bin> --leg-timeout <seconds>]";
 
 export function main(argv, root = gitToplevel(process.cwd())) {
   const [sub, ...rest] = argv;

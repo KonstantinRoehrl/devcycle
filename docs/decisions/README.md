@@ -13,7 +13,10 @@ P1–P12 rubric. It answers each gate from a per-entry answer file by resuming t
 ended, cuts a scratch **clone** at the entry's base rather than a worktree, prints its estimate
 first, refuses a pass past `--budget` (default $150), and launches nothing without the go-ahead
 token of the estimate the user approved. Spec §9.9 left the harness's name and docs page to the
-builder; the user chose both, and the clone.
+builder; the user chose both, and the clone. The default budget stays at the user's $150 per pass and the
+estimate keeps the upper ends of #442's rates, so a pass of one small, one medium and one large entry at
+default sizes ($172.60) is refused at the default: it takes a smaller corpus or an explicit `--budget`
+above the target, which only the user decides. `run` never starts in a driven session.
 
 **Why:** a 2026-11-19 spike (`docs/platform-notes.md` § (r)) showed `AskUserQuestion` is absent under
 `-p`, that a gate ends the session as result text, that `--resume` continues it, and that a

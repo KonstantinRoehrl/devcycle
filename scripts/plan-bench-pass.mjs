@@ -18,6 +18,11 @@ export const CONTINUE_PROMPT = "/devcycle:continue";
 export const planPrompt = (specRel) =>
   `/devcycle:cycle Plan the approved spec at ${specRel}. It is approved: enter planning against it and stop at the planning handoff.`;
 
+// What a replay leg must not inherit from a driver or a nesting session (scripts/drive-execution.mjs
+// childEnv): the drive token stops handoff-mark.mjs ever marking the leg's handoff, a nested-run flag leaves
+// the hooks module inert, and the others misreport the session.
+const DRIVER_ENV = ["DEVCYCLE_DRIVE_TOKEN", "DEVCYCLE_DRIVER_PLUGIN_VERSION", "DEVCYCLE_NESTED_RUN", "CLAUDECODE", "CLAUDE_EFFORT"];
+
 const handoffReady = (stateText) => /^ready\b/.test(field(stateText, "handoff") ?? "");
 
 /**
@@ -161,8 +166,10 @@ export function cutClone({ repoPath, baseSha, specPath, parent }) {
     const r = spawnSync("git", args, { encoding: "utf8" });
     if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr.trim()}`);
   };
-  git(["clone", "--quiet", "--no-checkout", repoPath, dir]);
+  git(["clone", "--quiet", "--no-checkout", "--", repoPath, dir]);
   git(["-C", dir, "checkout", "--quiet", "--detach", baseSha]);
+  // A replay must not be able to push to, or fetch from, the repo it was cut from.
+  git(["-C", dir, "remote", "remove", "origin"]);
   const specRel = isAbsolute(specPath) ? join("docs", "superpowers", "specs", basename(specPath)) : specPath;
   const source = specSource({ repoPath, specPath });
   mkdirSync(join(dir, specRel, ".."), { recursive: true });
@@ -207,7 +214,7 @@ function replay({ entry, arm, answers, budgetUsd, out, pluginDir, model, setting
   let dir;
   let specRel;
   try { ({ dir, specRel } = cutClone({ ...entry, parent: makeTempDir("plan-bench-") })); } catch (err) { return fail(err); }
-  const legEnv = { ...env, DEVCYCLE_RUNS_DIR: join(out, "runs"), CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0" };
+  const legEnv = { ...Object.fromEntries(Object.entries(env).filter(([key]) => !DRIVER_ENV.includes(key))), DEVCYCLE_RUNS_DIR: join(out, "runs"), CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0" };
   const statePath = join(dir, ".devcycle", "state.md");
   let n = 0;
   const result = runEntryArm({

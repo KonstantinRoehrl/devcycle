@@ -75,7 +75,7 @@ test("goAheadToken is 12 hex characters and changes with any input", () => {
 test("benchKnobs pins every knob but the arm and the implementer model", () => {
   assert.deepEqual(benchKnobs("inline", { implementerModel: "claude-sonnet-5-5" }), {
     profile: "standard", gitPolicy: "local-commits-only", docTrackingPolicy: "all-local", reviewDepth: "single",
-    crossModelReview: "false", onDeviceGate: "auto-ok", implementerModel: "claude-sonnet-5-5", handoffNotification: "off",
+    crossModelReview: false, onDeviceGate: "auto-ok", implementerModel: "claude-sonnet-5-5", handoffNotification: "off",
     executionMode: "manual", subagentBudget: "warn", planningStrategy: "inline",
   });
 });
@@ -131,6 +131,15 @@ test("cli estimate refuses past --budget with exit 2 and prints no token", () =>
   assert.doesNotMatch(r.stdout, /go-ahead:/);
 });
 
+test("the budget refusal names both ways forward: a smaller corpus, or an explicit --budget that is the user's call", () => {
+  const root = benchRoot({ entries: [gitEntry(), gitEntry({ id: "med-1", size: "medium" }), gitEntry({ id: "big", size: "large" })] });
+  const r = cli(["estimate", "--manifest", `${root}/.devcycle/plan-bench/manifest.json`], root);
+  assert.equal(r.status, 2);
+  assert.match(r.stdout, /^estimate: \$172\.60 for pass 1 \(budget \$150\.00\)$/m);
+  assert.match(r.stdout, /^refused: the estimate exceeds --budget \$150\.00$/m);
+  assert.match(r.stdout, /^next: either shrink the corpus \(fewer --entries, a smaller `size` or `tasks` in the manifest\), or rerun with an explicit --budget above the estimate, which is the user's decision to make$/m);
+});
+
 test("cli estimate narrows by --arms and --entries, and rejects an unknown arm, entry or bad manifest", () => {
   const root = benchRoot({ entries: [gitEntry(), gitEntry({ id: "med-1", size: "medium" })] });
   const m = `${root}/.devcycle/plan-bench/manifest.json`;
@@ -177,6 +186,21 @@ const STUB = `
 require("node:fs").appendFileSync(process.env.PB_STUB_LOG, process.argv.slice(2).join(" ") + "\\n");
 console.log("[]");
 `;
+
+test("cli run refuses inside a driven session (DEVCYCLE_DRIVE_TOKEN), before any estimate or go-ahead token prints; estimate stays allowed", () => {
+  const root = benchRoot({ entries: [gitEntry()] });
+  const log = join(makeTempDir("plan-bench-log-"), "calls.jsonl");
+  const bin = join(makeFakeBin("claude", STUB), "claude");
+  const env = { ...process.env, PB_STUB_LOG: log, DEVCYCLE_DRIVE_TOKEN: "drive-token" };
+  const run = spawnSync(process.execPath, [SCRIPT, "run", "--claude", bin, "--go-ahead", "000000000000"], { cwd: root, encoding: "utf8", env });
+  assert.notEqual(run.status, 0);
+  assert.match(run.stderr, /^plan-bench: run never starts inside a driven session/m);
+  assert.doesNotMatch(run.stdout, /go-ahead: [0-9a-f]{12}|estimate:/);
+  assert.equal(existsSync(log), false, "claude never spawned");
+  const est = spawnSync(process.execPath, [SCRIPT, "estimate"], { cwd: root, encoding: "utf8", env });
+  assert.equal(est.status, 0, est.stderr);
+  assert.match(est.stdout, /^go-ahead: [0-9a-f]{12}$/m);
+});
 
 test("cli estimate and run refuse a manifest with a vanished base sha (exit 2), before any token or claude call", () => {
   const root = benchRoot({ entries: [gitEntry(), gitEntry({ id: "gone-sha", baseSha: "0123456789abcdef0123456789abcdef01234567" })] });

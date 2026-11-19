@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
-import { RUBRIC_IDS, replayBreakdowns, scoreReplay, resultsMarkdown, scorePass } from "../../scripts/plan-bench-score.mjs";
+import { RUBRIC_IDS, replayBreakdowns, scoreReplay, resultsMarkdown, scorePass, armCheck } from "../../scripts/plan-bench-score.mjs";
 
 const SCRIPT = new URL("../../scripts/plan-bench.mjs", import.meta.url).pathname;
 const RUN = "0f1e2d3c4b5a6978";
@@ -16,9 +16,11 @@ const jsonl = (rows) => rows.map((r) => JSON.stringify(r)).join("\n") + "\n";
 
 // One replay directory in the layout runPass writes, holding a planning run doctor can break down:
 // the run record under runs/, one coordinator turn under corpus/.
-function replay(passDir, name, { outcome = "planned", planning = true } = {}) {
+// `knobs` is the knobs: line the replay's state.md carries; the default is the arm the replay was run as.
+function replay(passDir, name, { outcome = "planned", planning = true, knobs } = {}) {
   const dir = join(passDir, name);
   const [id, arm] = name.split("--");
+  if (knobs !== null) writeInto(dir, "state.md", `# devcycle state\n- stage: execution\n- knobs: ${knobs ?? `profile=standard planningStrategy=${arm} subagentBudget=warn`}\n`);
   writeInto(dir, "outcome.json", JSON.stringify({ id, size: "small", arm, outcome, usd: 1.5,
     legs: [{ phase: "plan", sessionId: SESSION, costUsd: 1, denials: 1, verdict: "question" }, { phase: "plan", sessionId: SESSION, costUsd: 0.5, denials: 0, verdict: "done" }],
     question: null, sessions: 1 }));
@@ -51,6 +53,30 @@ test("scoreReplay joins the outcome with the rubric, and a replay with no planni
   assert.equal(s.rubric.length, 12);
   const none = scoreReplay(replay(pass, "small-2--inline", { outcome: "unanswered", planning: false }));
   assert.deepEqual([none.outcome, none.rubric, none.byRole, none.runId], ["unanswered", null, null, null]);
+});
+
+test("armCheck reads the planningStrategy the replay's state.md knobs: line resolved and compares it to the arm", () => {
+  const pass = makeTempDir("plan-bench-pass-");
+  const check = (arm, opts) => armCheck(replay(pass, `${arm}-${Math.random().toString(36).slice(2)}--${arm}`, opts), arm);
+  assert.deepEqual(check("inline", {}), { armCheck: "verified", armSeen: "inline" });
+  assert.deepEqual(check("status-quo", {}), { armCheck: "verified", armSeen: "status-quo" });
+  assert.deepEqual(check("inline", { knobs: "profile=standard planningStrategy=auto" }), { armCheck: "arm-mismatch", armSeen: "auto" });
+  assert.deepEqual(check("inline", { knobs: "profile=standard" }), { armCheck: "arm-unverified", armSeen: null });
+  assert.deepEqual(check("inline", { knobs: null }), { armCheck: "arm-unverified", armSeen: null });
+});
+
+test("scoreReplay carries the arm check, and the results table flags a mismatched or unverified arm beside its outcome, never silently", () => {
+  const pass = makeTempDir("plan-bench-pass-");
+  const bad = scoreReplay(replay(pass, "small-1--inline", { knobs: "planningStrategy=auto" }));
+  assert.deepEqual([bad.armCheck, bad.armSeen], ["arm-mismatch", "auto"]);
+  const unknown = scoreReplay(replay(pass, "small-2--inline", { knobs: null }));
+  assert.equal(unknown.armCheck, "arm-unverified");
+  const good = scoreReplay(replay(pass, "small-3--inline"));
+  assert.equal(good.armCheck, "verified");
+  const rows = resultsMarkdown([bad, unknown, good]).split("\n").slice(2);
+  assert.match(rows[0], /^\| small-1 \| inline \| planned \(arm-mismatch: saw auto\) \| 1\.50 \|/);
+  assert.match(rows[1], /^\| small-2 \| inline \| planned \(arm-unverified\) \| 1\.50 \|/);
+  assert.match(rows[2], /^\| small-3 \| inline \| planned \| 1\.50 \|/);
 });
 
 test("resultsMarkdown tables each replay's P1-P12 as value and status, a dash where nothing was scored", () => {

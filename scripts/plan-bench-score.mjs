@@ -5,6 +5,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { findTranscriptFiles, parseArgs, readRunRecords, summarizeCorpus } from "./doctor.mjs";
 import { planningBreakdowns } from "./doctor-planning.mjs";
+import { field } from "./md-field.mjs";
 
 export const RUBRIC_IDS = ["P1", "P2", "P3", "P4", "P5", "P6", "P7", "P8", "P9", "P10", "P11", "P12"];
 
@@ -15,6 +16,23 @@ export function replayBreakdowns(replayDir) {
   // --all: every session in a replay corpus is the replay's own, whatever it was tagged.
   const { sessions } = summarizeCorpus(files, parseArgs(["--dir", corpus, "--all"]), readRunRecords(join(replayDir, "runs")));
   return planningBreakdowns(sessions);
+}
+
+/**
+ * Whether the replay ran the arm it was meant to: the planningStrategy its state file's `knobs:` line
+ * resolved, compared with the arm. The run record does not carry that knob (commands/cycle.md's
+ * `--knob` list omits it), so the state file is the one place the session's own value is kept; a replay
+ * with no state file or no planningStrategy on the line cannot be checked and is `arm-unverified`.
+ * @param {string} replayDir a `<passDir>/<id>--<arm>` directory
+ * @param {string} arm the arm the replay was started as
+ * @returns {{armCheck: "verified"|"arm-mismatch"|"arm-unverified", armSeen: string|null}}
+ */
+export function armCheck(replayDir, arm) {
+  const statePath = join(replayDir, "state.md");
+  const knobs = existsSync(statePath) ? field(readFileSync(statePath, "utf8"), "knobs") ?? "" : "";
+  const seen = /(?:^|\s)planningStrategy=(\S+)/.exec(knobs)?.[1] ?? null;
+  if (seen === null) return { armCheck: "arm-unverified", armSeen: null };
+  return { armCheck: seen === arm ? "verified" : "arm-mismatch", armSeen: seen };
 }
 
 /**
@@ -30,6 +48,7 @@ export function scoreReplay(replayDir, breakdownsOf = replayBreakdowns) {
   return {
     id: outcome.id, size: outcome.size, arm: outcome.arm, outcome: outcome.outcome, usd: outcome.usd,
     legs: outcome.legs.length, denials: outcome.legs.reduce((n, l) => n + l.denials, 0),
+    ...armCheck(replayDir, outcome.arm),
     runId: found.at(-1)?.runId ?? null,
     rubric: b ? b.rubric : null, byRole: b ? b.byRole : null, planDefects: b ? b.planDefects : null, raw: b ? b.raw : null,
   };
@@ -44,13 +63,17 @@ const cell = (row) => {
   return `${text} ${row.status}`;
 };
 
-/** The pass table: one row per replay, P1-P12 as `<value> <pass|fail|n/a>`. */
+// An arm that was not confirmed is named beside the outcome, so a table never reads as a clean comparison it is not.
+const outcomeCell = (r) => (r.armCheck === "arm-mismatch" ? `${r.outcome} (arm-mismatch: saw ${r.armSeen})`
+  : r.armCheck === "arm-unverified" ? `${r.outcome} (arm-unverified)` : r.outcome);
+
+/** The pass table: one row per replay, P1-P12 as `<value> <pass|fail|n/a>`; an unconfirmed arm is flagged in its Outcome cell. */
 export function resultsMarkdown(results) {
   const head = ["Entry", "Arm", "Outcome", "$", ...RUBRIC_IDS];
   const lines = [`| ${head.join(" | ")} |`, `| ${head.map(() => "---").join(" | ")} |`];
   for (const r of results) {
     const byId = new Map((r.rubric ?? []).map((row) => [row.id, row]));
-    lines.push(`| ${[r.id, r.arm, r.outcome, r.usd.toFixed(2), ...RUBRIC_IDS.map((id) => cell(byId.get(id)))].join(" | ")} |`);
+    lines.push(`| ${[r.id, r.arm, outcomeCell(r), r.usd.toFixed(2), ...RUBRIC_IDS.map((id) => cell(byId.get(id)))].join(" | ")} |`);
   }
   return lines.join("\n");
 }
