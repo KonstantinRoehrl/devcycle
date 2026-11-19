@@ -107,3 +107,32 @@ flowchart TD
 
 Playbook-internal — for where Planning sits in the pipeline, see
 [docs/pipeline/](../../pipeline/README.md).
+
+## Benchmarking planning strategies
+
+`planningStrategy` forces how planning drafts: `status-quo` keeps the delegation thresholds,
+`inline` drafts every task in the planning session. The replay benchmark (#449) runs the same specs
+through both arms and scores each run against the P1–P12 planning rubric doctor prints, so a
+planning change is measured before it ships. Everything it reads and writes stays under the
+gitignored `.devcycle/plan-bench/`:
+
+- `manifest.json` — `{"entries": [{id, size, repoPath, baseSha, specPath, tasks?, execute?}]}`.
+  `size` is `small`, `medium` or `large`. `tasks`, the planned task count the estimate prices, defaults
+  by size, and `execute` defaults to true for `medium`, whose plans are also executed so P2 and P10 are
+  measured. `node scripts/plan-bench-corpus.mjs` proposes one from this repo's archived cycles as
+  `manifest.proposed.json`; rename it once you have checked it.
+- `answers/<id>.json` — `{"prompt"?, "answers": [{match, reply}]}`. A headless session cannot ask,
+  so a gate ends the session with its question as text; the first unused answer whose `match` (a
+  case-insensitive regular expression) finds the question is sent back on the same session.
+  Without a file, one standing answer confirms triage and takes the recommended option elsewhere.
+- `passes/<pass>/<id>--<arm>/` — each replay's legs, state file, run record, transcripts and
+  `outcome.json`, and per pass `results.md`, the P1–P12 table.
+
+`node scripts/plan-bench.mjs estimate` prints what a pass would cost and a go-ahead token.
+`run --go-ahead <token>` spends money, so it runs only with the token of an estimate the user
+approved: it refuses past `--budget` (default $150) and stops spending once the budget is gone. Each
+replay plans in a scratch clone at `baseSha` loaded with `--plugin-dir` on the checkout under test, so
+nothing it does touches the source repo. `score --pass <pass>` re-scores a finished pass for free, and
+`node scripts/cost-model-fit.mjs --runs <runs dir>` fits the cost model's per-role F, t, r and o from
+the `agent-cost` rows a pass collected. [`docs/platform-notes.md`](../../platform-notes.md) § (r)
+records how a headless session is driven through its gates.

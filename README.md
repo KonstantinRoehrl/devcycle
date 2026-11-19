@@ -206,7 +206,10 @@ plugin ships. Start there.
   `agent-trace` row per finished subagent turn, which doctor cross-checks against those depth rows.
   The same sensor prices each finished subagent into an `agent-cost` row, and with the `plan-stats` row
   the planning handoff writes, doctor prints a per-run Planning breakdown: dollars by planning role and
-  the P1–P12 planning rubric.
+  the P1–P12 planning rubric. `scripts/plan-bench.mjs` replays past specs through headless planning,
+  once per `planningStrategy` arm, and scores each replay on that rubric
+  ([`docs/playbooks/planning-waves/README.md`](docs/playbooks/planning-waves/README.md) § Benchmarking
+  planning strategies).
   The depth gate runs `scripts/depth-probe.mjs`, which
   measures one transcript without loading doctor. Every `/devcycle:doctor` cost-analysis reply
   carries a per-version and per-stage overview, rendered by `scripts/doctor-overview.mjs` from

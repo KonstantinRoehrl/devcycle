@@ -5,6 +5,26 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-19 — The planning benchmark replays headless, answers gates by resuming, and clones
+
+**Decision:** `scripts/plan-bench.mjs` replays a gitignored corpus of specs through headless
+`claude -p` planning, once per `planningStrategy` arm, and scores each replay with doctor's own
+P1–P12 rubric. It answers each gate from a per-entry answer file by resuming the session the gate
+ended, cuts a scratch **clone** at the entry's base rather than a worktree, prints its estimate
+first, refuses a pass past `--budget` (default $150), and launches nothing without the go-ahead
+token of the estimate the user approved. Spec §9.9 left the harness's name and docs page to the
+builder; the user chose both, and the clone.
+
+**Why:** a 2026-11-19 spike (`docs/platform-notes.md` § (r)) showed `AskUserQuestion` is absent under
+`-p`, that a gate ends the session as result text, that `--resume` continues it, and that a
+`--settings` `pluginConfigs` override reaches a `--plugin-dir` load, so a replay can force its arm
+through the real knob channel. A worktree shares the source repo's refs, so a replay's execution leg
+would cut branches in the user's checkout; a clone cannot. The 0.32.2 external baseline will not be
+imported, so the status-quo arm run here is the baseline.
+
+**Supersedes:** the spec's "cut a scratch worktree at `baseSha`" (§9.9) and its external-baseline
+import (§9.9, §11).
+
 ## 2026-11-19 — The planning playbook honours `planningStrategy`
 
 **Decision:** `playbooks/planning-waves.md` § Delegated planning reads `planningStrategy` off the
