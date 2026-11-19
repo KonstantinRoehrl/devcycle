@@ -68,6 +68,8 @@ not just what they contain. Two goals govern every boundary decision, together:
 Planning runs inline unless a threshold trips, each on its own: **3+ independent feasibility
 unknowns** → parallel spikes; **5+ tasks in the task cut** → parallel per-task drafters. When either
 trips, read `${CLAUDE_PLUGIN_ROOT}/references/delegated-planning.md` and follow it for that half.
+`planningStrategy` on the `knobs:` line forces the drafting arm: `inline` never trips the drafter
+threshold, so the coordinator drafts every task itself; `auto` and `status-quo` apply both as written.
 
 ## Plan mechanics — the native engine (`lean` / `standard`)
 

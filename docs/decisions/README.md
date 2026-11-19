@@ -5,6 +5,23 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-19 — The planning playbook honours `planningStrategy`
+
+**Decision:** `playbooks/planning-waves.md` § Delegated planning reads `planningStrategy` off the
+`knobs:` line: `inline` never trips the per-task drafter threshold, and `auto` and `status-quo`
+apply both thresholds as written. The spike threshold is untouched, since a spike settles
+feasibility rather than drafting.
+
+**Why:** the knob is only an arm if the stage that drafts reads it; the benchmark's inline arm is
+otherwise indistinguishable from status-quo on any plan of five or more tasks.
+
+**Budgets:** two lines, 201 bytes, in the playbook and its closure.
+
+```text
+budget: surface-budget.json surfaceTotal 7043
+budget: context-budget.json playbooks/planning-waves.md 90741
+```
+
 ## 2026-11-19 — `planningStrategy` forces the planning stage's drafting arm
 
 **Decision:** a nineteenth knob, `planningStrategy` (`auto` | `status-quo` | `inline`, default `auto`),
