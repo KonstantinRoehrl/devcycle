@@ -70,6 +70,7 @@ const git = (root, args) => spawnSync("git", ["-C", root, ...args], { encoding: 
 // does not exit as documented counts as a change.
 function changeSince(root, head, path) {
   if (/[*?[]/.test(path)) return "it holds glob characters, so it cannot be compared literally";
+  if (path.startsWith(":")) return "it starts with \":\", a git magic pathspec, so it cannot be compared literally";
   const tracked = git(root, ["ls-tree", "-r", "--name-only", head, "--", path]);
   if (tracked.status !== 0) return "git could not list it";
   if (tracked.stdout.trim() === "") {

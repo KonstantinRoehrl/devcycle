@@ -6,7 +6,7 @@ import { writeFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { proseLines, LINE_REF_RE, MARKER_RE, VERIFIED_MARKER_RE, UNRUN_MARKER_RE } from "../../scripts/authored-claims-check.mjs";
+import { proseLines, LINE_REF_RE, MARKER_RE, VERIFIED_MARKER_RE } from "../../scripts/authored-claims-check.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/authored-claims-check.mjs");
 
@@ -234,8 +234,6 @@ test("the exported markers: verified and assumption clear a claim, unrun never d
   assert.ok(!MARKER_RE.test("(unrun: needs Task 2)"));
   assert.ok(VERIFIED_MARKER_RE.test("x (verified: node --test → 3 pass)"));
   assert.ok(!VERIFIED_MARKER_RE.test("(assumption)"));
-  assert.equal("(unrun: needs Task 2's export)".match(UNRUN_MARKER_RE)?.[1].trim(), "needs Task 2's export");
-  assert.equal("(unrun: )".match(UNRUN_MARKER_RE)?.[1].trim(), "");
 });
 
 test("LINE_REF_RE is the global line-reference pattern, read with matchAll", () => {

@@ -143,7 +143,10 @@ export function planningBreakdown(run, { tierTable = [] } = {}) {
 
   const planDefects = events.filter((e) => e.culprit === "plan-defect").length;
   const dispatches = finalDepth.size;
-  const checkerAgents = new Set(costs.filter((c) => c.role === "checker").map((c) => c.agentId ?? c));
+  // A tagged checker counts once per round it names; an untagged one stands for a round of its own.
+  const checkers = costs.filter((c) => c.role === "checker");
+  const checkerRounds = new Set(checkers.filter((c) => c.round != null).map((c) => c.round)).size
+    + new Set(checkers.filter((c) => c.round == null).map((c) => c.agentId ?? c)).size;
   const checkerKnown = costs.length > 0 || stats?.strategy === "inline";
 
   const explicitByAgent = new Map();
@@ -162,7 +165,7 @@ export function planningBreakdown(run, { tierTable = [] } = {}) {
   const p6 = sharedContext(rolled);
   const p7 = explicitByAgent.size > 0 ? [...explicitByAgent.values()].filter(Boolean).length / explicitByAgent.size : null;
   const p8 = stats && stats.specBytes > 0 ? { bytesRatio: stats.planBytes / stats.specBytes, fenceShare: stats.fenceShare } : null;
-  const p9 = checkerKnown ? { gateFails: planningGateFails.length, checkerRounds: checkerAgents.size } : null;
+  const p9 = checkerKnown ? { gateFails: planningGateFails.length, checkerRounds } : null;
   const p11 = ratio(run.planningMinutes ?? null, tasks);
   const p12 = dispatches > 0 ? { share: matched / dispatches, gaps: sensorGaps.length } : null;
 

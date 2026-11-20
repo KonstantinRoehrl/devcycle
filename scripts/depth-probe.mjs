@@ -77,7 +77,8 @@ const DOUBLE_QUOTE_ESCAPES = new Set(['"', "\\", "$", "`"]);
 
 // Splits a shell command into segments of arguments. Quotes, backslash escapes and heredoc bodies are
 // honoured, redirections (and their targets) are dropped, and `;`, `|`, `||`, `&&`, `&` and newlines
-// separate segments only outside quotes. A command with an unterminated quote yields no segments.
+// separate segments only outside quotes. A `#` that starts a word outside quotes comments out the rest of its
+// line, so an apostrophe in a comment opens no quote. A command with an unterminated quote yields no segments.
 function shellSegments(command) {
   const segments = [];
   const heredocs = [];
@@ -124,7 +125,10 @@ function shellSegments(command) {
   let i = 0;
   while (i < command.length) {
     const ch = command[i];
-    if (ch === "'") {
+    if (ch === "#" && word === null) {
+      const end = command.indexOf("\n", i);
+      i = end < 0 ? command.length : end;
+    } else if (ch === "'") {
       const end = command.indexOf("'", i + 1);
       if (end < 0) return [];
       word = (word ?? "") + command.slice(i + 1, end);
@@ -180,6 +184,7 @@ function printedFiles([command, ...args]) {
   if (!PRINTERS.has(command)) return [];
   const files = [];
   let quiet = false;
+  let inPlace = false;
   let scriptPending = command === "sed";
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -187,18 +192,20 @@ function printedFiles([command, ...args]) {
       // A short-flag cluster such as -n, -En or -ne; -e and -f take the rest of the cluster, or the next word.
       for (let k = 1; k < arg.length; k += 1) {
         if (arg[k] === "n") quiet = true;
+        else if (arg[k] === "i") inPlace = true;
         else if (arg[k] === "e" || arg[k] === "f") {
           if (k === arg.length - 1) i += 1;
           scriptPending = false;
           break;
         }
       }
-    } else if ((command === "head" || command === "tail") && (arg === "-n" || arg === "-c")) i += 1;
+    } else if (command === "sed" && (arg === "--in-place" || arg.startsWith("--in-place="))) inPlace = true;
+    else if ((command === "head" || command === "tail") && (arg === "-n" || arg === "-c")) i += 1;
     else if (arg.startsWith("-")) continue;
     else if (scriptPending) scriptPending = false;
     else if (arg) files.push(arg);
   }
-  return command === "sed" && !quiet ? [] : files;
+  return command === "sed" && (!quiet || inPlace) ? [] : files;
 }
 
 const resultText = (content) => (typeof content === "string" ? content

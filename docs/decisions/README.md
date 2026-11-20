@@ -5,6 +5,87 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-19 — Contract-only plans: the 0.32.0 full-code default reversed (#446, #448)
+
+**Decision:** a plan pins the contract, not the implementation. A `red-green` task pins its full
+`**Interfaces:**` block, its complete failing test code in a fenced block and its exact gate commands
+with expected red and green output; its implementation steps are prose. `**Detail:** code-pinned —
+<reason>` opts a task into a full implementation body, and `interface-pinned — <reason>` stays accepted
+as the older form of the default (spec §9.1). A plan no longer has every fenced block prototyped, a run
+marker (`(verified:)` or `(unrun:)`) on each fence, or the `briefFacts` marker check; execution proves
+pinned test code red, then green. The `proportion` leg of `scripts/plan-check.mjs` warns above 5× the
+spec's bytes or 30% code fences and fails above 8× or 45% unless a `- Proportion override: <reason>` line
+says why; those figures are initial, to be tuned in Phase 2b. After assembly a fast-tier edge checker runs
+once per producer→consumer pair, reading only the two task files and `pack.md`. A finding goes back to its
+task's drafter by `SendMessage` and never to a fresh dispatch (patch, not redraft), and one checker round
+plus one repair round is the cap, after which residual findings go to the user. Decision D2: a checker
+dispatch's description is `plan-checker: round <n> — Task <p> → Task <c>`, the dispatch sensor writes
+`round` on its `agent-cost` row, and doctor's P9 counts distinct rounds. Decision D3: the edge checker runs
+on the delegated path only; an inline coordinator relies on the `crossTask` leg.
+
+**Why:** the full-code default made the plan larger than the work it described, and prototyping every
+block cost more than the implementer's own red and green proves (#446, #448).
+
+**Supersedes:** the 0.32.0 rule that every plan step carries its implementation code and every fenced
+block a run marker.
+
+P1–P12 deltas: Phase 2a benchmark pass, 2026-11-20, same corpus and arms as `phase1-baseline`, run on
+this branch's tip (the medium inline replay hit the weekly usage limit and was re-run alone). Baseline →
+Phase 2a:
+
+| Entry · arm | P1 $/task | P3 disp/task | P4 p95 depth | P8 bytes×/fence | P9 gate fails/rounds | P11 min/task |
+| --- | --- | --- | --- | --- | --- | --- |
+| small · status-quo | 1.23 → 0.83 | 0.33 → 0.25 | 115904 → 65377 | 4.06/27% → 3.33/16% | 7/0 → 1/0 | 5.5 → 4.3 |
+| small · inline | 1.25 → 0.84 | 0.25 → 0.25 | 84508 → 49756 | 4.00/29% → 3.74/16% | 4/0 → 3/0 | 3.8 → 4.9 |
+| medium · status-quo | 2.00 → 1.97 | 1.29 → 1.71 | 149164 → 106409 | 7.77/48% → 6.50/39% | 10/1 → 5/1 | 5.2 → 4.1 |
+| medium · inline | no baseline (errored) → 0.97 | n/a | n/a | 3.80/39% | 5/0 | 2.9 |
+
+P2, P5 and P10 are unmeasured: both medium replays stopped at the leg cap before execution finished, and
+P10 read 0 attributed defects with nothing to attribute. **The exit bars are met only on the small entry.**
+The P8 fence-share bar (≤ 30%) and the P9 gate-fail bar (≤ 2) are missed on both medium arms, and P8's
+byte bar (≤ 5×) on the medium status-quo arm. The medium status-quo arm's P3 rose (more dispatches per task,
+consistent with the added edge checkers), and the small inline arm's P9 (3 gate fails) and P11 got worse. These
+misses carry into Phase 2b, whose tuning of the `proportion` leg's figures and of the gate legs is where they
+get addressed.
+
+**Budgets:**
+
+```text
+budget: context-budget.json commands/continue.md 76096
+budget: context-budget.json commands/cycle.md 89021
+budget: context-budget.json playbooks/maintaining-the-repo.md 68826
+budget: context-budget.json playbooks/planning-waves.md 66128
+budget: context-budget.json playbooks/reviewing-the-branch.md 61535
+budget: context-budget.json playbooks/scoping-the-request.md 36873
+budget: context-budget.json playbooks/taking-the-fast-path.md 54943
+budget: context-budget.json playbooks/verifying-on-device.md 66849
+budget: context-budget.json references/model-routing.md 10574
+budget: surface-budget.json surfaceTotal 7163
+```
+
+## 2026-11-19 — Per-task plan work files and the assembler (#448)
+
+**Decision:** while planning, on every path, each task is its own work file,
+`.devcycle/plan-work/<run id>/tasks/task-<n>.md`, beside `plan-header.md` and `dispatch-map.md`.
+`scripts/plan-assemble.mjs` assembles the plan from them and fails on a missing or duplicate task id,
+replacing the shell concatenation of `drafts/task-<n>.md`. The task file is canonical while planning,
+so a later change goes into it and the plan is re-assembled; the assembled plan keeps the shape
+`playbooks/executing-waves.md` reads.
+
+**Why:** a plan cut from per-task files gives a repair pass one file per task and the merge a check on
+ids that concatenation never made (#448).
+
+**Budgets:**
+
+```text
+budget: context-budget.json commands/cycle.md 88838
+budget: context-budget.json playbooks/planning-waves.md 64754
+budget: context-budget.json playbooks/reviewing-the-branch.md 61394
+budget: context-budget.json playbooks/scoping-the-request.md 36811
+budget: context-budget.json playbooks/verifying-on-device.md 66787
+budget: surface-budget.json surfaceTotal 7144
+```
+
 ## 2026-11-19 — Phase 1 review fixes, round 2: the drafter's stop and the plan header
 
 **Decision:** a drafter that cannot hold a pinned interface returns a summary line beginning

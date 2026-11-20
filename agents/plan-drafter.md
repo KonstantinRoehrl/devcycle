@@ -20,8 +20,10 @@ task; the coordinator owns Interfaces.
 
 ## What you write
 
-Only your own `.devcycle/plan-work/<run id>/drafts/task-<n>.md` files. Prototype pinned code in a
-scratch worktree outside the repo and remove it when done. You never edit a tracked file, and you
+Only your own `.devcycle/plan-work/<run id>/tasks/task-<n>.md` files. Pin the failing test code; never prototype the implementation. Run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-check.mjs" --draft <task file>` on each draft before you return,
+and fix what it reports. A finding the coordinator sends you by `SendMessage` is answered by patching your
+own task file and returning the result-file envelope again. You never edit a tracked file, and you
 never stage, **commit** or **push**.
 
 ## What you return

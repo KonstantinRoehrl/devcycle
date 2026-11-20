@@ -28,23 +28,28 @@ sub-skill supplies those mechanics instead, with rules this playbook
 always keeps regardless: the executor named in the plan header is always `executing-waves.md`,
 the header names the repo's whole verification gate as one `**Verification gate:**` command — the
 single command every test-class task's evidence captures and the green gate re-runs — no task
-ever carries a commit step, every pinned fenced block carries a run marker, and the plan gate below runs on the finished plan.
+ever carries a commit step, and the plan gate below runs on the finished plan.
 
 Three rules hold under both engines. A planner derives each task's `Files` block by running
 `scripts/blast-radius-check.mjs --scan` on the files the task modifies: an advisory pass over every
 text code file, not only JS/TS/Python, that matches the symbols each file declares (plus any
 `--symbol` given) and its basename with or without the extension, and tags each referencer `test`,
-`subclass` or `consumer`, and prints which extensions it read and which files are not on disk. A `red-green` task may declare `**Detail:** interface-pinned — <reason>` and
-describe its implementation in prose, as long as its interfaces, its complete failing test code and
-its gate commands stay pinned verbatim. And a large plan is delegated: 3+ independent feasibility
+`subclass` or `consumer`, and prints which extensions it read and which files are not on disk. A `red-green` task
+pins its interfaces, its complete failing test code and its gate commands verbatim and describes its
+implementation in prose: a plan is contract-only by default, and `**Detail:** code-pinned — <reason>`
+opts one task into a full implementation body. And a large plan is delegated: 3+ independent feasibility
 unknowns run as parallel spikes, each a fast-tier `Explore` dispatch returning at most fifteen lines
 (an unknown that needs only reading rides the research dispatch instead), and 5+ tasks as parallel
 `devcycle:plan-drafter` dispatches, one per task. Drafters read a context pack,
 `.devcycle/plan-work/<run id>/pack.md` (about 8k tokens, stable content first), and
-`references/plan-task-format.md` instead of this playbook, and each writes a file under
-`.devcycle/plan-work/<run id>/` that the coordinator splices into the plan by shell concatenation without reading the drafts, then
-checks across tasks (including a scan for placeholders and cross-task back-references) in one checker
-dispatch that writes its findings to a file and returns the path and a count, per
+`references/plan-task-format.md` instead of this playbook, and each writes its task to a work file, `.devcycle/plan-work/<run id>/tasks/task-<n>.md`, after running the
+`--draft` gate on it. On every path the work files are the canonical copy: `scripts/plan-assemble.mjs`
+assembles the plan from them without the coordinator reading a draft, and a later fix goes into the task
+file and is re-assembled. Across tasks, the plan gate's `crossTask` leg scans for placeholders and
+back-references, and a fast-tier checker reads each producer-to-consumer pair, tagged with its round, and
+writes its findings to a file, returning the path and a count. A finding goes back to its task's
+drafter as a patch rather than a redraft, and after one checker round and one repair round, whatever is
+still open goes to the user, per
 [`references/delegated-planning.md`](../../../references/delegated-planning.md). Every planning
 dispatch names its model, at the tier
 [`references/model-routing.md`](../../../references/model-routing.md) § Planning dispatches assigns,
@@ -53,30 +58,32 @@ and doctor's Planning breakdown reports it: `drafters:` lists each drafter's tur
 research or checker dispatch that ran outside the fast tier. Below both
 thresholds planning runs inline, and the finished plan looks the same either way.
 
-Once the plan is drafted, planning runs a six-item self-review — spec coverage, the per-task
+Once the plan is drafted, planning runs a seven-item self-review — spec coverage, the per-task
 checks `references/plan-task-format.md` owns (placeholder scan, factual-claim accuracy, assumed-tooling
-and pinned-code cross-check), type consistency, no count-only enumeration, mirrored-file parity, and
-the plan gate last — fixing what it finds
+and pinned-code cross-check, and the per-draft gate), type consistency, no count-only enumeration,
+mirrored-file parity, proportion, and the plan gate last — fixing what it finds
 inline, with no separate re-review pass. The plan gate is one command,
-`scripts/plan-check.mjs`, running eight legs over the plan: `codeBlocks` (pasted JS/mjs code
+`scripts/plan-check.mjs`, running ten legs over the plan: `codeBlocks` (pasted JS/mjs code
 blocks parse), `briefCompleteness` (every task carries its required fields, a `red-green` task
-that creates a non-test source file mentions a stub, and the Dispatch Map lists every task; it
-also notes, without failing, each prescribed git command the dispatch guard would deny an
-implementer, and checks that an interface-pinned task gives a reason, is `red-green` and pins a
-fenced block), `blastRadius` (every JS/TS/Python file naming a changed file's basename, test or
+that creates a non-test source file mentions a stub and pins its failing test in a fenced block, a
+`**Detail:**` line gives a reason, and the Dispatch Map lists every task; it also notes, without
+failing, each prescribed git command the dispatch guard would deny an implementer), `blastRadius` (every JS/TS/Python file naming a changed file's basename, test or
 not, sits in some Files block; each finding opens with the task that declares the changed file), `contentCoupling` (no same-wave task's brief names a file another same-wave task
 edits), `budgetFixtures` (a task touching a budgeted surface — `playbooks/`, `commands/`,
 `agents/`, `references/` markdown — also touches its budget fixtures and
 `docs/decisions/README.md`, whose `budget:` lines `validate.mjs` holds the fixtures to),
 `waveDisjointness` (no two same-wave tasks list the same file), `authoredClaims` (the
 factual-claim item's backstop: an unguarded `path.ext:line` reference or bare count claim,
-cleared by a `(verified: <cmd>)` or `(assumption)` marker), and `briefFacts` (every path a brief
-cites resolves, every cited line is within its file, and every fenced block pinned in a task carries a
-`(verified: <cmd>)` or `(unrun: <reason>)` run marker; it also notes a call-shaped span nothing
-defines). `node scripts/plan-check.mjs --help` prints the same legs and override forms. It fails closed: a plan with no
-`## Dispatch Map` is a finding before any leg runs. Four findings clear by an explicit override
+cleared by a `(verified: <cmd>)` or `(assumption)` marker), `briefFacts` (every path a brief
+cites resolves and every cited line is within its file; it also notes a call-shaped span nothing
+defines), `proportion` (the plan stays near its spec's size and mostly prose rather than code: a note
+above the warn figures, a failure above the higher ones unless a reason is recorded) and `crossTask`
+(what one task consumes from another is something that task pins, and no brief defers its content to a
+placeholder or a "similar to Task N" back-reference). `--draft` runs five of the legs on one drafted
+task file. `node scripts/plan-check.mjs --help` prints the same legs and override forms. It fails closed: a plan with no
+`## Dispatch Map` is a finding before any leg runs. Five findings clear by an explicit override
 line instead of a fix — `- Blast-radius override:`, `- Content-coupling override:`,
-`- Budget-fixture override:`, and `- Citation override:`, each with a reason. A non-zero exit is a hard stop, resolved by
+`- Budget-fixture override:`, `- Citation override:` and `- Proportion override:`, each with a reason. A non-zero exit is a hard stop, resolved by
 fixing the plan or recording an override, never by handing off around it. On success the gate
 prints one ok line, with each leg's notes (such as cleared overrides) reduced to a count unless
 `--verbose` lists them; a failing run always lists them. A run in progress records a `gate-ran`
@@ -98,7 +105,7 @@ policy and whether the plan's path is git-ignored.
 ```mermaid
 ---
 title: planning-waves — from feasibility gate to the Dispatch Map
-accDescr: Playbook-internal flowchart of the planning stage, from the feasibility gate's GO/NO-GO verdict through quality-constraint derivation, task cutting to the twin goals of parallelism and minimal context, the Dispatch Map, the six-item self-review ending in the plan gate, and the handoff to execution.
+accDescr: Playbook-internal flowchart of the planning stage, from the feasibility gate's GO/NO-GO verdict through quality-constraint derivation, task cutting to the twin goals of parallelism and minimal context, the Dispatch Map, the seven-item self-review ending in the plan gate, and the handoff to execution.
 ---
 flowchart TD
     FEAS{"Feasibility gate — GO or NO-GO?"}:::stage
@@ -107,8 +114,8 @@ flowchart TD
     QC --> CUT("Cut tasks to twin goals: maximize parallelism, minimize each brief's context"):::stage
     CUT --> TASK("Each task gets Files · Interfaces · Dependencies · Evidence class · Quality constraints · Lessons"):::stage
     TASK --> MAP[("Dispatch Map — tasks grouped into file-disjoint waves")]:::structural
-    MAP --> SELFREVIEW("Self-review items 1–5, fixed inline as it goes"):::stage
-    SELFREVIEW --> GATE{"Item 6, last — plan-check.mjs clean (eight legs)?"}:::stage
+    MAP --> SELFREVIEW("Self-review items 1–6, fixed inline as it goes"):::stage
+    SELFREVIEW --> GATE{"Item 7, last — plan-check.mjs clean (ten legs)?"}:::stage
     GATE -->|"no — fix the plan or record an override"| SELFREVIEW
     GATE -->|yes| HANDOFF("Handoff — state.md set to stage: execution, plan path recorded"):::stage
 

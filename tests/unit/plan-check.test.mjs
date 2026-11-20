@@ -14,7 +14,7 @@ const task = (n, files) => [
   `### Task ${n}: Thing ${n}`, "", "**Files:**", ...files.map((f) => `- Modify: ${f}`), "",
   "**Interfaces:**", "- Consumes: nothing.", "- Produces: nothing.", "",
   "**Dependencies:** none (completely independent)", "**Evidence:** red-green",
-  "**Quality constraints:** none", "**Lessons:**", "", "- [ ] step", "",
+  "**Quality constraints:** none", "**Lessons:**", "", "- [ ] step", "```js", "assert.ok(true);", "```", "",
 ].join("\n");
 const plan = (body, map = "## Dispatch Map\n\n- Wave 1: Task 1, Task 2 (file-disjoint, no dependencies)\n") =>
   `# P Implementation Plan\n\n**Verification gate:** \`npm test\`\n\n${body}\n${map}`;
@@ -30,10 +30,10 @@ function run(planText, { repo = realpathSync(makeTempDir("plan-check-repo")), ar
     env: { ...process.env, DEVCYCLE_RUNS_DIR: makeTempDir("plan-check-runs"), ...env } });
 }
 
-test("a clean plan prints one ok line naming all eight legs", () => {
+test("a clean plan prints one ok line naming all ten legs", () => {
   const r = run(plan(task(1, ["src/a.txt"]) + task(2, ["src/b.txt"])));
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout.trim(), "plan-check: ok — 8 leg(s): codeBlocks, briefCompleteness, blastRadius, contentCoupling, budgetFixtures, waveDisjointness, authoredClaims, briefFacts");
+  assert.equal(r.stdout.trim(), "plan-check: ok — 10 leg(s): codeBlocks, briefCompleteness, blastRadius, contentCoupling, budgetFixtures, waveDisjointness, authoredClaims, briefFacts, proportion, crossTask");
 });
 
 test("no Dispatch Map fails closed before any leg runs (M16)", () => {
@@ -135,7 +135,7 @@ test("a passing run summarizes each leg's notes as one count line", () => {
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stderr, COUNT_LINE);
   assert.doesNotMatch(r.stderr, /override --/);
-  assert.match(r.stdout, /^plan-check: ok — 8 leg\(s\)/);
+  assert.match(r.stdout, /^plan-check: ok — 10 leg\(s\)/);
 });
 
 test("--verbose lists every note on a passing run", () => {
@@ -175,8 +175,9 @@ test("a valueless --only names itself rather than taking the next flag as a leg"
   assert.match(r.stderr, /^plan-check: --only requires a value — usage: /);
 });
 
-// The leg names on every "plan-check: <leg>: …" line a failing run printed.
-const reportingLegs = (stderr) => new Set([...stderr.matchAll(/^plan-check: (\w+): /gm)].map((m) => m[1]));
+// The leg names on every "plan-check: <leg>: …" line a failing run printed, bar the proportion leg's
+// standing note that no spec was given: a fixture repo has none, so every failing run prints it.
+const reportingLegs = (stderr) => new Set([...stderr.matchAll(/^plan-check: (\w+): (?!no spec — proportion not measured)/gm)].map((m) => m[1]));
 
 const withProse = (n, files, prose) => task(n, files).replace("- [ ] step", `- [ ] ${prose}`);
 
@@ -190,6 +191,12 @@ const TRIPS = {
   waveDisjointness: () => run(plan(task(1, ["src/a.txt"]) + task(2, ["src/a.txt"]))),
   authoredClaims: () => run(plan(task(1, ["src/a.txt"]) + withProse(2, ["src/b.txt"], "touch 3 files"))),
   briefFacts: () => run(plan(task(1, ["src/a.txt"]) + task(2, ["src/gone.txt"]))),
+  proportion: () => {
+    const repo = realpathSync(makeTempDir("plan-check-repo"));
+    writeInto(repo, "spec.md", "s\n");
+    return run(plan(task(1, ["src/a.txt"]) + task(2, ["src/b.txt"])), { repo, args: ["--spec", join(repo, "spec.md")] });
+  },
+  crossTask: () => run(plan(task(1, ["src/a.txt"]) + withProse(2, ["src/b.txt"], "handle edge cases"))),
 };
 
 for (const [leg, trip] of Object.entries(TRIPS)) {
@@ -283,7 +290,7 @@ test("the same task passes once a step writes the stub", () => {
   assert.equal(r.status, 0, r.stderr);
 });
 
-test("--help prints every leg's check in LEGS order and the four override forms, exit 0", async () => {
+test("--help prints every leg's check in LEGS order and the five override forms, exit 0", async () => {
   const planCheck = await import("../../scripts/plan-check.mjs");
   assert.deepEqual(Object.keys(planCheck.LEG_HELP ?? {}), Object.keys(planCheck.LEGS));
   assert.ok(Object.isFrozen(planCheck.LEG_HELP));
@@ -293,11 +300,80 @@ test("--help prints every leg's check in LEGS order and the four override forms,
   const lines = r.stdout.split("\n");
   assert.match(lines[0], /^usage: plan-check\.mjs .*\[--help\]$/);
   assert.equal(lines[1], "");
-  assert.deepEqual(lines.slice(2, 10).map((l) => l.split(":")[0]), Object.keys(planCheck.LEGS));
+  assert.deepEqual(lines.slice(2, 12).map((l) => l.split(":")[0]), Object.keys(planCheck.LEGS));
   assert.match(r.stdout, /^budgetFixtures: .*docs\/decisions\/README\.md/m);
-  assert.deepEqual(lines.slice(10, 16), ["", "Overrides (each needs a reason):",
+  assert.equal(lines[12], "--draft: the path is one drafted task file; runs codeBlocks, briefCompleteness, budgetFixtures, authoredClaims, briefFacts and records nothing.");
+  assert.deepEqual(lines.slice(13, 20), ["", "Overrides (each needs a reason):",
     "- Blast-radius override: <changed-file> [→ <referencer>] — <reason>",
     "- Content-coupling override: Task B → <file> (Task A) — <reason>",
     "- Budget-fixture override: <surface-or-fixture> — <reason>",
-    "- Citation override: <path> — <reason>"]);
+    "- Citation override: <path> — <reason>",
+    "- Proportion override: <reason>"]);
+});
+
+test("--spec feeds the proportion leg; without it the state file's spec: line does", () => {
+  const repo = realpathSync(makeTempDir("plan-check-spec"));
+  writeInto(repo, "spec.md", "s\n");
+  const big = plan(task(1, ["src/a.txt"]) + task(2, ["src/b.txt"]));
+  const flagged = run(big, { repo, args: ["--spec", join(repo, "spec.md")] });
+  assert.equal(flagged.status, 1, flagged.stderr);
+  assert.match(flagged.stderr, /plan-check: proportion: plan\/spec \d+\.\d× exceeds the 8× limit/);
+  writeInto(repo, ".devcycle/state.md", "# devcycle state\n- spec: spec.md (spec review: clean)\n");
+  assert.match(run(big, { repo }).stderr, /plan-check: proportion: plan\/spec \d+\.\d× exceeds the 8× limit/);
+  const missing = run(big, { repo, args: ["--spec", join(repo, "nope.md")] });
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /plan-check: spec not found: /);
+});
+
+const draftRun = (repo, file, args = []) => spawnSync(process.execPath, [SCRIPT, "--draft", file, repo, ...args],
+  { encoding: "utf8", cwd: repo, env: { ...process.env, DEVCYCLE_RUNS_DIR: makeTempDir("plan-check-runs") } });
+
+test("--draft gates one task file with the per-task legs, needs no Dispatch Map and records nothing", () => {
+  const repo = realpathSync(makeTempDir("plan-check-draft"));
+  writeInto(repo, "src/a.txt", "");
+  writeInto(repo, ".devcycle/state.md", "# devcycle state\n- stage: planning\n- run: 0123456789abcdef\n");
+  writeInto(repo, "tasks/task-1.md", task(1, ["src/a.txt"]));
+  const runs = makeTempDir("plan-check-draft-runs");
+  const r = spawnSync(process.execPath, [SCRIPT, "--draft", join(repo, "tasks/task-1.md"), repo],
+    { encoding: "utf8", cwd: repo, env: { ...process.env, DEVCYCLE_RUNS_DIR: runs } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), "plan-check: ok — draft, 5 leg(s): codeBlocks, briefCompleteness, budgetFixtures, authoredClaims, briefFacts");
+  assert.deepEqual(readdirSync(runs, { recursive: true }), [], "a draft run records no gate-ran event");
+  const bad = draftRun(repo, join(repo, "tasks/task-1.md"), ["--only", "proportion"]);
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /plan-check: --draft runs only codeBlocks, briefCompleteness, budgetFixtures, authoredClaims, briefFacts/);
+});
+
+test("--draft still fails a task missing a field", () => {
+  const repo = realpathSync(makeTempDir("plan-check-draft-field"));
+  writeInto(repo, "src/a.txt", "");
+  writeInto(repo, "tasks/task-1.md", task(1, ["src/a.txt"]).replace("**Quality constraints:** none\n", ""));
+  const r = draftRun(repo, join(repo, "tasks/task-1.md"));
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /plan-check: briefCompleteness: Task 1: missing \*\*Quality constraints:\*\* field/);
+});
+
+test("--draft resolves a path a sibling task file creates or the draft's Consumes (Task N) line names", () => {
+  const repo = realpathSync(makeTempDir("plan-check-draft-sibling"));
+  const consumer = task(3, ["src/new.mjs"]);
+  writeInto(repo, "tasks/task-3.md", consumer);
+  assert.match(draftRun(repo, join(repo, "tasks/task-3.md")).stderr, /briefFacts: .*src\/new\.mjs/);
+  writeInto(repo, "tasks/task-2.md", task(2, []).replace("**Files:**\n", "**Files:**\n- Create: src/new.mjs\n"));
+  assert.equal(draftRun(repo, join(repo, "tasks/task-3.md")).status, 0);
+  const alone = realpathSync(makeTempDir("plan-check-draft-consumes"));
+  writeInto(alone, "tasks/task-3.md", consumer.replace("- Consumes: nothing.", "- Consumes (Task 2): `src/new.mjs` exports `x()`."));
+  assert.equal(draftRun(alone, join(alone, "tasks/task-3.md")).status, 0);
+});
+
+test("--draft leaves the required-checks manifest to the assembled plan", () => {
+  const repo = realpathSync(makeTempDir("plan-check-draft-manifest"));
+  writeInto(repo, "src/a.txt", "");
+  writeInto(repo, "tests/fixtures/required-gate-checks.json", '["node --test"]');
+  const convention = task(1, ["src/a.txt"]).replace("**Evidence:** red-green", "**Evidence:** convention (`npm run lint`)");
+  writeInto(repo, "tasks/task-1.md", convention);
+  assert.equal(draftRun(repo, join(repo, "tasks/task-1.md")).status, 0);
+  writeInto(repo, "plan.md", plan(convention));
+  const whole = spawnSync(process.execPath, [SCRIPT, join(repo, "plan.md"), repo, "--only", "briefCompleteness"], { encoding: "utf8", cwd: repo,
+    env: { ...process.env, DEVCYCLE_RUNS_DIR: makeTempDir("plan-check-runs") } });
+  assert.match(whole.stderr, /omits required gate check "node --test"/);
 });

@@ -10,19 +10,12 @@ import { isMain } from "./is-main.mjs";
 import { parseFlags } from "./cli-flags.mjs";
 import { field } from "./md-field.mjs";
 import { eachRecord } from "./jsonl.mjs";
-import { parseDispatchMap, lineFences } from "./task-files.mjs";
+import { fenceShare, parseDispatchMap } from "./task-files.mjs";
 import { gitToplevel, recordPath } from "./run-record.mjs";
 
 const RUN_RECORD = fileURLToPath(new URL("./run-record.mjs", import.meta.url));
 const STRATEGIES = ["inline", "delegated"];
 const USAGE = "usage: plan-stats.mjs --state <state.md> --plan <path> --spec <path> --strategy inline|delegated";
-
-// Bytes inside code fences, the fence lines themselves included. Pairing is task-files.mjs's
-// fencedBlocks: a ``` or ~~~ fence closes only on its own character, at least as long.
-function fencedBytes(planText) {
-  const owners = lineFences(planText);
-  return planText.split(/(?<=\n)/).reduce((bytes, line, i) => bytes + (owners[i] ? Buffer.byteLength(line) : 0), 0);
-}
 
 // The plan template puts "## Dispatch Map" last, and a plan may quote the heading earlier, so the
 // last heading is the map. Null when the plan has none.
@@ -43,7 +36,7 @@ export function planStats({ planText, specText, rows, strategy }) {
   return {
     specBytes: Buffer.byteLength(specText),
     planBytes,
-    fenceShare: planBytes === 0 ? 0 : Math.round((fencedBytes(planText) / planBytes) * 1000) / 1000,
+    fenceShare: fenceShare(planText),
     tasks: map ? new Set([...map.values()].flat()).size : (planText.match(/^### Task \d+:/gm) ?? []).length,
     waves: map ? map.size : 0,
     drafters: new Set(planning.filter((r) => r.role === "drafter").map((r) => r.agentId)).size,
