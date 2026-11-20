@@ -5,6 +5,27 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-20 — P9 counts rework, not re-runs; plan-stats records the non-test fence share (#443, #447)
+
+**Decision:** Decision D3: `plan-stats` records `nonTestFenceShare` beside `fenceShare`. P8's fence share
+exempts a red-green task's failing-test fences, which the contract mandates. The `proportion` leg warns
+above 20% and fails above 30% on the non-test share; the byte ratio stays at 5× and 8×. The gross share is
+still recorded. P8's bar reads the non-test share at 20%, and a row recorded before this change is judged
+on its gross share at 30%. Decision D4: P9 counts a planning `gate-ran` fail once per plan text. Every
+`gate-ran` event carries `planDigest`, and a fail whose `planDigest` and failing legs equal the previous
+planning `gate-ran` event's is a re-run, not rework.
+
+**Why:** both Phase 2a medium arms' first two gate fails were one identical re-run 8–12 seconds apart, so
+P9's `fails <= 2` bar charged a plan for running the same check twice.
+
+**Budgets:**
+
+```text
+budget: context-budget.json commands/continue.md 76207
+budget: context-budget.json commands/cycle.md 89132
+budget: context-budget.json playbooks/executing-waves.md 122067
+```
+
 ## 2026-11-20 — P8 measures non-test code fences (#443, #447)
 
 **Decision:** Decision D3: the `proportion` leg of `scripts/plan-check.mjs` measures the non-test

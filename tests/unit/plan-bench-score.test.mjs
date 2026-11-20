@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
-import { RUBRIC_IDS, replayBreakdowns, scoreReplay, resultsMarkdown, scorePass, armCheck } from "../../scripts/plan-bench-score.mjs";
+import { RUBRIC_IDS, cell, replayBreakdowns, scoreReplay, resultsMarkdown, scorePass, armCheck } from "../../scripts/plan-bench-score.mjs";
 
 const SCRIPT = new URL("../../scripts/plan-bench.mjs", import.meta.url).pathname;
 const RUN = "0f1e2d3c4b5a6978";
@@ -119,4 +119,10 @@ test("cli score re-scores a pass without launching anything, and names a missing
   const missing = spawnSync(process.execPath, [SCRIPT, "score", "--pass", "9"], { cwd: root, encoding: "utf8" });
   assert.equal(missing.status, 1);
   assert.match(missing.stderr, /no pass 9 at /);
+});
+
+test("a rubric cell renders a null member of an object value as —, not 0", () => {
+  assert.equal(cell({ value: { bytesRatio: 2, fenceShare: 0.1, nonTestFenceShare: null }, status: "pass" }), "2/0.1/— pass");
+  assert.equal(cell({ value: { bytesRatio: 6.4961, fenceShare: 0.391, nonTestFenceShare: 0.129 }, status: "fail" }), "6.496/0.391/0.129 fail");
+  assert.equal(cell(undefined), "—");
 });

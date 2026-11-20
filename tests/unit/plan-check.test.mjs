@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
 import { repoSlug, gitToplevel } from "../../scripts/run-record.mjs";
+import { planDigest } from "../../scripts/plan-check.mjs";
 
 const SCRIPT = new URL("../../scripts/plan-check.mjs", import.meta.url).pathname;
 const WAVE = new URL("../../scripts/wave-disjointness-check.mjs", import.meta.url).pathname;
@@ -376,4 +377,17 @@ test("--draft leaves the required-checks manifest to the assembled plan", () => 
   const whole = spawnSync(process.execPath, [SCRIPT, join(repo, "plan.md"), repo, "--only", "briefCompleteness"], { encoding: "utf8", cwd: repo,
     env: { ...process.env, DEVCYCLE_RUNS_DIR: makeTempDir("plan-check-runs") } });
   assert.match(whole.stderr, /omits required gate check "node --test"/);
+});
+
+test("planDigest is the first 12 hex of the plan text's sha256", () => {
+  assert.equal(planDigest(""), "e3b0c44298fc");
+  assert.match(planDigest("x"), /^[0-9a-f]{12}$/);
+  assert.notEqual(planDigest("a"), planDigest("b"));
+});
+
+test("every gate-ran event carries the digest of the plan it checked", () => {
+  const text = plan(task(1, ["src/a.txt"]) + task(2, ["src/a.txt"]));
+  const events = gateRan(text);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].planDigest, planDigest(text));
 });

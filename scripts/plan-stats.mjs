@@ -10,7 +10,7 @@ import { isMain } from "./is-main.mjs";
 import { parseFlags } from "./cli-flags.mjs";
 import { field } from "./md-field.mjs";
 import { eachRecord } from "./jsonl.mjs";
-import { fenceShare, parseDispatchMap } from "./task-files.mjs";
+import { fenceShare, nonTestFenceShare, parseDispatchMap } from "./task-files.mjs";
 import { gitToplevel, recordPath } from "./run-record.mjs";
 
 const RUN_RECORD = fileURLToPath(new URL("./run-record.mjs", import.meta.url));
@@ -37,6 +37,7 @@ export function planStats({ planText, specText, rows, strategy }) {
     specBytes: Buffer.byteLength(specText),
     planBytes,
     fenceShare: fenceShare(planText),
+    nonTestFenceShare: nonTestFenceShare(planText),
     tasks: map ? new Set([...map.values()].flat()).size : (planText.match(/^### Task \d+:/gm) ?? []).length,
     waves: map ? map.size : 0,
     drafters: new Set(planning.filter((r) => r.role === "drafter").map((r) => r.agentId)).size,

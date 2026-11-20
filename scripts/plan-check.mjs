@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // One plan gate: ten legs over one plan file, fail-closed on a missing Dispatch Map, one compact
 // line on success. `--draft` gates one drafted task file with the per-task legs instead. Each leg lives in (and is exported by) the script that still serves it standalone.
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -52,7 +53,7 @@ export const LEG_HELP = Object.freeze({
   waveDisjointness: "no two same-wave tasks list the same file.",
   authoredClaims: "every load-bearing plan-authored claim (a file or section target, a count, \"X already does Y\") carries `(verified: <cmd>)` or `(assumption)`.",
   briefFacts: "every path a brief cites resolves and every cited line is within its file; under `--draft`, a path a sibling task file creates or the draft's own Consumes (Task N) line names counts as created. It also notes, never failing, a call-shaped span nothing defines.",
-  proportion: "plan bytes stay within 5× the spec's and code fences within 30% of the plan (a note above either); above 8× or 45% it fails unless a `- Proportion override: <reason>` line says why. With no spec (`--spec`, else the state file's `spec:`) it is not measured.",
+  proportion: "plan bytes stay within 5× the spec's and non-test code fences within 20% of the plan (a note above either; a red-green task's failing-test fences are exempt), and above 8× or 30% it fails unless a `- Proportion override: <reason>` line says why. With no spec (`--spec`, else the state file's `spec:`) it is not measured.",
   crossTask: "every code span a `- Consumes (Task N):` line pins appears in a Produces line of Task N; no task brief carries a placeholder or a \"similar to Task N\" back-reference outside a code span; a definition two tasks pin with differing text is a note.",
 });
 
@@ -97,8 +98,11 @@ export function planCheck(planText, { planPath, repoRoot, only, specText, draft 
   return { findings, notes, legs };
 }
 
+// The first 12 hex of the plan text's sha256: doctor's P9 reads two gate runs on one digest as a re-run.
+export const planDigest = (planText) => createHash("sha256").update(planText).digest("hex").slice(0, 12);
+
 // failedLegs is the sorted, unique names of the legs that reported a finding; it is empty on a pass.
-function recordGateRan(repoRoot, failedLegs) {
+function recordGateRan(repoRoot, failedLegs, digest) {
   const stateFile = join(repoRoot, ".devcycle", "state.md");
   if (!existsSync(stateFile)) return;
   const state = readFileSync(stateFile, "utf8");
@@ -106,7 +110,7 @@ function recordGateRan(repoRoot, failedLegs) {
   const stage = field(state, "stage");
   if (!/^[0-9a-f]{16}$/.test(run ?? "") || !STAGES.has(stage)) return;
   spawnSync(process.execPath, [RUN_RECORD, "append", "--run", run, "--kind", "event",
-    "--event", "gate-ran", "--stage", stage, "--result", failedLegs.length ? "fail" : "pass",
+    "--event", "gate-ran", "--stage", stage, "--result", failedLegs.length ? "fail" : "pass", "--planDigest", digest,
     ...(failedLegs.length ? ["--legs", failedLegs.join(",")] : [])], { cwd: repoRoot, encoding: "utf8" });
 }
 
@@ -161,11 +165,12 @@ function main(argv) {
   if (specFlag && (!existsSync(specFlag) || !statSync(specFlag).isFile())) die(`spec not found: ${specFlag}`);
   const specPath = specFlag ?? stateSpecPath(repoRoot);
   const specText = specPath ? readFileSync(specPath, "utf8") : null;
-  const { findings, notes, legs } = planCheck(readFileSync(planPath, "utf8"), { planPath, repoRoot, only, specText, draft });
+  const planText = readFileSync(planPath, "utf8");
+  const { findings, notes, legs } = planCheck(planText, { planPath, repoRoot, only, specText, draft });
   printNotes(notes, { listAll: verbose || findings.length > 0 });
   for (const f of findings) console.error(`plan-check: ${f.leg}: ${f.text}`);
   // A draft is a work file, not the gate of record: only the assembled plan's run is recorded.
-  if (!draft) try { recordGateRan(repoRoot, [...new Set(findings.map((f) => f.leg))].sort()); } catch { /* recording is best-effort */ }
+  if (!draft) try { recordGateRan(repoRoot, [...new Set(findings.map((f) => f.leg))].sort(), planDigest(planText)); } catch { /* recording is best-effort */ }
   if (findings.length) process.exit(1);
   console.log(`plan-check: ok — ${draft ? "draft, " : ""}${legs.length} leg(s): ${legs.join(", ")}`);
 }

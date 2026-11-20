@@ -132,8 +132,9 @@ test("CLI appends one plan-stats row for the state file's run and prints its fie
     specBytes: 7, planBytes: Buffer.byteLength(readFileSync(`${repo}/plan.md`, "utf8")), tasks: 3, waves: 2,
     strategy: "delegated", drafters: 1, subagentUsd: 0.25, specReview: "pass" });
   assert.ok(row.fenceShare > 0 && row.fenceShare < 1);
+  assert.ok(row.nonTestFenceShare >= 0 && row.nonTestFenceShare <= row.fenceShare);
   assert.deepEqual(JSON.parse(r.stdout), { specBytes: row.specBytes, planBytes: row.planBytes, fenceShare: row.fenceShare,
-    tasks: 3, waves: 2, drafters: 1, subagentUsd: 0.25, specReview: "pass", strategy: "delegated" });
+    nonTestFenceShare: row.nonTestFenceShare, tasks: 3, waves: 2, drafters: 1, subagentUsd: 0.25, specReview: "pass", strategy: "delegated" });
 });
 
 test("CLI exits 1 with one line for a bad strategy, an unreadable plan, or a state file with no run", () => {
@@ -154,4 +155,12 @@ test("CLI exits 1 with one line for a bad strategy, an unreadable plan, or a sta
     assert.equal(r.stderr.trim().split("\n").length, 1);
   }
   assert.equal(rows(repo, runId).filter((o) => o.kind === "plan-stats").length, 0, "no row on failure");
+});
+
+test("nonTestFenceShare sits beside fenceShare and exempts a red-green task's failing test", () => {
+  const planText = '### Task 1: t\n\n**Evidence:** red-green\n\n```js\ntest("x", () => {\n  assert.equal(1, 1);\n});\n```\n';
+  const s = planStats({ planText, specText: "spec\n", rows: [], strategy: "inline" });
+  assert.ok(s.fenceShare > 0);
+  assert.equal(s.nonTestFenceShare, 0);
+  assert.deepEqual(Object.keys(s).slice(2, 4), ["fenceShare", "nonTestFenceShare"]);
 });
