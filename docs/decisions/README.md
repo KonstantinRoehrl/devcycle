@@ -5,6 +5,24 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-20 — Phase 2b ships without its benchmark pass (#443, #447)
+
+**Decision:** Decision D9: Phase 2b merges with no paid `plan-bench` pass of the `grouped` or `grouped-fork`
+arm. The P3 and P4 bars, the "P10 not worse" check, the P1–P12 deltas and the tuned decision-table thresholds
+are therefore unmeasured. The `grouped-fork` verdict (keep, drop or promote) is not recorded either: the arm
+exists as an experimental `planningStrategy` value and benchmark arm, but no run has judged it. The k ≤ 3 cap,
+the 150k per-drafter input cap, the ceil(N/3) drafter cap and the 4-drafter concurrency limit remain the initial
+values Decision D7 names.
+
+**Why:** the user declined the spend at the finish stage. The cheapest useful pass was about $83 estimated for
+`grouped` alone against the existing status-quo and inline baselines, and Phase 1's real grouped-4 run came in
+at about 2.5× its estimate.
+
+**How to apply:** a later phase or a follow-up run `node scripts/plan-bench.mjs` with `--arms grouped,grouped-fork`
+(budget above the default $150 for all three entries), records the deltas and verdict in a new entry here, and
+adjusts the `scripts/plan-strategy.mjs` thresholds. Until then `planningStrategy=auto` should be read as
+untuned for wide cuts.
+
 ## 2026-11-20 — The blast-radius gate matches a changed non-code file by its last two path segments (#443, #447)
 
 **Decision:** Decision D8: `referenceToken` in `scripts/blast-radius-check.mjs` matches a changed non-code file by
