@@ -210,16 +210,42 @@ function detailErrors(num, block) {
 
 // A red-green task's brief is where its failing test lives: the implementer works test-first from it
 // (references/plan-task-format.md § No placeholders). A fence holding only the gate command does not
-// pin it, so a shell-labelled fence, or an unlabelled one of nothing but command lines, is not test code.
+// pin it, so a shell- or output-labelled fence is not test code, and neither is an unlabelled or
+// plain-text one of nothing but command and output lines. Kept apart from SHELL_FENCE_INFO, which
+// also decides what the guard leg scans: an `output` fence quotes output, it does not prescribe a command.
+// `text`, `plaintext` and `txt` are ambiguous (output, or test-table rows to edit), so they are
+// judged by their lines like an unlabelled fence.
+// Accepted limit: a code-labelled fence (`js`) holding only the command as a string passes; judging
+// what a language's code asserts is not this check's job.
+const NON_TEST_FENCE_INFO = new Set([...SHELL_FENCE_INFO, "shell-session", "sh-session", "terminal", "powershell", "fish", "output", "log"]);
+const JUDGED_BY_LINES_INFO = new Set(["", "text", "plaintext", "txt"]);
 const COMMAND_LINE_RE = /^(?:\$\s+)?(?:[A-Za-z_]\w*=\S*\s+)*(?:node|npm|npx|pnpm|yarn|bun|deno|python3?|pytest|go|cargo|git|make|sh|bash|env|claude|jest|vitest|tsc|php|composer|dotnet|mvn|gradle|ruby|rspec|cd)(?:\s|$)/;
+// What a test runner prints: node's ✖ ✔ ℹ marks, TAP `ok 1`/`not ok 1`, an assertion or Error line,
+// FAIL/PASS, and the `expected:`/`actual:` lines of a failure diff. `#` comments are dropped separately.
+const OUTPUT_LINE_RE = /^(?:[✖✔ℹ]|(?:not )?ok \d|AssertionError\b|\w*Error:|(?:FAIL|PASS)\b|(?:expected|actual)\s*:)/;
+
+// A command wrapped with a trailing `\` is one logical line.
+function logicalLines(lines) {
+  const joined = [];
+  let carry = "";
+  for (const line of lines) {
+    const text = line.trim();
+    if (text.endsWith("\\")) carry += `${text.slice(0, -1)} `;
+    else {
+      joined.push(carry + text);
+      carry = "";
+    }
+  }
+  if (carry) joined.push(carry.trim());
+  return joined;
+}
 
 function holdsTestCode(block, fence) {
-  if (SHELL_FENCE_INFO.has(fence.info)) return false;
-  if (fence.info !== "") return true;
-  return block.split("\n").slice(fence.open + 1, fence.close ?? undefined)
-    .map((line) => line.trim())
+  if (NON_TEST_FENCE_INFO.has(fence.info)) return false;
+  if (!JUDGED_BY_LINES_INFO.has(fence.info)) return true;
+  return logicalLines(block.split("\n").slice(fence.open + 1, fence.close ?? undefined))
     .filter((line) => line !== "" && !line.startsWith("#"))
-    .some((line) => !COMMAND_LINE_RE.test(line));
+    .some((line) => !COMMAND_LINE_RE.test(line) && !OUTPUT_LINE_RE.test(line));
 }
 
 function fenceErrors(num, block) {

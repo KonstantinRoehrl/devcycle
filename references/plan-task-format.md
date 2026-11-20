@@ -32,8 +32,8 @@ concurrently); a reference to a type, function, or method no task defines. A `re
 full `**Interfaces:**` block (exact signatures and constants), its complete failing test code (every
 case) in a fenced block, and its exact gate commands with expected red and green output; its
 implementation steps are prose. `**Detail:** code-pinned — <reason>` opts into a full implementation
-body, for an algorithm the signature and tests leave open; `interface-pinned — <reason>` is the older
-form of the default and still accepted. `green-green` and doc-only tasks keep their shape. A Consumes
+body, for an algorithm the signature and tests leave open; `interface-pinned — <reason>` is still
+accepted. `green-green` and doc-only tasks keep their shape. A Consumes
 item drawn from another task reads `- Consumes (Task N): <that task's Produces text, verbatim>`.
 
 **Steps.** Each step is one action,
@@ -58,7 +58,7 @@ suite run is step 1. Never a commit step.
   through `workflows/mechanical-sweep.js` instead of dispatching an implementer, so the evidence
   class stays orthogonal and is typically `green-green (behavior-preserving)`. Any per-file judgment
   in the rule disqualifies the marker; a normal implementer takes the
-  task.
+  task. Wave placement rules are unchanged.
 
 ## Per-task checks
 
