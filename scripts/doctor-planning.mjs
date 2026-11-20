@@ -94,6 +94,24 @@ function row(id, measure, bar, value, pass, reason) {
 }
 
 /**
+ * The planning `gate-ran` fails that count as rework: a fail whose `planDigest` is present and equals the
+ * previous planning `gate-ran` event's, with the same failing legs, re-ran an unchanged plan and is not one.
+ * @param {object[]} events the run's event rows, in order
+ * @returns {object[]}
+ */
+export function reworkFails(events) {
+  const kept = [];
+  let previous = null;
+  for (const e of events) {
+    if (e.event !== "gate-ran" || e.stage !== "planning") continue;
+    const rerun = e.result === "fail" && e.planDigest && previous?.planDigest === e.planDigest && previous.legs === e.legs;
+    if (e.result === "fail" && !rerun) kept.push(e);
+    previous = e;
+  }
+  return kept;
+}
+
+/**
  * @param {PlanningRun} run
  * @param {{tierTable?: {family: string, rank: number, match: string}[]}} [options] references/model-tiers.json,
  *   which doctor.mjs loads; an empty table ranks no model, so nothing is flagged for tier fit.
@@ -164,8 +182,10 @@ export function planningBreakdown(run, { tierTable = [] } = {}) {
   const rolled = costs.filter((c) => c.role);
   const p6 = sharedContext(rolled);
   const p7 = explicitByAgent.size > 0 ? [...explicitByAgent.values()].filter(Boolean).length / explicitByAgent.size : null;
-  const p8 = stats && stats.specBytes > 0 ? { bytesRatio: stats.planBytes / stats.specBytes, fenceShare: stats.fenceShare } : null;
-  const p9 = checkerKnown ? { gateFails: planningGateFails.length, checkerRounds } : null;
+  const p8 = stats && stats.specBytes > 0
+    ? { bytesRatio: stats.planBytes / stats.specBytes, fenceShare: stats.fenceShare, nonTestFenceShare: stats.nonTestFenceShare ?? null }
+    : null;
+  const p9 = checkerKnown ? { gateFails: reworkFails(events).length, checkerRounds } : null;
   const p11 = ratio(run.planningMinutes ?? null, tasks);
   const p12 = dispatches > 0 ? { share: matched / dispatches, gaps: sensorGaps.length } : null;
 
@@ -178,8 +198,8 @@ export function planningBreakdown(run, { tierTable = [] } = {}) {
     row("P6", "shared-context duplication (re-read tokens / planning dispatch input)", "<= 20%", p6, p6 <= 0.2,
       p6 === null && "no planning dispatch rows, or one recorded without reads"),
     row("P7", "planning dispatches with explicitModel", "100%", p7, p7 === 1, p7 === null && "no planning agent-cost rows"),
-    row("P8", "plan/spec bytes and fenceShare", "plan/spec <= 5 and fenceShare <= 0.30", p8,
-      p8 && p8.bytesRatio <= 5 && p8.fenceShare <= 0.3, p8 === null && (stats ? "spec is empty" : noStats)),
+    row("P8", "plan/spec bytes and fence shares", "plan/spec <= 5 and nonTestFenceShare <= 0.20 (fenceShare <= 0.30 on a row recorded without it)", p8,
+      p8 && p8.bytesRatio <= 5 && (p8.nonTestFenceShare === null ? p8.fenceShare <= 0.3 : p8.nonTestFenceShare <= 0.2), p8 === null && (stats ? "spec is empty" : noStats)),
     row("P9", "planning gate-ran fails and checker rounds", "fails <= 2 and checker rounds <= 1", p9,
       p9 && p9.gateFails <= 2 && p9.checkerRounds <= 1, p9 === null && "no planning agent-cost rows to count checker rounds from"),
     row("P10", "plan-defect count", "baseline-relative", planDefects, false, "the bar is relative to a baseline, so the count is not judged"),
@@ -237,7 +257,7 @@ export function planningBreakdowns(summaries, { tierTable = [] } = {}) {
 }
 
 const valueText = (v) => (v !== null && typeof v === "object"
-  ? Object.entries(v).map(([k, n]) => `${k} ${+n.toFixed(3)}`).join(", ")
+  ? Object.entries(v).map(([k, n]) => `${k} ${n === null ? "—" : +n.toFixed(3)}`).join(", ")
   : typeof v === "number" ? +v.toFixed(3) : v);
 const countText = (n) => (n === null ? "unknown" : n);
 

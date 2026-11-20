@@ -18,6 +18,11 @@ Reproduce every signature your brief pins verbatim. If a pinned interface cannot
 so in a one-line summary beginning `stopped: <what pin cannot hold>`, and write no draft for that
 task; the coordinator owns Interfaces.
 
+In a later drafting round your brief also names `interfaces.lock.md`: reproduce every signature you consume from it
+verbatim, and run `node "${CLAUDE_PLUGIN_ROOT}/scripts/interface-lock.mjs" check <work dir>` before you return. A task you cannot
+draft without changing an interface the lock holds gets no draft: return a one-line summary beginning
+`interface-delta: Task <n> <what>`, and the coordinator decides.
+
 ## What you write
 
 Only your own `.devcycle/plan-work/<run id>/tasks/task-<n>.md` files. Pin the failing test code; never prototype the implementation. Run

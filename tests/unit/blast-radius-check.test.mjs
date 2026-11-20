@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync, realpathSync, symlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
+import { referenceToken } from "../../scripts/blast-radius-check.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/blast-radius-check.mjs");
 
@@ -654,4 +655,59 @@ test("--scan still finds a stem importer when a symbol is stoplisted, and a zero
   assert.match(none.out, /symbols: \(none\) \(skipped: Update\)/);
   assert.doesNotMatch(none.out, /^ {2}no referencers found$/m);
   assert.match(none.out, /^ {2}no referencers found; skipped names were not searched -- pass --symbol <name> to search one$/m);
+});
+
+const planOf = (file, override = "") => `# Plan\n### Task 1: Change it\n**Files:**\n- Modify: \`${file}\`\n**Dependencies:** none\n${override ? `${override}\n` : ""}## Dispatch Map\n- Wave 1: Task 1\n`;
+
+test("referenceToken keeps a code file's basename and qualifies any other file by its parent directory", () => {
+  assert.equal(referenceToken("src/widget.mjs"), "widget.mjs");
+  assert.equal(referenceToken("docs/guide/README.md"), "guide/README.md");
+  assert.equal(referenceToken("references/ledger.md"), "references/ledger.md");
+  assert.equal(referenceToken("README.md"), "README.md");
+  assert.equal(referenceToken("tests/data/table.json"), "data/table.json");
+});
+
+test("a changed Markdown file is not matched by a script naming another file of the same basename", () => {
+  const repo = makeRepo({
+    "docs/guide/README.md": "# guide\n",
+    "docs/README.md": "# docs\n",
+    "scripts/hub.mjs": 'readFileSync("docs/README.md");',
+  });
+  const { code, out } = run(planOf("docs/guide/README.md"), repo);
+  assert.equal(code, 0, out);
+});
+
+test("a changed Markdown file is still matched by a script naming its qualified path", () => {
+  const repo = makeRepo({
+    "docs/guide/README.md": "# guide\n",
+    "scripts/log.mjs": 'readFileSync("docs/guide/README.md");',
+  });
+  const { code, out } = run(planOf("docs/guide/README.md"), repo);
+  assert.equal(code, 1);
+  assert.match(out, /scripts\/log\.mjs \(non-test\) references docs\/guide\/README\.md/);
+});
+
+test("one override clears every referencer it lists, backticked or not, and no other", () => {
+  const files = {
+    "references/ledger.md": "# ledger\n",
+    "scripts/a.mjs": '"references/ledger.md"',
+    "scripts/b.mjs": '"references/ledger.md"',
+    "scripts/c.mjs": '"references/ledger.md"',
+  };
+  const listed = "- Blast-radius override: `references/ledger.md` → `scripts/a.mjs`, scripts/b.mjs — they read it by path only";
+  const { code, out } = run(planOf("references/ledger.md", listed), makeRepo(files));
+  assert.equal(code, 1);
+  assert.match(out, /scripts\/c\.mjs \(non-test\) references references\/ledger\.md/);
+  assert.doesNotMatch(out, /scripts\/a\.mjs \(non-test\)|scripts\/b\.mjs \(non-test\)/);
+  assert.match(out, /override -- scripts\/a\.mjs references references\/ledger\.md, cleared: they read it by path only/);
+  assert.match(out, /override -- scripts\/b\.mjs references references\/ledger\.md, cleared: they read it by path only/);
+  const all = "- Blast-radius override: references/ledger.md → scripts/a.mjs, scripts/b.mjs, `scripts/c.mjs` — they read it by path only";
+  assert.equal(run(planOf("references/ledger.md", all), makeRepo(files)).code, 0);
+});
+
+test("a malformed override names the form with an example", () => {
+  const repo = makeRepo({ "references/ledger.md": "# ledger\n", "scripts/a.mjs": '"references/ledger.md"' });
+  const { code, out } = run(planOf("references/ledger.md", "- Blast-radius override: references/ledger.md → scripts/a.mjs, ,  — why"), repo);
+  assert.equal(code, 1);
+  assert.match(out, /malformed override \(needs "<changed-file> \[→ <referencer>\[, <referencer>…\]\] — <reason>", e\.g\. "- Blast-radius override: scripts\/a\.mjs → tests\/unit\/a\.test\.mjs — only a comment names it"\)/);
 });

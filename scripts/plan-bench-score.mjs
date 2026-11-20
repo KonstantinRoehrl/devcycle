@@ -54,11 +54,11 @@ export function scoreReplay(replayDir, breakdownsOf = replayBreakdowns) {
   };
 }
 
-const cell = (row) => {
+export const cell = (row) => {
   if (!row) return "—";
   const v = row.value;
   const text = v === null || v === undefined ? "—"
-    : typeof v === "object" ? Object.values(v).map((n) => +Number(n).toFixed(3)).join("/")
+    : typeof v === "object" ? Object.values(v).map((n) => (n === null || n === undefined ? "—" : +Number(n).toFixed(3))).join("/")
       : typeof v === "number" ? String(+v.toFixed(3)) : String(v);
   return `${text} ${row.status}`;
 };

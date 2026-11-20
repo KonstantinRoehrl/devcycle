@@ -91,7 +91,7 @@ carry the same keys; without it the copies drift one release at a time.
 | `taskReviewerModel` | `playbooks/executing-waves.md` | `auto` — `references/model-routing.md` derives it per task |
 | `branchReviewModel` | `playbooks/reviewing-the-branch.md` | `auto` — the session's own model |
 | `walkthroughModel` | `playbooks/verifying-on-device.md` | `auto` — a fast model |
-| `planningStrategy` | `playbooks/planning-waves.md` | `auto` — the delegation thresholds, as `status-quo` |
+| `planningStrategy` | `playbooks/planning-waves.md` | `auto` — the decision table, `scripts/plan-strategy.mjs` |
 | `learnStalenessSessions` | § Learn staleness | `5` |
 | `learnStalenessDays` | § Learn staleness | `14` |
 | `learnSessionCap` | § Learn staleness | `100` |

@@ -10,7 +10,16 @@ import { basename, isAbsolute, join } from "node:path";
 import { field } from "./md-field.mjs";
 import { makeTempDir } from "./temp-dir.mjs";
 
-export const LEG_CAP = 8;
+// The branch a replay's clone sits on: an integration branch (references/branch.md § Committing), so execution cuts
+// its own topic branch the way it does in a real repo instead of committing onto a detached HEAD.
+export const BENCH_BASE_BRANCH = "dev";
+// An executing replay runs a leg per wave, so it gets more legs than a plan-only replay's gate round-trips.
+export const LEG_CAPS = Object.freeze({ plan: 8, execute: 14 });
+export const legCapFor = (execute) => (execute ? LEG_CAPS.execute : LEG_CAPS.plan);
+// Execute legs in a row that may move nothing before the replay ends `stalled`.
+export const STALL_LEGS = 2;
+// The stamps a `/devcycle:continue` leg rewrites whether or not it did any work; everything else is progress.
+export const progressKey = (text) => String(text).split("\n").filter((line) => !/^- (?:updated|handoff):/.test(line)).join("\n");
 export const PLANNING_STAGES = new Set(["scoping", "audit", "diagnosis", "brainstorm", "planning"]);
 export const CONTINUE_PROMPT = "/devcycle:continue";
 
@@ -96,20 +105,22 @@ const round2 = (n) => Math.round(n * 100) / 100;
 /**
  * Drives one entry × arm to its outcome. Pure apart from `spawnLeg` and `readState`.
  * @param {{execute: boolean, prompt: string, answers: {match: string, reply: string}[], budgetUsd: number,
- *   spawnLeg: (args: {prompt: string, resume: string|null, maxBudgetUsd: number}) => string, readState: () => string}} input
- * @returns {{outcome: "planned"|"executed"|"no-go"|"unanswered"|"error"|"budget-stop"|"leg-cap", usd: number,
+ *   spawnLeg: (args: {prompt: string, resume: string|null, maxBudgetUsd: number}) => string, readState: () => string,
+ *   readProgress?: () => string}} input `readProgress` is what an execute leg must change to count as progress; it defaults to `readState`
+ * @returns {{outcome: "planned"|"executed"|"no-go"|"unanswered"|"error"|"budget-stop"|"leg-cap"|"stalled", usd: number,
  *   legs: {phase: string, sessionId: string|null, costUsd: number, denials: number, verdict: string}[], question: string|null,
  *   error: string|null}} `error` carries the reason a leg could not launch; every other outcome leaves it null
  */
-export function runEntryArm({ execute, prompt, answers, budgetUsd, spawnLeg, readState }) {
+export function runEntryArm({ execute, prompt, answers, budgetUsd, spawnLeg, readState, readProgress = readState }) {
   const legs = [];
   const used = new Set();
   let phase = "plan";
   let resume = null;
   let next = prompt;
   let spent = 0;
+  let stalledLegs = 0;
   const end = (outcome, question = null, error = null) => ({ outcome, usd: round2(spent), legs, question, error });
-  while (legs.length < LEG_CAP) {
+  while (legs.length < legCapFor(execute)) {
     if (spent >= budgetUsd) return end("budget-stop");
     // A leg that never reports its cost (killed at --leg-timeout, or ended with no result event) may have spent up to the
     // cap it ran under, so it is charged that cap: real spend stays within the budget however many legs die.
@@ -119,6 +130,7 @@ export function runEntryArm({ execute, prompt, answers, budgetUsd, spawnLeg, rea
       legs.push({ phase, sessionId, costUsd: cap, denials: 0, verdict: "error" });
       return end("error", null, `${reason}; charged its $${cap.toFixed(2)} spend cap`);
     };
+    const before = phase === "execute" ? progressKey(readProgress()) : null;
     let leg;
     try { leg = parseLeg(spawnLeg({ prompt: next, resume, maxBudgetUsd: cap })); } catch (err) { return err.killed ? charged(null, err.message) : end("error", null, err.message); }
     if (leg.costUsd === null) return charged(leg.sessionId, "the leg ended with no result event");
@@ -128,6 +140,10 @@ export function runEntryArm({ execute, prompt, answers, budgetUsd, spawnLeg, rea
     if (verdict === "error") return end("error");
     if (verdict === "no-go") return end("no-go");
     if (verdict === "done" && (phase === "execute" || !execute)) return end(phase === "plan" ? "planned" : "executed");
+    if (phase === "execute") {
+      stalledLegs = verdict === "next" && progressKey(readProgress()) === before ? stalledLegs + 1 : 0;
+      if (stalledLegs >= STALL_LEGS) return end("stalled");
+    }
     if (verdict === "done" || verdict === "next") {
       phase = "execute";
       resume = null;
@@ -165,7 +181,7 @@ export function collectTranscripts({ projectsRoot, sessionIds, dest }) {
 export const specSource = ({ repoPath, specPath }) => (isAbsolute(specPath) ? specPath : join(repoPath, specPath));
 
 /**
- * A scratch clone of `repoPath` detached at `baseSha`, with the entry's spec copied in. A clone, not a
+ * A scratch clone of `repoPath` on `BENCH_BASE_BRANCH` at `baseSha`, with the entry's spec copied in. A clone, not a
  * worktree: a replay's execution leg cuts branches, which must never land in the source repo.
  * @returns {{dir: string, specRel: string}}
  */
@@ -176,7 +192,7 @@ export function cutClone({ repoPath, baseSha, specPath, parent }) {
     if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr.trim()}`);
   };
   git(["clone", "--quiet", "--no-checkout", "--", repoPath, dir]);
-  git(["-C", dir, "checkout", "--quiet", "--detach", baseSha]);
+  git(["-C", dir, "checkout", "--quiet", "-B", BENCH_BASE_BRANCH, baseSha]);
   // A replay must not be able to push to, or fetch from, the repo it was cut from.
   git(["-C", dir, "remote", "remove", "origin"]);
   const specRel = isAbsolute(specPath) ? join("docs", "superpowers", "specs", basename(specPath)) : specPath;
@@ -225,13 +241,17 @@ function replay({ entry, arm, answers, budgetUsd, out, pluginDir, model, setting
   try { ({ dir, specRel } = cutClone({ ...entry, parent: makeTempDir("plan-bench-") })); } catch (err) { return fail(err); }
   const legEnv = { ...Object.fromEntries(Object.entries(env).filter(([key]) => !DRIVER_ENV.includes(key))), DEVCYCLE_RUNS_DIR: join(out, "runs"), CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: "0" };
   const statePath = join(dir, ".devcycle", "state.md");
+  const ledgerPath = join(dir, ".devcycle", "ledger.md");
+  const readIfThere = (path) => (existsSync(path) ? readFileSync(path, "utf8") : "");
   let n = 0;
   const result = runEntryArm({
     execute: entry.execute,
     prompt: answers.prompt ?? planPrompt(specRel),
     answers: answers.answers,
     budgetUsd,
-    readState: () => (existsSync(statePath) ? readFileSync(statePath, "utf8") : ""),
+    readState: () => readIfThere(statePath),
+    // A wave that commits tasks without rewriting state.md still advances the ledger.
+    readProgress: () => `${readIfThere(statePath)}\n${readIfThere(ledgerPath)}`,
     spawnLeg: ({ prompt, resume, maxBudgetUsd }) => {
       const stdout = spawn(legArgs({ prompt, resume, pluginDir, settings: settingsFor(arm), model, maxBudgetUsd }), { cwd: dir, env: legEnv });
       writeFileSync(join(out, `leg-${++n}.jsonl`), stdout);

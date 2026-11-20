@@ -1,7 +1,7 @@
 # Delegated planning
 
-How `playbooks/planning-waves.md` splits a large plan across dispatches once one of its thresholds
-trips, so the coordinator's window holds answers and interfaces, never a spike's or a draft's body.
+How `playbooks/planning-waves.md` splits a large plan across dispatches once its spike threshold trips
+or its decision table picks `delegated` or `grouped`, so the coordinator's window holds answers and interfaces, never a spike's or a draft's body.
 Every dispatch here follows `references/delegation.md`'s envelope rules and runs at the tier
 `references/model-routing.md` § Planning dispatches assigns, naming its model explicitly; this file
 owns only the flow, the context pack and the two brief shapes. A finished plan must not show whether
@@ -50,9 +50,9 @@ and its one-line conclusions, the selected spike conclusions, then the per-task 
 line names its source path, to be read only if the line is insufficient. Whether drafters share a
 cached prefix is measured (doctor's P6), never assumed.
 
-## Drafters — 5+ tasks
+## Drafters — one per task
 
-One `devcycle:plan-drafter` dispatch per task, in parallel. Its brief carries paths, never content:
+Under `delegated`, one `devcycle:plan-drafter` dispatch per task, in parallel. Its brief carries paths, never content:
 `pack.md` and `plan-header.md` (whose `## Quality Constraints` section the drafter's
 `**Quality constraints:**` line cites), plus inline only the verdict, its own task's pinned Interfaces and its
 dependencies' Produces. The agent reads `references/plan-task-format.md` by its own definition. The
@@ -69,6 +69,29 @@ and falls back as `references/model-routing.md` § Model tiers says.
 A drafter whose summary begins `stopped: <what pin cannot hold>` wrote no draft. The coordinator, who
 owns Interfaces, decides that pin and re-dispatches the task, or drafts it inline.
 
+## Grouped drafting
+
+Under `grouped`, `plan-strategy.mjs` returns `rounds`: one per wave, each a list of groups of at most three
+tasks, at most four dispatched at once (its `batches`). Rounds run in wave order. A group is one drafter, briefed
+as § Drafters says for every task it holds, described `plan-drafter: Tasks <a>, <b>`, at the group's `tier`; it
+writes one `tasks/task-<n>.md` per task. The coordinator logs `plan-draft-<n>` per task and `plan-group-<k>` per group, the latter with the group's
+`agentId`.
+
+**The interface lock.** After each round the coordinator runs
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/interface-lock.mjs" write .devcycle/plan-work/<run id> --round <n>`, which copies
+the round's `Produces` items into `interfaces.lock.md`. A later round's briefs name that file by path, and their
+drafters reproduce what they consume from it verbatim; `interface-lock.mjs check` exiting 0 is what lets a round
+count as drafted.
+
+**Interface deltas.** A drafter that cannot draft a task without changing an interface the lock holds writes no
+draft for it and returns `interface-delta: Task <n> <what>`. The coordinator, who owns Interfaces, either accepts it
+(the producer's drafter patches its task by `SendMessage`, then `interface-lock.mjs write <work-dir> --round <n> --tasks <producer task> --relock`, then the
+consumer is re-sent) or tells the drafter to hold the pin.
+
+**Fork arm.** Under `grouped-fork` each group is dispatched as `subagent_type: "fork"` once the pack is written, its
+description still opening `plan-drafter: `. A fork inherits the coordinator's model, so the sensor records it as not
+explicitly routed. The arm is an experiment: the benchmark pass settles it, in a `docs/decisions/README.md` entry.
+
 ## The merge
 
 The coordinator writes its own Dispatch Map to `dispatch-map.md`, then assembles the plan with
@@ -79,19 +102,19 @@ duplicate task id. The cross-task self-review checks are the plan gate's `crossT
 `Consumes (Task N)` code span and the placeholder and back-reference scan, and the edge checker below;
 spec coverage and enumerations stay the coordinator's.
 
-**Edge checker.** After assembly, `plan-assemble.mjs edges .devcycle/plan-work/<run id>` lists the
-producer→consumer pairs, and each pair gets one fast-tier checker dispatch described
-`plan-checker: round <n> — Task <p> → Task <c>`. It reads only the two task files and `pack.md`,
-keeps to a budget of about 40k tokens of context, and writes its findings to
-`.devcycle/plan-work/<run id>/checker/round-<n>/task-<p>-task-<c>.md`; its summary is the finding
+**Edge checker.** After assembly, `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-assemble.mjs" edges .devcycle/plan-work/<run id> --batch 8`
+lists the producer→consumer pairs in batches of at most eight, and each batch gets one fast-tier checker dispatch
+described `plan-checker: round <n> — batch <b>`. It reads that batch's task files, `pack.md` and, after grouped
+drafting, `interfaces.lock.md`, keeps to a budget of about 40k tokens of context, and writes its findings to
+`.devcycle/plan-work/<run id>/checker/round-<n>/batch-<b>.md`; its summary is the finding
 count, and the coordinator logs `checker-round-<n>` when the round's dispatches are done. No dispatch
 holds the whole plan. The coordinator reads a findings file only when its count is above zero, runs
 the plan gate once, and presents the plan to the user by path with `plan-check`'s result and the
 findings count; it does not read the plan body on this path.
 
 **Patch, not redraft.** A finding opening `Task <n>:` goes back to that task's original drafter by
-`SendMessage`, its agent id logged as `agentId` in the `plan-draft-<n>` stage-log line. A one-line
-fix is the coordinator's own `Edit` of the task file. A finding never goes to a fresh dispatch; after
+`SendMessage`, its agent id read from its group's `plan-group-<k>` row under `grouped`, or its dispatch's own id under
+`delegated`. A one-line fix is the coordinator's own `Edit` of the task file. A finding never goes to a fresh dispatch; after
 a resume, when the drafter can no longer be reached, the coordinator edits the task file itself. Any
 other finding is the coordinator's to fix.
 

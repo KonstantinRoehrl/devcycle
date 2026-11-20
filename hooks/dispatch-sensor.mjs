@@ -35,6 +35,8 @@ export const depthOf = (tokens) => (tokens > DEPTH_BREACH ? "breach" : tokens > 
 // The planning role a dispatch description names: the `plan-<role>: ` prefix and nothing else.
 const ROLE_PREFIX = /^plan-(spike|research|drafter|checker|repair): /;
 export const roleOf = (description) => (typeof description === "string" ? ROLE_PREFIX.exec(description)?.[1] ?? null : null);
+// A fork records `model: "inherit"` in its sidecar: it took its parent's model rather than being given one.
+export const namesModel = (sidecar) => typeof sidecar.model === "string" && sidecar.model !== "" && sidecar.model !== "inherit";
 // A checker dispatch's "plan-checker: round <n>" tag: the n-th re-check of one plan, so doctor counts rounds, not agents.
 const ROUND_TAG = /^plan-checker: round (\d+)\b/;
 export const roundOf = (description) => (typeof description === "string" ? Number(ROUND_TAG.exec(description)?.[1] ?? NaN) || null : null);
@@ -168,7 +170,7 @@ function main() {
       "--model", clean(stats.model, MODEL_CHARS, 80) || "unknown",
       ...(round !== null ? ["--round", String(round)] : []),
       ...(role ? ["--role", role, "--sourcePrints", String(cost.sourcePrints), "--reads", JSON.stringify(cost.reads)] : []),
-      "--explicitModel", String(typeof sidecar.model === "string" && sidecar.model !== ""),
+      "--explicitModel", String(namesModel(sidecar)),
       "--inputTokens", String(cost.inputTokens), "--cacheWriteTokens", String(cost.cacheWriteTokens),
       "--cacheReadTokens", String(cost.cacheReadTokens), "--outputTokens", String(cost.outputTokens),
       "--usd", String(cost.usd), ...(measurement ? ["--measurement", measurement] : []), "--turns", String(cost.turns), "--continuationOf", String(cost.continuationOf)]);

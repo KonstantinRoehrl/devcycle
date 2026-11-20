@@ -68,11 +68,17 @@ not just what they contain. Two goals govern every boundary decision, together:
 
 ## Delegated planning — thresholds
 
-Planning runs inline unless a threshold trips, each on its own: **3+ independent feasibility
-unknowns** → parallel spikes; **5+ tasks in the task cut** → parallel per-task drafters. When either
-trips, read `${CLAUDE_PLUGIN_ROOT}/references/delegated-planning.md` and follow it for that half.
-`planningStrategy` on the `knobs:` line forces the drafting arm: `inline` never trips the drafter
-threshold, so the coordinator drafts every task itself; `auto` and `status-quo` apply both as written.
+**3+ independent feasibility unknowns** → parallel spikes. Drafting follows a decision table, run once the
+task cut exists: write the cut as `.devcycle/plan-work/<run id>/task-cut.json` (the shape
+`scripts/plan-strategy.mjs` documents) and run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-strategy.mjs" <cut path> --planningStrategy <value>`. Log its `strategy`,
+`groups`, `drafters` and `est` as stage-log key `drafting-plan`, then draft by `strategy`: `inline`, every task in
+this session; `checkpointed`, inline in one segment per wave group, logging `plan-group-<k>` as a segment's
+tasks are written; `grouped`, rounds of group drafters; `delegated`, one drafter per task; `split`, the spec is too large for one plan:
+report the suggestion to split it, and the user decides, either splitting or forcing an arm with `planningStrategy`. Read
+`${CLAUDE_PLUGIN_ROOT}/references/delegated-planning.md` for a spike, `grouped` or `delegated` run.
+`planningStrategy` on the `knobs:` line forces the drafting arm: `inline`, `checkpointed`, `grouped` and `grouped-fork`
+force theirs, `status-quo` keeps the old threshold (`delegated` from 5 tasks), and `auto` runs the table.
 
 ## Plan mechanics — the native engine (`lean` / `standard`)
 
@@ -114,8 +120,9 @@ re-review pass.
    one that more than one task reproduces belongs in Global Constraints, verbatim in every brief.
 5. **Mirrored-file parity:** diff the pinned blocks where tasks restate logic across mirrored files;
    the `crossTask` leg notes a differing mirrored definition.
-6. **Proportion:** the plan stays within 5× the spec's bytes and 30% code fences; above either, cut
-   code to the contract or record `- Proportion override: <reason>`.
+6. **Proportion:** the plan stays within 5× the spec's bytes and 20% non-test code fences, a red-green
+   task's failing-test fences being exempt; above either, cut code to the contract or record
+   `- Proportion override: <reason>`.
 7. **Plan gate:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-check.mjs" <plan-path> --spec <spec-path>`;
    `plan-check.mjs --help` lists its legs and the override line forms. A non-zero exit is a stop —
    fix the plan or record an override, never hand off around it.
@@ -159,8 +166,8 @@ the stage to resume at — and the `plan:` path; after a NO-GO, keep `stage: pla
 `- plan-counts: planned=<count from the Dispatch Map> waves=<wave count from the Dispatch Map>` so
 the sensor can carry the plan totals into each progressive workload write (`planned=0 waves=0` after
 a NO-GO, where no Dispatch Map exists). Then record the plan's shape with
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-stats.mjs" --state .devcycle/state.md --plan <plan path> --spec <spec path> --strategy inline|delegated`
-(`delegated` when per-task drafters ran), which appends one `plan-stats` run-record row; skip it after
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-stats.mjs" --state .devcycle/state.md --plan <plan path> --spec <spec path> --strategy inline|delegated|grouped|checkpointed`
+(the `drafting-plan` row's `strategy`: `grouped-fork` records as `grouped`, `status-quo`'s per-task drafters as `delegated`), which appends one `plan-stats` row; skip it after
 a NO-GO or with `spec: none`, and report a non-zero exit without stopping on it. Then emit this
 stage's handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, with
 `Stage completed: planning` and the plan path (or the NO-GO report) as its artifact. The plan carries

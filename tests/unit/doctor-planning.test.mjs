@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planningBreakdown, corpusGateLegs, corpusGateLegsLine } from "../../scripts/doctor-planning.mjs";
+import { planningBreakdown, corpusGateLegs, corpusGateLegsLine, reworkFails } from "../../scripts/doctor-planning.mjs";
 import { loadTable } from "../../scripts/model-pool.mjs";
 
 const cost = (agentId, role, usd, extra = {}) => ({
@@ -130,14 +130,43 @@ test("P7: share of planning dispatches with an explicit model, bar 100%", () => 
   assert.equal(row(planningBreakdown(healthy({ agentCosts: [] })), "P7").status, "n/a");
 });
 
-test("P8: plan/spec bytes <= 5 and fenceShare <= 0.30", () => {
+test("P8: plan/spec bytes <= 5 and nonTestFenceShare <= 0.20, else fenceShare <= 0.30 on a row recorded without it", () => {
   const at = (extra) => row(planningBreakdown(healthy({ planStats: stats(extra) })), "P8");
+  assert.equal(at({ specBytes: 10000, planBytes: 50000, fenceShare: 0.39, nonTestFenceShare: 0.2 }).status, "pass");
+  assert.equal(at({ specBytes: 10000, planBytes: 50000, fenceShare: 0.1, nonTestFenceShare: 0.21 }).status, "fail");
+  assert.equal(at({ specBytes: 10000, planBytes: 50001, fenceShare: 0.1, nonTestFenceShare: 0.1 }).status, "fail");
   assert.equal(at({ specBytes: 10000, planBytes: 50000, fenceShare: 0.3 }).status, "pass");
-  assert.equal(at({ specBytes: 10000, planBytes: 50001, fenceShare: 0.3 }).status, "fail");
   assert.equal(at({ specBytes: 10000, planBytes: 50000, fenceShare: 0.31 }).status, "fail");
-  assert.deepEqual(at({ specBytes: 10000, planBytes: 20000, fenceShare: 0.1 }).value, { bytesRatio: 2, fenceShare: 0.1 });
+  assert.deepEqual(at({ specBytes: 10000, planBytes: 20000, fenceShare: 0.1 }).value, { bytesRatio: 2, fenceShare: 0.1, nonTestFenceShare: null });
+  assert.deepEqual(at({ specBytes: 10000, planBytes: 20000, fenceShare: 0.3, nonTestFenceShare: 0.05 }).value, { bytesRatio: 2, fenceShare: 0.3, nonTestFenceShare: 0.05 });
   assert.equal(at({ specBytes: 0 }).status, "n/a");
   assert.equal(row(planningBreakdown(healthy({ planStats: null })), "P8").status, "n/a");
+});
+
+test("reworkFails drops a fail that re-runs the previous planning gate on the same plan with the same legs", () => {
+  const g = (result, legs, planDigest, stage = "planning") => ({ ...gate(result, legs, stage), ...(planDigest ? { planDigest } : {}) });
+  const events = [
+    g("fail", "blastRadius", "aaaaaaaaaaaa"),
+    g("fail", "blastRadius", "aaaaaaaaaaaa"), // identical re-run: dropped
+    g("fail", "crossTask", "aaaaaaaaaaaa"), // same plan, different legs: kept
+    g("fail", "crossTask", "bbbbbbbbbbbb"), // plan changed: kept
+    g("fail", "crossTask", "bbbbbbbbbbbb", "execution"), // another stage: not planning
+    g("pass", undefined, "cccccccccccc"),
+    g("fail", "crossTask", "bbbbbbbbbbbb"), // previous planning gate passed on another plan: kept
+    g("fail", "crossTask"), // no digest: never dropped
+    g("fail", "crossTask"),
+  ];
+  assert.deepEqual(reworkFails(events).map((e) => [e.legs, e.planDigest ?? null]), [
+    ["blastRadius", "aaaaaaaaaaaa"], ["crossTask", "aaaaaaaaaaaa"], ["crossTask", "bbbbbbbbbbbb"],
+    ["crossTask", "bbbbbbbbbbbb"], ["crossTask", null], ["crossTask", null],
+  ]);
+});
+
+test("P9 counts rework fails while gateLegs still counts every planning fail", () => {
+  const twin = { ...gate("fail", "blastRadius"), planDigest: "aaaaaaaaaaaa" };
+  const b = planningBreakdown(healthy({ events: [twin, twin, twin] }));
+  assert.equal(row(b, "P9").value.gateFails, 1);
+  assert.equal(b.gateLegs.blastRadius, 3);
 });
 
 test("P9: planning gate-ran fails <= 2 and checker rounds <= 1", () => {

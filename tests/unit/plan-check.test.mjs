@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
 import { repoSlug, gitToplevel } from "../../scripts/run-record.mjs";
+import { planDigest } from "../../scripts/plan-check.mjs";
 
 const SCRIPT = new URL("../../scripts/plan-check.mjs", import.meta.url).pathname;
 const WAVE = new URL("../../scripts/wave-disjointness-check.mjs", import.meta.url).pathname;
@@ -123,7 +124,7 @@ test("a passing plan records gate-ran pass with no legs field", () => {
 
 function referencerRepo() {
   const repo = realpathSync(makeTempDir("plan-check-repo"));
-  writeInto(repo, "lib/use.mjs", 'import data from "./a.txt";\n');
+  writeInto(repo, "lib/use.mjs", 'import data from "../src/a.txt";\n');
   return repo;
 }
 const OVERRIDE = "- Blast-radius override: src/a.txt → lib/use.mjs — it only reads the file's bytes\n\n";
@@ -304,7 +305,7 @@ test("--help prints every leg's check in LEGS order and the five override forms,
   assert.match(r.stdout, /^budgetFixtures: .*docs\/decisions\/README\.md/m);
   assert.equal(lines[12], "--draft: the path is one drafted task file; runs codeBlocks, briefCompleteness, budgetFixtures, authoredClaims, briefFacts and records nothing.");
   assert.deepEqual(lines.slice(13, 20), ["", "Overrides (each needs a reason):",
-    "- Blast-radius override: <changed-file> [→ <referencer>] — <reason>",
+    "- Blast-radius override: <changed-file> [→ <referencer>[, <referencer>…]] — <reason>",
     "- Content-coupling override: Task B → <file> (Task A) — <reason>",
     "- Budget-fixture override: <surface-or-fixture> — <reason>",
     "- Citation override: <path> — <reason>",
@@ -376,4 +377,17 @@ test("--draft leaves the required-checks manifest to the assembled plan", () => 
   const whole = spawnSync(process.execPath, [SCRIPT, join(repo, "plan.md"), repo, "--only", "briefCompleteness"], { encoding: "utf8", cwd: repo,
     env: { ...process.env, DEVCYCLE_RUNS_DIR: makeTempDir("plan-check-runs") } });
   assert.match(whole.stderr, /omits required gate check "node --test"/);
+});
+
+test("planDigest is the first 12 hex of the plan text's sha256", () => {
+  assert.equal(planDigest(""), "e3b0c44298fc");
+  assert.match(planDigest("x"), /^[0-9a-f]{12}$/);
+  assert.notEqual(planDigest("a"), planDigest("b"));
+});
+
+test("every gate-ran event carries the digest of the plan it checked", () => {
+  const text = plan(task(1, ["src/a.txt"]) + task(2, ["src/a.txt"]));
+  const events = gateRan(text);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].planDigest, planDigest(text));
 });

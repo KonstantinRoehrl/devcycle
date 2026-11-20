@@ -5,6 +5,130 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-20 — Phase 2b ships without its benchmark pass (#443, #447)
+
+**Decision:** Decision D9: Phase 2b merges with no paid `plan-bench` pass of the `grouped` or `grouped-fork`
+arm. The P3 and P4 bars, the "P10 not worse" check, the P1–P12 deltas and the tuned decision-table thresholds
+are therefore unmeasured. The `grouped-fork` verdict (keep, drop or promote) is not recorded either: the arm
+exists as an experimental `planningStrategy` value and benchmark arm, but no run has judged it. The k ≤ 3 cap,
+the 150k per-drafter input cap, the ceil(N/3) drafter cap and the 4-drafter concurrency limit remain the initial
+values Decision D7 names.
+
+**Why:** the user declined the spend at the finish stage. The cheapest useful pass was about $83 estimated for
+`grouped` alone against the existing status-quo and inline baselines, and Phase 1's real grouped-4 run came in
+at about 2.5× its estimate.
+
+**How to apply:** a later phase or a follow-up run `node scripts/plan-bench.mjs` with `--arms grouped,grouped-fork`
+(budget above the default $150 for all three entries), records the deltas and verdict in a new entry here, and
+adjusts the `scripts/plan-strategy.mjs` thresholds. Until then `planningStrategy=auto` should be read as
+untuned for wide cuts.
+
+## 2026-11-20 — The blast-radius gate matches a changed non-code file by its last two path segments (#443, #447)
+
+**Decision:** Decision D8: `referenceToken` in `scripts/blast-radius-check.mjs` matches a changed non-code file by
+its written-out `<parent>/<basename>` path rather than its bare basename. A same-directory reference
+(`"./a.txt"`) and a path built in pieces (`join(root, "references", "x.json")`) are no longer flagged, an accepted
+miss. `--scan` still matches by basename. The `referencerRepo` fixture in `tests/unit/plan-check.test.mjs` moved
+from `"./a.txt"` to `"../src/a.txt"` to keep passing; no test pins the accepted miss yet.
+
+**Why:** a bare basename such as `README.md` or `index.json` collides across directories, so the gate flagged
+code that named an unrelated file of the same name, and each false positive cost a Files-block edit or an override.
+
+**Budgets:** the `planning-waves.md` figure also carries the branch-review prose fixes to its `plan-stats --strategy`
+list and its `split` wording.
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 69077
+```
+
+## 2026-11-20 — Planning decision table, grouped drafting and the interface lock (#443, #447)
+
+**Decision:** Decision D2: `auto` runs a decision table, `scripts/plan-strategy.mjs`, once the task cut exists.
+A cut of at most 12 tasks, or at most 30 weight points, drafts inline; above 25 tasks planning suggests splitting
+the spec; otherwise a cut with coupling at or above 0.5, or width below 3, drafts `checkpointed`, and a wide,
+loosely coupled one drafts `grouped`, unless grouping would need more than `ceil(N/3)` drafters, which makes it
+`checkpointed`. Decision D3: `checkpointed` drafts inline in one segment per wave group, logs `plan-group-<k>` as
+each segment's tasks are written, and never clears; Phase 3 adds the clear. Decision D7: the token profile, the
+150k per-drafter input cap, k ≤ 3 and at most 4 concurrent drafters are initial values in
+`scripts/plan-strategy.mjs`, which the benchmark pass tunes and records here. `grouped-fork` is an experimental
+`planningStrategy` value and benchmark arm: its result is recorded in this log whichever way it goes, once the
+benchmark pass has run.
+Decision D5: a group packs the tasks of one wave, because a wave's tasks are file-disjoint and
+dependency-free; what a task consumes from an earlier wave reaches its drafter by the interface lock
+(`scripts/interface-lock.mjs`), which also makes a drafter return an `interface-delta` for a pin it cannot hold.
+Decision D6: the edge checker is one fast-tier dispatch per batch of at most 8 producer→consumer pairs
+(`plan-assemble.mjs edges --batch`), never escalated for Files above 5; the scripted legs cover Files.
+
+**Why:** Plan A's medium replay: seven drafters alone made P3 1.0. The decision table keeps small cuts inline and
+groups only wide, loosely coupled ones. Four checker dispatches all escalated to the session tier, $2.12 against $0.06.
+
+**Budgets:**
+
+```text
+budget: surface-budget.json surfaceTotal 7197
+budget: context-budget.json commands/cycle.md 89273
+budget: context-budget.json commands/learn.md 17751
+budget: context-budget.json commands/maintain.md 18930
+budget: context-budget.json commands/onboard.md 18039
+budget: context-budget.json commands/reconcile.md 25476
+budget: context-budget.json commands/review.md 26106
+budget: context-budget.json commands/verify.md 25204
+budget: context-budget.json playbooks/executing-waves.md 122078
+budget: context-budget.json playbooks/finishing-the-cycle.md 53391
+budget: context-budget.json playbooks/maintaining-the-repo.md 68828
+budget: context-budget.json playbooks/onboarding-a-repo.md 31641
+budget: context-budget.json playbooks/planning-waves.md 68816
+budget: context-budget.json playbooks/reviewing-the-branch.md 61699
+budget: context-budget.json playbooks/scoping-the-request.md 37009
+budget: context-budget.json playbooks/taking-the-fast-path.md 54953
+budget: context-budget.json playbooks/verifying-on-device.md 67003
+budget: context-budget.json references/config.md 15168
+budget: context-budget.json references/model-routing.md 10584
+```
+
+## 2026-11-20 — P9 counts rework, not re-runs; plan-stats records the non-test fence share (#443, #447)
+
+**Decision:** Decision D3: `plan-stats` records `nonTestFenceShare` beside `fenceShare`. P8's fence share
+exempts a red-green task's failing-test fences, which the contract mandates. The `proportion` leg warns
+above 20% and fails above 30% on the non-test share; the byte ratio stays at 5× and 8×. The gross share is
+still recorded. P8's bar reads the non-test share at 20%, and a row recorded before this change is judged
+on its gross share at 30%. Decision D4: P9 counts a planning `gate-ran` fail once per plan text. Every
+`gate-ran` event carries `planDigest`, and a fail whose `planDigest` and failing legs equal the previous
+planning `gate-ran` event's is a re-run, not rework.
+
+**Why:** both Phase 2a medium arms' first two gate fails were one identical re-run 8–12 seconds apart, so
+P9's `fails <= 2` bar charged a plan for running the same check twice.
+
+**Budgets:**
+
+```text
+budget: context-budget.json commands/continue.md 76207
+budget: context-budget.json commands/cycle.md 89132
+budget: context-budget.json playbooks/executing-waves.md 122067
+```
+
+## 2026-11-20 — P8 measures non-test code fences (#443, #447)
+
+**Decision:** Decision D3: the `proportion` leg of `scripts/plan-check.mjs` measures the non-test
+code-fence share, which is the gross share less every exempt fence. A fence is exempt when it sits in a
+`red-green` task, its info word names a programming language, and the lines between its fence lines read
+as a test. The leg warns above 20% and fails above 30% on that share; the byte ratio stays at 5× and 8×.
+The gross share is still recorded. P8's bar reads the non-test share at 20%, and a row recorded before
+this change is judged on its gross share at 30%.
+
+**Why:** failing-test fences are 26–29 points of a contract-compliant medium plan's 39% share, so the
+gross 30% and 45% figures cannot be met by a plan that follows the 2a rule. The spike evidence is local
+and cited by name only: `.devcycle/plan-work/0537d39d2097d3b6/spikes/1.md`.
+
+**Supersedes:** the Contract-only plans entry's initial 5× / 30% warn and 8× / 45% fail figures, the
+share part only.
+
+**Budgets:**
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 66184
+```
+
 ## 2026-11-19 — Contract-only plans: the 0.32.0 full-code default reversed (#446, #448)
 
 **Decision:** a plan pins the contract, not the implementation. A `red-green` task pins its full

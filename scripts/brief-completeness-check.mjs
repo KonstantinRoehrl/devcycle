@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   taskBlocks, parseDispatchMap, filesFieldValue, fieldValue, verificationGate, verificationGateField, conventionCommand,
-  createdFiles, isTestPath, lineFences, fencedBlocks,
+  createdFiles, isTestPath, lineFences, fencedBlocks, isRedGreen,
 } from "./task-files.mjs";
 import { budgetFixtureGaps, gapRemedy } from "./budget-fixture-check.mjs";
 import { isMain } from "./is-main.mjs";
@@ -169,8 +169,6 @@ const SOURCE_EXTENSIONS = new Set([".mjs", ".cjs", ".js", ".jsx", ".ts", ".tsx",
 const DECLARATION_FILE_RE = /\.d\.[mc]?ts$/i;
 const STUB_RE = /\bstub/i;
 
-const isRedGreen = (block) => (fieldValue(block, "Evidence") ?? "").split(/\s+/)[0] === "red-green";
-
 function stubErrors(num, block) {
   if (!isRedGreen(block)) return [];
   const files = filesFieldValue(block);
@@ -215,22 +213,39 @@ function detailErrors(num, block) {
 // also decides what the guard leg scans: an `output` fence quotes output, it does not prescribe a command.
 // `text`, `plaintext` and `txt` are ambiguous (output, or test-table rows to edit), so they are
 // judged by their lines like an unlabelled fence.
-// Accepted limit: a code-labelled fence (`js`) holding only the command as a string passes; judging
-// what a language's code asserts is not this check's job.
-const NON_TEST_FENCE_INFO = new Set([...SHELL_FENCE_INFO, "shell-session", "sh-session", "terminal", "powershell", "fish", "output", "log"]);
+// `diff` stays out on purpose: a plan may pin its failing test as a patch, so a `diff` fence is read as code.
+// Accepted limit: a code-labelled fence (`js`) holding only the command as a string passes, and so does a
+// `diff` fence holding only the command or its output; judging what a language's code asserts, or what a
+// patch adds, is not this check's job.
+const NON_TEST_FENCE_INFO = new Set([
+  ...SHELL_FENCE_INFO, "shell-session", "sh-session", "shellsession", "bash-session", "terminal", "powershell", "pwsh", "ps1",
+  "bat", "cmd", "batch", "ksh", "dash", "fish", "output", "stdout", "stderr", "log", "tap",
+]);
 const JUDGED_BY_LINES_INFO = new Set(["", "text", "plaintext", "txt"]);
 const COMMAND_LINE_RE = /^(?:\$\s+)?(?:[A-Za-z_]\w*=\S*\s+)*(?:node|npm|npx|pnpm|yarn|bun|deno|python3?|pytest|go|cargo|git|make|sh|bash|env|claude|jest|vitest|tsc|php|composer|dotnet|mvn|gradle|ruby|rspec|cd)(?:\s|$)/;
-// What a test runner prints: node's ✖ ✔ ℹ marks, TAP `ok 1`/`not ok 1`, an assertion or Error line,
-// FAIL/PASS, and the `expected:`/`actual:` lines of a failure diff. `#` comments are dropped separately.
-const OUTPUT_LINE_RE = /^(?:[✖✔ℹ]|(?:not )?ok \d|AssertionError\b|\w*Error:|(?:FAIL|PASS)\b|(?:expected|actual)\s*:)/;
+// What a test runner prints, per runner. node: the ✖ ✔ ℹ ▶ marks, TAP `ok 1`/`not ok 1`, an assertion or Error
+// line, and the `Expected:`/`Actual:` lines of a failure diff. pytest: a `====` banner, `E   ` assertion lines,
+// `FAILED`/`PASSED`/`ERROR`, a `<file>.py F.` progress line and `<n> failed`/`<n> passed`. go: `=== RUN`,
+// `--- FAIL`, FAIL/PASS and `ok  <package>  <duration>s`. cargo: `running <n> tests`, `test <name> ... ` and
+// `test result:`. npm: the `> ` script echo (its `npm ERR!`/`npm error` lines already read as commands). Case-sensitive apart from the first letter
+// of expected/actual/received, so a test line such as `ok(value)` is never read as output. `#` comments are
+// dropped separately.
+const OUTPUT_LINE_RE = new RegExp(
+  "^(?:[✖✔ℹ▶]|(?:not )?ok \\d|AssertionError\\b|\\w*Error:|(?:FAIL|PASS)\\b|(?:FAILED|PASSED|ERROR)\\b" +
+    "|={3,}|---\\s+(?:FAIL|PASS)\\b|E {2,}|(?:[Ee]xpected|[Aa]ctual|[Rr]eceived) *:" +
+    "|running \\d+ tests?\\b|test result:|test \\S+ \\.\\.\\. |ok\\s+\\S+\\s+[\\d.]+s\\b|> " +
+    "|\\S+\\.py [.FEsx]+$|\\d+ (?:passed|failed)\\b)",
+);
 
-// A command wrapped with a trailing `\` is one logical line.
+// A command wrapped with a trailing `\` is one logical line. A `#` comment ends at its own line break,
+// even when it ends in `\`, so it never carries into the line below.
 function logicalLines(lines) {
   const joined = [];
   let carry = "";
   for (const line of lines) {
     const text = line.trim();
-    if (text.endsWith("\\")) carry += `${text.slice(0, -1)} `;
+    if (text.startsWith("#")) joined.push(text);
+    else if (text.endsWith("\\")) carry += `${text.slice(0, -1)} `;
     else {
       joined.push(carry + text);
       carry = "";

@@ -10,12 +10,12 @@ import { isMain } from "./is-main.mjs";
 import { parseFlags } from "./cli-flags.mjs";
 import { field } from "./md-field.mjs";
 import { eachRecord } from "./jsonl.mjs";
-import { fenceShare, parseDispatchMap } from "./task-files.mjs";
+import { fenceShare, nonTestFenceShare, parseDispatchMap } from "./task-files.mjs";
 import { gitToplevel, recordPath } from "./run-record.mjs";
 
 const RUN_RECORD = fileURLToPath(new URL("./run-record.mjs", import.meta.url));
-const STRATEGIES = ["inline", "delegated"];
-const USAGE = "usage: plan-stats.mjs --state <state.md> --plan <path> --spec <path> --strategy inline|delegated";
+const STRATEGIES = ["inline", "delegated", "grouped", "checkpointed"];
+const USAGE = "usage: plan-stats.mjs --state <state.md> --plan <path> --spec <path> --strategy inline|delegated|grouped|checkpointed";
 
 // The plan template puts "## Dispatch Map" last, and a plan may quote the heading earlier, so the
 // last heading is the map. Null when the plan has none.
@@ -31,12 +31,13 @@ export function planStats({ planText, specText, rows, strategy }) {
   const planning = rows.filter((r) => r.kind === "agent-cost" && r.stage === "planning");
   // Planning subagents ran when the plan is delegated or any planning agent-depth row exists; with no
   // cost row to price them their dollars are unmeasurable, which is null and never 0.
-  const subagentsRan = strategy === "delegated" || rows.some((r) => r.kind === "agent-depth" && r.stage === "planning");
+  const subagentsRan = strategy === "delegated" || strategy === "grouped" || rows.some((r) => r.kind === "agent-depth" && r.stage === "planning");
   const reviews = rows.filter((r) => r.kind === "event" && r.event === "spec-review");
   return {
     specBytes: Buffer.byteLength(specText),
     planBytes,
     fenceShare: fenceShare(planText),
+    nonTestFenceShare: nonTestFenceShare(planText),
     tasks: map ? new Set([...map.values()].flat()).size : (planText.match(/^### Task \d+:/gm) ?? []).length,
     waves: map ? map.size : 0,
     drafters: new Set(planning.filter((r) => r.role === "drafter").map((r) => r.agentId)).size,
@@ -71,7 +72,7 @@ function main(argv) {
   }
   for (const name of ["--state", "--plan", "--spec", "--strategy"]) if (!flags[name]) die(`${name} is required — ${USAGE}`);
   const strategy = flags["--strategy"];
-  if (!STRATEGIES.includes(strategy)) die(`strategy must be inline or delegated, got "${strategy}"`);
+  if (!STRATEGIES.includes(strategy)) die(`strategy must be one of ${STRATEGIES.join(", ")}, got "${strategy}"`);
   const runId = field(readText(flags["--state"], "state file"), "run");
   if (!/^[0-9a-f]{16}$/.test(runId ?? "")) die(`no run id in ${flags["--state"]}`);
   const planText = readText(flags["--plan"], "plan");

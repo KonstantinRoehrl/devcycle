@@ -39,15 +39,22 @@ pins its interfaces, its complete failing test code and its gate commands verbat
 implementation in prose: a plan is contract-only by default, and `**Detail:** code-pinned — <reason>`
 opts one task into a full implementation body. And a large plan is delegated: 3+ independent feasibility
 unknowns run as parallel spikes, each a fast-tier `Explore` dispatch returning at most fifteen lines
-(an unknown that needs only reading rides the research dispatch instead), and 5+ tasks as parallel
-`devcycle:plan-drafter` dispatches, one per task. Drafters read a context pack,
+(an unknown that needs only reading rides the research dispatch instead), and the drafting strategy comes
+from a decision table the coordinator runs once the task cut exists (`scripts/plan-strategy.mjs`): a cut
+of up to `12` tasks, or of little weight, drafts inline; a larger, coupled or narrow one drafts
+`checkpointed`, inline in one segment per wave group; a wide, loosely coupled one drafts `grouped`, in
+rounds of `devcycle:plan-drafter` dispatches that each hold up to three tasks of one wave, never more
+than four at once; above `25` tasks planning suggests splitting the spec. Drafters read a context pack,
 `.devcycle/plan-work/<run id>/pack.md` (about 8k tokens, stable content first), and
 `references/plan-task-format.md` instead of this playbook, and each writes its task to a work file, `.devcycle/plan-work/<run id>/tasks/task-<n>.md`, after running the
 `--draft` gate on it. On every path the work files are the canonical copy: `scripts/plan-assemble.mjs`
 assembles the plan from them without the coordinator reading a draft, and a later fix goes into the task
-file and is re-assembled. Across tasks, the plan gate's `crossTask` leg scans for placeholders and
-back-references, and a fast-tier checker reads each producer-to-consumer pair, tagged with its round, and
-writes its findings to a file, returning the path and a count. A finding goes back to its task's
+file and is re-assembled. Under `grouped`, after each round `scripts/interface-lock.mjs` copies the
+round's `Produces` items into `interfaces.lock.md`; later rounds' drafters reproduce what they consume
+verbatim, the script checks it, and a drafter that must change a locked interface returns an
+`interface-delta` for the coordinator to accept or refuse. Across tasks, the plan gate's `crossTask` leg
+scans for placeholders and back-references, and one fast-tier checker dispatch per batch of up to eight
+producer-to-consumer pairs writes its findings to a file, returning the path and a count. A finding goes back to its task's
 drafter as a patch rather than a redraft, and after one checker round and one repair round, whatever is
 still open goes to the user, per
 [`references/delegated-planning.md`](../../../references/delegated-planning.md). Every planning
@@ -55,8 +62,8 @@ dispatch names its model, at the tier
 [`references/model-routing.md`](../../../references/model-routing.md) § Planning dispatches assigns,
 and doctor's Planning breakdown reports it: `drafters:` lists each drafter's turns and model,
 `source prints:` counts Bash calls that printed a source file, and `tier-fit:` flags a spike,
-research or checker dispatch that ran outside the fast tier. Below both
-thresholds planning runs inline, and the finished plan looks the same either way.
+research or checker dispatch that ran outside the fast tier. Whichever
+strategy ran, the finished plan looks the same.
 
 Once the plan is drafted, planning runs a seven-item self-review — spec coverage, the per-task
 checks `references/plan-task-format.md` owns (placeholder scan, factual-claim accuracy, assumed-tooling
@@ -67,7 +74,7 @@ inline, with no separate re-review pass. The plan gate is one command,
 blocks parse), `briefCompleteness` (every task carries its required fields, a `red-green` task
 that creates a non-test source file mentions a stub and pins its failing test in a fenced block, a
 `**Detail:**` line gives a reason, and the Dispatch Map lists every task; it also notes, without
-failing, each prescribed git command the dispatch guard would deny an implementer), `blastRadius` (every JS/TS/Python file naming a changed file's basename, test or
+failing, each prescribed git command the dispatch guard would deny an implementer), `blastRadius` (every JS/TS/Python file naming a changed file's basename (a changed non-code file's `<parent>/<basename>`), test or
 not, sits in some Files block; each finding opens with the task that declares the changed file), `contentCoupling` (no same-wave task's brief names a file another same-wave task
 edits), `budgetFixtures` (a task touching a budgeted surface — `playbooks/`, `commands/`,
 `agents/`, `references/` markdown — also touches its budget fixtures and
@@ -129,9 +136,11 @@ Playbook-internal — for where Planning sits in the pipeline, see
 
 ## Benchmarking planning strategies
 
-`planningStrategy` forces how planning drafts: `status-quo` keeps the delegation thresholds,
-`inline` drafts every task in the planning session. The replay benchmark (#449) runs the same specs
-through both arms and scores each run against the P1–P12 planning rubric doctor prints, so a
+`planningStrategy` forces how planning drafts: `status-quo` keeps the old thresholds, `inline` drafts
+every task in the planning session, `checkpointed` drafts inline in segments, `grouped` drafts in rounds
+of grouped drafters, `grouped-fork` is `grouped` with forked drafters (experimental), and `auto` runs the
+decision table. A pass runs `status-quo` and `inline` by default; `--arms` adds the other three. The replay benchmark (#449) runs the same specs
+through each arm and scores each run against the P1–P12 planning rubric doctor prints, so a
 planning change is measured before it ships. Everything it reads and writes stays under the
 gitignored `.devcycle/plan-bench/`:
 
@@ -155,7 +164,7 @@ spending: pick a new `--pass` to rerun.
 `run --go-ahead <token>` spends money, so it runs only with the token of an estimate the user
 approved: it refuses past `--budget` (default $150) and stops spending once the budget is gone. The
 estimate takes the upper ends of #442's per-task rates, so one `small`, one `medium` and one `large`
-entry at their default sizes estimates $172.60 and is refused at the default budget; the refusal names
+entry at their default sizes estimates $182.40 and is refused at the default budget; the refusal names
 the two ways forward, a smaller corpus (fewer `--entries`, a smaller `size` or `tasks`) or an explicit
 `--budget` above the estimate, which is the user's decision, not the harness's. `run` also refuses to
 start in a driven (unattended) session, where `DEVCYCLE_DRIVE_TOKEN` is set (`estimate` stays allowed),
@@ -165,10 +174,12 @@ it, so no test can launch a paid pass however it is started. `--leg-timeout <sec
 kills a leg that outlives it and records its replay as an `error`. A leg that never reports its cost, one
 killed at that timeout or one that ends with no result event, is charged the spend cap it ran under, which is the
 budget still unspent, so a pass that loses a leg stops there and its total stays within `--budget`. Each replay plans in a scratch clone
-at `baseSha`, with no remote to push to, loaded with `--plugin-dir` on the checkout under test, so
+on `dev` at `baseSha`, so execution cuts its own topic branch as in a real repo, with no remote to push to, loaded with `--plugin-dir` on the checkout under test, so
 nothing it does touches the source repo, and its leg environment drops the driver variables
 (`DEVCYCLE_DRIVE_TOKEN` and the nested-run ones). A replay that cannot start is recorded as an `error`
-outcome and the pass carries on. `score --pass <pass>` re-scores a finished pass for free, counting only the replays the pass started, and
+outcome and the pass carries on. A replay is capped at 8 legs when it only plans and 14 when it also
+executes, and an executing replay whose last two execute legs moved neither the state file nor the
+ledger ends `stalled`. `score --pass <pass>` re-scores a finished pass for free, counting only the replays the pass started, and
 flags in the Outcome column a replay whose state file's `knobs:` line resolved a `planningStrategy` other
 than its arm (`arm-mismatch`) or none (`arm-unverified`; the run record does not carry that knob), and
 `node scripts/cost-model-fit.mjs --runs <runs dir>` fits the cost model's per-role F, t, r and o from

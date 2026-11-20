@@ -22,14 +22,18 @@ import { resultsMarkdown, scorePass } from "./plan-bench-score.mjs";
 const { spawnSpec } = agentCli;
 
 export const ARMS = ["status-quo", "inline"];
+// Arms a pass runs only when --arms names them.
+export const OPT_IN_ARMS = ["grouped", "grouped-fork", "checkpointed"];
+const KNOWN_ARMS = [...ARMS, ...OPT_IN_ARMS];
 export const SIZES = ["small", "medium", "large"];
 // A manifest entry's planned task count when it names none, by size.
 export const DEFAULT_TASKS = { small: 3, medium: 7, large: 12 };
 // USD per planned task (assumption: #442's 0.32.x figures, upper ends) until cost-model-fit
-// calibrates them: status-quo $4.4-5.3 planning, inline $0.4-1.4, execution about a third of status-quo.
-export const RATES = { planning: { "status-quo": 5.3, inline: 1.4 }, execution: 1.8 };
+// calibrates them: status-quo $4.4-5.3 planning, inline $0.4-1.4, execution $2.5 (the observed Phase 1 medium baseline, about $5.5 for about 2 tasks).
+// The grouped, grouped-fork and checkpointed planning rates are assumptions until a pass calibrates them.
+export const RATES = { planning: { "status-quo": 5.3, inline: 1.4, grouped: 3, "grouped-fork": 2.5, checkpointed: 1.4 }, execution: 2.5 };
 // The default stays at the user's target: a small, a medium and a large entry at default sizes estimates
-// $172.60 (the estimate takes the upper ends of #442's rates on purpose), so such a pass needs a smaller
+// $182.40 (the estimate takes the upper ends of #442's rates on purpose), so such a pass needs a smaller
 // corpus or an explicit --budget above the target, which is the user's call.
 export const DEFAULT_BUDGET = 150;
 // Seconds one headless leg may run before it is killed and its replay recorded as an error.
@@ -200,8 +204,8 @@ export function readCommon(flags, root) {
   const { entries, errors } = validateManifest(parsed);
   if (errors.length) throw new PlanBenchError(errors.join("\n"));
   const arms = (requireValue(flags, "--arms", "a comma-separated arm list") ?? ARMS.join(",")).split(",");
-  const badArm = arms.find((a) => !ARMS.includes(a));
-  if (badArm) throw new PlanBenchError(`unknown arm ${badArm}; expected ${ARMS.join(", ")}`);
+  const badArm = arms.find((a) => !KNOWN_ARMS.includes(a));
+  if (badArm) throw new PlanBenchError(`unknown arm ${badArm}; expected ${KNOWN_ARMS.join(", ")}`);
   const only = requireValue(flags, "--entries", "a comma-separated id list")?.split(",");
   const unknown = only?.find((id) => !entries.some((e) => e.id === id));
   if (unknown) throw new PlanBenchError(`no manifest entry ${unknown}`);
@@ -319,7 +323,7 @@ function score(argv, root) {
 // Subcommand name to handler (argv, root) → exit code.
 export const SUBCOMMANDS = { estimate, run, score };
 
-const USAGE = "usage: plan-bench.mjs <estimate|run|score> [--manifest <path>] [--arms status-quo,inline] [--entries <id,…>] [--budget <usd>] [--pass <id>] " +
+const USAGE = "usage: plan-bench.mjs <estimate|run|score> [--manifest <path>] [--arms status-quo,inline,grouped,grouped-fork,checkpointed] [--entries <id,…>] [--budget <usd>] [--pass <id>] " +
   "[run: --go-ahead <token> --plugin-dir <checkout> --model <id> --implementer-model <id> --claude <bin> --leg-timeout <seconds>]";
 
 export function main(argv, root = gitToplevel(process.cwd())) {

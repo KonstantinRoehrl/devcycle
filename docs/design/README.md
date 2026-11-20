@@ -252,7 +252,7 @@ gated by `userConfig.crossModelReview`.
   "taskReviewerModel": "auto | <model id>",
   "branchReviewModel": "auto | <model id>",
   "walkthroughModel": "auto | <model id>",
-  "planningStrategy": "auto | status-quo | inline",
+  "planningStrategy": "auto | status-quo | inline | grouped | grouped-fork | checkpointed",
   "learnStalenessSessions": 5,
   "learnStalenessDays": 14,
   "learnSessionCap": 100,
@@ -324,8 +324,10 @@ gated by `userConfig.crossModelReview`.
   recorded `via=knob`, and skips the start confirm on later resumes; a run that stopped for a person
   still asks (decision log, 2026-10-29). A recorded row outranks it for the mode, and it is `live`, so a mid-cycle change is never knob drift. It takes no `auto`.
 - `planningStrategy` (added 2026-11-19) forces how the planning stage drafts: `status-quo` applies the
-  delegation thresholds, `inline` drafts every task in the planning session, and `auto`, the default,
-  is `status-quo` until the planning decision table lands. It exists so the planning benchmark can
+  delegation thresholds, `inline` drafts every task in the planning session, `checkpointed` drafts inline in one segment per
+  wave group, `grouped` drafts in rounds of grouped `devcycle:plan-drafter` dispatches held to an
+  interface lock, `grouped-fork` is `grouped` with forked drafters (experimental), and `auto`, the
+  default, runs the planning decision table over the task cut. It exists so the planning benchmark can
   compare arms like for like (decision log, 2026-11-19).
 - `driveWatch` and `drivePlugins` (added 2026-10-25) shape an unattended run. `driveWatch` is how
   much of it the starting session relays: `end`, the default, only its end, while the hooks

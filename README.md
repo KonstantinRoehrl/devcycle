@@ -207,8 +207,10 @@ plugin ships. Start there.
   The same sensor prices each finished subagent into an `agent-cost` row, and with the `plan-stats` row
   the planning handoff writes, doctor prints a per-run Planning breakdown: dollars by planning role,
   each drafter's turns and model, source-file prints, a tier-fit flag and the P1–P12 planning rubric.
-  Delegated planning drafts each task through the `devcycle:plan-drafter` agent, which reads a shared
-  context pack and `references/plan-task-format.md` rather than the whole planning playbook. `scripts/plan-bench.mjs` replays past specs through headless planning,
+  Planning picks its drafting strategy from the task cut (a decision table in `scripts/plan-strategy.mjs`):
+  small cuts draft inline, wide loosely coupled ones through grouped `devcycle:plan-drafter` dispatches
+  held to an interface lock, which read a shared context pack and `references/plan-task-format.md` rather
+  than the whole planning playbook. `scripts/plan-bench.mjs` replays past specs through headless planning,
   once per `planningStrategy` arm, and scores each replay on that rubric
   ([`docs/playbooks/planning-waves/README.md`](docs/playbooks/planning-waves/README.md) § Benchmarking
   planning strategies).

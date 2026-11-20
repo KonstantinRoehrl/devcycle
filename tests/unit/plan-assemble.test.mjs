@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { writeInto } from "./helpers.mjs";
-import { assemblePlan } from "../../scripts/plan-assemble.mjs";
+import { assemblePlan, batchEdges } from "../../scripts/plan-assemble.mjs";
 
 const SCRIPT = new URL("../../scripts/plan-assemble.mjs", import.meta.url).pathname;
 const HEADER = "# P Implementation Plan\n\n**Verification gate:** `npm test`\n";
@@ -93,4 +93,40 @@ test("the CLI refuses a usage it does not define with exit 2", () => {
   assert.equal(cli("edges").status, 2, "edges needs a work directory");
   assert.equal(cli("edges", dir, "--out", join(dir, "plan.md")).status, 2, "edges writes nothing");
   assert.equal(cli(dir, "--bogus", "x").status, 2, "an unknown flag is a usage error");
+});
+
+test("batchEdges splits the edges into batches of at most N and names each batch's tasks", () => {
+  const edges = [[1, 2], [1, 3], [2, 4], [3, 4], [4, 5]].map(([producer, consumer]) => ({ producer, consumer }));
+  assert.deepEqual(batchEdges(edges, 2), [
+    { edges: edges.slice(0, 2), tasks: [1, 2, 3] },
+    { edges: edges.slice(2, 4), tasks: [2, 3, 4] },
+    { edges: edges.slice(4), tasks: [4, 5] },
+  ]);
+  assert.deepEqual(batchEdges([], 2), []);
+  assert.throws(() => batchEdges(edges, 0), /positive integer/);
+});
+
+test("edges --batch groups the pairs, each batch naming the task files it reads", () => {
+  const dir = workDir();
+  for (const [n, deps] of [[1, "none (completely independent)"], [2, "Task 1 (x)"], [3, "Task 1 (x)"], [4, "Tasks 2+3 committed"]])
+    writeInto(dir, `tasks/task-${n}.md`, t(n, deps));
+  const r = cli("edges", dir, "--batch", "3");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), [
+    "batch 1 · 3 edges · tasks/task-1.md tasks/task-2.md tasks/task-3.md tasks/task-4.md",
+    "Task 1 → Task 2", "Task 1 → Task 3", "Task 2 → Task 4",
+    "batch 2 · 1 edge · tasks/task-3.md tasks/task-4.md",
+    "Task 3 → Task 4",
+  ].join("\n"));
+  assert.equal(cli("edges", dir, "--batch", "0").status, 2, "a batch size is a positive integer");
+  assert.equal(cli(dir, "--out", join(dir, "plan.md"), "--batch", "3").status, 2, "--batch belongs to edges");
+});
+
+test("edges --batch takes only a digits-only positive integer", () => {
+  const dir = workDir();
+  for (const value of ["0x10", "1e1"]) {
+    const r = cli("edges", dir, "--batch", value);
+    assert.equal(r.status, 2, `--batch ${value} is a usage error`);
+    assert.match(r.stderr, /^plan-assemble: --batch takes a positive integer$/m);
+  }
 });

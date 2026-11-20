@@ -11,11 +11,14 @@ import { parseFlags } from "./cli-flags.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
 import { parseDispatchMap, planEdges, taskBlocks } from "./task-files.mjs";
 
-const USAGE = "usage: plan-assemble.mjs <work-dir> --out <plan-path> | edges <work-dir>";
+const USAGE = "usage: plan-assemble.mjs <work-dir> --out <plan-path> | edges <work-dir> [--batch <n>]";
 const TASK_FILE_RE = /^task-(\d+)\.md$/;
 
 const fileNumber = (name) => Number(name.match(TASK_FILE_RE)[1]);
 const byFileNumber = (a, b) => fileNumber(a.name) - fileNumber(b.name);
+
+// A CLI argument naming a positive integer in digits only, so `0x10`, `1e1` and `01` are refused.
+export const isPositiveIntegerArg = (value) => /^[1-9]\d*$/.test(value);
 
 export function assemblePlan({ header, tasks, dispatchMap }) {
   const errors = [];
@@ -55,6 +58,18 @@ export function assemblePlan({ header, tasks, dispatchMap }) {
   return { plan: `${[header.trimEnd(), ...texts, dispatchMap.trimEnd()].join("\n\n")}\n`, errors };
 }
 
+// The edges in order, in runs of at most `perBatch`, each run naming the task numbers it touches.
+export function batchEdges(edges, perBatch) {
+  if (!Number.isInteger(perBatch) || perBatch < 1) throw new Error("the batch size must be a positive integer");
+  const batches = [];
+  for (let i = 0; i < edges.length; i += perBatch) {
+    const run = edges.slice(i, i + perBatch);
+    const tasks = [...new Set(run.flatMap(({ producer, consumer }) => [producer, consumer]))].sort((a, b) => a - b);
+    batches.push({ edges: run, tasks });
+  }
+  return batches;
+}
+
 function fail(message, code = 1) {
   console.error(`plan-assemble: ${message}`);
   process.exit(code);
@@ -71,7 +86,7 @@ function readWorkFile(path) {
   return readFileSync(path, "utf8");
 }
 
-function readTasks(workDir) {
+export function readTasks(workDir) {
   const dir = join(workDir, "tasks");
   if (!existsSync(dir)) fail(`missing ${dir}`);
   return readdirSync(dir)
@@ -83,21 +98,31 @@ function readTasks(workDir) {
 function main(argv) {
   let parsed;
   try {
-    parsed = parseFlags(argv, { "--out": "value" }, { allowPositionals: true, requireValues: "nonEmpty" });
+    parsed = parseFlags(argv, { "--out": "value", "--batch": "value" }, { allowPositionals: true, requireValues: "nonEmpty" });
   } catch (e) {
     usage(e.message);
   }
   const { flags, positionals } = parsed;
+  if (flags["--batch"] !== undefined && !isPositiveIntegerArg(flags["--batch"])) usage("--batch takes a positive integer");
+  const perBatch = flags["--batch"] === undefined ? undefined : Number(flags["--batch"]);
   if (positionals[0] === "edges") {
     if (positionals.length !== 2 || flags["--out"] !== undefined) usage();
     const tasks = readTasks(positionals[1]);
     const edges = planEdges(tasks.map(({ text }) => text.trimEnd()).join("\n\n"));
+    if (perBatch !== undefined && edges.length) {
+      const lines = batchEdges(edges, perBatch).flatMap((batch, i) => [
+        `batch ${i + 1} · ${batch.edges.length} edge${batch.edges.length === 1 ? "" : "s"} · ${batch.tasks.map((n) => `tasks/task-${n}.md`).join(" ")}`,
+        ...batch.edges.map(({ producer, consumer }) => `Task ${producer} → Task ${consumer}`),
+      ]);
+      console.log(lines.join("\n"));
+      return;
+    }
     console.log(edges.length
       ? edges.map(({ producer, consumer }) => `Task ${producer} → Task ${consumer} · tasks/task-${producer}.md · tasks/task-${consumer}.md`).join("\n")
       : "plan-assemble: no edges");
     return;
   }
-  if (positionals.length !== 1 || !flags["--out"]) usage();
+  if (positionals.length !== 1 || !flags["--out"] || perBatch !== undefined) usage(perBatch !== undefined ? "--batch belongs to edges" : undefined);
   const workDir = positionals[0];
   const header = readWorkFile(join(workDir, "plan-header.md"));
   const dispatchMap = readWorkFile(join(workDir, "dispatch-map.md"));
