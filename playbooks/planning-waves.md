@@ -72,13 +72,37 @@ not just what they contain. Two goals govern every boundary decision, together:
 task cut exists: write the cut as `.devcycle/plan-work/<run id>/task-cut.json` (the shape
 `scripts/plan-strategy.mjs` documents) and run
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-strategy.mjs" <cut path> --planningStrategy <value>`. Log its `strategy`,
-`groups`, `drafters` and `est` as stage-log key `drafting-plan`, then draft by `strategy`: `inline`, every task in
+`groups`, `drafters` and `est`, and the cut path as `cut`, as stage-log key `drafting-plan`, then draft by `strategy`: `inline`, every task in
 this session; `checkpointed`, inline in one segment per wave group, logging `plan-group-<k>` as a segment's
 tasks are written; `grouped`, rounds of group drafters; `delegated`, one drafter per task; `split`, the spec is too large for one plan:
 report the suggestion to split it, and the user decides, either splitting or forcing an arm with `planningStrategy`. Read
 `${CLAUDE_PLUGIN_ROOT}/references/delegated-planning.md` for a spike, `grouped` or `delegated` run.
 `planningStrategy` on the `knobs:` line forces the drafting arm: `inline`, `checkpointed`, `grouped` and `grouped-fork`
 force theirs, `status-quo` keeps the old threshold (`delegated` from 5 tasks), and `auto` runs the table.
+
+## Projected cost, budget and checkpoints
+
+**Estimate.** Before drafting, print the decision table's `projection`: its `dispatches`, its `tokens`, `$<usd>`,
+and whether it is calibrated (`projection.calibrated`); a `split` has none. When `planningBudgetUSD` on the
+`knobs:` line is above `0` and `projection.usd` exceeds it, ask one AskUserQuestion, **Proceed** · **Switch
+strategy** · **Reduce scope**, labelling the figure "uncalibrated" while `projection.calibrated` is false, and log
+the answer as stage-log key `budget-answer` with `--data`. **Switch strategy** re-runs the table with the arm the
+user names as `--planningStrategy`, **Reduce scope** re-runs it on the cut the user narrows, and either logs
+`drafting-plan` again; an Other answer appends `user-correction-at-gate` (`references/ledger.md` owns the condition).
+
+**Checkpoint.** `inline` and `checkpointed` log `plan-draft-<n>` as each task file lands. `checkpointed` writes
+`pack.md` after the cut, and an `inline` checkpoint before its handoff, in the shape
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/delegated-planning.md the-context-pack` prints.
+Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/depth-probe.mjs"` under `checkpointed` after each `plan-group-<k>`, `<m>`
+being the table's `metrics.waves`, and under `inline` after each `plan-draft-<n>` until it has checkpointed once;
+that checkpoint logs the tasks written so far as `plan-group-1`, so it is group `1` of `2`. At `over-budget` or
+`hard-stop`, log `plan-checkpoint-<k>`, run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/handoff-mark.mjs" --state .devcycle/state.md --ready --action clear --completed 'planning group <k> of <m>'`,
+and emit a handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` whose first field is
+`Session ended mid-planning: group <k> of <m>`, with the context action `Clear + /devcycle:continue`; `stage:`
+stays `planning`. The resumed session drafts from the `missing` and `nextGroup` of the `plan-resume.mjs` call
+`references/resume.md` § Resuming at the recorded stage owns, reading `pack.md` and the task files, never the
+transcript.
 
 ## Plan mechanics — the native engine (`lean` / `standard`)
 
@@ -165,9 +189,9 @@ After saving the plan (or issuing a NO-GO report), update `.devcycle/state.md` (
 the stage to resume at — and the `plan:` path; after a NO-GO, keep `stage: planning`), also writing
 `- plan-counts: planned=<count from the Dispatch Map> waves=<wave count from the Dispatch Map>` so
 the sensor can carry the plan totals into each progressive workload write (`planned=0 waves=0` after
-a NO-GO, where no Dispatch Map exists). Then record the plan's shape with
+a NO-GO, where no Dispatch Map exists). Then, before the handoff's `handoff-mark.mjs` ready mark, record the plan's shape with
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-stats.mjs" --state .devcycle/state.md --plan <plan path> --spec <spec path> --strategy inline|delegated|grouped|checkpointed`
-(the `drafting-plan` row's `strategy`: `grouped-fork` records as `grouped`, `status-quo`'s per-task drafters as `delegated`), which appends one `plan-stats` row; skip it after
+(the `drafting-plan` row's `strategy`: `grouped-fork` records as `grouped`, `status-quo`'s per-task drafters as `delegated`), which appends one `plan-stats` row and prints, as its second line, the `planning:` line the block carries verbatim; skip it after
 a NO-GO or with `spec: none`, and report a non-zero exit without stopping on it. Then emit this
 stage's handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, with
 `Stage completed: planning` and the plan path (or the NO-GO report) as its artifact. The plan carries

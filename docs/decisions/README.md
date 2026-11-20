@@ -5,6 +5,39 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-20 — Planning prints its projected cost, asks over a budget and can clear mid-stage (#450)
+
+**Decision:** at the task cut, planning prints `plan-strategy.mjs`'s `projection` and whether it is calibrated.
+Under Decision D2, when `planningBudgetUSD` is above 0 and the projection exceeds it, planning asks proceed,
+switch strategy or reduce scope, and labels the figure uncalibrated until `isCalibrated` holds. Under Decision D10,
+`checkpointed` (and `inline` once) offers a mid-stage clear at the over-budget band, with the
+`Session ended mid-planning: group <k> of <m>` handoff, and resumes from `plan-resume.mjs`. Under Decision D8, the
+planning handoff carries `plan-stats.mjs`'s `planning:` line.
+
+**Why:** spec §9.10 makes the cost of planning visible before it is spent and lets a long planning stage end cleanly
+instead of degrading at the context ceiling. The resume reads only the disk (D9): the stage log, the work files and
+the task files, never the transcript.
+
+**Budgets:** the playbook gains one section, and `references/handoff.md` a fourth first-field label and the
+`planning:` line, which every closure citing `references/handoff.md` carries.
+
+```text
+budget: surface-budget.json surfaceTotal 7238
+budget: context-budget.json commands/continue.md 76788
+budget: context-budget.json commands/cycle.md 90092
+budget: context-budget.json playbooks/executing-waves.md 122496
+budget: context-budget.json playbooks/finishing-the-cycle.md 53776
+budget: context-budget.json playbooks/planning-waves.md 71966
+budget: context-budget.json playbooks/receiving-review.md 125786
+budget: context-budget.json playbooks/reviewing-the-branch.md 62233
+budget: context-budget.json playbooks/scoping-the-request.md 37469
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 96570
+budget: context-budget.json playbooks/taking-the-fast-path.md 55264
+budget: context-budget.json playbooks/verifying-on-device.md 67537
+budget: context-budget.json playbooks/writing-the-findings-document.md 68364
+budget: context-budget.json references/handoff.md 12141
+```
+
 ## 2026-11-20 — `references/resume.md` names the planning resume position (#450)
 
 **Decision:** `references/resume.md` § Resuming at the recorded stage gains one sentence that runs
