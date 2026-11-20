@@ -13,9 +13,9 @@ writes `plan-header.md`, the plan header it composed, once, before it dispatches
 spikes, the `tasks/task-<n>.md` files and `merge-findings.md` land as their own sections below say. Spikes run as
 `Explore` and drafters as `devcycle:plan-drafter`. Every planning-stage dispatch, the repo-research
 one `playbooks/planning-waves.md` § Reuse before rebuild runs included, opens its `description` with
-its role: `plan-spike: `, `plan-research: `, `plan-drafter: `, `plan-checker: ` or `plan-repair: `
-(a drafter's repair of a finding). `hooks/dispatch-sensor.mjs` reads that prefix into the
-`role` of the agent's `agent-cost` row, and doctor's Planning breakdown prices each role from it.
+its role: `plan-spike: `, `plan-research: `, `plan-drafter: ` or `plan-checker: `, which
+`hooks/dispatch-sensor.mjs` records as the `role` of the agent's `agent-cost` row. A repair is a
+`SendMessage` to its drafter and has no description: any later stop of a drafter is `repair`.
 
 ## Spikes — 3+ independent feasibility unknowns
 

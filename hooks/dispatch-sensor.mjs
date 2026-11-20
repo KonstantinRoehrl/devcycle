@@ -151,12 +151,15 @@ function main() {
   try {
     if (!agentId) return;
     const sidecar = readSidecar(transcriptPath);
-    const role = roleOf(sidecar.description);
+    const earlier = earlierCostRows(repoRoot, run, agentId);
+    // A SendMessage repair makes no new dispatch, so it carries the drafter's original description: a resumed drafter is repairing.
+    const named = roleOf(sidecar.description);
+    const role = named === "drafter" && earlier.length > 0 ? "repair" : named;
     const round = role === "checker" ? roundOf(sidecar.description) : null;
     const priced = priceTranscript(transcriptPath);
     // A planning dispatch also records what it read; `reads` is written even when empty, so its
     // presence says the row was measured.
-    const cost = costDelta(role ? { ...priced, ...transcriptReads(transcriptPath) } : priced, earlierCostRows(repoRoot, run, agentId));
+    const cost = costDelta(role ? { ...priced, ...transcriptReads(transcriptPath) } : priced, earlier);
     // A null usd says why: the transcript's own measurement, or, when only an earlier row was unpriced, that.
     const measurement = cost.usd === null ? clean(priced.usd === null ? priced.measurement : "earlier-row-unpriced", MODEL_CHARS, MEASUREMENT_MAX) : "";
     append(["--kind", "agent-cost", "--stage", stage,

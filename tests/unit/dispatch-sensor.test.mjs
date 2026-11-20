@@ -525,3 +525,26 @@ test("a checker dispatch's round tag lands on its agent-cost row; a drafter's ro
   callHook(untagged);
   assert.equal(Object.hasOwn(costRows(untagged)[0], "round"), false);
 });
+
+const appendTurn = (fx) => {
+  const more = { type: "assistant", timestamp: "2026-10-07T07:19:00.000Z", message: { model: "claude-haiku-4-5-20251001", usage: usage(1000, 200, 500, 20), content: [{ type: "text", text: "more" }] } };
+  writeFileSync(fx.transcript, readFileSync(fx.transcript, "utf8") + JSON.stringify(more) + "\n");
+};
+
+test("a drafter's first stop is role drafter, and its resumed stop (a SendMessage repair) is role repair", () => {
+  const fx = fixture();
+  writeSidecar(fx, { agentType: "devcycle:plan-drafter", description: "plan-drafter: task 3", model: "haiku" });
+  callHook(fx);
+  appendTurn(fx);
+  callHook(fx);
+  assert.deepEqual(costRows(fx).map((r) => [r.role, r.continuationOf]), [["drafter", 0], ["repair", 1]]);
+});
+
+test("a resumed checker stays checker: only a continued drafter is repair work", () => {
+  const fx = fixture();
+  writeSidecar(fx, { agentType: "devcycle:plan-researcher", description: "plan-checker: round 1", model: "haiku" });
+  callHook(fx);
+  appendTurn(fx);
+  callHook(fx);
+  assert.deepEqual(costRows(fx).map((r) => [r.role, r.continuationOf]), [["checker", 0], ["checker", 1]]);
+});

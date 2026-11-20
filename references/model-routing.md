@@ -140,8 +140,7 @@ that run before any ledger exists log nothing; where a ledger exists, same shape
 
 Planning names the model of every dispatch it makes: a fast-tier dispatch names the fast-tier id,
 and a session-tier one names the orchestrator's own id rather than omitting the override, so a
-configured default subagent model cannot take it over. The role is the `description` prefix
-`references/delegated-planning.md` owns.
+configured default subagent model cannot take it over. `references/delegated-planning.md` owns the role, `repair` included.
 
 | Dispatch | Role | Tier |
 | --- | --- | --- |
