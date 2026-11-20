@@ -155,7 +155,7 @@ spending: pick a new `--pass` to rerun.
 `run --go-ahead <token>` spends money, so it runs only with the token of an estimate the user
 approved: it refuses past `--budget` (default $150) and stops spending once the budget is gone. The
 estimate takes the upper ends of #442's per-task rates, so one `small`, one `medium` and one `large`
-entry at their default sizes estimates $172.60 and is refused at the default budget; the refusal names
+entry at their default sizes estimates $182.40 and is refused at the default budget; the refusal names
 the two ways forward, a smaller corpus (fewer `--entries`, a smaller `size` or `tasks`) or an explicit
 `--budget` above the estimate, which is the user's decision, not the harness's. `run` also refuses to
 start in a driven (unattended) session, where `DEVCYCLE_DRIVE_TOKEN` is set (`estimate` stays allowed),
@@ -165,10 +165,12 @@ it, so no test can launch a paid pass however it is started. `--leg-timeout <sec
 kills a leg that outlives it and records its replay as an `error`. A leg that never reports its cost, one
 killed at that timeout or one that ends with no result event, is charged the spend cap it ran under, which is the
 budget still unspent, so a pass that loses a leg stops there and its total stays within `--budget`. Each replay plans in a scratch clone
-at `baseSha`, with no remote to push to, loaded with `--plugin-dir` on the checkout under test, so
+on `dev` at `baseSha`, so execution cuts its own topic branch as in a real repo, with no remote to push to, loaded with `--plugin-dir` on the checkout under test, so
 nothing it does touches the source repo, and its leg environment drops the driver variables
 (`DEVCYCLE_DRIVE_TOKEN` and the nested-run ones). A replay that cannot start is recorded as an `error`
-outcome and the pass carries on. `score --pass <pass>` re-scores a finished pass for free, counting only the replays the pass started, and
+outcome and the pass carries on. A replay is capped at 8 legs when it only plans and 14 when it also
+executes, and an executing replay whose last two execute legs moved neither the state file nor the
+ledger ends `stalled`. `score --pass <pass>` re-scores a finished pass for free, counting only the replays the pass started, and
 flags in the Outcome column a replay whose state file's `knobs:` line resolved a `planningStrategy` other
 than its arm (`arm-mismatch`) or none (`arm-unverified`; the run record does not carry that knob), and
 `node scripts/cost-model-fit.mjs --runs <runs dir>` fits the cost model's per-role F, t, r and o from

@@ -6,7 +6,7 @@ import { delimiter, join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeFakeBin, makeRepo, commitAll, writeInto, sh } from "./helpers.mjs";
 import {
-  LEG_CAP, classifyLeg, pickAnswer, legArgs, parseLeg, runEntryArm, runPass, collectTranscripts, cutClone, planPrompt,
+  LEG_CAPS, legCapFor, STALL_LEGS, progressKey, BENCH_BASE_BRANCH, classifyLeg, pickAnswer, legArgs, parseLeg, runEntryArm, runPass, collectTranscripts, cutClone, planPrompt,
 } from "../../scripts/plan-bench-pass.mjs";
 import { DEFAULT_ANSWERS } from "../../scripts/plan-bench.mjs";
 
@@ -111,9 +111,9 @@ test("runEntryArm ends on a NO-GO, an unanswered gate, an error, the budget and 
   const pricey = scripted([{ state: ASKING, text: "Triage?", cost: 3 }, { state: ASKING, text: "Triage?" }]);
   const b = runEntryArm({ execute: false, prompt: "go", answers: [...ANSWERS, ...ANSWERS], budgetUsd: 2, ...pricey });
   assert.deepEqual([b.outcome, b.legs.length], ["budget-stop", 1]);
-  const loop = scripted(Array.from({ length: LEG_CAP }, () => ({ state: ASKING, text: "triage" })));
-  const many = Array.from({ length: LEG_CAP }, () => ANSWERS[0]);
-  assert.deepEqual([runEntryArm({ execute: false, prompt: "go", answers: many, budgetUsd: 100, ...loop }).outcome, loop.calls.length], ["leg-cap", LEG_CAP]);
+  const loop = scripted(Array.from({ length: LEG_CAPS.plan }, () => ({ state: ASKING, text: "triage" })));
+  const many = Array.from({ length: LEG_CAPS.plan }, () => ANSWERS[0]);
+  assert.deepEqual([runEntryArm({ execute: false, prompt: "go", answers: many, budgetUsd: 100, ...loop }).outcome, loop.calls.length], ["leg-cap", LEG_CAPS.plan]);
 });
 
 test("a standing answer keeps answering later gates; a per-gate answer is consumed once", () => {
@@ -233,7 +233,7 @@ test("collectTranscripts copies each session's transcript and subagent directory
   for (const p of ["-tmp-a/s1.jsonl", "-tmp-a/s1/subagents/agent-x.jsonl", "-tmp-b/s2.jsonl"]) assert.ok(existsSync(join(dest, p)), p);
 });
 
-test("cutClone detaches a clone at baseSha with the spec copied in, leaving the source repo's branches alone", () => {
+test("cutClone checks out a clone on the bench base branch at baseSha, with the spec copied in, leaving the source repo's branches alone", () => {
   const repo = makeRepo();
   writeInto(repo, "a.txt", "one\n");
   commitAll(repo, "one");
@@ -244,6 +244,8 @@ test("cutClone detaches a clone at baseSha with the spec copied in, leaving the 
   const spec = writeInto(specDir, "s-design.md", "# spec\n");
   const { dir, specRel } = cutClone({ repoPath: repo, baseSha: base, specPath: spec, parent: makeTempDir("plan-bench-") });
   assert.equal(specRel, "docs/superpowers/specs/s-design.md");
+  assert.equal(sh("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: dir }).trim(), BENCH_BASE_BRANCH);
+  assert.equal(sh("git", ["rev-parse", "HEAD"], { cwd: dir }).trim(), base);
   assert.equal(readFileSync(join(dir, "a.txt"), "utf8"), "one\n");
   assert.equal(readFileSync(join(dir, specRel), "utf8"), "# spec\n");
   assert.equal(sh("git", ["remote"], { cwd: dir }).trim(), "", "the clone keeps no remote to push to");
@@ -411,4 +413,50 @@ test("cli run with a go-ahead replays each arm through the gate and collects its
   assert.equal(legs[2].runs, join(out, "runs"));
   for (const f of ["leg-1.jsonl", "leg-2.jsonl", "state.md", "outcome.json", "corpus/-fake/sid-1.jsonl"]) assert.ok(existsSync(join(out, f)), f);
   assert.equal(JSON.parse(readFileSync(join(out, "outcome.json"), "utf8")).outcome, "planned");
+});
+
+test("the leg cap is keyed by whether the replay executes", () => {
+  assert.deepEqual(LEG_CAPS, { plan: 8, execute: 14 });
+  assert.ok(Object.isFrozen(LEG_CAPS));
+  assert.equal(legCapFor(false), 8);
+  assert.equal(legCapFor(true), 14);
+  assert.equal(BENCH_BASE_BRANCH, "dev");
+  assert.equal(STALL_LEGS, 2);
+});
+
+test("progressKey drops only the updated and handoff stamps", () => {
+  const at = (t) => state({ stage: "execution", plan: "docs/p.md", updated: t, handoff: `ready ${t}` });
+  assert.equal(progressKey(at("2026-11-20T00:00:00Z")), progressKey(at("2026-11-20T01:00:00Z")));
+  assert.equal(progressKey(at("x")), "# devcycle state\n- stage: execution\n- plan: docs/p.md\n");
+  assert.notEqual(progressKey(at("x")), progressKey(state({ stage: "branch-review", plan: "docs/p.md", updated: "x", handoff: "ready x" })));
+});
+
+test("runEntryArm ends an executing replay as stalled after two execute legs that move nothing", () => {
+  const moved = state({ stage: "execution", plan: "docs/p.md", branch: "feat/x", handoff: "ready 2026-11-19T00:00:00Z" });
+  const s = scripted([{ state: PLANNED }, { state: moved }, { state: moved }, { state: moved }, { state: moved }]);
+  const r = runEntryArm({ execute: true, prompt: "go", answers: ANSWERS, budgetUsd: 100, ...s });
+  assert.equal(r.outcome, "stalled");
+  assert.equal(s.calls.length, 4, "the leg that moved the branch resets the count; the next two do not move");
+  assert.deepEqual(r.legs.map((l) => [l.phase, l.verdict]), [["plan", "done"], ["execute", "next"], ["execute", "next"], ["execute", "next"]]);
+});
+
+test("runEntryArm counts ledger movement as progress, so a replay that keeps moving runs to the execute cap", () => {
+  const s = scripted(Array.from({ length: LEG_CAPS.execute }, () => ({ state: PLANNED })));
+  const r = runEntryArm({ execute: true, prompt: "go", answers: ANSWERS, budgetUsd: 100, ...s, readProgress: () => `${s.readState()}\nledger ${s.calls.length}` });
+  assert.equal(r.outcome, "leg-cap");
+  assert.equal(s.calls.length, LEG_CAPS.execute);
+});
+
+test("a plan-only replay keeps the plan cap", () => {
+  const loop = scripted(Array.from({ length: LEG_CAPS.execute }, () => ({ state: ASKING, text: "triage" })));
+  const many = Array.from({ length: LEG_CAPS.execute }, () => ANSWERS[0]);
+  const r = runEntryArm({ execute: false, prompt: "go", answers: many, budgetUsd: 100, ...loop });
+  assert.deepEqual([r.outcome, loop.calls.length], ["leg-cap", LEG_CAPS.plan]);
+});
+
+test("runEntryArm resets the stall count when a leg moves something between two that do not", () => {
+  const at = (branch) => state({ stage: "execution", plan: "docs/p.md", branch, handoff: "ready 2026-11-19T00:00:00Z" });
+  const s = scripted([{ state: PLANNED }, ...Array.from({ length: LEG_CAPS.execute }, (_, i) => ({ state: at(`b${Math.floor(i / 2)}`) }))]);
+  const r = runEntryArm({ execute: true, prompt: "go", answers: ANSWERS, budgetUsd: 100, ...s });
+  assert.equal(r.outcome, "leg-cap", "an idle leg then one that moves never makes two idle legs in a row");
 });

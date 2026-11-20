@@ -26,10 +26,10 @@ export const SIZES = ["small", "medium", "large"];
 // A manifest entry's planned task count when it names none, by size.
 export const DEFAULT_TASKS = { small: 3, medium: 7, large: 12 };
 // USD per planned task (assumption: #442's 0.32.x figures, upper ends) until cost-model-fit
-// calibrates them: status-quo $4.4-5.3 planning, inline $0.4-1.4, execution about a third of status-quo.
-export const RATES = { planning: { "status-quo": 5.3, inline: 1.4 }, execution: 1.8 };
+// calibrates them: status-quo $4.4-5.3 planning, inline $0.4-1.4, execution $2.5 (the observed Phase 1 medium baseline, about $5.5 for about 2 tasks).
+export const RATES = { planning: { "status-quo": 5.3, inline: 1.4 }, execution: 2.5 };
 // The default stays at the user's target: a small, a medium and a large entry at default sizes estimates
-// $172.60 (the estimate takes the upper ends of #442's rates on purpose), so such a pass needs a smaller
+// $182.40 (the estimate takes the upper ends of #442's rates on purpose), so such a pass needs a smaller
 // corpus or an explicit --budget above the target, which is the user's call.
 export const DEFAULT_BUDGET = 150;
 // Seconds one headless leg may run before it is killed and its replay recorded as an error.

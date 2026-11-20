@@ -16,7 +16,7 @@ const entry = (over) => ({ id: "small-1", size: "small", repoPath: "/repo", base
 test("the arms are status-quo and inline, and the default task counts and rates are pinned", () => {
   assert.deepEqual(ARMS, ["status-quo", "inline"]);
   assert.deepEqual(DEFAULT_TASKS, { small: 3, medium: 7, large: 12 });
-  assert.deepEqual(RATES, { planning: { "status-quo": 5.3, inline: 1.4 }, execution: 1.8 });
+  assert.deepEqual(RATES, { planning: { "status-quo": 5.3, inline: 1.4 }, execution: 2.5 });
 });
 
 test("validateManifest fills tasks from the size and executes medium entries by default", () => {
@@ -57,14 +57,14 @@ test("estimatePass prices planning per arm and execution only for executing entr
   assert.deepEqual(rows, [
     { id: "small-1", arm: "status-quo", tasks: 3, planningUsd: 15.9, executionUsd: 0, usd: 15.9 },
     { id: "small-1", arm: "inline", tasks: 3, planningUsd: 4.2, executionUsd: 0, usd: 4.2 },
-    { id: "med-1", arm: "status-quo", tasks: 7, planningUsd: 37.1, executionUsd: 12.6, usd: 49.7 },
-    { id: "med-1", arm: "inline", tasks: 7, planningUsd: 9.8, executionUsd: 12.6, usd: 22.4 },
+    { id: "med-1", arm: "status-quo", tasks: 7, planningUsd: 37.1, executionUsd: 17.5, usd: 54.6 },
+    { id: "med-1", arm: "inline", tasks: 7, planningUsd: 9.8, executionUsd: 17.5, usd: 27.3 },
   ]);
-  assert.equal(totalUsd, 92.2);
+  assert.equal(totalUsd, 102);
 });
 
 test("goAheadToken is 12 hex characters and changes with any input", () => {
-  const base = { manifestText: "m", answersTexts: ["a"], arms: ARMS, passId: "1", budget: 150, totalUsd: 92.2 };
+  const base = { manifestText: "m", answersTexts: ["a"], arms: ARMS, passId: "1", budget: 150, totalUsd: 102 };
   const t = goAheadToken(base);
   assert.match(t, /^[0-9a-f]{12}$/);
   assert.equal(goAheadToken({ ...base }), t);
@@ -121,8 +121,8 @@ test("cli estimate prints the table, the estimate and a go-ahead token, exit 0 w
   const r = cli(["estimate", "--manifest", `${root}/.devcycle/plan-bench/manifest.json`], root);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^\| Entry \| Arm \| Tasks \| Planning \$ \| Execution \$ \| Total \$ \|$/m);
-  assert.match(r.stdout, /^\| med-1 \| status-quo \| 7 \| 37\.10 \| 12\.60 \| 49\.70 \|$/m);
-  assert.match(r.stdout, /^estimate: \$92\.20 for pass 1 \(budget \$150\.00\)$/m);
+  assert.match(r.stdout, /^\| med-1 \| status-quo \| 7 \| 37\.10 \| 17\.50 \| 54\.60 \|$/m);
+  assert.match(r.stdout, /^estimate: \$102\.00 for pass 1 \(budget \$150\.00\)$/m);
   assert.match(r.stdout, /^go-ahead: [0-9a-f]{12}$/m);
 });
 
@@ -138,7 +138,7 @@ test("the budget refusal names both ways forward: a smaller corpus, or an explic
   const root = benchRoot({ entries: [gitEntry(), gitEntry({ id: "med-1", size: "medium" }), gitEntry({ id: "big", size: "large" })] });
   const r = cli(["estimate", "--manifest", `${root}/.devcycle/plan-bench/manifest.json`], root);
   assert.equal(r.status, 2);
-  assert.match(r.stdout, /^estimate: \$172\.60 for pass 1 \(budget \$150\.00\)$/m);
+  assert.match(r.stdout, /^estimate: \$182\.40 for pass 1 \(budget \$150\.00\)$/m);
   assert.match(r.stdout, /^refused: the estimate exceeds --budget \$150\.00$/m);
   assert.match(r.stdout, /^next: either shrink the corpus \(fewer --entries, a smaller `size` or `tasks` in the manifest\), or rerun with an explicit --budget above the estimate, which is the user's decision to make$/m);
 });
