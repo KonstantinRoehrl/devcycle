@@ -17,7 +17,8 @@ const jsonl = (rows) => rows.map((r) => JSON.stringify(r)).join("\n") + "\n";
 // One replay directory in the layout runPass writes, holding a planning run doctor can break down:
 // the run record under runs/, one coordinator turn under corpus/.
 // `knobs` is the knobs: line the replay's state.md carries; the default is the arm the replay was run as.
-function replay(passDir, name, { outcome = "planned", planning = true, knobs } = {}) {
+// `estUsd` is the planning estimate its plan-stats row records; the default records none.
+function replay(passDir, name, { outcome = "planned", planning = true, knobs, estUsd } = {}) {
   const dir = join(passDir, name);
   const [id, arm] = name.split("--");
   if (knobs !== null) writeInto(dir, "state.md", `# devcycle state\n- stage: execution\n- knobs: ${knobs ?? `profile=standard planningStrategy=${arm} subagentBudget=warn`}\n`);
@@ -30,7 +31,7 @@ function replay(passDir, name, { outcome = "planned", planning = true, knobs } =
     ...(planning ? [
       { kind: "stage", runId: RUN, stage: "planning", startedAt: "2026-10-07T07:00:00Z", endedAt: "2026-10-07T07:10:00Z", outcome: "complete" },
       { kind: "plan-stats", runId: RUN, stage: "planning", specBytes: 10000, planBytes: 40000, fenceShare: 0.2, tasks: 4, waves: 2,
-        strategy: "inline", drafters: 0, subagentUsd: 0, specReview: "pass", ts: TS },
+        strategy: "inline", drafters: 0, subagentUsd: 0, specReview: "pass", ...(estUsd === undefined ? {} : { estUsd }), ts: TS },
     ] : []),
   ]));
   writeInto(dir, `corpus/-fake/${SESSION}.jsonl`, jsonl([{ sessionId: SESSION, isSidechain: false, type: "assistant", timestamp: "2026-10-07T07:05:00.000Z",
@@ -125,4 +126,24 @@ test("a rubric cell renders a null member of an object value as —, not 0", () 
   assert.equal(cell({ value: { bytesRatio: 2, fenceShare: 0.1, nonTestFenceShare: null }, status: "pass" }), "2/0.1/— pass");
   assert.equal(cell({ value: { bytesRatio: 6.4961, fenceShare: 0.391, nonTestFenceShare: 0.129 }, status: "fail" }), "6.496/0.391/0.129 fail");
   assert.equal(cell(undefined), "—");
+});
+
+test("scoreReplay carries the breakdown's projection as its last key, and null for a replay with no planning breakdown", () => {
+  const pass = makeTempDir("plan-bench-pass-");
+  const s = scoreReplay(replay(pass, "small-1--inline", { estUsd: 3 }));
+  assert.deepEqual(s.projection, { estUsd: 3, actualUsd: 2.501175, errorPct: 19.9 });
+  assert.equal(Object.keys(s).at(-1), "projection");
+  assert.deepEqual(scoreReplay(replay(pass, "small-2--inline")).projection, { estUsd: null, actualUsd: 2.501175, errorPct: null });
+  assert.equal(scoreReplay(replay(pass, "small-3--inline", { outcome: "unanswered", planning: false })).projection, null);
+  const fixed = { estUsd: 4, actualUsd: 2, errorPct: 100 };
+  const stub = () => [{ runId: "r1", breakdown: { rubric: [], byRole: {}, planDefects: 0, raw: {}, projection: fixed } }];
+  assert.deepEqual(scoreReplay(replay(pass, "small-4--inline"), stub).projection, fixed);
+});
+
+test("scorePass writes each replay's projection into results.json, and results.md stays the P1-P12 table", () => {
+  const pass = makeTempDir("plan-bench-pass-");
+  replay(pass, "small-1--inline", { estUsd: 3 });
+  scorePass(pass);
+  assert.deepEqual(JSON.parse(readFileSync(join(pass, "results.json"), "utf8"))[0].projection, { estUsd: 3, actualUsd: 2.501175, errorPct: 19.9 });
+  assert.doesNotMatch(readFileSync(join(pass, "results.md"), "utf8"), /projection|19\.9/);
 });

@@ -51,6 +51,7 @@ export function scoreReplay(replayDir, breakdownsOf = replayBreakdowns) {
     ...armCheck(replayDir, outcome.arm),
     runId: found.at(-1)?.runId ?? null,
     rubric: b ? b.rubric : null, byRole: b ? b.byRole : null, planDefects: b ? b.planDefects : null, raw: b ? b.raw : null,
+    projection: b ? b.projection : null,
   };
 }
 

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planningBreakdown, corpusGateLegs, corpusGateLegsLine, reworkFails } from "../../scripts/doctor-planning.mjs";
+import { planningBreakdown, corpusGateLegs, corpusGateLegsLine, reworkFails, projectionError, errorPctText } from "../../scripts/doctor-planning.mjs";
 import { loadTable } from "../../scripts/model-pool.mjs";
 
 const cost = (agentId, role, usd, extra = {}) => ({
@@ -273,13 +273,47 @@ test("P6: tokens re-read from another planning dispatch over their input, the pl
   assert.equal(planningBreakdown(healthy({ agentCosts: own })).p6, 0, "an agent re-reading its own path is not shared context");
 });
 
-test("P6 is n/a when a planning dispatch row carries no reads; P5 stays n/a until Phase 3", () => {
+test("P6 is n/a when a planning dispatch row carries no reads", () => {
   const b = planningBreakdown(healthy({ agentCosts: [reading("a1", "drafter", { "a.mjs": 10 }), cost("a2", "checker", 0.5)] }));
   assert.equal(b.p6, null);
   assert.equal(row(b, "P6").status, "n/a");
   assert.match(row(b, "P6").reason, /without reads/);
-  assert.equal(row(b, "P5").status, "n/a");
-  assert.match(row(b, "P5").reason, /Phase 3/);
+});
+
+test("P5: the plan-stats row's coordinatorDepthPct against the 15% bar, n/a with a reason when it is not recorded", () => {
+  const p5 = (over) => row(planningBreakdown(healthy(over)), "P5");
+  assert.deepEqual(p5({ planStats: stats({ coordinatorDepthPct: 12.5 }) }),
+    { id: "P5", measure: "coordinator depth at handoff", value: 12.5, bar: "<= 15%", status: "pass" });
+  assert.equal(p5({ planStats: stats({ coordinatorDepthPct: 15 }) }).status, "pass");
+  assert.equal(p5({ planStats: stats({ coordinatorDepthPct: 17.1 }) }).status, "fail");
+  assert.equal(p5({ planStats: stats({ coordinatorDepthPct: 0 }) }).status, "pass");
+  for (const planStats of [stats(), stats({ coordinatorDepthPct: null }), stats({ coordinatorDepthPct: "17.1" })])
+    assert.deepEqual(p5({ planStats }), { id: "P5", measure: "coordinator depth at handoff", value: null, bar: "<= 15%", status: "n/a",
+      reason: "coordinator depth not recorded on the plan-stats row" });
+  assert.equal(p5({ planStats: null }).reason, "no plan-stats row (planning has not reached its handoff)");
+});
+
+test("projectionError: the signed percent the estimate missed the actual by, to one decimal; null without two numbers or a positive actual", () => {
+  assert.equal(projectionError(12, 10), 20);
+  assert.equal(projectionError(8, 10), -20);
+  assert.equal(projectionError(1, 3), -66.7);
+  assert.equal(projectionError(2, 3), -33.3);
+  assert.equal(projectionError(3, 2.501175), 19.9);
+  assert.equal(projectionError(0, 10), -100);
+  assert.equal(projectionError(10, 10), 0);
+  for (const [est, actual] of [[null, 10], [10, null], [undefined, 10], ["12", 10], [12, "10"], [10, 0], [10, -1]])
+    assert.equal(projectionError(est, actual), null, `${est} vs ${actual}`);
+});
+
+test("projection: the plan-stats estimate beside the planning dollars, placed right after byRole", () => {
+  const b = planningBreakdown(healthy({ planStats: stats({ estUsd: 7.5 }) }));
+  assert.deepEqual(b.projection, { estUsd: 7.5, actualUsd: 6, errorPct: 25 });
+  assert.equal(Object.keys(b).indexOf("projection"), Object.keys(b).indexOf("byRole") + 1);
+  assert.deepEqual(planningBreakdown(healthy()).projection, { estUsd: null, actualUsd: 6, errorPct: null });
+  assert.deepEqual(planningBreakdown(healthy({ planStats: stats({ estUsd: 7.5 }), planningUsd: null })).projection,
+    { estUsd: 7.5, actualUsd: null, errorPct: null });
+  assert.deepEqual(planningBreakdown(healthy({ planStats: null, planningUsd: undefined })).projection,
+    { estUsd: null, actualUsd: null, errorPct: null });
 });
 
 test("drafterTurns and sourcePrints: turns summed per drafter in first-seen order; prints null unless every dispatch row has them", () => {
@@ -307,4 +341,11 @@ test("P9: checker rounds count round tags, and each untagged checker as its own 
   assert.equal(p9([pair("c1", 1), pair("c2", 1), pair("c3", 1)]).status, "pass");
   assert.deepEqual(p9([pair("c1", 1), pair("c2", 2)]).value, { gateFails: 0, checkerRounds: 2 });
   assert.deepEqual(p9([pair("c1", 1), cost("c9", "checker", 0.1)]).value, { gateFails: 0, checkerRounds: 2 });
+});
+
+test("errorPctText: a signed one-decimal percent, unknown for null", () => {
+  assert.equal(errorPctText(19.9), "+19.9%");
+  assert.equal(errorPctText(0), "+0.0%");
+  assert.equal(errorPctText(-20), "-20.0%");
+  assert.equal(errorPctText(null), "unknown");
 });
