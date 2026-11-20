@@ -74,7 +74,7 @@ inline, with no separate re-review pass. The plan gate is one command,
 blocks parse), `briefCompleteness` (every task carries its required fields, a `red-green` task
 that creates a non-test source file mentions a stub and pins its failing test in a fenced block, a
 `**Detail:**` line gives a reason, and the Dispatch Map lists every task; it also notes, without
-failing, each prescribed git command the dispatch guard would deny an implementer), `blastRadius` (every JS/TS/Python file naming a changed file's basename, test or
+failing, each prescribed git command the dispatch guard would deny an implementer), `blastRadius` (every JS/TS/Python file naming a changed file's basename (a changed non-code file's `<parent>/<basename>`), test or
 not, sits in some Files block; each finding opens with the task that declares the changed file), `contentCoupling` (no same-wave task's brief names a file another same-wave task
 edits), `budgetFixtures` (a task touching a budgeted surface — `playbooks/`, `commands/`,
 `agents/`, `references/` markdown — also touches its budget fixtures and

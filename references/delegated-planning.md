@@ -74,8 +74,8 @@ owns Interfaces, decides that pin and re-dispatches the task, or drafts it inlin
 Under `grouped`, `plan-strategy.mjs` returns `rounds`: one per wave, each a list of groups of at most three
 tasks, at most four dispatched at once (its `batches`). Rounds run in wave order. A group is one drafter, briefed
 as § Drafters says for every task it holds, described `plan-drafter: Tasks <a>, <b>`, at the group's `tier`; it
-writes one `tasks/task-<n>.md` per task. The coordinator logs `plan-draft-<n>` per task, each with the group's
-`agentId`, and `plan-group-<k>` per group.
+writes one `tasks/task-<n>.md` per task. The coordinator logs `plan-draft-<n>` per task and `plan-group-<k>` per group, the latter with the group's
+`agentId`.
 
 **The interface lock.** After each round the coordinator runs
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/interface-lock.mjs" write .devcycle/plan-work/<run id> --round <n>`, which copies
@@ -85,7 +85,7 @@ count as drafted.
 
 **Interface deltas.** A drafter that cannot draft a task without changing an interface the lock holds writes no
 draft for it and returns `interface-delta: Task <n> <what>`. The coordinator, who owns Interfaces, either accepts it
-(the producer's drafter patches its task by `SendMessage`, then `interface-lock.mjs write … --relock`, then the
+(the producer's drafter patches its task by `SendMessage`, then `interface-lock.mjs write <work-dir> --round <n> --tasks <producer task> --relock`, then the
 consumer is re-sent) or tells the drafter to hold the pin.
 
 **Fork arm.** Under `grouped-fork` each group is dispatched as `subagent_type: "fork"` once the pack is written, its
@@ -113,8 +113,8 @@ the plan gate once, and presents the plan to the user by path with `plan-check`'
 findings count; it does not read the plan body on this path.
 
 **Patch, not redraft.** A finding opening `Task <n>:` goes back to that task's original drafter by
-`SendMessage`, its agent id logged as `agentId` in the `plan-draft-<n>` stage-log line. A one-line
-fix is the coordinator's own `Edit` of the task file. A finding never goes to a fresh dispatch; after
+`SendMessage`, its agent id read from its group's `plan-group-<k>` row under `grouped`, or its dispatch's own id under
+`delegated`. A one-line fix is the coordinator's own `Edit` of the task file. A finding never goes to a fresh dispatch; after
 a resume, when the drafter can no longer be reached, the coordinator edits the task file itself. Any
 other finding is the coordinator's to fix.
 

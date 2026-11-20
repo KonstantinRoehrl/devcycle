@@ -5,6 +5,24 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-20 — The blast-radius gate matches a changed non-code file by its last two path segments (#443, #447)
+
+**Decision:** Decision D8: `referenceToken` in `scripts/blast-radius-check.mjs` matches a changed non-code file by
+its written-out `<parent>/<basename>` path rather than its bare basename. A same-directory reference
+(`"./a.txt"`) and a path built in pieces (`join(root, "references", "x.json")`) are no longer flagged, an accepted
+miss. `--scan` still matches by basename. The `referencerRepo` fixture in `tests/unit/plan-check.test.mjs` moved
+from `"./a.txt"` to `"../src/a.txt"` to keep passing; no test pins the accepted miss yet.
+
+**Why:** a bare basename such as `README.md` or `index.json` collides across directories, so the gate flagged
+code that named an unrelated file of the same name, and each false positive cost a Files-block edit or an override.
+
+**Budgets:** the `planning-waves.md` figure also carries the branch-review prose fixes to its `plan-stats --strategy`
+list and its `split` wording.
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 69077
+```
+
 ## 2026-11-20 — Planning decision table, grouped drafting and the interface lock (#443, #447)
 
 **Decision:** Decision D2: `auto` runs a decision table, `scripts/plan-strategy.mjs`, once the task cut exists.
