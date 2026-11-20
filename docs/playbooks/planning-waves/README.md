@@ -39,15 +39,22 @@ pins its interfaces, its complete failing test code and its gate commands verbat
 implementation in prose: a plan is contract-only by default, and `**Detail:** code-pinned — <reason>`
 opts one task into a full implementation body. And a large plan is delegated: 3+ independent feasibility
 unknowns run as parallel spikes, each a fast-tier `Explore` dispatch returning at most fifteen lines
-(an unknown that needs only reading rides the research dispatch instead), and 5+ tasks as parallel
-`devcycle:plan-drafter` dispatches, one per task. Drafters read a context pack,
+(an unknown that needs only reading rides the research dispatch instead), and the drafting strategy comes
+from a decision table the coordinator runs once the task cut exists (`scripts/plan-strategy.mjs`): a cut
+of up to `12` tasks, or of little weight, drafts inline; a larger, coupled or narrow one drafts
+`checkpointed`, inline in one segment per wave group; a wide, loosely coupled one drafts `grouped`, in
+rounds of `devcycle:plan-drafter` dispatches that each hold up to three tasks of one wave, never more
+than four at once; above `25` tasks planning suggests splitting the spec. Drafters read a context pack,
 `.devcycle/plan-work/<run id>/pack.md` (about 8k tokens, stable content first), and
 `references/plan-task-format.md` instead of this playbook, and each writes its task to a work file, `.devcycle/plan-work/<run id>/tasks/task-<n>.md`, after running the
 `--draft` gate on it. On every path the work files are the canonical copy: `scripts/plan-assemble.mjs`
 assembles the plan from them without the coordinator reading a draft, and a later fix goes into the task
-file and is re-assembled. Across tasks, the plan gate's `crossTask` leg scans for placeholders and
-back-references, and a fast-tier checker reads each producer-to-consumer pair, tagged with its round, and
-writes its findings to a file, returning the path and a count. A finding goes back to its task's
+file and is re-assembled. Under `grouped`, after each round `scripts/interface-lock.mjs` copies the
+round's `Produces` items into `interfaces.lock.md`; later rounds' drafters reproduce what they consume
+verbatim, the script checks it, and a drafter that must change a locked interface returns an
+`interface-delta` for the coordinator to accept or refuse. Across tasks, the plan gate's `crossTask` leg
+scans for placeholders and back-references, and one fast-tier checker dispatch per batch of up to eight
+producer-to-consumer pairs writes its findings to a file, returning the path and a count. A finding goes back to its task's
 drafter as a patch rather than a redraft, and after one checker round and one repair round, whatever is
 still open goes to the user, per
 [`references/delegated-planning.md`](../../../references/delegated-planning.md). Every planning
@@ -55,8 +62,8 @@ dispatch names its model, at the tier
 [`references/model-routing.md`](../../../references/model-routing.md) § Planning dispatches assigns,
 and doctor's Planning breakdown reports it: `drafters:` lists each drafter's turns and model,
 `source prints:` counts Bash calls that printed a source file, and `tier-fit:` flags a spike,
-research or checker dispatch that ran outside the fast tier. Below both
-thresholds planning runs inline, and the finished plan looks the same either way.
+research or checker dispatch that ran outside the fast tier. Whichever
+strategy ran, the finished plan looks the same.
 
 Once the plan is drafted, planning runs a seven-item self-review — spec coverage, the per-task
 checks `references/plan-task-format.md` owns (placeholder scan, factual-claim accuracy, assumed-tooling
@@ -129,9 +136,11 @@ Playbook-internal — for where Planning sits in the pipeline, see
 
 ## Benchmarking planning strategies
 
-`planningStrategy` forces how planning drafts: `status-quo` keeps the delegation thresholds,
-`inline` drafts every task in the planning session. The replay benchmark (#449) runs the same specs
-through both arms and scores each run against the P1–P12 planning rubric doctor prints, so a
+`planningStrategy` forces how planning drafts: `status-quo` keeps the old thresholds, `inline` drafts
+every task in the planning session, `checkpointed` drafts inline in segments, `grouped` drafts in rounds
+of grouped drafters, `grouped-fork` is `grouped` with forked drafters (experimental), and `auto` runs the
+decision table. A pass runs `status-quo` and `inline` by default; `--arms` adds the other three. The replay benchmark (#449) runs the same specs
+through each arm and scores each run against the P1–P12 planning rubric doctor prints, so a
 planning change is measured before it ships. Everything it reads and writes stays under the
 gitignored `.devcycle/plan-bench/`:
 
