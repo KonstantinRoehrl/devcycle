@@ -96,6 +96,19 @@ test("specReview is the result of the LAST spec-review event, else null", () => 
   assert.equal(s([ev("pass"), ev("fail")]), "fail");
 });
 
+test("grouped planning runs subagents, so its unpriced dollars are unmeasurable, and checkpointed planning runs none", () => {
+  const s = (strategy) => planStats({ planText: "", specText: "", rows: [], strategy }).subagentUsd;
+  assert.equal(s("grouped"), null);
+  assert.equal(s("checkpointed"), 0);
+});
+
+test("CLI refuses a strategy outside inline, delegated, grouped and checkpointed", () => {
+  const dir = makeTempDir("plan-stats-bad-strategy");
+  const r = cli(["--state", "s.md", "--plan", "p.md", "--spec", "c.md", "--strategy", "parallel"], { cwd: dir, runsDir: dir });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /strategy must be one of inline, delegated, grouped, checkpointed, got "parallel"/);
+});
+
 function cli(args, { cwd, runsDir }) {
   return spawnSync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", cwd,
     env: { ...process.env, DEVCYCLE_RUNS_DIR: runsDir } });

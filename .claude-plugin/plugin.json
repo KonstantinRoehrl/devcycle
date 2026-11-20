@@ -81,9 +81,12 @@
       "options": [
         "auto",
         "status-quo",
-        "inline"
+        "inline",
+        "grouped",
+        "grouped-fork",
+        "checkpointed"
       ],
-      "description": "How the planning stage drafts a plan. auto (default) and status-quo apply the delegation thresholds (per-task drafters from 5 tasks); inline always drafts in the planning session itself. Forces an arm for the planning benchmark. One of: auto, status-quo, inline. Default: auto."
+      "description": "How the planning stage drafts a plan. auto (default) picks by the decision table; status-quo applies the delegation thresholds (per-task drafters from 5 tasks); inline always drafts in the planning session itself. grouped dispatches one drafter per group of tasks; grouped-fork does the same with forked drafters that inherit the planning context; checkpointed drafts in the planning session, saving a checkpoint after each task group. Forces an arm for the planning benchmark. One of: auto, status-quo, inline, grouped, grouped-fork, checkpointed. Default: auto."
     },
     "reviewDepth": {
       "type": "string",

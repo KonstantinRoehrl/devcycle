@@ -297,7 +297,7 @@
         "nonTestFenceShare": { "type": "number", "minimum": 0, "maximum": 1 },
         "tasks": { "type": "integer", "minimum": 0 },
         "waves": { "type": "integer", "minimum": 0 },
-        "strategy": { "enum": ["inline", "delegated"] },
+        "strategy": { "enum": ["inline", "delegated", "grouped", "checkpointed"] },
         "drafters": { "type": "integer", "minimum": 0 },
         "subagentUsd": { "type": ["number", "null"], "minimum": 0 },
         "specReview": { "enum": ["pass", "fail", null] },
