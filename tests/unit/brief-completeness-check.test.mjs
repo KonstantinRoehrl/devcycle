@@ -603,3 +603,43 @@ test("a task without a Detail line is a full-code task and is not checked for on
   assert.equal(r.code, 0);
   assert.doesNotMatch(r.out, /Detail/);
 });
+
+test("fails a red-green task whose only fence is a gate command and real runner output (O1)", () => {
+  const outputs = {
+    pytest: "$ pytest tests/test_a.py\n============ test session starts ============\ntests/test_a.py F\nE       assert 1 == 2\nFAILED tests/test_a.py::test_add - assert 1 == 2\n1 failed in 0.01s",
+    go: "$ go test ./...\n=== RUN   TestAdd\n--- FAIL: TestAdd (0.00s)\nFAIL\nFAIL\texample.com/a\t0.002s",
+    goOk: "$ go test ./...\nok  \texample.com/a\t0.002s\nPASS",
+    cargo: "$ cargo test\nrunning 1 test\ntest tests::adds ... FAILED\ntest result: FAILED. 0 passed; 1 failed",
+    npm: "$ npm test\n> a@1.0.0 test\n> node --test\n✖ adds\nnpm ERR! Test failed.",
+    node: "$ node --test tests/unit/a.test.mjs\n▶ suite\n  ✖ adds (1.2ms)\n    AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n    Expected: 3\n    Actual: 2",
+    // An `npm error`/`npm ERR!` line starts with `npm`, so it already reads as a command, not as output.
+    npmErrorLower: "$ npm test\nnpm error Test failed.",
+    // One fence per alternative below: its line is the only thing that can make the fence read as output.
+    pytestPassedWord: "$ pytest -v\nPASSED tests/test_a.py::test_ok",
+    pytestErrorWord: "$ pytest\nERROR tests/test_a.py",
+    receivedLine: "$ node --test tests/unit/a.test.mjs\nReceived: 2",
+    pytestPassedCount: "$ pytest\n1 passed in 0.01s",
+  };
+  for (const [name, body] of Object.entries(outputs)) {
+    const r = run(onlyFence("", body));
+    assert.equal(r.code, 1, `${name}: ${r.out}`);
+    assert.match(r.out, NO_TEST_CODE, name);
+  }
+});
+
+test("test code beside runner output still counts, and ok(value) is test code, not output", () => {
+  assert.equal(run(onlyFence("", 'test("x", () => {});\n✖ x\nExpected: 1')).code, 0);
+  assert.equal(run(onlyFence("", "ok(value);")).code, 0);
+});
+
+test("fails a red-green task whose only fence carries a shell-session or output label (O2)", () => {
+  for (const info of ["shellsession", "bash-session", "pwsh", "ps1", "bat", "cmd", "batch", "ksh", "dash", "stdout", "stderr", "tap"])
+    assert.equal(run(onlyFence(info, 'test("x", () => {});')).code, 1, `fence info "${info}"`);
+  // A diff fence may pin the failing test as a patch, so it is still read as code.
+  assert.equal(run(onlyFence("diff", '+test("x", () => {});')).code, 0);
+});
+
+test("a # comment ending in a backslash does not swallow the next line (O3)", () => {
+  assert.equal(run(onlyFence("", '# run it with \\\ntest("x", () => {});')).code, 0);
+  assert.equal(run(onlyFence("", "# the gate \\\nnode --test tests/unit/a.test.mjs")).code, 1);
+});
