@@ -3,9 +3,13 @@
 // files that reference it (by module basename, or `<parent>/<basename>` for a file outside CODE_EXT) but appear in no task's Files block. Any such
 // referencer -- test or non-test -- is a hard failure (it almost certainly needs updating), cleared
 // only by adding it to a Files block or recording an override. The gate walks only JS/TS/Python
-// files (CODE_EXT) and matches the changed file's basename with its extension, so a referencer in
-// any other language, or one that imports `./foo` without the extension, is never seen. `--scan`
-// is the planner's wider, advisory pass over the same walk. See playbooks/planning-waves.md.
+// files (CODE_EXT) and matches a changed code file by its basename with its extension, so a referencer
+// in any other language, or one that imports `./foo` without the extension, is never seen. A changed
+// non-code file is matched by its written-out `<parent>/<basename>` path behind a path character, so a
+// script that builds that path in pieces (`join(root, "docs", "guide", "README.md")`) or names it
+// relatively (`"./ledger.md"`) is not flagged: a deliberate trade of false positives for false
+// negatives. `--scan` is the planner's wider, advisory pass over the same walk and still matches by
+// basename. See playbooks/planning-waves.md.
 import { readFileSync, existsSync, readdirSync, statSync, realpathSync } from "node:fs";
 import { join, basename, dirname, extname, relative, resolve, isAbsolute, sep, posix } from "node:path";
 import { taskBlocks, taskFileMap, TEST_FILE_SUFFIXES, normalizeFileToken, isTestPath } from "./task-files.mjs";
