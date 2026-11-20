@@ -488,9 +488,9 @@ export const TEST_CODE_INFO = new Set([
   "rust", "rb", "ruby", "java", "kt", "kotlin", "cs", "csharp", "php", "swift",
 ]);
 
-// A test written in any of the runners above: a call to test/it/describe, an assertion, or the
-// language's own test declaration.
-export const TEST_IDIOM_RE = /\b(?:test|it|describe)\s*\(|\bassert\b|\bexpect\s*\(|\bdef test_|\bfunc Test|#\[test\]/;
+// A line that declares or calls a test in any of the runners above. Each alternative is anchored to
+// the line start so an implementation's `RE.test(x)`, a comment or an import never reads as a test.
+export const TEST_IDIOM_RE = /^\s*(?:(?:test|it|describe)(?:\.\w+)*\s*\(|assert\s*[.(]|expect\s*\(|def test_|func Test|#\[test\])/m;
 
 // The 0-based line indexes of the fences a red-green task writes to state its failing test: a closed
 // fence in a language, whose lines between the fence lines read as a test.

@@ -654,6 +654,13 @@ test("TEST_CODE_INFO names languages and TEST_IDIOM_RE finds a test", () => {
   assert.ok(!TEST_IDIOM_RE.test("export function add(a, b) { return a + b; }"));
 });
 
+test("TEST_IDIOM_RE matches a line that declares or calls a test, never an implementation's .test call, comment or import", () => {
+  for (const s of ["if (TOKEN_RE.test(line)) return true;", "const ok = RE.test(x);", "// assert nothing", 'import assert from "node:assert/strict";'])
+    assert.ok(!TEST_IDIOM_RE.test(s), s);
+  for (const s of ["  it('y', f)", 'const a = 1;\ntest("x", () => {})', "  it.only('y', f)", "  describe.skip('z', f)", "\tassert(ok)", "  expect(x).toBe(1)"])
+    assert.ok(TEST_IDIOM_RE.test(s), s);
+});
+
 test("nonTestFenceShare exempts a red-green task's failing-test fence and nothing else", () => {
   const testOnly = `# Plan\n\n${taskOf(1, "red-green", fenceOf("js", TEST_BODY))}`;
   assert.ok(fenceShare(testOnly) > 0.3);
@@ -681,6 +688,15 @@ test("nonTestFenceShare exempts only a closed language fence whose body reads as
   assert.ok(counted(fenceOf("js", "export const add = (a, b) => a + b;")), "a language fence with no test idiom still counts");
   assert.ok(counted(`${tick}js\n${TEST_BODY}\n`), "a fence never closed still counts");
   assert.ok(!counted(fenceOf("py", "def test_add():\n    assert add(1, 2) == 3")), "a python test is exempt");
+});
+
+test("nonTestFenceShare counts a red-green implementation fence whose only idiom word is a .test call or a comment", () => {
+  const impl = (inner) => `function check(line) {\n  ${inner}\n  return false;\n}\n`;
+  for (const inner of ["if (TOKEN_RE.test(line)) return true;", "// assert nothing"]) {
+    const plan = `# Plan\n\n${taskOf(1, "red-green", fenceOf("js", impl(inner).repeat(5)))}`;
+    assert.ok(fenceShare(plan) > 0.5, inner);
+    assert.equal(nonTestFenceShare(plan), fenceShare(plan), inner);
+  }
 });
 
 test("nonTestFenceShare exempts only the red-green task's own fences", () => {
