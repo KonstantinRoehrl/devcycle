@@ -5,6 +5,42 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-20 — Planning decision table, grouped drafting and the interface lock (#443, #447)
+
+**Decision:** Decision D2: `auto` runs a decision table, `scripts/plan-strategy.mjs`, once the task cut exists.
+A cut of at most 12 tasks, or at most 30 weight points, drafts inline; above 25 tasks planning suggests splitting
+the spec; otherwise a cut with coupling at or above 0.5, or width below 3, drafts `checkpointed`, and a wide,
+loosely coupled one drafts `grouped`, unless grouping would need more than `ceil(N/3)` drafters, which makes it
+`checkpointed`. Decision D3: `checkpointed` drafts inline in one segment per wave group, logs `plan-group-<k>` as
+each segment's tasks are written, and never clears; Phase 3 adds the clear. Decision D7: the token profile, the
+150k per-drafter input cap, k ≤ 3 and at most 4 concurrent drafters are initial values in
+`scripts/plan-strategy.mjs`, which the benchmark pass tunes and records here. `grouped-fork` is an experimental
+`planningStrategy` value and benchmark arm: its result is recorded in this log whichever way it goes, once the
+benchmark pass has run.
+
+**Why:** Plan A's medium replay: seven drafters alone made P3 1.0. The decision table keeps small cuts inline and
+groups only wide, loosely coupled ones.
+
+**Budgets:**
+
+```text
+budget: surface-budget.json surfaceTotal 7169
+budget: context-budget.json commands/cycle.md 89273
+budget: context-budget.json commands/learn.md 17751
+budget: context-budget.json commands/maintain.md 18930
+budget: context-budget.json commands/onboard.md 18039
+budget: context-budget.json commands/reconcile.md 25476
+budget: context-budget.json commands/review.md 26106
+budget: context-budget.json commands/verify.md 25204
+budget: context-budget.json playbooks/finishing-the-cycle.md 53391
+budget: context-budget.json playbooks/onboarding-a-repo.md 31641
+budget: context-budget.json playbooks/planning-waves.md 66930
+budget: context-budget.json playbooks/reviewing-the-branch.md 61680
+budget: context-budget.json playbooks/scoping-the-request.md 37009
+budget: context-budget.json playbooks/verifying-on-device.md 67003
+budget: context-budget.json references/config.md 15168
+```
+
 ## 2026-11-20 — P9 counts rework, not re-runs; plan-stats records the non-test fence share (#443, #447)
 
 **Decision:** Decision D3: `plan-stats` records `nonTestFenceShare` beside `fenceShare`. P8's fence share

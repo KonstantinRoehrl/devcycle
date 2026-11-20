@@ -68,11 +68,17 @@ not just what they contain. Two goals govern every boundary decision, together:
 
 ## Delegated planning — thresholds
 
-Planning runs inline unless a threshold trips, each on its own: **3+ independent feasibility
-unknowns** → parallel spikes; **5+ tasks in the task cut** → parallel per-task drafters. When either
-trips, read `${CLAUDE_PLUGIN_ROOT}/references/delegated-planning.md` and follow it for that half.
-`planningStrategy` on the `knobs:` line forces the drafting arm: `inline` never trips the drafter
-threshold, so the coordinator drafts every task itself; `auto` and `status-quo` apply both as written.
+**3+ independent feasibility unknowns** → parallel spikes. Drafting follows a decision table, run once the
+task cut exists: write the cut as `.devcycle/plan-work/<run id>/task-cut.json` (the shape
+`scripts/plan-strategy.mjs` documents) and run
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-strategy.mjs" <cut path> --planningStrategy <value>`. Log its `strategy`,
+`groups`, `drafters` and `est` as stage-log key `drafting-plan`, then draft by `strategy`: `inline`, every task in
+this session; `checkpointed`, inline in one segment per wave group, logging `plan-group-<k>` as a segment's
+tasks are written; `grouped`, rounds of group drafters; `delegated`, one drafter per task; `split`, the spec is too large for one plan,
+a NO-GO under the feasibility gate above. Read
+`${CLAUDE_PLUGIN_ROOT}/references/delegated-planning.md` for a spike, `grouped` or `delegated` run.
+`planningStrategy` on the `knobs:` line forces the drafting arm: `inline`, `checkpointed`, `grouped` and `grouped-fork`
+force theirs, `status-quo` keeps the old threshold (`delegated` from 5 tasks), and `auto` runs the table.
 
 ## Plan mechanics — the native engine (`lean` / `standard`)
 

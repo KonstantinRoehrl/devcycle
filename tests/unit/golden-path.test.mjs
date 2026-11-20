@@ -2829,9 +2829,14 @@ test("continue names action: \"drive\" before its execution-resume gates and wal
     "a written manual row no longer re-runs wave-setup for its walk fields");
 });
 
-test("planning-waves honours planningStrategy: inline never trips the drafter threshold", () => {
+test("planning-waves runs the decision table and honours planningStrategy", () => {
   const section = read("playbooks/planning-waves.md").split("## Delegated planning — thresholds")[1]?.split(/\n## /)[0] ?? "";
   assert.match(section, /`planningStrategy` on the `knobs:` line forces the drafting arm/);
-  assert.match(section, /`inline` never trips the drafter\s+threshold/);
-  assert.match(section, /`auto` and `status-quo` apply both as written/);
+  assert.match(section, /scripts\/plan-strategy\.mjs/);
+  assert.match(section, /stage-log key `drafting-plan`/);
+  for (const arm of ["inline", "checkpointed", "grouped", "grouped-fork", "status-quo", "auto"]) assert.ok(section.includes(`\`${arm}\``), `the section names \`${arm}\``);
+  assert.match(section, /`plan-group-<k>`/);
+  assert.match(read("references/stage-log.md"), /`drafting-plan` \(`--data` `strategy`, `groups`, `drafters`, `est`\)/);
+  assert.match(read("references/stage-log.md"), /`plan-group-<k>`/);
+  assert.match(read("references/config.md"), /\| `planningStrategy` \| `playbooks\/planning-waves\.md` \| `auto` — the decision table, `scripts\/plan-strategy\.mjs` \|/);
 });
