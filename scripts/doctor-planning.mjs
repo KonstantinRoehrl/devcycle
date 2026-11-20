@@ -224,7 +224,7 @@ export function planningBreakdown(run, { tierTable = [] } = {}) {
   };
 }
 
-const sumKnown = (values) => (values.some((v) => v !== null && v !== undefined) ? values.reduce((n, v) => n + (v ?? 0), 0) : null);
+export const sumKnown = (values) => (values.some((v) => v !== null && v !== undefined) ? values.reduce((n, v) => n + (v ?? 0), 0) : null);
 
 /**
  * Joins the summaries of one run's sessions into a PlanningRun, one per run that has a planning stage.

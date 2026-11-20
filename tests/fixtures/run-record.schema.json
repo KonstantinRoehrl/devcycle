@@ -301,6 +301,8 @@
         "drafters": { "type": "integer", "minimum": 0 },
         "subagentUsd": { "type": ["number", "null"], "minimum": 0 },
         "specReview": { "enum": ["pass", "fail", null] },
+        "estUsd": { "type": ["number", "null"], "minimum": 0 },
+        "coordinatorDepthPct": { "type": ["number", "null"], "minimum": 0 },
         "ts": { "type": "string", "format": "date-time" }
       },
       "required": ["kind", "runId", "stage", "specBytes", "planBytes", "fenceShare", "tasks", "waves",

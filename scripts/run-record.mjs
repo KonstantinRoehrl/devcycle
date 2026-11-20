@@ -257,7 +257,8 @@ function main() {
     "steps", "peakDepth", "window", "toolResultChars", "warned", "refused",
     "inputTokens", "cacheWriteTokens", "cacheReadTokens", "outputTokens", "turns", "continuationOf",
     "specBytes", "planBytes", "tasks", "waves", "drafters", "sourcePrints"]);
-  const floatFields = new Set(["cost", "usd", "fenceShare", "nonTestFenceShare", "subagentUsd"]);
+  const floatFields = new Set(["cost", "usd", "fenceShare", "nonTestFenceShare", "subagentUsd",
+    "estUsd", "coordinatorDepthPct"]);
   const boolFields = new Set(["background", "fork", "windowAssumed", "isAborted", "explicitModel"]);
   const objectFields = new Set(["reads"]);
 
