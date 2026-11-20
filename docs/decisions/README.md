@@ -29,7 +29,24 @@ block cost more than the implementer's own red and green proves (#446, #448).
 **Supersedes:** the 0.32.0 rule that every plan step carries its implementation code and every fenced
 block a run marker.
 
-P1–P12 deltas: pending the Phase 2a benchmark pass
+P1–P12 deltas: Phase 2a benchmark pass, 2026-11-20, same corpus and arms as `phase1-baseline`, run on
+this branch's tip (the medium inline replay hit the weekly usage limit and was re-run alone). Baseline →
+Phase 2a:
+
+| Entry · arm | P1 $/task | P3 disp/task | P4 p95 depth | P8 bytes×/fence | P9 gate fails/rounds | P11 min/task |
+| --- | --- | --- | --- | --- | --- | --- |
+| small · status-quo | 1.23 → 0.83 | 0.33 → 0.25 | 115904 → 65377 | 4.06/27% → 3.33/16% | 7/0 → 1/0 | 5.5 → 4.3 |
+| small · inline | 1.25 → 0.84 | 0.25 → 0.25 | 84508 → 49756 | 4.00/29% → 3.74/16% | 4/0 → 3/0 | 3.8 → 4.9 |
+| medium · status-quo | 2.00 → 1.97 | 1.29 → 1.71 | 149164 → 106409 | 7.77/48% → 6.50/39% | 10/1 → 5/1 | 5.2 → 4.1 |
+| medium · inline | no baseline (errored) → 0.97 | n/a | n/a | 3.80/39% | 5/0 | 2.9 |
+
+P2, P5 and P10 are unmeasured: both medium replays stopped at the leg cap before execution finished, and
+P10 read 0 attributed defects with nothing to attribute. **The exit bars are met only on the small entry.**
+The P8 fence-share bar (≤ 30%) and the P9 gate-fail bar (≤ 2) are missed on both medium arms, and P8's
+byte bar (≤ 5×) on the medium status-quo arm. The medium status-quo arm's P3 rose (more dispatches per task,
+consistent with the added edge checkers), and the small inline arm's P9 (3 gate fails) and P11 got worse. These
+misses carry into Phase 2b, whose tuning of the `proportion` leg's figures and of the gate legs is where they
+get addressed.
 
 **Budgets:**
 
