@@ -5,6 +5,26 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-20 — `references/resume.md` names the planning resume position (#450)
+
+**Decision:** `references/resume.md` § Resuming at the recorded stage gains one sentence that runs
+`scripts/plan-resume.mjs` at `stage: planning`, so a session cleared mid-planning resumes from the printed
+position instead of a transcript.
+
+**Why:** golden-path C3 leg 3 requires every CLI script to be invoked from the surface, and the resume path is where
+the position is read.
+
+**Budgets:** the sentence adds three lines to the runtime surface and bytes to every closure that reads
+`references/resume.md`.
+
+```text
+budget: surface-budget.json surfaceTotal 7209
+budget: context-budget.json commands/continue.md 76444
+budget: context-budget.json commands/cycle.md 89599
+budget: context-budget.json playbooks/receiving-review.md 125475
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 96259
+```
+
 ## 2026-11-20 — `planningBudgetUSD` sets a dollar ceiling on planning (#450)
 
 **Decision:** Decision D5 adds a twentieth knob, `planningBudgetUSD`: a `number` userConfig whose default `0`
