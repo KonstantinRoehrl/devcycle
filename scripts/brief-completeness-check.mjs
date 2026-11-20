@@ -209,10 +209,22 @@ function detailErrors(num, block) {
 }
 
 // A red-green task's brief is where its failing test lives: the implementer works test-first from it
-// (references/plan-task-format.md § No placeholders).
+// (references/plan-task-format.md § No placeholders). A fence holding only the gate command does not
+// pin it, so a shell-labelled fence, or an unlabelled one of nothing but command lines, is not test code.
+const COMMAND_LINE_RE = /^(?:\$\s+)?(?:[A-Za-z_]\w*=\S*\s+)*(?:node|npm|npx|pnpm|yarn|bun|deno|python3?|pytest|go|cargo|git|make|sh|bash|env|claude|jest|vitest|tsc|php|composer|dotnet|mvn|gradle|ruby|rspec|cd)(?:\s|$)/;
+
+function holdsTestCode(block, fence) {
+  if (SHELL_FENCE_INFO.has(fence.info)) return false;
+  if (fence.info !== "") return true;
+  return block.split("\n").slice(fence.open + 1, fence.close ?? undefined)
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("#"))
+    .some((line) => !COMMAND_LINE_RE.test(line));
+}
+
 function fenceErrors(num, block) {
-  if (!isRedGreen(block) || fencedBlocks(block).length > 0) return [];
-  return [`Task ${num}: a red-green task pins its complete failing test code in a fenced block, and this brief has none (references/plan-task-format.md § No placeholders)`];
+  if (!isRedGreen(block) || fencedBlocks(block).some((fence) => holdsTestCode(block, fence))) return [];
+  return [`Task ${num}: a red-green task pins the failing test itself in a fenced block, not only the gate command (references/plan-task-format.md § No placeholders)`];
 }
 
 // repoRoot is the work tree whose required-checks manifest applies; plan-check passes its own. A `draft` is

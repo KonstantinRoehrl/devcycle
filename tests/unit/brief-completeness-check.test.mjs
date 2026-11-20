@@ -474,7 +474,41 @@ test("fails an interface-pinned task whose evidence class is not red-green", () 
 test("fails any red-green task whose brief pins no fenced block", () => {
   const r = run(COMPLETE.replace('- [ ] step\n```js\ntest("x", () => {});\n```\n', "- [ ] step\n"));
   assert.equal(r.code, 1);
-  assert.match(r.out, /Task 1: a red-green task pins its complete failing test code in a fenced block, and this brief has none/);
+  assert.match(r.out, /Task 1: a red-green task pins the failing test itself in a fenced block, not only the gate command/);
+});
+
+const GATE_ONLY = COMPLETE.replace(
+  '- [ ] step\n```js\ntest("x", () => {});\n```\n',
+  "- [ ] Write a test that covers the cases\n```bash\nnode --test tests/unit/a.test.mjs\n```\n",
+);
+const NO_TEST_CODE = /Task 1: a red-green task pins the failing test itself in a fenced block, not only the gate command/;
+
+test("fails a red-green task whose only fenced block is its bash gate command", () => {
+  const r = run(GATE_ONLY);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, NO_TEST_CODE);
+});
+
+test("fails a red-green task whose only fence is an unlabelled block of command lines", () => {
+  const r = run(GATE_ONLY.replace("```bash", "```"));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, NO_TEST_CODE);
+});
+
+test("passes a red-green task that pins a js test fence next to its bash gate fence", () => {
+  const r = run(GATE_ONLY.replace("## Dispatch Map", '```js\ntest("x", () => {});\n```\n## Dispatch Map'));
+  assert.equal(r.code, 0, r.out);
+});
+
+test("passes a red-green task whose test fence is unlabelled or in another language", () => {
+  const body = GATE_ONLY.replace("## Dispatch Map", "```%s\ntest(\"x\", () => {});\n```\n## Dispatch Map");
+  for (const info of ["", "ts", "mjs", "python"])
+    assert.equal(run(body.replace("%s", info)).code, 0, `fence info "${info}"`);
+});
+
+test("a green-green task with only a bash gate fence still passes", () => {
+  const r = run(GATE_ONLY.replace("**Evidence:** red-green", "**Evidence:** green-green (behavior-preserving)"));
+  assert.equal(r.code, 0, r.out);
 });
 
 test("passes a code-pinned task with a reason, on any evidence class", () => {
