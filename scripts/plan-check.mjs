@@ -57,7 +57,7 @@ export const LEG_HELP = Object.freeze({
 });
 
 const OVERRIDE_FORMS = [
-  "- Blast-radius override: <changed-file> [→ <referencer>] — <reason>",
+  "- Blast-radius override: <changed-file> [→ <referencer>[, <referencer>…]] — <reason>",
   "- Content-coupling override: Task B → <file> (Task A) — <reason>",
   "- Budget-fixture override: <surface-or-fixture> — <reason>",
   "- Citation override: <path> — <reason>",

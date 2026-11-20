@@ -123,7 +123,7 @@ test("a passing plan records gate-ran pass with no legs field", () => {
 
 function referencerRepo() {
   const repo = realpathSync(makeTempDir("plan-check-repo"));
-  writeInto(repo, "lib/use.mjs", 'import data from "./a.txt";\n');
+  writeInto(repo, "lib/use.mjs", 'import data from "../src/a.txt";\n');
   return repo;
 }
 const OVERRIDE = "- Blast-radius override: src/a.txt → lib/use.mjs — it only reads the file's bytes\n\n";
@@ -304,7 +304,7 @@ test("--help prints every leg's check in LEGS order and the five override forms,
   assert.match(r.stdout, /^budgetFixtures: .*docs\/decisions\/README\.md/m);
   assert.equal(lines[12], "--draft: the path is one drafted task file; runs codeBlocks, briefCompleteness, budgetFixtures, authoredClaims, briefFacts and records nothing.");
   assert.deepEqual(lines.slice(13, 20), ["", "Overrides (each needs a reason):",
-    "- Blast-radius override: <changed-file> [→ <referencer>] — <reason>",
+    "- Blast-radius override: <changed-file> [→ <referencer>[, <referencer>…]] — <reason>",
     "- Content-coupling override: Task B → <file> (Task A) — <reason>",
     "- Budget-fixture override: <surface-or-fixture> — <reason>",
     "- Citation override: <path> — <reason>",
