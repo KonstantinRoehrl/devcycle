@@ -5,6 +5,39 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-20 — `planningBudgetUSD` sets a dollar ceiling on planning (#450)
+
+**Decision:** Decision D5 adds a twentieth knob, `planningBudgetUSD`: a `number` userConfig whose default `0`
+means no budget. It resolves through the new `usd` kind in `scripts/resolve-knobs.mjs`, and it is not `live`, so
+`--compare` reports a mid-cycle change as drift, as it does for `planningStrategy`.
+
+**Why:** the projected-cost gate (spec §9.10) asks only when a budget is set, and a plain `number` keeps the
+loader accepting the manifest (the 0.17.0 `integer` rejection).
+
+**Budgets:** each entry command grows by one resolver line and `references/config.md` by one roster row, which every
+closure citing it carries, and `commands/continue.md` passes its 186-line ceiling.
+
+```text
+budget: surface-budget.json surfaceTotal 7206
+budget: surface-budget.json commandMax 187
+budget: context-budget.json commands/continue.md 76251
+budget: context-budget.json commands/cycle.md 89406
+budget: context-budget.json commands/learn.md 17884
+budget: context-budget.json commands/maintain.md 19063
+budget: context-budget.json commands/onboard.md 18172
+budget: context-budget.json commands/reconcile.md 25609
+budget: context-budget.json commands/review.md 26239
+budget: context-budget.json commands/verify.md 25337
+budget: context-budget.json playbooks/executing-waves.md 122152
+budget: context-budget.json playbooks/finishing-the-cycle.md 53465
+budget: context-budget.json playbooks/learning-from-sessions.md 66847
+budget: context-budget.json playbooks/maintaining-the-repo.md 68902
+budget: context-budget.json playbooks/onboarding-a-repo.md 31715
+budget: context-budget.json playbooks/reviewing-the-branch.md 61773
+budget: context-budget.json playbooks/verifying-on-device.md 67077
+budget: context-budget.json references/config.md 15242
+```
+
 ## 2026-11-20 — Phase 2b ships without its benchmark pass (#443, #447)
 
 **Decision:** Decision D9: Phase 2b merges with no paid `plan-bench` pass of the `grouped` or `grouped-fork`
