@@ -490,7 +490,12 @@ export const TEST_CODE_INFO = new Set([
 
 // A line that declares or calls a test in any of the runners above. Each alternative is anchored to
 // the line start so an implementation's `RE.test(x)`, a comment or an import never reads as a test.
-export const TEST_IDIOM_RE = /^\s*(?:(?:test|it|describe)(?:\.\w+)*\s*\(|assert\s*[.(]|expect\s*\(|def test_|func Test|#\[test\])/m;
+// An `await`, `async`, `export [default]` or `const|let|var name =` prefix may precede the call
+// (`await expect(f()).rejects`, `export const x = test(...)`), but the call itself must stay a bare
+// runner call: `const ok = RE.test(x)` is still not a test. `.test(` counts only on the runner
+// namespaces Deno, QUnit and Bun; a bare `assert expr` is a Python assert statement, and `async def
+// test_` is covered by the `async` prefix.
+export const TEST_IDIOM_RE = /^\s*(?:await\s+|async\s+|export\s+(?:default\s+)?|(?:const|let|var)\s+\w+\s*=\s*(?:await\s+)?)*(?:(?:test|it|describe)(?:\.\w+)*\s*\(|(?:Deno|QUnit|Bun)\.test\s*\(|assert\s*[.(]|assert[ \t]+\S|expect\s*\(|def test_|func Test|#\[test\])/m;
 
 // The 0-based line indexes of the fences a red-green task writes to state its failing test: a closed
 // fence in a language, whose lines between the fence lines read as a test.

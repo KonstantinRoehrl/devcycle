@@ -655,9 +655,24 @@ test("TEST_CODE_INFO names languages and TEST_IDIOM_RE finds a test", () => {
 });
 
 test("TEST_IDIOM_RE matches a line that declares or calls a test, never an implementation's .test call, comment or import", () => {
-  for (const s of ["if (TOKEN_RE.test(line)) return true;", "const ok = RE.test(x);", "// assert nothing", 'import assert from "node:assert/strict";'])
+  for (const s of [
+    "if (TOKEN_RE.test(line)) return true;", "const ok = RE.test(x);", "const ok = RE.test(x)", "const ok = await RE.test(x);",
+    "export const ok = RE.test(x);", "const ok = checker.test(x);", "// assert nothing", 'import assert from "node:assert/strict";',
+    "const ok = RE\n  .test(x);", "Foo.test('x', f)",
+  ])
     assert.ok(!TEST_IDIOM_RE.test(s), s);
   for (const s of ["  it('y', f)", 'const a = 1;\ntest("x", () => {})', "  it.only('y', f)", "  describe.skip('z', f)", "\tassert(ok)", "  expect(x).toBe(1)"])
+    assert.ok(TEST_IDIOM_RE.test(s), s);
+});
+
+test("TEST_IDIOM_RE still matches async python tests, runner-namespace .test calls, awaited and declared tests and a bare assert", () => {
+  for (const s of [
+    "@pytest.mark.asyncio\nasync def test_add():\n    assert await add(1,2)==3",
+    "Deno.test('x', () => {\n  assertEquals(1,1);\n});", "QUnit.test('x', () => {});", "  Bun.test('x', f)",
+    "await assert.rejects(f(), /x/);", "await expect(f()).rejects.toThrow();",
+    "assert add(1,2) == 3",
+    "export const x = test('a', () => {})", "const t = it('b', f)", "export default test('c', f)", "let u = await it('d', f)",
+  ])
     assert.ok(TEST_IDIOM_RE.test(s), s);
 });
 
@@ -697,6 +712,19 @@ test("nonTestFenceShare counts a red-green implementation fence whose only idiom
     assert.ok(fenceShare(plan) > 0.5, inner);
     assert.equal(nonTestFenceShare(plan), fenceShare(plan), inner);
   }
+});
+
+test("nonTestFenceShare exempts a pytest-asyncio and a Deno.test fence, and still counts an implementation fence that assigns RE.test(x)", () => {
+  const asyncPy = fenceOf("py", "@pytest.mark.asyncio\nasync def test_add():\n    assert await add(1,2)==3");
+  const deno = fenceOf("ts", "Deno.test('x', () => {\n  assertEquals(1,1);\n});");
+  const plan = `# Plan\n\n${taskOf(1, "red-green", asyncPy.repeat(5), deno.repeat(5))}`;
+  assert.ok(fenceShare(plan) > 0.5);
+  assert.equal(nonTestFenceShare(plan), 0);
+
+  const impl = fenceOf("js", "function check(x) {\n  const ok = RE.test(x);\n  return ok;\n}").repeat(5);
+  const implPlan = `# Plan\n\n${taskOf(1, "red-green", impl)}`;
+  assert.ok(fenceShare(implPlan) > 0.5);
+  assert.equal(nonTestFenceShare(implPlan), fenceShare(implPlan));
 });
 
 test("nonTestFenceShare exempts only the red-green task's own fences", () => {
