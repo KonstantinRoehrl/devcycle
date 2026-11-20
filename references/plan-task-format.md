@@ -22,8 +22,8 @@ planning and filled with the task's matched lessons by `task-dispatch.mjs` at di
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/blast-radius-check.mjs" --scan <changed-file…> [--symbol <name>…]`
 on the files it modifies. It walks every text code file and matches each declared symbol and the
 basename, with or without its extension; `--symbol` adds a name it misses. Every consumer, subclass
-and test it lists goes into the block, or gets a `Blast-radius override` line with a reason. It is
-advisory: the plan gate (`plan-check.mjs`) still checks the block.
+and test it lists goes into the block, or gets a `Blast-radius override` line with a reason. Advisory:
+`plan-check.mjs` still checks the block.
 
 **No placeholders.** None of these may appear: "TBD", "TODO", "implement later", "fill in details";
 "add appropriate error handling" / "add validation" / "handle edge cases"; "write tests for the above"
@@ -57,12 +57,12 @@ suite run is step 1. Never a commit step.
   the instruction, the concrete file list, and the verifyCommand. Executing-waves then runs the task
   through `workflows/mechanical-sweep.js` instead of dispatching an implementer, so the evidence
   class stays orthogonal and is typically `green-green (behavior-preserving)`. Any per-file judgment
-  in the rule disqualifies the marker — leave the line off and let a normal implementer take the
-  task. Wave placement rules are unchanged.
+  in the rule disqualifies the marker; a normal implementer takes the
+  task.
 
 ## Per-task checks
 
-Run on each task before it joins the plan, fixing what they find inline:
+Run on each task before it joins the plan, fixing findings inline:
 
 1. **Placeholder scan:** search the task for the failures above and fix them.
 2. **Factual-claim accuracy:** every load-bearing plan-authored claim — file/section targets,
@@ -72,5 +72,5 @@ Run on each task before it joins the plan, fixing what they find inline:
    `authoredClaims` leg — a blocking lint that flags an unguarded `path.ext:line` reference or a
    bare count claim, cleared by a `(verified: <cmd>)` or `(assumption)` marker on the same or an
    adjacent line.
-3. **Assumed-tooling and pinned-code cross-check:** every tool or pattern a brief assumes (mock approach, a lint gate such as `prettier --check`, a named test-helper identifier) exists and is accepted by this repo's toolchain — an invented identifier or a rejected pattern is an unverified authored claim (item 2). Verify each against the repo before dispatch. Every command a step prescribes must also be one a guarded dispatch may run: `hooks/block-destructive-git.mjs` decides, and the plan gate's `briefCompleteness` leg notes each one it denies. For each task, run every side-effect-free command a brief pins, inline or fenced, and compare each pinned block with the quality-constraint ids its task lists. Inline commands carry no gate, so dry-running them is this item's job alone, and `briefCompleteness` checks only that fields are present, so the two never overlap.
-4. **Per-draft gate:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-check.mjs" --draft <task file>`. A task joins the plan only once it passes or carries an override line.
+3. **Assumed-tooling and pinned-code cross-check:** every tool or pattern a brief assumes (mock approach, a lint gate such as `prettier --check`, a named test-helper identifier) exists and is accepted by this repo's toolchain — an invented identifier or rejected pattern is an unverified claim (item 2); verify each against the repo. Every command a step prescribes must also be one a guarded dispatch may run: `hooks/block-destructive-git.mjs` decides, and the plan gate's `briefCompleteness` leg notes each one it denies. For each task, run every side-effect-free command a brief pins, inline or fenced, and compare each pinned block with the quality-constraint ids its task lists. Inline commands carry no gate; dry-running them is this item's job alone.
+4. **Per-draft gate:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-check.mjs" --draft <task file>`. A task joins the plan only once it passes or carries an override line. A path whose producer is a named, undrafted dependency (no `tasks/task-<n>.md` yet) is deferred to the whole-plan gate; any other needs a `Consumes (Task N)` code span or `- Citation override: <path> — <reason>`.

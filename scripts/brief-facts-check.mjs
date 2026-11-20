@@ -3,13 +3,15 @@
 // dispatched. Every cited path resolves and every cited line is within its file, or a
 // `- Citation override:` line says why not, and a call-shaped span nothing defines is a note. Under
 // `draft` (one task file, checked before the plan is assembled) a path a sibling `task-*.md` creates, or
-// the draft's own `- Consumes (Task N):` items name in a code span, counts as created.
+// the draft's own `- Consumes (Task N):` items name in a code span, counts as created. A path still
+// missing is deferred to the whole-plan gate, as a note, while a task the draft depends on has no
+// `task-<n>.md` yet: parallel drafters write their files in no fixed order.
 // See references/plan-task-format.md § Per-task checks; `plan-check.mjs --help` lists the legs.
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { taskBlocks, filesFieldValue, extractFiles, createdFiles, modifiedFiles, testFiles, lineFences, interfaceLines } from "./task-files.mjs";
+import { taskBlocks, taskDependencies, filesFieldValue, extractFiles, createdFiles, modifiedFiles, testFiles, lineFences, interfaceLines } from "./task-files.mjs";
 import { LINE_REF_RE } from "./authored-claims-check.mjs";
 import { GRAMMAR_DIRS, PLUGIN_ROOT_PATH } from "./citation-grammar.mjs";
 import { isMain } from "./is-main.mjs";
@@ -101,6 +103,13 @@ function draftCreatedPaths(planText, planPath) {
   return paths;
 }
 
+// The tasks each task of a draft depends on whose `task-<n>.md` is not beside the draft yet.
+function undraftedDependencies(planText, planPath) {
+  const dir = dirname(resolve(planPath));
+  return new Map(taskBlocks(planText).map(({ num, text }) =>
+    [num, taskDependencies(text).filter((n) => !existsSync(join(dir, `task-${n}.md`)))]));
+}
+
 export function briefFactsLeg(planText, { planPath, repoRoot = process.cwd(), draft = false }) {
   const lines = planText.split("\n");
   const fences = lineFences(planText);
@@ -149,8 +158,13 @@ export function briefFactsLeg(planText, { planPath, repoRoot = process.cwd(), dr
   const unresolved = [...cited.values()].filter(({ path, files, plugin }) =>
     !exists(repoRoot, path) && !(plugin && !files && exists(PLUGIN_ROOT, path)) && !created.has(path));
   const ignored = ignoredPaths([...new Set(unresolved.map(({ path }) => path))], repoRoot);
-  for (const { task, path } of unresolved)
-    if (!ignored.has(path)) report(path, `${who(task)}: cites ${path} — not in the working tree and no task creates it`);
+  const undrafted = draft ? undraftedDependencies(planText, planPath) : new Map();
+  for (const { task, path } of unresolved) {
+    if (ignored.has(path)) continue;
+    const waitingOn = undrafted.get(task) ?? [];
+    if (waitingOn.length > 0) notes.push(`deferred to the whole-plan gate: ${path} (${waitingOn.map((n) => `Task ${n}`).join(", ")} not drafted yet)`);
+    else report(path, `${who(task)}: cites ${path} — not in the working tree and no task creates it`);
+  }
 
   const reported = new Set();
   for (const { task, path, last } of bounds) {

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
+import { briefFactsLeg } from "../../scripts/brief-facts-check.mjs";
 
 const SCRIPT = new URL("../../scripts/brief-facts-check.mjs", import.meta.url).pathname;
 const TEN = "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n";
@@ -151,4 +152,41 @@ test("an unresolved call-shaped span is a note, never a finding; a tracked or pl
 test("a pinned fenced block needs no run marker", () => {
   const r = run(task(1, "**Files:**\n- Create: `src/x.mjs`\n\n```js\nexport const x = 1;\n```\n\n```\nnode --test\n```"));
   assert.equal(r.code, 0, r.out);
+});
+
+// Parallel drafters: a producer's task file may not be written yet when a consumer's gate runs.
+const consumer = (dependencies) => task(3, `**Files:**\n- Modify: \`src/new.mjs\`\n\n**Dependencies:** ${dependencies}`);
+const draftOf = (text, siblings = {}) => {
+  const repo = realpathSync(makeTempDir("bfc-draft-"));
+  for (const [name, body] of Object.entries({ "task-3.md": text, ...siblings })) writeInto(repo, `tasks/${name}`, body);
+  return briefFactsLeg(text, { planPath: join(repo, "tasks/task-3.md"), repoRoot: repo, draft: true });
+};
+const wholePlan = (text) => {
+  const repo = realpathSync(makeTempDir("bfc-whole-"));
+  return briefFactsLeg(text, { planPath: join(repo, "plan.md"), repoRoot: repo });
+};
+
+test("--draft defers a path to the whole-plan gate when a named dependency's task file is not on disk yet", () => {
+  const r = draftOf(consumer("Task 2"));
+  assert.deepEqual(r.findings, []);
+  assert.deepEqual(r.notes, ["deferred to the whole-plan gate: src/new.mjs (Task 2 not drafted yet)"]);
+});
+
+test("--draft still fails a path when the named dependency is on disk and does not create it", () => {
+  const producer = task(2, "**Files:**\n- Create: `src/other.mjs`");
+  const r = draftOf(consumer("Task 2"), { "task-2.md": producer });
+  assert.deepEqual(r.findings, ["Task 3: cites src/new.mjs — not in the working tree and no task creates it"]);
+  assert.deepEqual(r.notes, []);
+});
+
+test("--draft still fails a path when no dependency is absent from disk", () => {
+  for (const dependencies of ["none", "Task 3"]) {
+    const r = draftOf(consumer(dependencies));
+    assert.deepEqual(r.findings, ["Task 3: cites src/new.mjs — not in the working tree and no task creates it"], dependencies);
+  }
+});
+
+test("whole-plan mode never defers a path, whatever its dependencies name", () => {
+  const r = wholePlan(consumer("Task 2"));
+  assert.deepEqual(r.findings, ["Task 3: cites src/new.mjs — not in the working tree and no task creates it"]);
 });
