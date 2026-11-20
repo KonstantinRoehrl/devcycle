@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { roleOf, roundOf, costDelta } from "../../hooks/dispatch-sensor.mjs";
+import { roleOf, roundOf, costDelta, namesModel } from "../../hooks/dispatch-sensor.mjs";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
 import { repoSlug, gitToplevel, hashSession } from "../../scripts/run-record.mjs";
@@ -547,4 +547,19 @@ test("a resumed checker stays checker: only a continued drafter is repair work",
   appendTurn(fx);
   callHook(fx);
   assert.deepEqual(costRows(fx).map((r) => [r.role, r.continuationOf]), [["checker", 0], ["checker", 1]]);
+});
+
+test("namesModel: a named model is explicit; none, empty or inherit is not", () => {
+  assert.equal(namesModel({ model: "haiku" }), true);
+  assert.equal(namesModel({ model: "claude-sonnet-5-5" }), true);
+  for (const sidecar of [{}, { model: "" }, { model: "inherit" }, { model: 3 }]) assert.equal(namesModel(sidecar), false, JSON.stringify(sidecar));
+});
+
+test("a forked drafter's agent-cost row says its model was not named", () => {
+  const fx = fixture();
+  writeSidecar(fx, { agentType: "fork", isFork: true, description: "plan-drafter: Tasks 1-3", model: "inherit" });
+  assert.equal(callHook(fx).status, 0);
+  const [row] = costRows(fx);
+  assert.equal(row.role, "drafter");
+  assert.equal(row.explicitModel, false);
 });
