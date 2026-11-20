@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { writeInto } from "./helpers.mjs";
-import { taskWeight, cutMetrics, groupCut, chooseStrategy, parseCut } from "../../scripts/plan-strategy.mjs";
+import { THRESHOLDS, PROFILE, taskWeight, cutMetrics, groupCut, chooseStrategy, parseCut } from "../../scripts/plan-strategy.mjs";
+import * as planCost from "../../scripts/plan-cost.mjs";
 
 const SCRIPT = new URL("../../scripts/plan-strategy.mjs", import.meta.url).pathname;
 const task = (num, wave, { deps = [], files = [`f${num}.mjs`, `t${num}.mjs`, `g${num}.mjs`], produces = 2, ...flags } = {}) =>
@@ -48,7 +49,7 @@ test("auto checkpoints a coupled or narrow cut above the inline range", () => {
 
 test("auto groups a wide, loosely coupled cut", () => {
   const r = chooseStrategy(wideCut([9, 6]));
-  assert.deepEqual([r.strategy, r.fork, r.groups, r.drafters, r.est], ["grouped", false, 5, 5, 75]);
+  assert.deepEqual([r.strategy, r.fork, r.groups, r.drafters, r.est], ["grouped", false, 5, 5, 2.63]);
 });
 
 test("auto falls back to checkpointed when grouping would need more than ceil(N/3) drafters", () => {
@@ -72,6 +73,32 @@ test("a knob forces its arm, and status-quo keeps per-task drafting from 5 tasks
   assert.deepEqual([chooseStrategy(wideCut([3]), "grouped-fork").strategy, chooseStrategy(wideCut([3]), "grouped-fork").fork], ["grouped", true]);
   const over = chooseStrategy(wideCut([10, 4]), "grouped");
   assert.deepEqual([over.strategy, over.drafters], ["grouped", 6]);
+  assert.match(over.reason, /; warning: 6 drafters is more than ceil\(N\/3\) = 5$/);
+  assert.doesNotMatch(chooseStrategy(wideCut([3]), "grouped").reason, /warning/);
+});
+
+test("a forced grouping warns about a group above the input cap", () => {
+  const heavy = [task(1, 1, { files: Array.from({ length: 40 }, (_, j) => `h${j}`) })];
+  assert.match(chooseStrategy(heavy, "grouped-fork").reason, /; warning: the group of Task 1 needs 208000 input tokens, above the 150000 cap$/);
+});
+
+test("the thresholds are pinned, and a drafter takes at most three tasks even when the input cap would allow more", () => {
+  assert.deepEqual(THRESHOLDS, {
+    inlineMaxTasks: 12, inlineMaxWeight: 30, splitAboveTasks: 25, couplingMin: 0.5, groupWidthMin: 3,
+    maxTasksPerDrafter: 3, maxConcurrent: 4, inputCapTokens: 150000, delegatedFromTasks: 5,
+  });
+  const light = Array.from({ length: 7 }, (_, i) => task(i + 1, 1, { files: [`l${i}`], produces: 0 }));
+  assert.deepEqual(groupCut(light).rounds[0].groups.map((g) => g.tasks), [[1, 2, 3], [4, 5, 6], [7]]);
+});
+
+test("est is the projected planning USD, PROFILE is plan-cost's, and a split has no estimate", () => {
+  assert.equal(PROFILE, planCost.PROFILE);
+  assert.equal(taskWeight, planCost.taskWeight);
+  const r = chooseStrategy(wideCut([12]));
+  assert.equal(r.est, r.projection.usd);
+  assert.equal(r.projection.byRole.coordinator.count, 1);
+  const split = chooseStrategy(wideCut([13, 13]));
+  assert.deepEqual([split.est, split.projection], [null, null]);
 });
 
 test("groupCut packs each wave into groups of at most three tasks, one round per wave", () => {
@@ -122,7 +149,8 @@ test("the CLI prints the decision as JSON and refuses a malformed cut", () => {
   const ok = spawnSync("node", [SCRIPT, good, "--planningStrategy", "auto"], { encoding: "utf8" });
   assert.equal(ok.status, 0, ok.stderr);
   const out = JSON.parse(ok.stdout);
-  assert.deepEqual([out.strategy, out.fork, out.groups, out.drafters, out.est], ["grouped", false, 5, 5, 75]);
+  assert.deepEqual([out.strategy, out.fork, out.groups, out.drafters, out.est], ["grouped", false, 5, 5, 2.63]);
+  assert.deepEqual([out.projection.dispatches, out.projection.calibrated], [6, false]);
   const bad = spawnSync("node", [SCRIPT, writeInto(dir, "bad.json", "{}")], { encoding: "utf8" });
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /plan-strategy: the cut must be a JSON array of tasks/);
