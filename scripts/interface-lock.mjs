@@ -2,7 +2,8 @@
 // The interface lock of the planning-groups design (spec §9.4): once a round of task drafts is
 // accepted, each task's `Produces` items are frozen in <work-dir>/interfaces.lock.md, so a later
 // drafter that consumes a locked task reproduces its signatures verbatim and cannot drift from the
-// plan the earlier round was checked against. A drafter that must change a pinned interface returns
+// plan the earlier round was checked against. A consumer must reproduce a locked span or item
+// exactly, up to whitespace; a fragment of a locked signature does not pass. A drafter that must change a pinned interface returns
 // an interface-delta instead of editing the lock; only the coordinator accepts it, by relocking with
 // `write --relock`. `check` re-reads the task files against the lock. A consumer whose producers are
 // all unlocked is left to the plan gate's crossTask leg (cross-task-check.mjs).
@@ -17,12 +18,13 @@ import { interfaceLines, taskBlocks } from "./task-files.mjs";
 import { codeSpans } from "./cross-task-check.mjs";
 import { isPositiveIntegerArg, readTasks } from "./plan-assemble.mjs";
 
-const USAGE = "usage: interface-lock.mjs write <work-dir> --round <n> [--tasks 1,2] [--relock] | check <work-dir>";
+const USAGE = "usage: interface-lock.mjs write <work-dir> --round <n> [--tasks 1,2] [--relock] | check <work-dir> [--tasks 1,2]";
 const LOCK_FILE = "interfaces.lock.md";
 const ENTRY_HEADING_RE = /^## Task (\d+) \(round (\d+)\)$/;
 const NO_PRODUCES = "(no Produces)";
 
 const byNum = (a, b) => a.num - b.num;
+const collapse = (text) => text.replace(/\s+/g, " ").trim();
 const sameItems = (a, b) => a.length === b.length && a.every((item, i) => item === b[i]);
 
 export function extractLock(blocks, round, nums) {
@@ -60,7 +62,7 @@ export function mergeLock(existing, fresh, { relock = false } = {}) {
   return { entries: [...held.values()].sort(byNum), errors };
 }
 
-export function checkLock({ lockText, blocks }) {
+export function checkLock({ lockText, blocks, tasks }) {
   const findings = [];
   const entries = new Map(parseLock(lockText).map((entry) => [entry.num, entry]));
   const taskText = new Map(blocks.map(({ num, text }) => [num, text]));
@@ -70,13 +72,15 @@ export function checkLock({ lockText, blocks }) {
       findings.push(`Task ${num}: Produces differ from the interface lock (round ${round}); a drafter that must change a pinned interface returns an interface-delta, and the coordinator relocks`);
   }
   for (const { num, text } of blocks) {
+    if (tasks !== undefined && !tasks.includes(num)) continue;
     for (const { from, text: item } of interfaceLines(text).consumes) {
       const locked = from.filter((p) => entries.has(p));
       if (locked.length === 0) continue;
-      const carried = locked.flatMap((p) => entries.get(p).produces).join("\n");
+      const items = locked.flatMap((p) => entries.get(p).produces);
+      const carried = new Set(items.flatMap((produced) => [produced, ...codeSpans(produced)]).map(collapse));
       const owners = locked.join("+");
       for (const span of codeSpans(item))
-        if (!carried.includes(span))
+        if (!carried.has(collapse(span)))
           findings.push(`Task ${num}: consumes \`${span}\` from Task ${owners}, which the interface lock's Task ${owners} entry does not carry verbatim`);
     }
   }
@@ -103,15 +107,21 @@ function readLock(lockPath) {
   return existsSync(lockPath) ? readFileSync(lockPath, "utf8") : null;
 }
 
+function parseTasks(flag) {
+  if (flag === undefined) return undefined;
+  const parts = flag.split(",").map((part) => part.trim());
+  if (!parts.every(isPositiveIntegerArg)) usage("--tasks takes task numbers like 1,2");
+  return parts.map(Number);
+}
+
+function requireTaskFiles(blocks, nums) {
+  for (const num of nums) if (!blocks.some((block) => block.num === num)) fail(`Task ${num} has no task file`);
+}
+
 function write(workDir, flags) {
   if (flags["--round"] === undefined || !isPositiveIntegerArg(flags["--round"])) usage("--round takes a positive integer");
   const round = Number(flags["--round"]);
-  let nums;
-  if (flags["--tasks"] !== undefined) {
-    const parts = flags["--tasks"].split(",").map((part) => part.trim());
-    if (!parts.every(isPositiveIntegerArg)) usage("--tasks takes task numbers like 1,2");
-    nums = parts.map(Number);
-  }
+  let nums = parseTasks(flags["--tasks"]);
   const lockPath = join(workDir, LOCK_FILE);
   const lockText = readLock(lockPath);
   const existing = lockText === null ? [] : parseLock(lockText);
@@ -121,7 +131,7 @@ function write(workDir, flags) {
     nums = blocks.map(({ num }) => num).filter((num) => !locked.has(num));
     if (nums.length === 0) fail("no unlocked task files to lock");
   } else {
-    for (const num of nums) if (!blocks.some((block) => block.num === num)) fail(`Task ${num} has no task file`);
+    requireTaskFiles(blocks, nums);
   }
   const fresh = extractLock(blocks, round, nums);
   const { entries, errors } = mergeLock(existing, fresh, { relock: flags["--relock"] === true });
@@ -133,10 +143,13 @@ function write(workDir, flags) {
   console.log(`interface-lock: locked ${fresh.map(({ num }) => `Task ${num} (round ${round})`).join(", ")} in ${lockPath}`);
 }
 
-function check(workDir) {
+function check(workDir, flags) {
+  const tasks = parseTasks(flags["--tasks"]);
   const lockText = readLock(join(workDir, LOCK_FILE));
   if (lockText === null) fail(`no ${LOCK_FILE} in ${workDir}`);
-  const { findings } = checkLock({ lockText, blocks: readBlocks(workDir) });
+  const blocks = readBlocks(workDir);
+  if (tasks !== undefined) requireTaskFiles(blocks, tasks);
+  const { findings } = checkLock({ lockText, blocks, tasks });
   if (findings.length) {
     for (const finding of findings) console.error(`interface-lock: ${finding}`);
     process.exit(1);
@@ -156,8 +169,8 @@ function main(argv) {
   if (positionals.length !== 2) usage();
   if (command === "write") return write(workDir, flags);
   if (command === "check") {
-    if (Object.keys(flags).length) usage("check takes no flags");
-    return check(workDir);
+    if (Object.keys(flags).some((flag) => flag !== "--tasks")) usage("check takes only --tasks");
+    return check(workDir, flags);
   }
   return usage();
 }
