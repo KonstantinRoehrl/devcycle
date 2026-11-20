@@ -17,14 +17,19 @@ each segment's tasks are written, and never clears; Phase 3 adds the clear. Deci
 `scripts/plan-strategy.mjs`, which the benchmark pass tunes and records here. `grouped-fork` is an experimental
 `planningStrategy` value and benchmark arm: its result is recorded in this log whichever way it goes, once the
 benchmark pass has run.
+Decision D5: a group packs the tasks of one wave, because a wave's tasks are file-disjoint and
+dependency-free; what a task consumes from an earlier wave reaches its drafter by the interface lock
+(`scripts/interface-lock.mjs`), which also makes a drafter return an `interface-delta` for a pin it cannot hold.
+Decision D6: the edge checker is one fast-tier dispatch per batch of at most 8 producer→consumer pairs
+(`plan-assemble.mjs edges --batch`), never escalated for Files above 5; the scripted legs cover Files.
 
 **Why:** Plan A's medium replay: seven drafters alone made P3 1.0. The decision table keeps small cuts inline and
-groups only wide, loosely coupled ones.
+groups only wide, loosely coupled ones. Four checker dispatches all escalated to the session tier, $2.12 against $0.06.
 
 **Budgets:**
 
 ```text
-budget: surface-budget.json surfaceTotal 7169
+budget: surface-budget.json surfaceTotal 7197
 budget: context-budget.json commands/cycle.md 89273
 budget: context-budget.json commands/learn.md 17751
 budget: context-budget.json commands/maintain.md 18930
@@ -32,13 +37,17 @@ budget: context-budget.json commands/onboard.md 18039
 budget: context-budget.json commands/reconcile.md 25476
 budget: context-budget.json commands/review.md 26106
 budget: context-budget.json commands/verify.md 25204
+budget: context-budget.json playbooks/executing-waves.md 122078
 budget: context-budget.json playbooks/finishing-the-cycle.md 53391
+budget: context-budget.json playbooks/maintaining-the-repo.md 68828
 budget: context-budget.json playbooks/onboarding-a-repo.md 31641
-budget: context-budget.json playbooks/planning-waves.md 66930
-budget: context-budget.json playbooks/reviewing-the-branch.md 61680
+budget: context-budget.json playbooks/planning-waves.md 68816
+budget: context-budget.json playbooks/reviewing-the-branch.md 61699
 budget: context-budget.json playbooks/scoping-the-request.md 37009
+budget: context-budget.json playbooks/taking-the-fast-path.md 54953
 budget: context-budget.json playbooks/verifying-on-device.md 67003
 budget: context-budget.json references/config.md 15168
+budget: context-budget.json references/model-routing.md 10584
 ```
 
 ## 2026-11-20 — P9 counts rework, not re-runs; plan-stats records the non-test fence share (#443, #447)

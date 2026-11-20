@@ -5,6 +5,9 @@
 import { taskBlocks, fencedBlocks, lineFences, interfaceLines } from "./task-files.mjs";
 
 const SPAN_RE = /`([^`\n]+)`/g;
+
+// Each backticked span of `text`, without its backticks.
+export const codeSpans = (text) => [...text.matchAll(SPAN_RE)].map((m) => m[1]);
 const PLACEHOLDER_RES = [/\b(?:TBD|TODO)\b/g, /\b(?:implement later|fill in details|add appropriate error handling|add validation|handle edge cases)\b/gi];
 const BACK_REFERENCE_RE = /\b(?:similar to|same as) Task \d+\b/gi;
 const PROSE_FENCE_INFOS = new Set(["text", "txt", "markdown", "md"]);
@@ -22,7 +25,7 @@ function consumesFindings(blocks) {
       const missing = from.filter((p) => !defined.has(p));
       for (const p of missing) findings.push(`Task ${num}: consumes from Task ${p}, which the plan does not define`);
       if (missing.length) continue;
-      const spans = [...item.matchAll(SPAN_RE)].map((m) => m[1]);
+      const spans = codeSpans(item);
       if (spans.length === 0) {
         notes.push(`Task ${num}: a Consumes (Task ${from.join("+")}) line pins no code span, so it cannot be checked`);
         continue;

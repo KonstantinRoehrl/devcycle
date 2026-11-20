@@ -30,23 +30,36 @@ test("it writes only its own drafts and never stages, commits or pushes", () => 
   assert.ok(/\bstages?\b/i.test(agent) && /\bcommits?\b/i.test(agent) && /\bpush(es)?\b/i.test(agent));
 });
 
-test("it returns the result-file envelope and stops on a pinned interface it cannot honour", () => {
+test("it returns the result-file envelope, stops on a pin it cannot honour and returns an interface-delta for a locked one", () => {
   assert.match(agent, /result-file/);
   assert.match(agent, /read-section\.mjs" references\/delegation\.md return-envelopes/);
   assert.match(agent, /cannot hold, stop and say\s+so in a one-line summary beginning `stopped: <what pin cannot hold>`/);
   assert.match(agent, /write no draft for that\s+task/);
-  assert.doesNotMatch(agent, /interface-delta/);
+  assert.match(agent, /`interface-delta: Task <n> <what>`/);
+  assert.match(agent, /interfaces\.lock\.md/);
+  assert.match(agent, /interface-lock\.mjs" check/);
 });
 
 test("it reports per output.md like its sibling agents", () => {
   assert.match(agent, /^Report per `\$\{CLAUDE_PLUGIN_ROOT\}\/references\/output\.md`\.$/m);
 });
 
-test("delegated planning consumes the stop and names the plan-header work file", () => {
+test("delegated planning consumes the stop, the delta and the lock, and batches the edge checker", () => {
   const doc = readFileSync(join(root, "references/delegated-planning.md"), "utf8");
   assert.match(doc, /summary begins `stopped: <what pin cannot hold>` wrote no draft/);
   assert.match(doc, /assembles only once every dispatched task has its file/);
   assert.match(doc, /writes `plan-header\.md`[^]*?before it dispatches any drafter/);
   assert.match(doc, /`pack\.md` and `plan-header\.md`/);
-  assert.doesNotMatch(doc, /interface-delta/);
+  assert.match(doc, /## Grouped drafting/);
+  assert.match(doc, /interface-lock\.mjs" write/);
+  assert.match(doc, /`interface-delta: Task <n> <what>`/);
+  assert.match(doc, /plan-assemble\.mjs" edges [^\n]*--batch 8/);
+  assert.match(doc, /`plan-checker: round <n> — batch <b>`/);
+  assert.doesNotMatch(doc, /one fast-tier checker dispatch described\s+`plan-checker: round <n> — Task/);
+});
+
+test("model routing sends every edge checker batch to the fast tier", () => {
+  const routing = readFileSync(join(root, "references/model-routing.md"), "utf8");
+  assert.match(routing, /\| Edge checker, one per batch of producer→consumer pairs \| `checker` \| fast \|/);
+  assert.doesNotMatch(routing, /unless the pair's Files together exceed 5/);
 });

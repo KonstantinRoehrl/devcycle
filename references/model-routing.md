@@ -145,10 +145,10 @@ configured default subagent model cannot take it over. `references/delegated-pla
 | Dispatch | Role | Tier |
 | --- | --- | --- |
 | Research map, spike | `research`, `spike` | fast; `Explore`, since neither writes a file (the coordinator persists the result) |
-| Drafter of a task that is not `code-pinned`, with Files ≤ 5 | `drafter` | fast |
-| Drafter of a `code-pinned` task, a new abstraction, Files > 5 or cross-package scope | `drafter` | session |
+| Drafter, alone or of a group, whose tasks are not `code-pinned` and each have Files ≤ 5 | `drafter` | fast |
+| Drafter, alone or of a group, with a `code-pinned` task, a new abstraction, Files > 5 or cross-package scope | `drafter` | session |
 | Repair, a finding sent back to its drafter by `SendMessage` | `repair` | that drafter's tier |
-| Edge checker, one per producer→consumer pair | `checker` | fast, unless the pair's Files together exceed 5 |
+| Edge checker, one per batch of producer→consumer pairs | `checker` | fast |
 | Coordinator | — | session (unchanged) |
 
 A planning dispatch's audit record is its `agent-cost` run-record row: the `model` and `explicitModel`
