@@ -5,6 +5,28 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-20 — P8 measures non-test code fences (#443, #447)
+
+**Decision:** Decision D3: the `proportion` leg of `scripts/plan-check.mjs` measures the non-test
+code-fence share, which is the gross share less every exempt fence. A fence is exempt when it sits in a
+`red-green` task, its info word names a programming language, and the lines between its fence lines read
+as a test. The leg warns above 20% and fails above 30% on that share; the byte ratio stays at 5× and 8×.
+The gross share is still recorded. P8's bar reads the non-test share at 20%, and a row recorded before
+this change is judged on its gross share at 30%.
+
+**Why:** failing-test fences are 26–29 points of a contract-compliant medium plan's 39% share, so the
+gross 30% and 45% figures cannot be met by a plan that follows the 2a rule. The spike evidence is local
+and cited by name only: `.devcycle/plan-work/0537d39d2097d3b6/spikes/1.md`.
+
+**Supersedes:** the Contract-only plans entry's initial 5× / 30% warn and 8× / 45% fail figures, the
+share part only.
+
+**Budgets:**
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 66184
+```
+
 ## 2026-11-19 — Contract-only plans: the 0.32.0 full-code default reversed (#446, #448)
 
 **Decision:** a plan pins the contract, not the implementation. A `red-green` task pins its full

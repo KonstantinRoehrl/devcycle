@@ -553,7 +553,7 @@ test("modifiedFiles reads only the paths a Modify label declares, not an annotat
   assert.deepEqual([...modifiedFiles("- Create: `src/a.mjs`\n- Modify: `src/b.mjs` (drop `x.y` from the list)\n- Test: `tests/unit/a.test.mjs`")], ["src/b.mjs"]);
 });
 
-import { taskDependencies, interfaceLines, planEdges, fenceShare } from "../../scripts/task-files.mjs";
+import { taskDependencies, interfaceLines, planEdges, fenceShare, nonTestFenceShare, isRedGreen, TEST_CODE_INFO, TEST_IDIOM_RE } from "../../scripts/task-files.mjs";
 
 const depBlock = (deps) => `### Task 9: X\n\n**Files:**\n- Modify: a.mjs\n\n**Dependencies:** ${deps}\n**Evidence:** red-green\n`;
 
@@ -632,4 +632,59 @@ test("interfaceLines reads producing tasks only from a Task or Tasks label, neve
     consumes: [{ from: [], text: "`k()`." }, { from: [], text: "`m()`." }],
     produces: [],
   });
+});
+
+const tick = "```";
+const fenceOf = (info, body) => `${tick}${info}\n${body}\n${tick}\n`;
+const taskOf = (n, evidence, ...fences) => `### Task ${n}: t\n\n**Evidence:** ${evidence}\n\n${fences.join("\n")}\n`;
+const TEST_BODY = 'test("adds", () => {\n  assert.equal(add(1, 2), 3);\n});';
+const share = (bytes, plan) => Math.round((bytes / Buffer.byteLength(plan)) * 1000) / 1000;
+
+test("isRedGreen reads the first word of the Evidence field", () => {
+  assert.equal(isRedGreen(taskOf(1, "red-green")), true);
+  assert.equal(isRedGreen(taskOf(1, "green-green (behavior-preserving)")), false);
+  assert.equal(isRedGreen("### Task 1: t\n"), false);
+});
+
+test("TEST_CODE_INFO names languages and TEST_IDIOM_RE finds a test", () => {
+  for (const info of ["js", "mjs", "ts", "py", "go", "rs"]) assert.ok(TEST_CODE_INFO.has(info), info);
+  for (const info of ["", "text", "md", "markdown", "json", "bash", "sh", "output"]) assert.ok(!TEST_CODE_INFO.has(info), info);
+  for (const s of ['test("x", () => {})', "it('y', f)", "describe ( 'z'", "assert.equal(a, b)", "expect(x).toBe(1)", "def test_add():", "func TestAdd(t *testing.T)", "#[test]"])
+    assert.ok(TEST_IDIOM_RE.test(s), s);
+  assert.ok(!TEST_IDIOM_RE.test("export function add(a, b) { return a + b; }"));
+});
+
+test("nonTestFenceShare exempts a red-green task's failing-test fence and nothing else", () => {
+  const testOnly = `# Plan\n\n${taskOf(1, "red-green", fenceOf("js", TEST_BODY))}`;
+  assert.ok(fenceShare(testOnly) > 0.3);
+  assert.equal(nonTestFenceShare(testOnly), 0);
+
+  const docFence = fenceOf("md", "## A heading quoted from a doc\n\nSome prose.");
+  const implFence = fenceOf("js", "export function add(a, b) {\n  return a + b;\n}");
+  const mixed = `# Plan\n\n${taskOf(1, "red-green", fenceOf("js", TEST_BODY), docFence, implFence)}`;
+  assert.equal(nonTestFenceShare(mixed), share(Buffer.byteLength(docFence) + Buffer.byteLength(implFence), mixed));
+
+  const greenGreen = `# Plan\n\n${taskOf(1, "green-green (behavior-preserving)", fenceOf("js", TEST_BODY))}`;
+  assert.equal(nonTestFenceShare(greenGreen), fenceShare(greenGreen));
+  const outsideTask = `# Plan\n\n${fenceOf("js", TEST_BODY)}`;
+  assert.equal(nonTestFenceShare(outsideTask), fenceShare(outsideTask));
+  assert.equal(nonTestFenceShare(""), 0);
+});
+
+test("nonTestFenceShare exempts only a closed language fence whose body reads as a test", () => {
+  const counted = (...fences) => {
+    const plan = `# Plan\n\n${taskOf(1, "red-green", ...fences)}`;
+    return nonTestFenceShare(plan) === fenceShare(plan);
+  };
+  assert.ok(counted(fenceOf("md", TEST_BODY)), "a non-language fence holding test text still counts");
+  assert.ok(counted(fenceOf("", TEST_BODY)), "a fence with no info word still counts");
+  assert.ok(counted(fenceOf("js", "export const add = (a, b) => a + b;")), "a language fence with no test idiom still counts");
+  assert.ok(counted(`${tick}js\n${TEST_BODY}\n`), "a fence never closed still counts");
+  assert.ok(!counted(fenceOf("py", "def test_add():\n    assert add(1, 2) == 3")), "a python test is exempt");
+});
+
+test("nonTestFenceShare exempts only the red-green task's own fences", () => {
+  const second = taskOf(2, "green-green (behavior-preserving)", fenceOf("js", TEST_BODY));
+  const plan = `# Plan\n\n${taskOf(1, "red-green", fenceOf("js", TEST_BODY))}\n${second}`;
+  assert.equal(nonTestFenceShare(plan), share(Buffer.byteLength(fenceOf("js", TEST_BODY)), plan));
 });

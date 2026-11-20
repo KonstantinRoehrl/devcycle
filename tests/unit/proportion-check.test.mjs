@@ -7,8 +7,8 @@ const prose = (bytes) => `${"p".repeat(bytes - 1)}\n`;
 const fenced = (proseBytes, bodyBytes) => `${prose(proseBytes)}\`\`\`js\n${"x".repeat(bodyBytes - 1)}\n\`\`\`\n`;
 const REMEDY = 'cut code bodies to the contract, or record "- Proportion override: <reason>"';
 
-test("the thresholds are the spec's initial figures, frozen", () => {
-  assert.deepEqual(PROPORTION, { warnRatio: 5, failRatio: 8, warnFenceShare: 0.3, failFenceShare: 0.45 });
+test("the thresholds are Phase 2b's tuned figures, frozen", () => {
+  assert.deepEqual(PROPORTION, { warnRatio: 5, failRatio: 8, warnFenceShare: 0.2, failFenceShare: 0.3 });
   assert.ok(Object.isFrozen(PROPORTION));
 });
 
@@ -28,10 +28,15 @@ test("plan/spec above 5× is a note, above 8× a finding only", () => {
   assert.deepEqual(proportionLeg(prose(900), { specText: spec }), { findings: [`plan/spec 9.0× exceeds the 8× limit — ${REMEDY}`], notes: [] });
 });
 
-test("code-fence share above 30% is a note, above 45% a finding only", () => {
-  // 60 prose + 6 + 30 + 4 = 100 bytes, 40 fenced; 50 prose + 6 + 40 + 4 = 100 bytes, 50 fenced.
-  assert.deepEqual(proportionLeg(fenced(60, 30), { specText: spec }), { findings: [], notes: ["code-fence share 40% is above the 30% target"] });
-  assert.deepEqual(proportionLeg(fenced(50, 40), { specText: spec }), { findings: [`code-fence share 50% exceeds the 45% limit — ${REMEDY}`], notes: [] });
+test("non-test code-fence share above 20% is a note, above 30% a finding only", () => {
+  // 75 prose + 6 + 15 + 4 = 100 bytes, 25 fenced; 65 prose + 6 + 25 + 4 = 100 bytes, 35 fenced.
+  assert.deepEqual(proportionLeg(fenced(75, 15), { specText: spec }), { findings: [], notes: ["non-test code-fence share 25% is above the 20% target"] });
+  assert.deepEqual(proportionLeg(fenced(65, 25), { specText: spec }), { findings: [`non-test code-fence share 35% exceeds the 30% limit — ${REMEDY}`], notes: [] });
+});
+
+test("a red-green task's failing-test fence does not count toward the share", () => {
+  const plan = `### Task 1: t\n\n**Evidence:** red-green\n\n\`\`\`js\ntest("x", () => {\n  assert.equal(1, 1);\n${"/".repeat(60)}\n});\n\`\`\`\n`;
+  assert.deepEqual(proportionLeg(plan, { specText: spec }), { findings: [], notes: [] });
 });
 
 test("a reasoned override turns each finding into a note; a reasonless one fails first", () => {

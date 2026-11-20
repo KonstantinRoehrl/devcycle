@@ -114,8 +114,9 @@ re-review pass.
    one that more than one task reproduces belongs in Global Constraints, verbatim in every brief.
 5. **Mirrored-file parity:** diff the pinned blocks where tasks restate logic across mirrored files;
    the `crossTask` leg notes a differing mirrored definition.
-6. **Proportion:** the plan stays within 5× the spec's bytes and 30% code fences; above either, cut
-   code to the contract or record `- Proportion override: <reason>`.
+6. **Proportion:** the plan stays within 5× the spec's bytes and 20% non-test code fences, a red-green
+   task's failing-test fences being exempt; above either, cut code to the contract or record
+   `- Proportion override: <reason>`.
 7. **Plan gate:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-check.mjs" <plan-path> --spec <spec-path>`;
    `plan-check.mjs --help` lists its legs and the override line forms. A non-zero exit is a stop —
    fix the plan or record an override, never hand off around it.

@@ -477,12 +477,54 @@ export function planEdges(planText) {
   return [...edges.values()].sort((a, b) => a.consumer - b.consumer || a.producer - b.producer);
 }
 
-// Bytes inside code fences, the fence lines themselves included, as a share of all bytes. Pairing is
-// fencedBlocks': a ``` or ~~~ fence closes only on its own character, at least as long.
-export function fenceShare(text) {
+// The class is the first word of a task's **Evidence:** value (references/evidence.md § The three
+// evidence classes); a block with no Evidence field is not red-green.
+export const isRedGreen = (block) => (fieldValue(block, "Evidence") ?? "").split(/\s+/)[0] === "red-green";
+
+// Fence info words that name a programming language: a fence of any other kind (markdown, json, a
+// shell session, output, no info word) holds quoted doc text or data, never a test.
+export const TEST_CODE_INFO = new Set([
+  "js", "mjs", "cjs", "javascript", "ts", "mts", "cts", "tsx", "jsx", "typescript", "py", "python", "go", "rs",
+  "rust", "rb", "ruby", "java", "kt", "kotlin", "cs", "csharp", "php", "swift",
+]);
+
+// A test written in any of the runners above: a call to test/it/describe, an assertion, or the
+// language's own test declaration.
+export const TEST_IDIOM_RE = /\b(?:test|it|describe)\s*\(|\bassert\b|\bexpect\s*\(|\bdef test_|\bfunc Test|#\[test\]/;
+
+// The 0-based line indexes of the fences a red-green task writes to state its failing test: a closed
+// fence in a language, whose lines between the fence lines read as a test.
+function exemptTestLines(text) {
+  const exempt = new Set();
+  let cursor = 0;
+  for (const block of taskBlocks(text)) {
+    const start = text.indexOf(block.text, cursor);
+    cursor = start + block.text.length;
+    if (!isRedGreen(block.text)) continue;
+    const blockLines = block.text.split("\n");
+    const firstLine = text.slice(0, start).split("\n").length - 1;
+    for (const fence of fencedBlocks(block.text)) {
+      if (fence.close === null || !TEST_CODE_INFO.has(fence.info)) continue;
+      if (!TEST_IDIOM_RE.test(blockLines.slice(fence.open + 1, fence.close).join("\n"))) continue;
+      for (let i = fence.open; i <= fence.close; i++) exempt.add(firstLine + i);
+    }
+  }
+  return exempt;
+}
+
+// Bytes inside code fences (less any `exempt` lines), the fence lines themselves included, as a share
+// of all bytes. Pairing is fencedBlocks': a ``` or ~~~ fence closes only on its own character, at
+// least as long.
+function shareOfFences(text, exempt = new Set()) {
   const total = Buffer.byteLength(text);
   if (total === 0) return 0;
   const owners = lineFences(text);
-  const fenced = text.split(/(?<=\n)/).reduce((bytes, line, i) => bytes + (owners[i] ? Buffer.byteLength(line) : 0), 0);
+  const fenced = text.split(/(?<=\n)/).reduce((bytes, line, i) => bytes + (owners[i] && !exempt.has(i) ? Buffer.byteLength(line) : 0), 0);
   return Math.round((fenced / total) * 1000) / 1000;
 }
+
+export const fenceShare = (text) => shareOfFences(text);
+
+// fenceShare less the fences a red-green task needs to state its failing test: a plan that follows
+// the contract-only rule still carries those, so they cannot count against its proportion.
+export const nonTestFenceShare = (planText) => shareOfFences(planText, exemptTestLines(planText));
