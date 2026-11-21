@@ -3,7 +3,7 @@
 // a fixture transcript root, so nothing here reads the real ~/.claude.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { hostname } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
@@ -19,6 +19,7 @@ import { DRIVE_LOCK_REL, acquireDriveLock, driveTokenHash, releaseDriveLock } fr
 import { RESULT_REL, holderLiveness } from "../../scripts/drive-result.mjs";
 import { parseLedgerLine } from "../../scripts/task-ledger.mjs";
 import { reviewLoopId } from "../../scripts/review-loop.mjs";
+import { gitToplevel, hashSession, repoSlug } from "../../scripts/run-record.mjs";
 import { ROSTER, formatKnobsLine, resolveKnobs } from "../../scripts/resolve-knobs.mjs";
 
 const ROOT = process.cwd();
@@ -855,9 +856,9 @@ test("continue keeps the session append as its own call beside wave-setup, and w
 
 test("handoff: the row is carried, and the not-ready question is asked only where no other question or driver owns the session", () => {
   const PENDING = "- handoff: pending 2026-10-16T10:00:00Z";
-  assert.deepEqual(setup(cycle()).handoff, { state: "ready", stamp: null, ask: false }, "no row reads as ready");
-  assert.deepEqual(setup(cycle({ state: ["- handoff: ready 2026-10-16T11:00:00Z"] })).handoff, { state: "ready", stamp: "2026-10-16T11:00:00Z", ask: false });
-  assert.deepEqual(setup(cycle({ state: [PENDING] })).handoff, { state: "pending", stamp: "2026-10-16T10:00:00Z", ask: true });
+  assert.deepEqual(setup(cycle()).handoff, { state: "ready", stamp: null, ask: false, uncontrolled: null }, "no row reads as ready");
+  assert.deepEqual(setup(cycle({ state: ["- handoff: ready 2026-10-16T11:00:00Z"] })).handoff, { state: "ready", stamp: "2026-10-16T11:00:00Z", ask: false, uncontrolled: null });
+  assert.deepEqual(setup(cycle({ state: [PENDING] })).handoff, { state: "pending", stamp: "2026-10-16T10:00:00Z", ask: true, uncontrolled: { since: "unknown", label: "unknown" } });
   assert.equal(setup(cycle({ state: [PENDING] }), { knobsLine: knobsWith("manual") }).handoff.ask, true);
   assert.equal(setup(cycle({ state: [PENDING, DRIVE_ROW] })).handoff.ask, true, "a start with no driver end yet still asks");
   const restart = setup(ended(cycle({ state: [PENDING, DRIVE_ROW] }), runEnd("interrupted", { code: 130 })));
@@ -870,6 +871,36 @@ test("handoff: the row is carried, and the not-ready question is asked only wher
     assert.deepEqual([attach.drive.action, attach.handoff.ask], ["attach", false]);
     assert.equal(driven(c).handoff.ask, false, "a driven session never asks");
   });
+});
+
+test("handoff.uncontrolled carries the uncontrolled stop's stamp and label only where the not-ready question is asked", () => {
+  const PENDING = "- handoff: pending 2026-10-16T10:00:00Z";
+  const UPDATED = "- updated: 2026-10-16T09:00:00Z";
+  assert.deepEqual(setup(cycle({ state: [PENDING, UPDATED] })).handoff.uncontrolled, { since: "2026-10-16T09:00:00Z", label: "unknown" }, "no session recorded: dated by updated:");
+  // The run record names an earlier session whose transcript ended on a usage limit.
+  const c = cycle({ state: [PENDING, UPDATED] });
+  const runs = makeTempDir("wave-setup-runs-");
+  const before = process.env.DEVCYCLE_RUNS_DIR;
+  process.env.DEVCYCLE_RUNS_DIR = runs;
+  try {
+    const record = join(runs, repoSlug(gitToplevel(c.repo)), "00000000000000a1.jsonl");
+    mkdirSync(dirname(record), { recursive: true });
+    writeFileSync(record, `${JSON.stringify({ kind: "session", sessionHash: hashSession("sess-last") })}\n`);
+    const config = makeTempDir("wave-setup-config-");
+    mkdirSync(join(config, "projects", "-repo"), { recursive: true });
+    const fixture = new URL("../fixtures/dispatch-health/api-error.jsonl", import.meta.url).pathname;
+    const transcript = join(config, "projects", "-repo", "sess-last.jsonl");
+    writeFileSync(transcript, readFileSync(fixture, "utf8"));
+    utimesSync(transcript, new Date(Date.now() - 60 * 60_000), new Date(Date.now() - 60 * 60_000));
+    const stamp = new Date(JSON.parse(readFileSync(fixture, "utf8").trim().split("\n").at(-1)).timestamp).toISOString().replace(/\.\d{3}Z$/, "Z");
+    assert.deepEqual(setup(c, { env: { CLAUDE_CONFIG_DIR: config } }).handoff.uncontrolled, { since: stamp, label: "usage-limit" });
+  } finally {
+    if (before === undefined) delete process.env.DEVCYCLE_RUNS_DIR;
+    else process.env.DEVCYCLE_RUNS_DIR = before;
+  }
+  const STOPPED = "- stopped: 2026-10-30T10:00:00Z .devcycle/stop.json";
+  assert.equal(setup(cycle({ state: [STOPPED, PENDING, UPDATED, MANUAL_ROW] })).handoff.uncontrolled, null, "a recorded stop asks nothing");
+  assert.equal(setup(cycle({ state: ["- handoff: ready 2026-10-16T11:00:00Z", UPDATED] })).handoff.uncontrolled, null);
 });
 
 test("a dispatch-ended line routes a redispatch of its role once, then the user decides", () => {

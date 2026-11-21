@@ -5,17 +5,21 @@
 // checkState, so that import would close a cycle.
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
-import { cycleDispatches } from "./dispatch-health.mjs";
+import { dirname, join } from "node:path";
+import { cycleDispatches, readTranscript, recordRunning, transcriptState } from "./dispatch-health.mjs";
 import { readDriveLockHolder } from "./drive-lock.mjs";
 import { holderRunning } from "./drive-result.mjs";
+import { parseHandoff } from "./handoff-mark.mjs";
 import { ledgerSlotState } from "./ledger-slot.mjs";
 import { field } from "./md-field.mjs";
 import { readProcesses } from "./process-registry.mjs";
 import { gitToplevel, hashSession, recordPath } from "./run-record.mjs";
+import { lastSession } from "./run-transcripts.mjs";
 import { readStage } from "./stage-log.mjs";
+import { isoSeconds } from "./stamp.mjs";
 import { taskBlocks } from "./task-files.mjs";
 import { parseLedgerLine } from "./task-ledger.mjs";
+import { stopLabel } from "./usage-limit.mjs";
 
 // A report field never costs the stop itself.
 export const orElse = (read, fallback) => {
@@ -126,4 +130,34 @@ export function positionOf(root, devcycleDir, stateText, run, stage) {
     : null;
   const summary = fromFiles ?? (done.length ? `${done.length} steps logged, the last ${last}` : "no steps logged");
   return { done, last, summary };
+}
+
+// references/resume.md § The state file: a stop is uncontrolled when the state says a session was
+// mid-stage (`handoff: pending`), nothing stopped it on purpose (no `stopped:` row, no running driver),
+// and nothing of the run still works on it: the last session's transcript is not running and no open
+// dispatch's agent is. Every read fails open: what cannot be read is not live, and labels `unknown`.
+export function uncontrolledStop({ statePath, env = process.env, now = Date.now() }) {
+  const devcycleDir = dirname(statePath);
+  const root = dirname(devcycleDir);
+  let stateText;
+  try {
+    stateText = readFileSync(statePath, "utf8");
+  } catch {
+    return null;
+  }
+  if (parseHandoff(field(stateText, "handoff")).state !== "pending" || field(stateText, "stopped") !== null) return null;
+  if (orElse(() => holderRunning(root, readDriveLockHolder(root)), false)) return null;
+  const run = field(stateText, "run");
+  const last = orElse(() => lastSession({ rows: runRows(root, run), currentSessionId: env.CLAUDE_CODE_SESSION_ID ?? null, env }), null);
+  const transcript = last?.file ? orElse(() => readTranscript(last.file), null) : null;
+  if (transcript && orElse(() => transcriptState(transcript, { now }), "quiet") === "running") return null;
+  const { open } = orElse(() => openDispatches(devcycleDir, root, stateText, run, null), { open: [] });
+  if (open.some(({ record }) => recordRunning(record, { env, now }))) return null;
+  return {
+    stage: field(stateText, "stage")?.split(/\s+/)[0] ?? "unknown",
+    since: transcript?.lastStamp ? isoSeconds(transcript.lastStamp) : field(stateText, "updated") || "unknown",
+    label: stopLabel(transcript?.apiError),
+    lastSession: last,
+    transcript,
+  };
 }
