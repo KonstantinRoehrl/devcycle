@@ -66,9 +66,15 @@ prints it — and copy its numbers into the field. A failed probe is written
 `Context depth: unknown (<the probe's one-line reason>)`.
 
 At a wave → wave boundary within execution the first field is instead `Wave completed: <n> of
-<m> (stage: execution)`, and a session the safety valve ends inside a wave writes
-`Session ended mid-wave: <k> of <n> tasks done (stage: execution)`. `Stage completed:` is reserved
-for true stage ends, and these are the only three sanctioned first-field labels.
+<m> (stage: execution)`, a session the safety valve ends inside a wave writes
+`Session ended mid-wave: <k> of <n> tasks done (stage: execution)`, and a planning checkpoint writes
+`Session ended mid-planning: group <k> of <m>`, its context action `Clear + /devcycle:continue`.
+`Stage completed:` is reserved for true stage ends, and these are the only four sanctioned first-field labels.
+
+At the planning stage's true end the block carries, directly after `Artifacts:`, the second line
+`scripts/plan-stats.mjs` prints, verbatim: `planning: strategy=<s> drafters=<n> est=$X actual=$Y`
+(`est` is the whole-stage estimate). A mid-planning checkpoint block omits it:
+`playbooks/planning-waves.md` runs `plan-stats.mjs` only once the plan is written.
 
 At the finish stage specifically, the block carries one additional line, directly after
 `Artifacts:` — the resolved git policy, in the exact shape `playbooks/finishing-the-cycle.md`

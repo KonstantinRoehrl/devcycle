@@ -5,6 +5,162 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-21 — `plan-strategy.mjs` prices a host-wrapped session model id as its bare id (#450)
+
+**Decision:** `scripts/plan-strategy.mjs` prices `--sessionModel` through `canonicalModelId`, now exported from
+`scripts/depth-bands.mjs`, so a `[1m]`, Bedrock or Vertex id prices like the bare id. An id still unpriced keeps the default
+and warns, naming the id as given and its canonical form. The planning-waves Estimate step prints the output's `warnings`
+with the figure.
+
+**Why:** a branch review found the playbook passes the transcript's model verbatim, so a wrapped id silently priced a
+1-task inline cut at 0.71 instead of 0.35 on the Opus default.
+
+**Budgets:** `playbooks/planning-waves.md` gains one clause.
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 72582
+```
+
+## 2026-11-21 — The handoff's `planning:` line is a true-end line, and the root README names the cost gate (#450)
+
+**Decision:** `references/handoff.md` carries the `planning:` line only at the planning stage's true end, where
+`plan-stats.mjs` prints it, and a mid-planning checkpoint block omits it, because the checkpoint cannot produce the line.
+The line's `est` is the whole-stage estimate. The planning-waves docs page no longer says `estimate` and the task-cut
+projection read one table: the bench's `estimate` reads the per-task rates and the projection reads the fitted role
+parameters, so the two disagree until a benchmark pass fits one from the other.
+
+**Why:** a branch review found the handoff rule unsatisfiable at a checkpoint and the one-table claim false, since on a
+12-task cut the two models differ by a factor of 20 to 40.
+
+**Budgets:** `references/handoff.md` gains two lines, and every closure citing it carries them.
+
+```text
+budget: surface-budget.json surfaceTotal 7242
+budget: context-budget.json commands/continue.md 76960
+budget: context-budget.json commands/cycle.md 90316
+budget: context-budget.json playbooks/executing-waves.md 122668
+budget: context-budget.json playbooks/finishing-the-cycle.md 53948
+budget: context-budget.json playbooks/planning-waves.md 72481
+budget: context-budget.json playbooks/receiving-review.md 125958
+budget: context-budget.json playbooks/reviewing-the-branch.md 62457
+budget: context-budget.json playbooks/scoping-the-request.md 37693
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 96742
+budget: context-budget.json playbooks/taking-the-fast-path.md 55436
+budget: context-budget.json playbooks/verifying-on-device.md 67761
+budget: context-budget.json playbooks/writing-the-findings-document.md 68536
+budget: context-budget.json references/handoff.md 12313
+```
+
+## 2026-11-21 — The planning estimate covers the whole stage, and the projection prices the session's own model (#450)
+
+**Decision:** the cut logs `spent`, the planning dollars already spent, beside `est` in the `drafting-plan` row, read by
+`plan-stats.mjs spent` through the same `planningActual` the handoff uses. `planningEstimate` returns `est + spent`, so the
+`plan-stats` row's `estUsd` compares like with like with the actual; a row with no `spent` keeps `est` alone. The budget
+question still gates `projection.usd`, the projected cost of the remaining planning. `plan-strategy.mjs` takes
+`--sessionModel <id>`, which the playbook reads from `depth-probe.mjs --json`, and prices the coordinator and fork
+drafters on it; an id `pricing.mjs` does not price keeps the default and adds a `warnings` entry.
+
+**Why:** the projection prices only the draft, merge and check dispatches, while the actual holds the feasibility,
+research and spike spend before the cut, so the error was biased negative by that sunk cost and the calibration bound
+could only pass by fitting constants that absorb it. The session model was fixed at Opus 5.5 whatever the session ran.
+
+**Budgets:** the playbook's cut step gains two lines, and every closure citing it carries them.
+
+```text
+budget: surface-budget.json surfaceTotal 7240
+budget: context-budget.json commands/cycle.md 90144
+budget: context-budget.json playbooks/planning-waves.md 72309
+budget: context-budget.json playbooks/reviewing-the-branch.md 62285
+budget: context-budget.json playbooks/scoping-the-request.md 37521
+budget: context-budget.json playbooks/verifying-on-device.md 67589
+```
+
+## 2026-11-20 — Planning prints its projected cost, asks over a budget and can clear mid-stage (#450)
+
+**Decision:** at the task cut, planning prints `plan-strategy.mjs`'s `projection` and whether it is calibrated.
+Under Decision D2, when `planningBudgetUSD` is above 0 and the projection exceeds it, planning asks proceed,
+switch strategy or reduce scope, and labels the figure uncalibrated until `isCalibrated` holds. Under Decision D10,
+`checkpointed` (and `inline` once) offers a mid-stage clear at the over-budget band, with the
+`Session ended mid-planning: group <k> of <m>` handoff, and resumes from `plan-resume.mjs`. Under Decision D8, the
+planning handoff carries `plan-stats.mjs`'s `planning:` line.
+
+**Why:** spec §9.10 makes the cost of planning visible before it is spent and lets a long planning stage end cleanly
+instead of degrading at the context ceiling. The resume reads only the disk (D9): the stage log, the work files and
+the task files, never the transcript.
+
+**Budgets:** the playbook gains one section, and `references/handoff.md` a fourth first-field label and the
+`planning:` line, which every closure citing `references/handoff.md` carries.
+
+```text
+budget: surface-budget.json surfaceTotal 7238
+budget: context-budget.json commands/continue.md 76788
+budget: context-budget.json commands/cycle.md 90092
+budget: context-budget.json playbooks/executing-waves.md 122496
+budget: context-budget.json playbooks/finishing-the-cycle.md 53776
+budget: context-budget.json playbooks/planning-waves.md 71966
+budget: context-budget.json playbooks/receiving-review.md 125786
+budget: context-budget.json playbooks/reviewing-the-branch.md 62233
+budget: context-budget.json playbooks/scoping-the-request.md 37469
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 96570
+budget: context-budget.json playbooks/taking-the-fast-path.md 55264
+budget: context-budget.json playbooks/verifying-on-device.md 67537
+budget: context-budget.json playbooks/writing-the-findings-document.md 68364
+budget: context-budget.json references/handoff.md 12141
+```
+
+## 2026-11-20 — `references/resume.md` names the planning resume position (#450)
+
+**Decision:** `references/resume.md` § Resuming at the recorded stage gains one sentence that runs
+`scripts/plan-resume.mjs` at `stage: planning`, so a session cleared mid-planning resumes from the printed
+position instead of a transcript.
+
+**Why:** golden-path C3 leg 3 requires every CLI script to be invoked from the surface, and the resume path is where
+the position is read.
+
+**Budgets:** the sentence adds three lines to the runtime surface and bytes to every closure that reads
+`references/resume.md`.
+
+```text
+budget: surface-budget.json surfaceTotal 7209
+budget: context-budget.json commands/continue.md 76444
+budget: context-budget.json commands/cycle.md 89599
+budget: context-budget.json playbooks/receiving-review.md 125475
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 96259
+```
+
+## 2026-11-20 — `planningBudgetUSD` sets a dollar ceiling on planning (#450)
+
+**Decision:** Decision D5 adds a twentieth knob, `planningBudgetUSD`: a `number` userConfig whose default `0`
+means no budget. It resolves through the new `usd` kind in `scripts/resolve-knobs.mjs`, and it is not `live`, so
+`--compare` reports a mid-cycle change as drift, as it does for `planningStrategy`.
+
+**Why:** the projected-cost gate (spec §9.10) asks only when a budget is set, and a plain `number` keeps the
+loader accepting the manifest (the 0.17.0 `integer` rejection).
+
+**Budgets:** each entry command grows by one resolver line and `references/config.md` by one roster row, which every
+closure citing it carries, and `commands/continue.md` passes its 186-line ceiling.
+
+```text
+budget: surface-budget.json surfaceTotal 7206
+budget: surface-budget.json commandMax 187
+budget: context-budget.json commands/continue.md 76251
+budget: context-budget.json commands/cycle.md 89406
+budget: context-budget.json commands/learn.md 17884
+budget: context-budget.json commands/maintain.md 19063
+budget: context-budget.json commands/onboard.md 18172
+budget: context-budget.json commands/reconcile.md 25609
+budget: context-budget.json commands/review.md 26239
+budget: context-budget.json commands/verify.md 25337
+budget: context-budget.json playbooks/executing-waves.md 122152
+budget: context-budget.json playbooks/finishing-the-cycle.md 53465
+budget: context-budget.json playbooks/learning-from-sessions.md 66847
+budget: context-budget.json playbooks/maintaining-the-repo.md 68902
+budget: context-budget.json playbooks/onboarding-a-repo.md 31715
+budget: context-budget.json playbooks/reviewing-the-branch.md 61773
+budget: context-budget.json playbooks/verifying-on-device.md 67077
+budget: context-budget.json references/config.md 15242
+```
+
 ## 2026-11-20 — Phase 2b ships without its benchmark pass (#443, #447)
 
 **Decision:** Decision D9: Phase 2b merges with no paid `plan-bench` pass of the `grouped` or `grouped-fork`

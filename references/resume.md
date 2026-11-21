@@ -208,6 +208,9 @@ upstream skill — and its re-entry `note:`. `scripts/stage-entry.mjs <stage>` p
 state file, so neither command opens this file to find an entry. `commands/cycle.md` walks the
 stages in order and states each one's conditions.
 
+At `stage: planning`, `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-resume.mjs" --state .devcycle/state.md`
+prints the planning position, and the resume drafts from its `missing` and `nextGroup`.
+
 `done` has no entry: a closed cycle resumes at nothing, and `/devcycle:cycle` reuses its state file
 rather than resuming it.
 

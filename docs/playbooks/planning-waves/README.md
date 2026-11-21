@@ -134,6 +134,35 @@ flowchart TD
 Playbook-internal — for where Planning sits in the pipeline, see
 [docs/pipeline/](../../pipeline/README.md).
 
+## Projected cost, the budget and resume
+
+At the task cut, planning prints the projected cost of the strategy the decision table chose,
+before any drafter runs: dispatches, tokens and dollars, by role. The projection comes from
+[`scripts/plan-cost.mjs`](../../../scripts/plan-cost.mjs) and is recorded as `est` on the
+`drafting-plan` row of the stage log, beside `spent`, the planning dollars so far
+(`plan-stats.mjs spent --state <state.md>` prints it). `plan-strategy.mjs --sessionModel <id>` prices
+the session on the model the run uses.
+
+The `planningBudgetUSD` knob ([`docs/configuration/README.md`](../../configuration/README.md))
+sets a dollar ceiling, and its default of `0` sets none. When the projection exceeds the ceiling,
+planning asks one question with three answers: **proceed**, **switch strategy** or **reduce
+scope**. While the estimate is uncalibrated, the question labels the figure as such. Whether it is
+calibrated is decided by the passes recorded in [`scripts/plan-cost.mjs`](../../../scripts/plan-cost.mjs)
+(`CALIBRATION`, `isCalibrated`), which the benchmark follow-up updates.
+
+A depth probe runs after each `plan-group-<k>` under `checkpointed`, or once under `inline`. At
+`over-budget` or `hard-stop`, planning logs `plan-checkpoint-<k>`, marks the state file `handoff: ready`
+and emits a mid-stage handoff, `Session ended mid-planning: group <k> of <m>`, whose context action is
+clear and continue. Nothing asks the user to accept a checkpoint. The next session resumes from disk:
+[`references/resume.md`](../../../references/resume.md) § Resuming at the recorded stage reads the
+planning position that `scripts/plan-resume.mjs` prints, and the drafters read the context pack that
+[`references/delegated-planning.md`](../../../references/delegated-planning.md) § The context pack owns.
+
+At handoff, [`scripts/plan-stats.mjs`](../../../scripts/plan-stats.mjs) prints the planning line, whose
+format [`references/handoff.md`](../../../references/handoff.md) owns, and records `estUsd` (the
+whole-stage estimate, `est` plus `spent`) and `coordinatorDepthPct` on its row. Doctor's Planning breakdown then prints the projection error for the
+run as a `projection:` line, and the P5 row, coordinator depth at handoff, whose bar is `<= 15%`.
+
 ## Benchmarking planning strategies
 
 `planningStrategy` forces how planning drafts: `status-quo` keeps the old thresholds, `inline` drafts
@@ -185,3 +214,13 @@ than its arm (`arm-mismatch`) or none (`arm-unverified`; the run record does not
 `node scripts/cost-model-fit.mjs --runs <runs dir>` fits the cost model's per-role F, t, r and o from
 the `agent-cost` rows a pass collected. [`docs/platform-notes.md`](../../platform-notes.md) § (r)
 records how a headless session is driven through its gates.
+
+[`scripts/plan-cost.mjs`](../../../scripts/plan-cost.mjs) owns every figure a pass prices with, but the
+two readers use different ones: `estimate` reads the per-task rates (`PLANNING_RATES` and
+`EXECUTION_RATE`, which `scripts/plan-bench.mjs` imports) and the projection at the task cut reads the
+fitted role parameters (`PROFILE` and `ROLE_PARAMS`). They stay separate until a benchmark pass fits one
+from the other, and until then the projection is labelled uncalibrated. `node scripts/cost-model-fit.mjs --rates <dir> [--json]`
+searches `<dir>` recursively for `results.json`, one pass per file found, and reports each arm's
+planning dollars per task, each replay's projection error and a calibration verdict. That verdict does
+not set the projection's `calibrated` flag, which reads the passes recorded in
+[`scripts/plan-cost.mjs`](../../../scripts/plan-cost.mjs) (`CALIBRATION`).

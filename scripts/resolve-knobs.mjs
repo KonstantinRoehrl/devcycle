@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Resolves devcycle's userConfig knobs from the placeholders an entry command renders. Only command
 // text is templated -- a playbook or reference a stage opens with Read never sees a substituted
-// value -- so every entry command passes all nineteen rendered placeholders here and stages read the
+// value -- so every entry command passes all twenty rendered placeholders here and stages read the
 // printed `knobs:` line. references/config.md states the resolution order; this file is its
 // executable form, and ROSTER is the roster's fifth hand-kept copy that golden-path holds in parity.
 // Its enum `values` own each fixed set: validate.mjs holds plugin.json's `options` lists to them.
@@ -29,6 +29,7 @@ export const ROSTER = [
   { key: "branchReviewModel", kind: "model", fallback: "auto" },
   { key: "walkthroughModel", kind: "model", fallback: "auto" },
   { key: "planningStrategy", kind: "enum", values: ["auto", "status-quo", "inline", "grouped", "grouped-fork", "checkpointed"], fallback: "auto" },
+  { key: "planningBudgetUSD", kind: "usd", fallback: "0" },
   { key: "learnStalenessSessions", kind: "count", min: 0, fallback: "5" },
   { key: "learnStalenessDays", kind: "count", min: 0, fallback: "14" },
   { key: "learnSessionCap", kind: "count", min: 1, fallback: "100" },
@@ -91,6 +92,8 @@ export function inSet(entry, value) {
       return v === "true" || v === "false" ? v : null;
     case "count":
       return /^\d+$/.test(v) && Number(v) >= entry.min ? String(Number(v)) : null;
+    case "usd":
+      return /^\d+(\.\d{1,2})?$/.test(v) ? String(Number(v)) : null;
     case "model": {
       // An id with whitespace inside it would print unquoted on the knobs: line and split apart
       // when parseRecordedLine reads that line back, so it is refused rather than normalized.
@@ -114,6 +117,8 @@ export function allowedSet(entry) {
       return "true | false";
     case "count":
       return `a whole number of at least ${entry.min}`;
+    case "usd":
+      return "a non-negative dollar amount with at most two decimals";
     case "list":
       return "none, all, or a comma-separated list of plugin names";
     default:

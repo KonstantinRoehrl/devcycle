@@ -9,6 +9,11 @@
 import { readFileSync } from "node:fs";
 import { isMain } from "./is-main.mjs";
 import { parseFlags } from "./cli-flags.mjs";
+import { PLANNING_MODELS, PROFILE, draftTier, projectPlanning, taskTokens, taskWeight } from "./plan-cost.mjs";
+import { canonicalModelId } from "./depth-bands.mjs";
+import { priceFor } from "./pricing.mjs";
+
+export { PROFILE, taskWeight };
 
 export const THRESHOLDS = Object.freeze({
   inlineMaxTasks: 12,
@@ -22,23 +27,8 @@ export const THRESHOLDS = Object.freeze({
   delegatedFromTasks: 5,
 });
 
-// Input-token model of one drafter: a shared prefix and the pack, plus a base and a per-weight
-// share for each task it drafts.
-export const PROFILE = Object.freeze({
-  sharedPrefixTokens: 20000,
-  packTokens: 8000,
-  taskBaseTokens: 12000,
-  tokensPerWeight: 4000,
-});
-
-// A group drafts on the fast tier only when every task is small and its interfaces are pinned.
-const FAST_TIER_MAX_FILES = 5;
-
 export const KNOBS = Object.freeze(["auto", "inline", "checkpointed", "grouped", "grouped-fork", "status-quo"]);
 
-export const taskWeight = (task) => (task.files.length + task.produces) * (task.codePinned ? 2 : 1);
-
-const taskTokens = (task) => PROFILE.taskBaseTokens + PROFILE.tokensPerWeight * taskWeight(task);
 const groupBaseTokens = () => PROFILE.sharedPrefixTokens + PROFILE.packTokens;
 
 export function cutMetrics(cut) {
@@ -58,14 +48,11 @@ export function cutMetrics(cut) {
   };
 }
 
-const isFastGroup = (tasks) =>
-  tasks.every((task) => !task.codePinned && !task.newAbstraction && task.files.length <= FAST_TIER_MAX_FILES);
-
 function closeGroup(tasks) {
   return {
     tasks: tasks.map((task) => task.num),
     est: groupBaseTokens() + tasks.reduce((sum, task) => sum + taskTokens(task), 0),
-    tier: isFastGroup(tasks) ? "fast" : "session",
+    tier: draftTier(tasks),
   };
 }
 
@@ -95,26 +82,46 @@ export function groupCut(cut) {
   return { rounds, drafters: rounds.reduce((sum, round) => sum + round.groups.length, 0) };
 }
 
-export function chooseStrategy(cut, knob = "auto") {
+// A forced grouping skips the auto path's guards, so it reports what the auto path would have refused.
+function capWarnings(grouping, n) {
+  const warnings = [];
+  const ceiling = Math.ceil(n / THRESHOLDS.maxTasksPerDrafter);
+  if (grouping.drafters > ceiling) warnings.push(`${grouping.drafters} drafters is more than ceil(N/3) = ${ceiling}`);
+  for (const round of grouping.rounds) {
+    for (const group of round.groups) {
+      if (group.est > THRESHOLDS.inputCapTokens) {
+        const label = group.tasks.map((num) => `Task ${num}`).join(", ");
+        warnings.push(`the group of ${label} needs ${group.est} input tokens, above the ${THRESHOLDS.inputCapTokens} cap`);
+      }
+    }
+  }
+  return warnings.map((warning) => `; warning: ${warning}`).join("");
+}
+
+export function chooseStrategy(cut, knob = "auto", models = PLANNING_MODELS) {
   if (!KNOBS.includes(knob)) throw new RangeError(`unknown planningStrategy "${knob}", expected one of ${KNOBS.join(", ")}`);
   const metrics = cutMetrics(cut);
-  const decide = (strategy, reason, { fork = false, grouping } = {}) => ({
-    strategy,
-    fork,
-    groups: grouping ? grouping.rounds.reduce((sum, round) => sum + round.groups.length, 0) : 0,
-    drafters: grouping ? grouping.drafters : 0,
-    est: metrics.e,
-    metrics,
-    reason,
-    rounds: grouping ? grouping.rounds : [],
-  });
+  const decide = (strategy, reason, { fork = false, grouping } = {}) => {
+    const rounds = grouping ? grouping.rounds : [];
+    const projection = projectPlanning({ strategy, fork, rounds }, cut, models);
+    return {
+      strategy,
+      fork,
+      groups: grouping ? grouping.rounds.reduce((sum, round) => sum + round.groups.length, 0) : 0,
+      drafters: grouping ? grouping.drafters : 0,
+      est: projection ? projection.usd : null,
+      projection,
+      metrics,
+      reason,
+      rounds,
+    };
+  };
   if (knob === "inline") return decide("inline", "the planningStrategy knob forces inline drafting");
   if (knob === "checkpointed") return decide("checkpointed", "the planningStrategy knob forces checkpointed drafting");
   if (knob === "grouped" || knob === "grouped-fork") {
-    return decide("grouped", `the planningStrategy knob forces grouped drafting${knob === "grouped-fork" ? " with fork drafters" : ""}`, {
-      fork: knob === "grouped-fork",
-      grouping: groupCut(cut),
-    });
+    const grouping = groupCut(cut);
+    const reason = `the planningStrategy knob forces grouped drafting${knob === "grouped-fork" ? " with fork drafters" : ""}`;
+    return decide("grouped", reason + capWarnings(grouping, metrics.n), { fork: knob === "grouped-fork", grouping });
   }
   if (knob === "status-quo") {
     return metrics.n >= THRESHOLDS.delegatedFromTasks
@@ -184,7 +191,7 @@ export function parseCut(text) {
   return { cut: kept, errors };
 }
 
-const USAGE = "usage: plan-strategy.mjs <task-cut.json> [--planningStrategy <value>]";
+const USAGE = "usage: plan-strategy.mjs <task-cut.json> [--planningStrategy <value>] [--sessionModel <model id>]";
 
 function usage(message) {
   if (message) console.error(`plan-strategy: ${message}`);
@@ -195,7 +202,7 @@ function usage(message) {
 function main(argv) {
   let parsed;
   try {
-    parsed = parseFlags(argv, { "--planningStrategy": "value" }, { allowPositionals: true, requireValues: "nonEmpty" });
+    parsed = parseFlags(argv, { "--planningStrategy": "value", "--sessionModel": "value" }, { allowPositionals: true, requireValues: "nonEmpty" });
   } catch (e) {
     usage(e.message);
   }
@@ -215,8 +222,21 @@ function main(argv) {
     for (const error of errors) console.error(`plan-strategy: ${error}`);
     process.exit(1);
   }
-  const { strategy, fork, groups, drafters, est, reason, metrics, rounds } = chooseStrategy(cut, knob);
-  console.log(JSON.stringify({ strategy, fork, groups, drafters, est, reason, metrics, rounds }, null, 2));
+  // The session model prices the coordinator and fork drafters; an id the price table does not hold
+  // keeps the default and says so, because a guessed price would be presented as a measured one.
+  const warnings = [];
+  const models = { ...PLANNING_MODELS };
+  const sessionModel = flags["--sessionModel"];
+  if (sessionModel !== undefined) {
+    const canonical = canonicalModelId(sessionModel);
+    if (priceFor(canonical)) models.session = canonical;
+    else {
+      const named = canonical === sessionModel ? sessionModel : `${sessionModel} (${canonical})`;
+      warnings.push(`--sessionModel ${named} has no price in scripts/pricing.mjs; priced the session as ${PLANNING_MODELS.session}`);
+    }
+  }
+  const { strategy, fork, groups, drafters, est, projection, reason, metrics, rounds } = chooseStrategy(cut, knob, models);
+  console.log(JSON.stringify({ strategy, fork, groups, drafters, est, projection, reason, metrics, rounds, warnings }, null, 2));
 }
 
 if (isMain(import.meta.url, process.argv[1])) main(process.argv.slice(2));

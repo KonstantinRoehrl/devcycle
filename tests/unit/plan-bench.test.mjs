@@ -9,6 +9,7 @@ import {
   ARMS, OPT_IN_ARMS, DEFAULT_TASKS, RATES, DEFAULT_ANSWERS, validateManifest, validateAnswers, estimatePass, goAheadToken,
   benchKnobs, benchSettings, preflight,
 } from "../../scripts/plan-bench.mjs";
+import { PLANNING_RATES, EXECUTION_RATE } from "../../scripts/plan-cost.mjs";
 
 const SCRIPT = new URL("../../scripts/plan-bench.mjs", import.meta.url).pathname;
 const entry = (over) => ({ id: "small-1", size: "small", repoPath: "/repo", baseSha: "71cc4ff", specPath: "docs/s.md", ...over });
@@ -18,6 +19,9 @@ test("the default arms are status-quo and inline, three more are opt-in, and the
   assert.deepEqual(OPT_IN_ARMS, ["grouped", "grouped-fork", "checkpointed"]);
   assert.deepEqual(DEFAULT_TASKS, { small: 3, medium: 7, large: 12 });
   assert.deepEqual(RATES, { planning: { "status-quo": 5.3, inline: 1.4, grouped: 3, "grouped-fork": 2.5, checkpointed: 1.4 }, execution: 2.5 });
+  // The rates are plan-cost's, never a second copy.
+  assert.equal(RATES.planning, PLANNING_RATES);
+  assert.equal(RATES.execution, EXECUTION_RATE);
 });
 
 test("validateManifest fills tasks from the size and executes medium entries by default", () => {

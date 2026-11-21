@@ -88,6 +88,12 @@
       ],
       "description": "How the planning stage drafts a plan. auto (default) picks by the decision table; status-quo applies the delegation thresholds (per-task drafters from 5 tasks); inline always drafts in the planning session itself. grouped dispatches one drafter per group of tasks; grouped-fork does the same with forked drafters that inherit the planning context; checkpointed drafts in the planning session, saving a checkpoint after each task group. Forces an arm for the planning benchmark. One of: auto, status-quo, inline, grouped, grouped-fork, checkpointed. Default: auto."
     },
+    "planningBudgetUSD": {
+      "type": "number",
+      "title": "Planning budget (USD)",
+      "default": 0,
+      "description": "A dollar ceiling for the planning stage's projected cost. When the projection at the task cut exceeds it, planning asks whether to proceed, switch strategy or reduce scope. A non-negative amount with at most two decimals; 0 (default) sets no budget. Default: 0."
+    },
     "reviewDepth": {
       "type": "string",
       "title": "Review depth",

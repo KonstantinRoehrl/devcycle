@@ -100,3 +100,21 @@ test("renderReport: a run recorded before reads shows no drafters, an unknown pr
   const section = planningSection(renderReport([summarizeSession(SESSION, [turn], readRunRecords(dir))], ctx));
   assert.match(section, /^drafters: 0\nsource prints: —\ntier-fit: ok$/m);
 });
+
+test("renderReport: the projection line follows the failing legs line, setting the estimate beside the actual with the signed error", () => {
+  const dir = runsDir([...BASE, { ...PLAN_STATS, estUsd: 3 }]);
+  const section = planningSection(renderReport([summarizeSession(SESSION, [turn], readRunRecords(dir))], ctx));
+  assert.match(section, /^Failing plan-check legs: none\.\nprojection: est \$3\.00 · actual \$2\.50 · error \+19\.9%\nPlan defects: /m);
+});
+
+test("renderReport: a run with no recorded estimate prints the projection line with unknown estimate and error", () => {
+  const dir = runsDir([...BASE, PLAN_STATS]);
+  const section = planningSection(renderReport([summarizeSession(SESSION, [turn], readRunRecords(dir))], ctx));
+  assert.match(section, /^projection: est unknown · actual \$2\.50 · error unknown$/m);
+});
+
+test("renderReport: P5 reads the plan-stats row's coordinator depth as a percent against the 15% bar", () => {
+  const dir = runsDir([...BASE, { ...PLAN_STATS, coordinatorDepthPct: 17.1 }]);
+  const section = planningSection(renderReport([summarizeSession(SESSION, [turn], readRunRecords(dir))], ctx));
+  assert.match(section, /^\| P5 \| coordinator depth at handoff \| 17\.1 \| <= 15% \| fail \| — \|$/m);
+});

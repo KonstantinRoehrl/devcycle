@@ -60,6 +60,33 @@ test("checkLock flags a consumed signature the lock does not carry verbatim", ()
   ]);
 });
 
+test("checkLock flags a consumed span that is only part of a locked signature", () => {
+  const b = blocks([1, ONE], [2, { consumes: [[1, "calls `planStrategy(cut)`"]] }]);
+  assert.deepEqual(checkLock({ lockText: LOCK, blocks: b }).findings, [
+    "Task 2: consumes `planStrategy(cut)` from Task 1, which the interface lock's Task 1 entry does not carry verbatim",
+  ]);
+});
+
+test("checkLock matches a consumed span to a locked span with whitespace collapsed, or to a whole Produces item", () => {
+  const lockText = renderLock([{ num: 1, round: 1, produces: ["`planStrategy(cut) -> {strategy}`", "`LIMIT  =  3`", "the limit is three"] }]);
+  const b = blocks([1, { produces: ["`planStrategy(cut) -> {strategy}`", "`LIMIT  =  3`", "the limit is three"] }],
+    [2, { consumes: [[1, "calls `planStrategy(cut)   ->\t{strategy}`, reads ` LIMIT = 3 ` and `the limit is three`"]] }]);
+  assert.deepEqual(checkLock({ lockText, blocks: b }), { findings: [] });
+  const part = blocks([1, { produces: ["`planStrategy(cut) -> {strategy}`", "`LIMIT  =  3`", "the limit is three"] }],
+    [2, { consumes: [[1, "reads `the limit`"]] }]);
+  assert.equal(checkLock({ lockText, blocks: part }).findings.length, 1);
+});
+
+test("checkLock scoped to some tasks checks only their consumers, against every locked producer", () => {
+  const b = blocks([1, ONE], [2, { consumes: [[1, "calls `planStrategy(cut) -> {strategy}`"]] }], [3, { consumes: [[1, "calls `planStrategy`"]] }]);
+  assert.equal(checkLock({ lockText: LOCK, blocks: b }).findings.length, 1);
+  assert.deepEqual(checkLock({ lockText: LOCK, blocks: b, tasks: [2] }), { findings: [] });
+  const drifted = [...blocks([1, { produces: ["`LIMIT = 3`"] }]), ...b.slice(1)];
+  assert.deepEqual(checkLock({ lockText: LOCK, blocks: drifted, tasks: [2] }).findings, [
+    "Task 1: Produces differ from the interface lock (round 1); a drafter that must change a pinned interface returns an interface-delta, and the coordinator relocks",
+  ]);
+});
+
 test("checkLock flags a locked task whose Produces drifted, or whose file is gone", () => {
   const drifted = blocks([1, { produces: ["`planStrategy(cut, knob) -> {strategy}`", "`LIMIT = 3`"] }]);
   assert.deepEqual(checkLock({ lockText: LOCK, blocks: drifted }).findings, [
@@ -104,6 +131,27 @@ test("the CLI locks each round's drafts, checks them, and relocks only on reques
   assert.equal(run("check", dir).status, 0);
 });
 
+test("check --tasks limits the consumers checked, so an unlocked sibling's draft does not fail a drafter's self-check", () => {
+  const dir = makeTempDir("interface-lock-scoped-");
+  const run = (...args) => spawnSync("node", [SCRIPT, ...args], { encoding: "utf8" });
+  writeInto(dir, "tasks/task-1.md", block(1, { produces: ["`f(a) -> b`"] }));
+  assert.equal(run("write", dir, "--round", "1").status, 0);
+  writeInto(dir, "tasks/task-2.md", block(2, { consumes: [[1, "calls `f(a) -> b`"]] }));
+  writeInto(dir, "tasks/task-3.md", block(3, { consumes: [[1, "calls `f(a)`"]] }));
+  let r = run("check", dir);
+  assert.equal(r.status, 1, "the weaker pin in Task 3 fails an unscoped check");
+  assert.match(r.stderr, /^interface-lock: Task 3: consumes `f\(a\)` from Task 1, which the interface lock's Task 1 entry does not carry verbatim$/m);
+  r = run("check", dir, "--tasks", "2");
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^interface-lock: 1 locked task\(s\) match their task files$/m);
+  assert.equal(run("check", dir, "--tasks", "2,3").status, 1);
+  writeInto(dir, "tasks/task-1.md", block(1, { produces: ["`f(a, b) -> b`"] }));
+  r = run("check", dir, "--tasks", "2");
+  assert.equal(r.status, 1, "a scoped check still reads the producers from the lock");
+  assert.match(r.stderr, /^interface-lock: Task 1: Produces differ from the interface lock \(round 1\)/m);
+  assert.doesNotMatch(r.stderr, /Task 3:/);
+});
+
 test("the CLI refuses a bad round, a flag on check, an unknown task and a missing lock", () => {
   const dir = makeTempDir("interface-lock-guards-");
   const run = (...args) => spawnSync("node", [SCRIPT, ...args], { encoding: "utf8" });
@@ -115,11 +163,20 @@ test("the CLI refuses a bad round, a flag on check, an unknown task and a missin
   }
   let r = run("check", dir, "--relock");
   assert.equal(r.status, 2);
-  assert.match(r.stderr, /^interface-lock: check takes no flags$/m);
+  assert.match(r.stderr, /^interface-lock: check takes only --tasks$/m);
+  for (const tasks of ["x", "0", "1,,2", "1.5"]) {
+    r = run("check", dir, "--tasks", tasks);
+    assert.equal(r.status, 2, `check --tasks ${tasks} is a usage error`);
+    assert.match(r.stderr, /^interface-lock: --tasks takes task numbers like 1,2$/m);
+  }
   r = run("check", dir);
   assert.equal(r.status, 1);
   assert.match(r.stderr, new RegExp(`^interface-lock: no interfaces\\.lock\\.md in ${dir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
   r = run("write", dir, "--round", "1", "--tasks", "9");
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^interface-lock: Task 9 has no task file$/m);
+  assert.equal(run("write", dir, "--round", "1").status, 0);
+  r = run("check", dir, "--tasks", "9");
   assert.equal(r.status, 1);
   assert.match(r.stderr, /^interface-lock: Task 9 has no task file$/m);
 });

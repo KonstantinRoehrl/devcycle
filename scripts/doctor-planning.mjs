@@ -24,6 +24,8 @@ import { rank } from "./model-pool.mjs";
  * @property {Record<string, number|null>} byRole planning subagent dollars per role (spike, research,
  *   drafter, checker, repair), `unrolled` for rows with no role, and `coordinator`: planning-stage
  *   dollars minus planning subagent dollars.
+ * @property {{estUsd: number|null, actualUsd: number|null, errorPct: number|null}} projection the plan-stats
+ *   estimate set beside the planning-stage dollars, with the signed percent by which the estimate missed
  * @property {{id: string, measure: string, value: *, bar: string, status: "pass"|"fail"|"n/a", reason?: string}[]} rubric
  * @property {number} planDefects rows attributing culprit `plan-defect`
  * @property {{blocked: number|null, rejected: number, retried: number|null}} raw execution counts
@@ -87,6 +89,15 @@ function tierFit(rolled, tierTable) {
       flagged.set(c.agentId, { role: c.role, agentId: c.agentId, model: c.model });
   return [...flagged.values()];
 }
+
+/** The signed percent, to one decimal, by which an estimate missed the actual; null without two numbers or a positive actual. */
+export function projectionError(estUsd, actualUsd) {
+  if (typeof estUsd !== "number" || typeof actualUsd !== "number" || actualUsd <= 0) return null;
+  return Math.round(((estUsd - actualUsd) / actualUsd) * 1000) / 10;
+}
+
+/** A projection error as it prints: signed, one decimal, "unknown" for null. */
+export const errorPctText = (pct) => (pct === null ? "unknown" : `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`);
 
 function row(id, measure, bar, value, pass, reason) {
   if (reason) return { id, measure, value, bar, status: "n/a", reason };
@@ -180,6 +191,7 @@ export function planningBreakdown(run, { tierTable = [] } = {}) {
   const p3 = dispatches > 0 ? ratio(dispatches, tasks) : null;
   const p4 = dispatches > 0 ? percentile95([...finalDepth.values()].map((d) => d.tokens)) : null;
   const rolled = costs.filter((c) => c.role);
+  const p5 = typeof stats?.coordinatorDepthPct === "number" ? stats.coordinatorDepthPct : null;
   const p6 = sharedContext(rolled);
   const p7 = explicitByAgent.size > 0 ? [...explicitByAgent.values()].filter(Boolean).length / explicitByAgent.size : null;
   const p8 = stats && stats.specBytes > 0
@@ -194,7 +206,7 @@ export function planningBreakdown(run, { tierTable = [] } = {}) {
     row("P2", "planning $ / execution $", "<= 1.0", p2, p2 <= 1, p2 === null && "planning or execution dollars unknown, or no execution spend yet"),
     row("P3", "planning dispatches / task", "<= 0.5", p3, p3 <= 0.5, p3 === null && (stats ? "no planning agent-depth rows" : noStats)),
     row("P4", "p95 final depth of planning dispatches (tokens)", "<= 150000", p4, p4 <= 150000, p4 === null && "no planning agent-depth rows"),
-    row("P5", "coordinator depth at handoff", "<= 15%", null, false, "not recorded until Phase 3"),
+    row("P5", "coordinator depth at handoff", "<= 15%", p5, p5 <= 15, p5 === null && (stats ? "coordinator depth not recorded on the plan-stats row" : noStats)),
     row("P6", "shared-context duplication (re-read tokens / planning dispatch input)", "<= 20%", p6, p6 <= 0.2,
       p6 === null && "no planning dispatch rows, or one recorded without reads"),
     row("P7", "planning dispatches with explicitModel", "100%", p7, p7 === 1, p7 === null && "no planning agent-cost rows"),
@@ -208,8 +220,10 @@ export function planningBreakdown(run, { tierTable = [] } = {}) {
       p12 && p12.share === 1 && p12.gaps === 0, p12 === null && "no planning agent-depth rows"),
   ];
 
+  const estUsd = stats?.estUsd ?? null;
   return {
     byRole,
+    projection: { estUsd, actualUsd: planningUsd, errorPct: projectionError(estUsd, planningUsd) },
     rubric,
     planDefects,
     // blocked and retried come off the run's dispatch rows, which doctor reads only from a run record.
@@ -224,7 +238,7 @@ export function planningBreakdown(run, { tierTable = [] } = {}) {
   };
 }
 
-const sumKnown = (values) => (values.some((v) => v !== null && v !== undefined) ? values.reduce((n, v) => n + (v ?? 0), 0) : null);
+export const sumKnown = (values) => (values.some((v) => v !== null && v !== undefined) ? values.reduce((n, v) => n + (v ?? 0), 0) : null);
 
 /**
  * Joins the summaries of one run's sessions into a PlanningRun, one per run that has a planning stage.
@@ -289,6 +303,8 @@ export function planningBreakdownLines(entries) {
       b.rubric.map((r) => [r.id, r.measure, valueText(r.value), r.bar, r.status, r.reason]), "no rubric"), "");
     const legs = Object.entries(b.gateLegs).map(([leg, n]) => `${leg} ${n}`).join(", ");
     L.push(`Failing plan-check legs: ${legs || "none"}.`);
+    const { estUsd, actualUsd, errorPct } = b.projection;
+    L.push(`projection: est ${estUsd === null ? "unknown" : usd(estUsd)} · actual ${actualUsd === null ? "unknown" : usd(actualUsd)} · error ${errorPctText(errorPct)}`);
     L.push(`Plan defects: ${b.planDefects}. Execution (observed): blocked ${countText(b.raw.blocked)}, ` +
       `rejected ${b.raw.rejected}, retried ${countText(b.raw.retried)}.`);
     L.push(`Sensor gaps: ${b.sensorGaps.map((g) => `${g.agentId ?? "(no agentId)"} (${g.cause})`).join(", ") || "none"}.`);

@@ -214,6 +214,12 @@ plugin ships. Start there.
   once per `planningStrategy` arm, and scores each replay on that rubric
   ([`docs/playbooks/planning-waves/README.md`](docs/playbooks/planning-waves/README.md) § Benchmarking
   planning strategies).
+  At the task cut planning also prints a projected dispatch, token and dollar figure
+  (`scripts/plan-cost.mjs`), asks whether to proceed, switch strategy or reduce scope when an optional
+  `planningBudgetUSD` is exceeded, and can clear and resume mid-planning from disk
+  (`scripts/plan-resume.mjs`); the figure is labelled uncalibrated until a benchmark pass calibrates it
+  ([`docs/playbooks/planning-waves/README.md`](docs/playbooks/planning-waves/README.md) § Projected cost, the
+  budget and resume).
   The depth gate runs `scripts/depth-probe.mjs`, which
   measures one transcript without loading doctor. Every `/devcycle:doctor` cost-analysis reply
   carries a per-version and per-stage overview, rendered by `scripts/doctor-overview.mjs` from

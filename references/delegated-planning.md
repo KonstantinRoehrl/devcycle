@@ -81,7 +81,8 @@ writes one `tasks/task-<n>.md` per task. The coordinator logs `plan-draft-<n>` p
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/interface-lock.mjs" write .devcycle/plan-work/<run id> --round <n>`, which copies
 the round's `Produces` items into `interfaces.lock.md`. A later round's briefs name that file by path, and their
 drafters reproduce what they consume from it verbatim; `interface-lock.mjs check` exiting 0 is what lets a round
-count as drafted.
+count as drafted. A drafter's self-check scopes it to its own tasks:
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/interface-lock.mjs" check <work dir> --tasks <its task numbers>`.
 
 **Interface deltas.** A drafter that cannot draft a task without changing an interface the lock holds writes no
 draft for it and returns `interface-delta: Task <n> <what>`. The coordinator, who owns Interfaces, either accepts it
