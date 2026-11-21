@@ -11,7 +11,7 @@ import { isMain } from "./is-main.mjs";
 import { parseFlags } from "./cli-flags.mjs";
 import { PLANNING_MODELS, PROFILE, draftTier, projectPlanning, taskTokens, taskWeight } from "./plan-cost.mjs";
 import { canonicalModelId } from "./depth-bands.mjs";
-import { priceFor } from "./pricing.mjs";
+import { parseModelId, priceFor } from "./pricing.mjs";
 
 export { PROFILE, taskWeight };
 
@@ -222,14 +222,21 @@ function main(argv) {
     for (const error of errors) console.error(`plan-strategy: ${error}`);
     process.exit(1);
   }
-  // The session model prices the coordinator and fork drafters; an id the price table does not hold
-  // keeps the default and says so, because a guessed price would be presented as a measured one.
+  // The session model prices the coordinator and fork drafters. A dated snapshot the table does not hold
+  // falls back to its undated id (the grammar's owner is pricing.mjs), and an id neither form prices keeps
+  // the default and says so, because a guessed price would be presented as a measured one. An omitted flag
+  // says so too: the default is Opus, so a Sonnet session would otherwise be silently overpriced.
   const warnings = [];
   const models = { ...PLANNING_MODELS };
   const sessionModel = flags["--sessionModel"];
-  if (sessionModel !== undefined) {
+  if (sessionModel === undefined) {
+    warnings.push(`no --sessionModel given; priced the session as ${PLANNING_MODELS.session}`);
+  } else {
     const canonical = canonicalModelId(sessionModel);
-    if (priceFor(canonical)) models.session = canonical;
+    const parsed = parseModelId(canonical);
+    const undated = parsed && /-\d{8}$/.test(canonical) ? `claude-${parsed.family}-${parsed.version.join("-")}` : null;
+    const priced = [canonical, undated].find((id) => id && priceFor(id));
+    if (priced) models.session = priced;
     else {
       const named = canonical === sessionModel ? sessionModel : `${sessionModel} (${canonical})`;
       warnings.push(`--sessionModel ${named} has no price in scripts/pricing.mjs; priced the session as ${PLANNING_MODELS.session}`);
