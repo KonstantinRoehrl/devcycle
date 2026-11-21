@@ -139,7 +139,9 @@ Playbook-internal — for where Planning sits in the pipeline, see
 At the task cut, planning prints the projected cost of the strategy the decision table chose,
 before any drafter runs: dispatches, tokens and dollars, by role. The projection comes from
 [`scripts/plan-cost.mjs`](../../../scripts/plan-cost.mjs) and is recorded as `est` on the
-`drafting-plan` row of the stage log.
+`drafting-plan` row of the stage log, beside `spent`, the planning dollars so far
+(`plan-stats.mjs spent --state <state.md>` prints it). `plan-strategy.mjs --sessionModel <id>` prices
+the session on the model the run uses.
 
 The `planningBudgetUSD` knob ([`docs/configuration/README.md`](../../configuration/README.md))
 sets a dollar ceiling, and its default of `0` sets none. When the projection exceeds the ceiling,
@@ -157,8 +159,8 @@ planning position that `scripts/plan-resume.mjs` prints, and the drafters read t
 [`references/delegated-planning.md`](../../../references/delegated-planning.md) § The context pack owns.
 
 At handoff, [`scripts/plan-stats.mjs`](../../../scripts/plan-stats.mjs) prints the planning line, whose
-format [`references/handoff.md`](../../../references/handoff.md) owns, and records `estUsd` and
-`coordinatorDepthPct` on its row. Doctor's Planning breakdown then prints the projection error for the
+format [`references/handoff.md`](../../../references/handoff.md) owns, and records `estUsd` (the
+whole-stage estimate, `est` plus `spent`) and `coordinatorDepthPct` on its row. Doctor's Planning breakdown then prints the projection error for the
 run as a `projection:` line, and the P5 row, coordinator depth at handoff, whose bar is `<= 15%`.
 
 ## Benchmarking planning strategies
@@ -213,9 +215,11 @@ than its arm (`arm-mismatch`) or none (`arm-unverified`; the run record does not
 the `agent-cost` rows a pass collected. [`docs/platform-notes.md`](../../platform-notes.md) § (r)
 records how a headless session is driven through its gates.
 
-The rates a pass prices with are owned by [`scripts/plan-cost.mjs`](../../../scripts/plan-cost.mjs)
-(`PLANNING_RATES` and `EXECUTION_RATE`), which `scripts/plan-bench.mjs` imports, so `estimate` and the
-projection at the task cut read one table. `node scripts/cost-model-fit.mjs --rates <dir> [--json]`
+[`scripts/plan-cost.mjs`](../../../scripts/plan-cost.mjs) owns every figure a pass prices with, but the
+two readers use different ones: `estimate` reads the per-task rates (`PLANNING_RATES` and
+`EXECUTION_RATE`, which `scripts/plan-bench.mjs` imports) and the projection at the task cut reads the
+fitted role parameters (`PROFILE` and `ROLE_PARAMS`). They stay separate until a benchmark pass fits one
+from the other, and until then the projection is labelled uncalibrated. `node scripts/cost-model-fit.mjs --rates <dir> [--json]`
 searches `<dir>` recursively for `results.json`, one pass per file found, and reports each arm's
 planning dollars per task, each replay's projection error and a calibration verdict. That verdict does
 not set the projection's `calibrated` flag, which reads the passes recorded in

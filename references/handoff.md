@@ -71,8 +71,10 @@ At a wave → wave boundary within execution the first field is instead `Wave co
 `Session ended mid-planning: group <k> of <m>`, its context action `Clear + /devcycle:continue`.
 `Stage completed:` is reserved for true stage ends, and these are the only four sanctioned first-field labels.
 
-At the planning stage the block carries, directly after `Artifacts:`, the second line
-`scripts/plan-stats.mjs` prints, verbatim: `planning: strategy=<s> drafters=<n> est=$X actual=$Y`.
+At the planning stage's true end the block carries, directly after `Artifacts:`, the second line
+`scripts/plan-stats.mjs` prints, verbatim: `planning: strategy=<s> drafters=<n> est=$X actual=$Y`
+(`est` is the whole-stage estimate). A mid-planning checkpoint block omits it:
+`playbooks/planning-waves.md` runs `plan-stats.mjs` only once the plan is written.
 
 At the finish stage specifically, the block carries one additional line, directly after
 `Artifacts:` — the resolved git policy, in the exact shape `playbooks/finishing-the-cycle.md`

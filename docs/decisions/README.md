@@ -5,6 +5,36 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-21 — The handoff's `planning:` line is a true-end line, and the root README names the cost gate (#450)
+
+**Decision:** `references/handoff.md` carries the `planning:` line only at the planning stage's true end, where
+`plan-stats.mjs` prints it, and a mid-planning checkpoint block omits it, because the checkpoint cannot produce the line.
+The line's `est` is the whole-stage estimate. The planning-waves docs page no longer says `estimate` and the task-cut
+projection read one table: the bench's `estimate` reads the per-task rates and the projection reads the fitted role
+parameters, so the two disagree until a benchmark pass fits one from the other.
+
+**Why:** a branch review found the handoff rule unsatisfiable at a checkpoint and the one-table claim false, since on a
+12-task cut the two models differ by a factor of 20 to 40.
+
+**Budgets:** `references/handoff.md` gains two lines, and every closure citing it carries them.
+
+```text
+budget: surface-budget.json surfaceTotal 7242
+budget: context-budget.json commands/continue.md 76960
+budget: context-budget.json commands/cycle.md 90316
+budget: context-budget.json playbooks/executing-waves.md 122668
+budget: context-budget.json playbooks/finishing-the-cycle.md 53948
+budget: context-budget.json playbooks/planning-waves.md 72481
+budget: context-budget.json playbooks/receiving-review.md 125958
+budget: context-budget.json playbooks/reviewing-the-branch.md 62457
+budget: context-budget.json playbooks/scoping-the-request.md 37693
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 96742
+budget: context-budget.json playbooks/taking-the-fast-path.md 55436
+budget: context-budget.json playbooks/verifying-on-device.md 67761
+budget: context-budget.json playbooks/writing-the-findings-document.md 68536
+budget: context-budget.json references/handoff.md 12313
+```
+
 ## 2026-11-21 — The planning estimate covers the whole stage, and the projection prices the session's own model (#450)
 
 **Decision:** the cut logs `spent`, the planning dollars already spent, beside `est` in the `drafting-plan` row, read by
