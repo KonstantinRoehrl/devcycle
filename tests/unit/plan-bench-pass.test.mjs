@@ -615,6 +615,8 @@ test("countCheckpoints is 0 before a run exists and surfaces a malformed run id 
   const dir = makeTempDir("plan-bench-checkpoints-");
   assert.equal(countCheckpoints(dir, undefined), 0);
   assert.equal(countCheckpoints(dir, ""), 0);
+  // `run: none` is what the state file says before the run is minted.
+  assert.equal(countCheckpoints(dir, "none"), 0);
   assert.throws(() => countCheckpoints(dir, "not-a-run"), /16-hex/);
   const run = "0123456789abcdef";
   assert.equal(countCheckpoints(dir, run), 0);
@@ -624,7 +626,26 @@ test("countCheckpoints is 0 before a run exists and surfaces a malformed run id 
   assert.equal(countCheckpoints(dir, run), 2);
 });
 
-test("runPass ends a replay whose state file carries a malformed run id as an error and still runs the next replay", () => {
+test("runEntryArm ends as an error that keeps the leg's spend when readCheckpoints throws after a leg", () => {
+  const s = scripted([{ state: ASKING, sid: "s9", cost: 0.75 }]);
+  let r;
+  assert.doesNotThrow(() => {
+    r = runEntryArm({ execute: false, prompt: "go", answers: ANSWERS, budgetUsd: 10, ...s, readCheckpoints: () => { if (s.calls.length) throw new Error("bad run id"); return 0; } });
+  });
+  assert.deepEqual([r.outcome, r.usd, r.error, r.question], ["error", 0.75, "bad run id", null]);
+  assert.deepEqual(r.legs.map((l) => [l.phase, l.sessionId, l.costUsd, l.verdict]), [["plan", "s9", 0.75, "error"]]);
+});
+
+test("runEntryArm ends as an error with no spend when the first readCheckpoints throws", () => {
+  const s = scripted([{ state: ASKING }]);
+  let r;
+  assert.doesNotThrow(() => {
+    r = runEntryArm({ execute: false, prompt: "go", answers: ANSWERS, budgetUsd: 10, ...s, readCheckpoints: () => { throw new Error("bad run id"); } });
+  });
+  assert.deepEqual([r.outcome, r.usd, r.error, r.legs.length, s.calls.length], ["error", 0, "bad run id", 0, 0]);
+});
+
+test("runPass ends a replay whose state file carries a malformed run id as an error that keeps its spend and artifacts, and still runs the next replay", () => {
   const repoPath = benchRepo();
   const baseSha = sh("git", ["rev-parse", "HEAD"], { cwd: repoPath }).trim();
   const entries = [{ id: "m-1", size: "medium", repoPath, baseSha, specPath: "docs/superpowers/specs/s-design.md", tasks: 1, execute: false }];
@@ -640,7 +661,9 @@ test("runPass ends a replay whose state file carries a malformed run id as an er
       },
     },
   );
-  assert.deepEqual(outcomes.map((o) => [o.arm, o.outcome]), [["a", "error"], ["b", "error"]]);
+  assert.deepEqual(outcomes.map((o) => [o.arm, o.outcome, o.usd]), [["a", "error", 0.5], ["b", "error", 0.5]]);
   assert.match(outcomes[0].error, /16-hex/);
+  assert.equal(outcomes[0].legs.length, 1);
   assert.equal(JSON.parse(readFileSync(join(passDir, "m-1--a", "outcome.json"), "utf8")).outcome, "error");
+  assert.match(readFileSync(join(passDir, "m-1--a", "state.md"), "utf8"), /run: corrupt/);
 });

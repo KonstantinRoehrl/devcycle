@@ -134,7 +134,8 @@ const round2 = (n) => Math.round(n * 100) / 100;
  *   `sleep` and `now` wait out a usage limit; a leg the limit stopped never counts toward the leg cap.
  * @returns {{outcome: "planned"|"executed"|"no-go"|"unanswered"|"error"|"budget-stop"|"leg-cap"|"stalled"|"rate-limited", usd: number,
  *   legs: {phase: string, sessionId: string|null, costUsd: number, denials: number, verdict: string}[], question: string|null,
- *   error: string|null}} `error` carries the reason a leg could not launch; every other outcome leaves it null
+ *   error: string|null}} `error` carries the reason a leg could not launch, or the corrupt run id `readCheckpoints` threw on
+ *   (the leg it followed stays in `legs` and `usd`); every other outcome leaves it null
  */
 export function runEntryArm({
   execute, prompt, answers, budgetUsd, spawnLeg, readState, readProgress = readState, readCheckpoints = () => 0, sleep = sleepSync, now = Date.now,
@@ -159,7 +160,9 @@ export function runEntryArm({
       return end("error", null, `${reason}; charged its $${cap.toFixed(2)} spend cap`);
     };
     const before = phase === "execute" ? progressKey(readProgress()) : null;
-    const checkpointsBefore = phase === "plan" ? readCheckpoints() : 0;
+    // A corrupt run id makes readCheckpoints throw; that ends this replay as an error with the spend so far kept, not the pass.
+    let checkpointsBefore = 0;
+    if (phase === "plan") try { checkpointsBefore = readCheckpoints(); } catch (err) { return end("error", null, err.message); }
     let leg;
     try { leg = parseLeg(spawnLeg({ prompt: next, resume, maxBudgetUsd: cap })); } catch (err) { return err.killed ? charged(null, err.message) : end("error", null, err.message); }
     if (leg.costUsd === null) return charged(leg.sessionId, "the leg ended with no result event");
@@ -177,7 +180,13 @@ export function runEntryArm({
       }
       continue;
     }
-    const checkpointed = phase === "plan" && readCheckpoints() > checkpointsBefore;
+    let checkpointed = false;
+    if (phase === "plan") {
+      try { checkpointed = readCheckpoints() > checkpointsBefore; } catch (err) {
+        legs.push({ phase, sessionId: leg.sessionId, costUsd: leg.costUsd, denials: leg.denials, verdict: "error" });
+        return end("error", null, err.message);
+      }
+    }
     const verdict = classifyLeg({ phase, stateText: readState(), leg, checkpointed });
     legs.push({ phase, sessionId: leg.sessionId, costUsd: leg.costUsd, denials: leg.denials, verdict });
     if (verdict === "error") return end("error");
@@ -283,14 +292,15 @@ export function runPass(common, { passDir, pluginDir, model, settingsFor, projec
 
 /**
  * How many `plan-checkpoint-<k>` keys the planning stage log of `run` holds. No run yet (a state file with no `run:` row, or
- * none at all) is 0; a run id that is not 16 hex is a corrupt state file and throws, so it is never read as "no checkpoints".
+ * none at all, or the `run: none` it carries before the run is minted) is 0; any other run id that is not 16 hex is a
+ * corrupt state file and throws, so it is never read as "no checkpoints".
  */
 export function countCheckpoints(devcycleDir, run) {
-  if (!run) return 0;
+  if (!run || run === "none") return 0;
   return readStage(devcycleDir, { run, stage: "planning" }).filter((l) => l.key.startsWith("plan-checkpoint-")).length;
 }
 
-// One replay's outcome; a throw before or between legs becomes an `error` outcome instead of ending the pass.
+// One replay's outcome; a clone that cannot be cut becomes an `error` outcome instead of ending the pass.
 function replay({ entry, arm, answers, budgetUsd, out, pluginDir, model, settingsFor, projectsRoot, spawn, env }) {
   const fail = (err) => ({ id: entry.id, size: entry.size, arm, outcome: "error", usd: 0, legs: [], question: null, error: err.message, sessions: 0 });
   let dir;
@@ -322,9 +332,7 @@ function replay({ entry, arm, answers, budgetUsd, out, pluginDir, model, setting
       return stdout;
     },
   });
-  let result;
-  // A corrupt state file makes readCheckpoints throw; that ends this replay as an error row, not the whole pass.
-  try { result = drive(); } catch (err) { return fail(err); }
+  const result = drive();
   if (existsSync(statePath)) cpSync(statePath, join(out, "state.md"));
   const stageLog = join(dir, ".devcycle", "stage-log", `${run()}.jsonl`);
   if (existsSync(stageLog)) cpSync(stageLog, join(out, "stage-log.jsonl"));
