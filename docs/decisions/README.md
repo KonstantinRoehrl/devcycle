@@ -5,6 +5,28 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-21 — Planning logs its post-draft steps (#454)
+
+**Decision:** planning logs three more stage-log keys: `plan-assembled` (written by `plan-assemble.mjs --state`, with the
+plan's hash, alongside the state's `plan:` row), `plan-repair-<n>` and `plan-gate`, and `checker-round-<n>` carries its
+finding count. `scripts/plan-resume.mjs` reports a `next` step and a per-step status from them, and the planning resume
+continues at that `next`.
+
+**Why:** an uncontrolled stop after the drafts left no record of the assembly, the checker round, the repair or the gate,
+so a resume could not tell a finished post-draft step from one cut off mid-way (#454).
+
+```text
+budget: surface-budget.json surfaceTotal 7246
+budget: context-budget.json commands/continue.md 76988
+budget: context-budget.json commands/cycle.md 90841
+budget: context-budget.json playbooks/planning-waves.md 73817
+budget: context-budget.json playbooks/receiving-review.md 125986
+budget: context-budget.json playbooks/reviewing-the-branch.md 62954
+budget: context-budget.json playbooks/scoping-the-request.md 38190
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 96770
+budget: context-budget.json playbooks/verifying-on-device.md 68258
+```
+
 ## 2026-11-21 — The interface lock checks consumers verbatim, and a pass's error is its worst replay's (#450)
 
 **Decision:** `scripts/interface-lock.mjs` accepts a consumed code span only when it equals, whitespace collapsed, a

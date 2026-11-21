@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { writeInto } from "./helpers.mjs";
-import { assemblePlan, batchEdges } from "../../scripts/plan-assemble.mjs";
+import { assemblePlan, batchEdges, edgeBatches, sha256Hex } from "../../scripts/plan-assemble.mjs";
+import { readStage } from "../../scripts/stage-log.mjs";
 
 const SCRIPT = new URL("../../scripts/plan-assemble.mjs", import.meta.url).pathname;
 const HEADER = "# P Implementation Plan\n\n**Verification gate:** `npm test`\n";
@@ -129,4 +130,67 @@ test("edges --batch takes only a digits-only positive integer", () => {
     assert.equal(r.status, 2, `--batch ${value} is a usage error`);
     assert.match(r.stderr, /^plan-assemble: --batch takes a positive integer$/m);
   }
+});
+
+test("edgeBatches reads a work directory's task files into the batches edges --batch prints", () => {
+  const dir = workDir();
+  for (const [n, deps] of [[3, "Task 1 (x)"], [4, "Tasks 2+3 committed"]]) writeInto(dir, `tasks/task-${n}.md`, t(n, deps));
+  const edge = (producer, consumer) => ({ producer, consumer });
+  assert.deepEqual(edgeBatches(dir, 3), [
+    { edges: [edge(1, 2), edge(1, 3), edge(2, 4)], tasks: [1, 2, 3, 4] },
+    { edges: [edge(3, 4)], tasks: [3, 4] },
+  ]);
+  assert.equal(edgeBatches(dir, 8).length, 1);
+});
+
+test("sha256Hex is the hex SHA-256 of the text", () => {
+  assert.equal(sha256Hex("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+});
+
+const RUN = "00000000000000a5";
+// A checkout whose state file names RUN, its work directory and a nested plan directory.
+function stateRoot(stateText = `# devcycle state\n- stage: planning\n- run: ${RUN}\n- plan: none\n- spec: s.md\n`) {
+  const root = realpathSync(makeTempDir("plan-assemble-state-"));
+  const work = join(root, `.devcycle/plan-work/${RUN}`);
+  writeInto(work, "plan-header.md", HEADER);
+  writeInto(work, "dispatch-map.md", MAP);
+  writeInto(work, "tasks/task-1.md", t(1));
+  writeInto(work, "tasks/task-2.md", t(2, "Task 1 (consumes x)"));
+  writeInto(root, ".devcycle/state.md", stateText);
+  mkdirSync(join(root, "docs/plans"), { recursive: true });
+  return { root, work, state: join(root, ".devcycle/state.md"), out: join(root, "docs/plans/p.md") };
+}
+
+test("--state logs plan-assembled with the plan's repo-relative path and hash, and writes the state's plan: row", () => {
+  const { root, work, state, out } = stateRoot();
+  const r = cli(work, "--out", out, "--state", state);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), `plan-assemble: wrote ${out} — 2 task(s), 2 wave(s)`);
+  const plan = readFileSync(out, "utf8");
+  const rows = readStage(join(root, ".devcycle"), { run: RUN, stage: "planning" });
+  assert.deepEqual(rows.map(({ key, ref, data }) => ({ key, ref, data })), [{ key: "plan-assembled", ref: "docs/plans/p.md", data: { sha256: sha256Hex(plan) } }]);
+  assert.match(rows[0].at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+  assert.equal(readFileSync(state, "utf8"), `# devcycle state\n- stage: planning\n- run: ${RUN}\n- plan: docs/plans/p.md\n- spec: s.md\n`);
+});
+
+test("without --state nothing is logged and the state file is untouched", () => {
+  const { root, work, state, out } = stateRoot();
+  const before = readFileSync(state, "utf8");
+  assert.equal(cli(work, "--out", out).status, 0);
+  assert.equal(existsSync(join(root, ".devcycle/stage-log")), false, "no stage log is written");
+  assert.equal(readFileSync(state, "utf8"), before);
+});
+
+test("--state refuses a missing state file or one naming no run, before writing the plan", () => {
+  const missing = stateRoot();
+  let r = cli(missing.work, "--out", missing.out, "--state", join(missing.root, ".devcycle/gone.md"));
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^plan-assemble: no state file at .*gone\.md$/m);
+  assert.equal(existsSync(missing.out), false, "no plan is written");
+  const runless = stateRoot("# devcycle state\n- stage: planning\n");
+  r = cli(runless.work, "--out", runless.out, "--state", runless.state);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^plan-assemble: .*state\.md names no run, so the assembly cannot be logged$/m);
+  assert.equal(existsSync(runless.out), false, "no plan is written");
+  assert.equal(cli("edges", runless.work, "--state", runless.state).status, 2, "edges logs nothing");
 });

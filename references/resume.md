@@ -209,7 +209,7 @@ state file, so neither command opens this file to find an entry. `commands/cycle
 stages in order and states each one's conditions.
 
 At `stage: planning`, `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-resume.mjs" --state .devcycle/state.md`
-prints the planning position, and the resume drafts from its `missing` and `nextGroup`.
+prints the planning position, and the resume drafts from its `missing` and `nextGroup` and continues at its `next`.
 
 `done` has no entry: a closed cycle resumes at nothing, and `/devcycle:cycle` reuses its state file
 rather than resuming it.

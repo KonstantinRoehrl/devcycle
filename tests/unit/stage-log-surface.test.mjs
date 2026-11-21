@@ -19,7 +19,7 @@ test("the table has one row for every stage in commands/cycle.md's enum except d
 test("every pinned key shape is in the owner, and the read-on-entry rule names the CLI", () => {
   const text = owner();
   for (const key of ["interview-batch-<n>", "research-map", "scope-written", "question-batch-<n>", "section-approved-<slug>", "builder-check",
-    "feasibility-verdict", "plan-section-<slug>", "self-review-<item>", "refutation-<round>", "batch-answer", "item-<id>", "criteria-confirmed", "reproduction", "hypothesis-<n>"])
+    "feasibility-verdict", "plan-section-<slug>", "plan-assembled", "plan-repair-<n>", "plan-gate", "self-review-<item>", "refutation-<round>", "batch-answer", "item-<id>", "criteria-confirmed", "reproduction", "hypothesis-<n>"])
     assert.ok(text.includes(`\`${key}\``), `the owner no longer names ${key}`);
   assert.ok(text.includes('scripts/stage-log.mjs" read --state .devcycle/state.md --stage <stage>'), "no read-on-entry command");
   assert.ok(text.includes('scripts/stage-log.mjs" log --state .devcycle/state.md --stage <stage> --key <key>'), "no log command");
