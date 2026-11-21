@@ -70,6 +70,9 @@ export function readRows(dir) {
   return rows;
 }
 
+/** The larger-magnitude of two signed errors, sign kept; a tie goes to the positive one. */
+const worseMiss = (a, b) => (Math.abs(b) > Math.abs(a) || (Math.abs(b) === Math.abs(a) && b > a) ? b : a);
+
 /**
  * Per-arm planning $/task, every replay's projection error and the calibration verdict, over scored benchmark passes.
  * @param {{id: string, results: object[]}[]} passes each `results` a parsed `results.json`: plan-bench-score's per-replay entries
@@ -91,7 +94,7 @@ export function ratesReport(passes) {
     .map(([arm, values]) => ({ arm, n: values.length, planningUsdPerTask: values.length ? median(values) : null }));
   const passErrors = passes.map(({ id }) => {
     const errors = replays.filter((r) => r.pass === id && r.errorPct !== null).map((r) => r.errorPct);
-    return { id, errorPct: errors.length ? median(errors) : null };
+    return { id, errorPct: errors.length ? errors.reduce(worseMiss) : null };
   });
   const calibrated = isCalibrated({ passes: passErrors.filter((p) => p.errorPct !== null), maxErrorPct: CALIBRATION.maxErrorPct });
   return { arms, replays, passes: passErrors, calibrated };
@@ -147,11 +150,11 @@ export function main(argv) {
     ratesDir = requireValue(flags, "--rates");
   } catch (err) {
     console.error(`cost-model-fit: ${err.message}\n${USAGE}`);
-    return 1;
+    return 2;
   }
   if ((runsDir === undefined) === (ratesDir === undefined)) {
-    console.error(USAGE);
-    return 1;
+    console.error(`cost-model-fit: give exactly one of --runs and --rates\n${USAGE}`);
+    return 2;
   }
   if (ratesDir !== undefined) return ratesMode(ratesDir, "--json" in flags);
   const dir = runsDir;
