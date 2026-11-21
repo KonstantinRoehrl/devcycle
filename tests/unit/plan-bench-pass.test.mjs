@@ -7,6 +7,7 @@ import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeFakeBin, makeRepo, commitAll, writeInto, sh } from "./helpers.mjs";
 import {
   LEG_CAPS, legCapFor, STALL_LEGS, progressKey, BENCH_BASE_BRANCH, classifyLeg, pickAnswer, legArgs, parseLeg, runEntryArm, runPass, collectTranscripts, cutClone, planPrompt,
+  LIMIT_RESUME_PROMPT, LIMIT_WAITS, MAX_LIMIT_WAIT_MS,
 } from "../../scripts/plan-bench-pass.mjs";
 import { DEFAULT_ANSWERS } from "../../scripts/plan-bench.mjs";
 
@@ -54,9 +55,9 @@ test("legArgs is the driver's headless flag set plus the settings, resume and sp
 test("parseLeg reads the last result event, and a missing one is an error carrying the init session", () => {
   const out = [JSON.stringify({ type: "system", subtype: "init", session_id: "s0" }), "not json",
     result({ session_id: "s1", total_cost_usd: 1.25, result: "Question?", permission_denials: [{}, {}] })].join("\n");
-  assert.deepEqual(parseLeg(out), { sessionId: "s1", costUsd: 1.25, text: "Question?", isError: false, denials: 2 });
+  assert.deepEqual(parseLeg(out), { sessionId: "s1", costUsd: 1.25, text: "Question?", isError: false, denials: 2, limit: null });
   assert.deepEqual(parseLeg(JSON.stringify({ type: "system", subtype: "init", session_id: "s0" })),
-    { sessionId: "s0", costUsd: null, text: null, isError: true, denials: 0 });
+    { sessionId: "s0", costUsd: null, text: null, isError: true, denials: 0, limit: null });
 });
 
 // A scripted replay: each leg returns its stdout and leaves the state text the next readState() sees.
@@ -459,4 +460,124 @@ test("runEntryArm resets the stall count when a leg moves something between two 
   const s = scripted([{ state: PLANNED }, ...Array.from({ length: LEG_CAPS.execute }, (_, i) => ({ state: at(`b${Math.floor(i / 2)}`) }))]);
   const r = runEntryArm({ execute: true, prompt: "go", answers: ANSWERS, budgetUsd: 100, ...s });
   assert.equal(r.outcome, "leg-cap", "an idle leg then one that moves never makes two idle legs in a row");
+});
+
+test("classifyLeg: a ready planning handoff is a checkpoint when the leg logged a plan-checkpoint, a NO-GO when it did not", () => {
+  const ready = state({ stage: "planning", plan: "none", handoff: "ready 2026-11-21T00:00:00Z" });
+  assert.equal(classifyLeg({ phase: "plan", stateText: ready, leg: leg("Session ended mid-planning: group 1 of 3"), checkpointed: true }), "checkpoint");
+  assert.equal(classifyLeg({ phase: "plan", stateText: ready, leg: leg("NO-GO: x"), checkpointed: false }), "no-go");
+  const pending = state({ stage: "planning", plan: "none", handoff: "pending 2026-11-21T00:00:00Z" });
+  assert.equal(classifyLeg({ phase: "plan", stateText: pending, leg: leg("Which?"), checkpointed: true }), "question");
+});
+
+test("planPrompt tells only a plan-only replay to stop at the planning handoff", () => {
+  const spec = "docs/superpowers/specs/s-design.md";
+  assert.equal(planPrompt(spec, true), "/devcycle:cycle Plan the approved spec at docs/superpowers/specs/s-design.md. It is approved: enter planning against it.");
+  assert.equal(planPrompt(spec, false), planPrompt(spec));
+  assert.match(planPrompt(spec), /and stop at the planning handoff\.$/);
+});
+
+// A leg a usage limit stopped: the rejected event, then the error result the session ends with.
+const limitedLeg = (resetsAt, sid = "s1") => [
+  JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "allowed", resetsAt: 1 } }),
+  JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "rejected", ...(resetsAt === undefined ? {} : { resetsAt }) } }),
+  result({ session_id: sid, is_error: true, total_cost_usd: 0, result: "You've hit your 5-hour limit" }),
+].join("\n");
+
+test("parseLeg reads a rejected rate_limit_event as the leg's usage limit, with or without a reset", () => {
+  assert.deepEqual(parseLeg(limitedLeg(1795273200)).limit, { resetAt: 1795273200 });
+  assert.deepEqual(parseLeg(limitedLeg(undefined)).limit, { resetAt: null });
+  assert.equal(parseLeg(result({})).limit, null);
+  assert.equal(parseLeg([JSON.stringify({ type: "rate_limit_event", rate_limit_info: { status: "allowed", resetsAt: 9 } }), result({})].join("\n")).limit, null);
+});
+
+test("runEntryArm sends a fresh /devcycle:continue after a mid-planning checkpoint instead of scoring it a NO-GO", () => {
+  const CHECKPOINT = state({ stage: "planning", plan: "none", handoff: "ready 2026-11-21T00:00:00Z" });
+  // Each leg's own checkpoint count after it ran: the first logs plan-checkpoint-1, the second logs none.
+  const runCase = (steps, after) => {
+    const s = scripted(steps);
+    let checkpoints = 0;
+    const spawnLeg = (args) => { checkpoints = after[s.calls.length]; return s.spawnLeg(args); };
+    return { s, r: runEntryArm({ execute: false, prompt: "go", answers: ANSWERS, budgetUsd: 10, ...s, spawnLeg, readCheckpoints: () => checkpoints }) };
+  };
+  const resumed = runCase([{ state: CHECKPOINT, sid: "s1" }, { state: PLANNED, sid: "s2" }], [1, 1]);
+  assert.equal(resumed.r.outcome, "planned");
+  assert.deepEqual(resumed.s.calls.map(({ prompt, resume }) => [prompt, resume]), [["go", null], ["/devcycle:continue", null]]);
+  assert.deepEqual(resumed.r.legs.map((l) => [l.phase, l.verdict]), [["plan", "checkpoint"], ["plan", "done"]]);
+  // An earlier leg's checkpoint does not make a later ready handoff with no plan anything but a NO-GO.
+  const noGo = runCase([{ state: CHECKPOINT }, { state: CHECKPOINT, text: "NO-GO: x" }], [1, 1]);
+  assert.equal(noGo.r.outcome, "no-go");
+  assert.deepEqual(noGo.r.legs.map((l) => l.verdict), ["checkpoint", "no-go"]);
+});
+
+// A replay whose legs print `outs` in turn, the state turning PLANNED on the leg numbered `plannedAt` (1-based).
+function limitedReplay(outs, { plannedAt = Infinity, now = () => 400_000 } = {}) {
+  const calls = [];
+  const waits = [];
+  let current = ASKING;
+  const r = runEntryArm({
+    execute: false, prompt: "go", answers: Array.from({ length: LEG_CAPS.plan }, () => ANSWERS[0]), budgetUsd: 10,
+    spawnLeg: (args) => {
+      calls.push(args);
+      if (calls.length >= plannedAt) current = PLANNED;
+      return outs[calls.length - 1] ?? result({ result: "triage" });
+    },
+    readState: () => current, now, sleep: (ms) => waits.push(ms),
+  });
+  return { r, calls, waits };
+}
+
+test("runEntryArm waits out a usage limit to its reset plus a minute, then resumes the same session", () => {
+  const { r, calls, waits } = limitedReplay([limitedLeg(1000, "s7"), result({ session_id: "s7" })], { plannedAt: 2 });
+  assert.equal(r.outcome, "planned");
+  assert.deepEqual(waits, [1000 * 1000 - 400_000 + 60_000]);
+  assert.deepEqual(calls.map(({ prompt, resume }) => [prompt, resume]), [["go", null], [LIMIT_RESUME_PROMPT, "s7"]]);
+  assert.deepEqual(r.legs.map((l) => l.verdict), ["rate-limited", "done"]);
+});
+
+test("a leg the usage limit stopped does not count toward the leg cap", () => {
+  const { r, calls } = limitedReplay([limitedLeg(1000)]);
+  assert.equal(r.outcome, "leg-cap");
+  assert.equal(calls.length, LEG_CAPS.plan + 1);
+});
+
+test("a usage limit with no reset, one past the wait cap, or one resetting too far off ends the replay rate-limited", () => {
+  const none = limitedReplay([limitedLeg(undefined)]);
+  assert.deepEqual([none.r.outcome, none.waits.length, none.calls.length], ["rate-limited", 0, 1]);
+  const far = limitedReplay([limitedLeg((400_000 + MAX_LIMIT_WAIT_MS) / 1000)]);
+  assert.deepEqual([far.r.outcome, far.waits.length], ["rate-limited", 0]);
+  const justInside = limitedReplay([limitedLeg((400_000 + MAX_LIMIT_WAIT_MS - 60_000) / 1000)], { plannedAt: 2 });
+  assert.deepEqual([justInside.r.outcome, justInside.waits], ["planned", [MAX_LIMIT_WAIT_MS]]);
+  const repeated = limitedReplay(Array.from({ length: LIMIT_WAITS + 1 }, () => limitedLeg(1000)));
+  assert.deepEqual([repeated.r.outcome, repeated.waits.length, repeated.calls.length], ["rate-limited", LIMIT_WAITS, LIMIT_WAITS + 1]);
+});
+
+test("runPass resumes a replay past a logged checkpoint, prompts an executing entry without the planning stop, and keeps its stage log", () => {
+  const repoPath = benchRepo();
+  const baseSha = sh("git", ["rev-parse", "HEAD"], { cwd: repoPath }).trim();
+  const entries = [{ id: "m-1", size: "medium", repoPath, baseSha, specPath: "docs/superpowers/specs/s-design.md", tasks: 1, execute: true }];
+  const passDir = join(makeTempDir("plan-bench-passdir-"), "1");
+  const run = "0123456789abcdef";
+  const prompts = [];
+  runPass(
+    { entries, arms: ["checkpointed"], answers: [{ prompt: null, answers: DEFAULT_ANSWERS }], budget: 50 },
+    {
+      passDir, pluginDir: "/p", model: "m", settingsFor: () => ({}), projectsRoot: makeTempDir("plan-bench-projects-"),
+      spawn: (args, { cwd }) => {
+        prompts.push(args[args.indexOf("-p") + 1]);
+        mkdirSync(join(cwd, ".devcycle", "stage-log"), { recursive: true });
+        const first = prompts.length === 1;
+        writeFileSync(join(cwd, ".devcycle", "state.md"), first
+          ? state({ stage: "planning", plan: "none", run, handoff: "ready 2026-11-21T00:00:00Z" })
+          : state({ stage: "branch-review", plan: "docs/p.md", run, handoff: "ready 2026-11-21T00:00:00Z" }));
+        if (first) writeFileSync(join(cwd, ".devcycle", "stage-log", `${run}.jsonl`), JSON.stringify({ stage: "planning", key: "plan-checkpoint-1", at: "2026-11-21T00:00:00Z" }) + "\n");
+        return result({});
+      },
+    },
+  );
+  assert.deepEqual(prompts, [planPrompt("docs/superpowers/specs/s-design.md", true), "/devcycle:continue", "/devcycle:continue"]);
+  const outcome = JSON.parse(readFileSync(join(passDir, "m-1--checkpointed", "outcome.json"), "utf8"));
+  assert.deepEqual(outcome.legs.map((l) => [l.phase, l.verdict]), [["plan", "checkpoint"], ["plan", "done"], ["execute", "done"]]);
+  assert.equal(outcome.outcome, "executed");
+  assert.match(readFileSync(join(passDir, "m-1--checkpointed", "stage-log.jsonl"), "utf8"), /plan-checkpoint-1/);
 });

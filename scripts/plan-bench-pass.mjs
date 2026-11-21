@@ -8,7 +8,9 @@ import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join } from "node:path";
 import { field } from "./md-field.mjs";
+import { readStage } from "./stage-log.mjs";
 import { makeTempDir } from "./temp-dir.mjs";
+import { rejectedLimit, resetWaitMs } from "./usage-limit.mjs";
 
 // The branch a replay's clone sits on: an integration branch (references/branch.md § Committing), so execution cuts
 // its own topic branch the way it does in a real repo instead of committing onto a detached HEAD.
@@ -22,10 +24,20 @@ export const STALL_LEGS = 2;
 export const progressKey = (text) => String(text).split("\n").filter((line) => !/^- (?:updated|handoff):/.test(line)).join("\n");
 export const PLANNING_STAGES = new Set(["scoping", "audit", "diagnosis", "brainstorm", "planning"]);
 export const CONTINUE_PROMPT = "/devcycle:continue";
+// A usage limit is waited out and the same session resumed with this prompt, at most LIMIT_WAITS times a replay and never
+// for a reset further off than MAX_LIMIT_WAIT_MS (a weekly window): past either, the replay ends `rate-limited`.
+export const LIMIT_RESUME_PROMPT = "A usage limit stopped you and has now reset. Carry on from where you stopped.";
+export const LIMIT_WAITS = 3;
+export const MAX_LIMIT_WAIT_MS = 6 * 60 * 60_000;
+const sleepSync = (ms) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); };
 
-/** The first prompt of a replay: plan the entry's spec, which the corpus records as approved. */
-export const planPrompt = (specRel) =>
-  `/devcycle:cycle Plan the approved spec at ${specRel}. It is approved: enter planning against it and stop at the planning handoff.`;
+/**
+ * The first prompt of a replay: plan the entry's spec, which the corpus records as approved. Only a plan-only replay is
+ * told to stop at the planning handoff: the cycle records the prompt as its `request:`, and an executing replay's
+ * `/devcycle:continue` legs would read that stop and refuse to execute.
+ */
+export const planPrompt = (specRel, execute = false) =>
+  `/devcycle:cycle Plan the approved spec at ${specRel}. It is approved: enter planning against it${execute ? "." : " and stop at the planning handoff."}`;
 
 // What a replay leg must not inherit from a driver or a nesting session (scripts/drive-execution.mjs
 // childEnv): the drive token stops handoff-mark.mjs ever marking the leg's handoff, a nested-run flag leaves
@@ -36,19 +48,22 @@ const handoffReady = (stateText) => /^ready\b/.test(field(stateText, "handoff") 
 
 /**
  * What a finished leg means for the replay.
- * @param {{phase: "plan"|"execute", stateText: string, leg: {isError: boolean, text: string|null}}} input
- * @returns {"done"|"next"|"no-go"|"question"|"error"}
+ * @param {{phase: "plan"|"execute", stateText: string, leg: {isError: boolean, text: string|null}, checkpointed?: boolean}} input
+ *   `checkpointed`: the leg logged a `plan-checkpoint-<k>` stage-log key
+ * @returns {"done"|"next"|"checkpoint"|"no-go"|"question"|"error"}
  *   done: the phase's target stage was reached; next: a handoff inside execution, so a fresh
- *   `/devcycle:continue` leg follows; no-go: planning handed off without a plan; question: the
+ *   `/devcycle:continue` leg follows; checkpoint: planning ended mid-stage at a checkpoint, so a fresh
+ *   `/devcycle:continue` leg resumes it; no-go: planning handed off without a plan; question: the
  *   session stopped on a gate.
  */
-export function classifyLeg({ phase, stateText, leg }) {
+export function classifyLeg({ phase, stateText, leg, checkpointed = false }) {
   if (leg.isError || leg.text === null) return "error";
   const stage = field(stateText, "stage");
   if (phase === "plan") {
     const plan = field(stateText, "plan");
     if (stage && !PLANNING_STAGES.has(stage) && plan && plan !== "none") return "done";
-    return stage === "planning" && handoffReady(stateText) ? "no-go" : "question";
+    if (stage === "planning" && handoffReady(stateText)) return checkpointed ? "checkpoint" : "no-go";
+    return "question";
   }
   if (stage && stage !== "execution") return "done";
   return handoffReady(stateText) ? "next" : "question";
@@ -80,23 +95,29 @@ export function legArgs({ prompt, resume, pluginDir, settings, model, maxBudgetU
   ];
 }
 
-/** A leg's stream-json output, reduced to what the replay needs. No result event reads as an error whose cost is unknown (`costUsd: null`). */
+/**
+ * A leg's stream-json output, reduced to what the replay needs. No result event reads as an error whose cost is unknown
+ * (`costUsd: null`); `limit` is the last rejected rate-limit event's (scripts/usage-limit.mjs), or null.
+ */
 export function parseLeg(stdout) {
   let init = null;
   let result = null;
+  let limit = null;
   for (const line of String(stdout).split("\n")) {
     let e;
     try { e = JSON.parse(line); } catch { continue; }
     if (e?.type === "system" && e.subtype === "init") init = e;
     if (e?.type === "result") result = e;
+    limit = rejectedLimit(e) ?? limit;
   }
-  if (!result) return { sessionId: init?.session_id ?? null, costUsd: null, text: null, isError: true, denials: 0 };
+  if (!result) return { sessionId: init?.session_id ?? null, costUsd: null, text: null, isError: true, denials: 0, limit };
   return {
     sessionId: result.session_id ?? init?.session_id ?? null,
     costUsd: typeof result.total_cost_usd === "number" ? result.total_cost_usd : 0,
     text: typeof result.result === "string" ? result.result : null,
     isError: result.is_error === true,
     denials: Array.isArray(result.permission_denials) ? result.permission_denials.length : 0,
+    limit,
   };
 }
 
@@ -106,12 +127,17 @@ const round2 = (n) => Math.round(n * 100) / 100;
  * Drives one entry × arm to its outcome. Pure apart from `spawnLeg` and `readState`.
  * @param {{execute: boolean, prompt: string, answers: {match: string, reply: string}[], budgetUsd: number,
  *   spawnLeg: (args: {prompt: string, resume: string|null, maxBudgetUsd: number}) => string, readState: () => string,
- *   readProgress?: () => string}} input `readProgress` is what an execute leg must change to count as progress; it defaults to `readState`
- * @returns {{outcome: "planned"|"executed"|"no-go"|"unanswered"|"error"|"budget-stop"|"leg-cap"|"stalled", usd: number,
+ *   readProgress?: () => string, readCheckpoints?: () => number, sleep?: (ms: number) => void, now?: () => number}} input
+ *   `readProgress` is what an execute leg must change to count as progress; it defaults to `readState`. `readCheckpoints`
+ *   counts the `plan-checkpoint-<k>` keys the stage log holds, so a plan leg that raised it ended at a checkpoint.
+ *   `sleep` and `now` wait out a usage limit; a leg the limit stopped never counts toward the leg cap.
+ * @returns {{outcome: "planned"|"executed"|"no-go"|"unanswered"|"error"|"budget-stop"|"leg-cap"|"stalled"|"rate-limited", usd: number,
  *   legs: {phase: string, sessionId: string|null, costUsd: number, denials: number, verdict: string}[], question: string|null,
  *   error: string|null}} `error` carries the reason a leg could not launch; every other outcome leaves it null
  */
-export function runEntryArm({ execute, prompt, answers, budgetUsd, spawnLeg, readState, readProgress = readState }) {
+export function runEntryArm({
+  execute, prompt, answers, budgetUsd, spawnLeg, readState, readProgress = readState, readCheckpoints = () => 0, sleep = sleepSync, now = Date.now,
+}) {
   const legs = [];
   const used = new Set();
   let phase = "plan";
@@ -119,8 +145,9 @@ export function runEntryArm({ execute, prompt, answers, budgetUsd, spawnLeg, rea
   let next = prompt;
   let spent = 0;
   let stalledLegs = 0;
+  let limitWaits = 0;
   const end = (outcome, question = null, error = null) => ({ outcome, usd: round2(spent), legs, question, error });
-  while (legs.length < legCapFor(execute)) {
+  while (legs.filter((l) => l.verdict !== "rate-limited").length < legCapFor(execute)) {
     if (spent >= budgetUsd) return end("budget-stop");
     // A leg that never reports its cost (killed at --leg-timeout, or ended with no result event) may have spent up to the
     // cap it ran under, so it is charged that cap: real spend stays within the budget however many legs die.
@@ -131,14 +158,34 @@ export function runEntryArm({ execute, prompt, answers, budgetUsd, spawnLeg, rea
       return end("error", null, `${reason}; charged its $${cap.toFixed(2)} spend cap`);
     };
     const before = phase === "execute" ? progressKey(readProgress()) : null;
+    const checkpointsBefore = phase === "plan" ? readCheckpoints() : 0;
     let leg;
     try { leg = parseLeg(spawnLeg({ prompt: next, resume, maxBudgetUsd: cap })); } catch (err) { return err.killed ? charged(null, err.message) : end("error", null, err.message); }
     if (leg.costUsd === null) return charged(leg.sessionId, "the leg ended with no result event");
     spent += leg.costUsd;
-    const verdict = classifyLeg({ phase, stateText: readState(), leg });
+    if (leg.limit) {
+      legs.push({ phase, sessionId: leg.sessionId, costUsd: leg.costUsd, denials: leg.denials, verdict: "rate-limited" });
+      const waitMs = leg.limit.resetAt === null ? null : resetWaitMs(leg.limit.resetAt, now());
+      if (waitMs === null || waitMs > MAX_LIMIT_WAIT_MS || limitWaits >= LIMIT_WAITS) return end("rate-limited");
+      limitWaits += 1;
+      sleep(waitMs);
+      // A leg the limit stopped before its session started is re-run as it was; any other resumes its own session.
+      if (leg.sessionId) {
+        resume = leg.sessionId;
+        next = LIMIT_RESUME_PROMPT;
+      }
+      continue;
+    }
+    const checkpointed = phase === "plan" && readCheckpoints() > checkpointsBefore;
+    const verdict = classifyLeg({ phase, stateText: readState(), leg, checkpointed });
     legs.push({ phase, sessionId: leg.sessionId, costUsd: leg.costUsd, denials: leg.denials, verdict });
     if (verdict === "error") return end("error");
     if (verdict === "no-go") return end("no-go");
+    if (verdict === "checkpoint") {
+      resume = null;
+      next = CONTINUE_PROMPT;
+      continue;
+    }
     if (verdict === "done" && (phase === "execute" || !execute)) return end(phase === "plan" ? "planned" : "executed");
     if (phase === "execute") {
       stalledLegs = verdict === "next" && progressKey(readProgress()) === before ? stalledLegs + 1 : 0;
@@ -204,8 +251,8 @@ export function cutClone({ repoPath, baseSha, specPath, parent }) {
 
 /**
  * Runs every entry × arm of one pass in order, stopping once the budget is spent, and writes each
- * replay's artifacts under `<passDir>/<id>--<arm>/`: leg-<n>.jsonl, state.md, runs/ (the
- * DEVCYCLE_RUNS_DIR the session wrote), corpus/ (its transcripts) and outcome.json. `<passDir>/pass.json`
+ * replay's artifacts under `<passDir>/<id>--<arm>/`: leg-<n>.jsonl, state.md, stage-log.jsonl (its run's stage log), runs/
+ * (the DEVCYCLE_RUNS_DIR the session wrote), corpus/ (its transcripts) and outcome.json. `<passDir>/pass.json`
  * names the replays the pass was started with, which is what scoring counts. A replay that cannot start
  * or whose leg cannot launch is recorded as an `error` outcome and the pass carries on with the next one.
  * @param {{entries: object[], arms: string[], answers: {prompt: string|null, answers: object[]}[], budget: number}} common
@@ -243,15 +290,28 @@ function replay({ entry, arm, answers, budgetUsd, out, pluginDir, model, setting
   const statePath = join(dir, ".devcycle", "state.md");
   const ledgerPath = join(dir, ".devcycle", "ledger.md");
   const readIfThere = (path) => (existsSync(path) ? readFileSync(path, "utf8") : "");
+  const run = () => field(readIfThere(statePath), "run");
+  const readCheckpoints = () => {
+    try {
+      return readStage(join(dir, ".devcycle"), { run: run(), stage: "planning" }).filter((l) => l.key.startsWith("plan-checkpoint-")).length;
+    } catch {
+      return 0;
+    }
+  };
   let n = 0;
   const result = runEntryArm({
     execute: entry.execute,
-    prompt: answers.prompt ?? planPrompt(specRel),
+    prompt: answers.prompt ?? planPrompt(specRel, entry.execute),
     answers: answers.answers,
     budgetUsd,
     readState: () => readIfThere(statePath),
     // A wave that commits tasks without rewriting state.md still advances the ledger.
     readProgress: () => `${readIfThere(statePath)}\n${readIfThere(ledgerPath)}`,
+    readCheckpoints,
+    sleep: (ms) => {
+      console.error(`plan-bench: ${entry.id}--${arm} hit a usage limit; waiting ${Math.ceil(ms / 60_000)} min for its reset`);
+      sleepSync(ms);
+    },
     spawnLeg: ({ prompt, resume, maxBudgetUsd }) => {
       const stdout = spawn(legArgs({ prompt, resume, pluginDir, settings: settingsFor(arm), model, maxBudgetUsd }), { cwd: dir, env: legEnv });
       writeFileSync(join(out, `leg-${++n}.jsonl`), stdout);
@@ -259,6 +319,8 @@ function replay({ entry, arm, answers, budgetUsd, out, pluginDir, model, setting
     },
   });
   if (existsSync(statePath)) cpSync(statePath, join(out, "state.md"));
+  const stageLog = join(dir, ".devcycle", "stage-log", `${run()}.jsonl`);
+  if (existsSync(stageLog)) cpSync(stageLog, join(out, "stage-log.jsonl"));
   const sessions = collectTranscripts({ projectsRoot, sessionIds: result.legs.map((l) => l.sessionId), dest: join(out, "corpus") });
   return { id: entry.id, size: entry.size, arm, ...result, sessions };
 }

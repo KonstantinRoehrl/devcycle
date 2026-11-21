@@ -25,6 +25,7 @@ import { readPluginList, surfaceArgs } from "./drive-surface.mjs";
 import { stopWindowOpen } from "./stop-files.mjs";
 import { follow, statusReport, WATCH_LEVELS, waitForEnd } from "./drive-watch.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
+import { rejectedLimit, resetWaitMs } from "./usage-limit.mjs";
 import { isMain } from "./is-main.mjs";
 import { UNREADABLE_PLUGIN_VERSION, installedVersion } from "./verification.mjs";
 import { field } from "./md-field.mjs";
@@ -89,7 +90,6 @@ const TRANSIENT_TEXT = /api error|overloaded|connection|timed? ?out|ECONNRESET|E
 const AUTH_TEXT = /\/login|not logged in|invalid api key|authentication_error|oauth token (has )?expired/i;
 // Minutes before the k-th consecutive transient retry; every later one waits the last figure.
 const BACKOFF_MINUTES = [1, 2, 4, 8, 16, 30];
-const RESET_MARGIN_MS = 60_000;
 const MID_WAVE_LABEL = "Session ended mid-wave:";
 // The ledger events that mean a task moved: a session that adds lines but none of these is churn.
 const OUTCOME_EVENTS = new Set(["committed", "report-received", "review-verdict"]);
@@ -570,8 +570,8 @@ function runSession(ctx, bin, args, log, n) {
         }
       } else if (e.type === "user" && !e.parent_tool_use_id) {
         for (const c of e.message?.content ?? []) if (c?.type === "tool_result") s.pending.delete(c.tool_use_id);
-      } else if (e.type === "rate_limit_event" && e.rate_limit_info?.status === "rejected") {
-        s.limit = { resetAt: e.rate_limit_info.resetsAt ?? null };
+      } else if (rejectedLimit(e)) {
+        s.limit = rejectedLimit(e);
       } else if (e.type === "result") {
         s.result = e;
       }
@@ -693,7 +693,7 @@ function judge({ ctx, opts, s, before, after, stalls, churn, spent, waited, atte
   const churned = () => verdict("stalled", 5, `stalled: ${counts.churn} sessions in a row added ledger lines but no report, verdict or commit. ${said}`, counts);
   if (s.limit?.resetAt) {
     if (overBudget) return budgetSpent();
-    const ms = Math.max(s.limit.resetAt * 1000 - clockNow(), 0) + RESET_MARGIN_MS;
+    const ms = resetWaitMs(s.limit.resetAt, clockNow());
     return verdict("budget", null, null, { ...counts, wait: { ms, what: "usage limit until its reset", charged: false } });
   }
   if (transient) {
