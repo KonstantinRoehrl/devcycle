@@ -10,7 +10,7 @@ import { basename, isAbsolute, join } from "node:path";
 import { field } from "./md-field.mjs";
 import { readStage } from "./stage-log.mjs";
 import { makeTempDir } from "./temp-dir.mjs";
-import { rejectedLimit, resetWaitMs } from "./usage-limit.mjs";
+import { rejectedLimit, resetWaitMs, textLimit } from "./usage-limit.mjs";
 
 // The branch a replay's clone sits on: an integration branch (references/branch.md § Committing), so execution cuts
 // its own topic branch the way it does in a real repo instead of committing onto a detached HEAD.
@@ -97,7 +97,8 @@ export function legArgs({ prompt, resume, pluginDir, settings, model, maxBudgetU
 
 /**
  * A leg's stream-json output, reduced to what the replay needs. No result event reads as an error whose cost is unknown
- * (`costUsd: null`); `limit` is the last rejected rate-limit event's (scripts/usage-limit.mjs), or null.
+ * (`costUsd: null`); `limit` is the last rejected rate-limit event's, else the limit an error result's text reports
+ * (scripts/usage-limit.mjs), or null.
  */
 export function parseLeg(stdout) {
   let init = null;
@@ -117,7 +118,7 @@ export function parseLeg(stdout) {
     text: typeof result.result === "string" ? result.result : null,
     isError: result.is_error === true,
     denials: Array.isArray(result.permission_denials) ? result.permission_denials.length : 0,
-    limit,
+    limit: limit ?? (result.is_error === true && typeof result.result === "string" ? textLimit(result.result) : null),
   };
 }
 
@@ -280,6 +281,15 @@ export function runPass(common, { passDir, pluginDir, model, settingsFor, projec
   return outcomes;
 }
 
+/**
+ * How many `plan-checkpoint-<k>` keys the planning stage log of `run` holds. No run yet (a state file with no `run:` row, or
+ * none at all) is 0; a run id that is not 16 hex is a corrupt state file and throws, so it is never read as "no checkpoints".
+ */
+export function countCheckpoints(devcycleDir, run) {
+  if (!run) return 0;
+  return readStage(devcycleDir, { run, stage: "planning" }).filter((l) => l.key.startsWith("plan-checkpoint-")).length;
+}
+
 // One replay's outcome; a throw before or between legs becomes an `error` outcome instead of ending the pass.
 function replay({ entry, arm, answers, budgetUsd, out, pluginDir, model, settingsFor, projectsRoot, spawn, env }) {
   const fail = (err) => ({ id: entry.id, size: entry.size, arm, outcome: "error", usd: 0, legs: [], question: null, error: err.message, sessions: 0 });
@@ -291,15 +301,9 @@ function replay({ entry, arm, answers, budgetUsd, out, pluginDir, model, setting
   const ledgerPath = join(dir, ".devcycle", "ledger.md");
   const readIfThere = (path) => (existsSync(path) ? readFileSync(path, "utf8") : "");
   const run = () => field(readIfThere(statePath), "run");
-  const readCheckpoints = () => {
-    try {
-      return readStage(join(dir, ".devcycle"), { run: run(), stage: "planning" }).filter((l) => l.key.startsWith("plan-checkpoint-")).length;
-    } catch {
-      return 0;
-    }
-  };
+  const readCheckpoints = () => countCheckpoints(join(dir, ".devcycle"), run());
   let n = 0;
-  const result = runEntryArm({
+  const drive = () => runEntryArm({
     execute: entry.execute,
     prompt: answers.prompt ?? planPrompt(specRel, entry.execute),
     answers: answers.answers,
@@ -318,9 +322,13 @@ function replay({ entry, arm, answers, budgetUsd, out, pluginDir, model, setting
       return stdout;
     },
   });
+  let result;
+  // A corrupt state file makes readCheckpoints throw; that ends this replay as an error row, not the whole pass.
+  try { result = drive(); } catch (err) { return fail(err); }
   if (existsSync(statePath)) cpSync(statePath, join(out, "state.md"));
   const stageLog = join(dir, ".devcycle", "stage-log", `${run()}.jsonl`);
   if (existsSync(stageLog)) cpSync(stageLog, join(out, "stage-log.jsonl"));
   const sessions = collectTranscripts({ projectsRoot, sessionIds: result.legs.map((l) => l.sessionId), dest: join(out, "corpus") });
   return { id: entry.id, size: entry.size, arm, ...result, sessions };
 }
+

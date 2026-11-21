@@ -25,7 +25,7 @@ import { readPluginList, surfaceArgs } from "./drive-surface.mjs";
 import { stopWindowOpen } from "./stop-files.mjs";
 import { follow, statusReport, WATCH_LEVELS, waitForEnd } from "./drive-watch.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
-import { rejectedLimit, resetWaitMs } from "./usage-limit.mjs";
+import { rejectedLimit, resetWaitMs, textLimit } from "./usage-limit.mjs";
 import { isMain } from "./is-main.mjs";
 import { UNREADABLE_PLUGIN_VERSION, installedVersion } from "./verification.mjs";
 import { field } from "./md-field.mjs";
@@ -72,7 +72,6 @@ const DETACH_POLL_MS = 50;
 // each session it starts compares this with its own (scripts/wave-setup.mjs). A version this driver
 // could not read goes out as UNREADABLE_PLUGIN_VERSION, which stops each session for a person.
 const DRIVER_PLUGIN_VERSION = installedVersion();
-const USAGE_LIMIT_TEXT = /usage limit|rate limit|hit your limit/i;
 // Every wait is a wall-clock deadline checked in slices, so a machine that sleeps through a deadline
 // starts the next session on wake. DEVCYCLE_DRIVE_SLICE_MS and DEVCYCLE_DRIVE_CLOCK_FILE (a file
 // holding epoch milliseconds) let tests run hours of waiting in milliseconds.
@@ -518,8 +517,7 @@ function finalize(s, model) {
   s.denials = Array.isArray(r?.permission_denials) ? r.permission_denials.length : 0;
   if (!s.environment && r?.is_error && AUTH_TEXT.test(s.resultText))
     s.environment = `authentication failed: ${s.resultText.split("\n")[0]}`;
-  if (!s.limit && r?.is_error && USAGE_LIMIT_TEXT.test(s.resultText))
-    s.limit = { resetAt: Number(s.resultText.match(/\|(\d{9,})\b/)?.[1]) || null };
+  if (!s.limit && r?.is_error) s.limit = textLimit(s.resultText);
   if (!s.environment && !s.limit && r?.is_error && apiFailure(s.resultText) === "refused")
     s.environment = `the API refused the session's request, and retrying cannot fix that: ${s.resultText.split("\n")[0]} — ` +
       "fix what it names (the account's credit balance, the model id, the key's access), then restart the run from /devcycle:continue";
