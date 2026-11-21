@@ -31,7 +31,7 @@ export function budgetBand(depth, window) {
 // The id pricing.mjs would key the model under: strips the wrappers a host reports around it
 // (Claude Code's `[1m]`, Bedrock's `<region>.anthropic.` prefix and `-v<n>:<n>` suffix, Vertex's
 // `@<date>`) and reorders the older `claude-3-5-sonnet-...` naming to family-first.
-function canonicalModelId(model) {
+export function canonicalModelId(model) {
   return model
     .replace(/\[1m\]$/i, "")
     .replace(/^(?:[a-z]+\.)?anthropic\./, "")

@@ -85,7 +85,7 @@ force theirs, `status-quo` keeps the old threshold (`delegated` from 5 tasks), a
 ## Projected cost, budget and checkpoints
 
 **Estimate.** Before drafting, print the decision table's `projection`: its `dispatches`, its `tokens`, `$<usd>`,
-and whether it is calibrated (`projection.calibrated`); a `split` has none. When `planningBudgetUSD` on the
+and whether it is calibrated (`projection.calibrated`); a `split` has none. Print the output's `warnings` with the figure: one means it was priced on the default session model. When `planningBudgetUSD` on the
 `knobs:` line is above `0` and `projection.usd` exceeds it, ask one AskUserQuestion, **Proceed** · **Switch
 strategy** · **Reduce scope**, labelling the figure "uncalibrated" while `projection.calibrated` is false, and log
 the answer as stage-log key `budget-answer` with `--data`. **Switch strategy** re-runs the table with the arm the

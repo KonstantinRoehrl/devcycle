@@ -32,6 +32,15 @@ test("windowFor: a priced, a provisional, an assumed and an unknowable window", 
   assert.equal(bands.windowFor("claude-sonnet-4-5-20250929"), null);
 });
 
+test("canonicalModelId strips the host wrappers and is the one owner plan-strategy prices through", () => {
+  assert.equal(typeof bands.canonicalModelId, "function");
+  assert.equal(bands.canonicalModelId("claude-sonnet-5-5[1m]"), "claude-sonnet-5-5");
+  assert.equal(bands.canonicalModelId("eu.anthropic.claude-sonnet-5-5-v1:0"), "claude-sonnet-5-5");
+  assert.equal(bands.canonicalModelId("claude-sonnet-5-5@20250101"), "claude-sonnet-5-5");
+  assert.equal(bands.canonicalModelId("claude-3-5-sonnet-20241022"), "claude-sonnet-3-5-20241022");
+  assert.equal(bands.canonicalModelId("claude-sonnet-5-5"), "claude-sonnet-5-5");
+});
+
 test("the stage budget's two counters", () => {
   assert.equal(bands.STAGE_TOOL_CALLS, 30);
   assert.equal(bands.STAGE_FILES_READ, 15);

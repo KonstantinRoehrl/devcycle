@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { isMain } from "./is-main.mjs";
 import { parseFlags } from "./cli-flags.mjs";
 import { PLANNING_MODELS, PROFILE, draftTier, projectPlanning, taskTokens, taskWeight } from "./plan-cost.mjs";
+import { canonicalModelId } from "./depth-bands.mjs";
 import { priceFor } from "./pricing.mjs";
 
 export { PROFILE, taskWeight };
@@ -227,8 +228,12 @@ function main(argv) {
   const models = { ...PLANNING_MODELS };
   const sessionModel = flags["--sessionModel"];
   if (sessionModel !== undefined) {
-    if (priceFor(sessionModel)) models.session = sessionModel;
-    else warnings.push(`--sessionModel ${sessionModel} has no price in scripts/pricing.mjs; priced the session as ${PLANNING_MODELS.session}`);
+    const canonical = canonicalModelId(sessionModel);
+    if (priceFor(canonical)) models.session = canonical;
+    else {
+      const named = canonical === sessionModel ? sessionModel : `${sessionModel} (${canonical})`;
+      warnings.push(`--sessionModel ${named} has no price in scripts/pricing.mjs; priced the session as ${PLANNING_MODELS.session}`);
+    }
   }
   const { strategy, fork, groups, drafters, est, projection, reason, metrics, rounds } = chooseStrategy(cut, knob, models);
   console.log(JSON.stringify({ strategy, fork, groups, drafters, est, projection, reason, metrics, rounds, warnings }, null, 2));

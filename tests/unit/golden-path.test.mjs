@@ -2853,6 +2853,7 @@ test("planning prints the projection, asks over planningBudgetUSD, checkpoints m
     "print the decision table's `projection`: its `dispatches`, its `tokens`, `$<usd>`, and whether it is calibrated (`projection.calibrated`)",
     "When `planningBudgetUSD` on the `knobs:` line is above `0` and `projection.usd` exceeds it, ask one AskUserQuestion, **Proceed** · **Switch strategy** · **Reduce scope**",
     "labelling the figure \"uncalibrated\" while `projection.calibrated` is false",
+    "Print the output's `warnings` with the figure: one means it was priced on the default session model.",
     "log the answer as stage-log key `budget-answer` with `--data`",
     "`inline` and `checkpointed` log `plan-draft-<n>` as each task file lands",
     'scripts/read-section.mjs" references/delegated-planning.md the-context-pack',

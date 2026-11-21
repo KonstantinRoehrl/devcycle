@@ -5,6 +5,22 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-21 — `plan-strategy.mjs` prices a host-wrapped session model id as its bare id (#450)
+
+**Decision:** `scripts/plan-strategy.mjs` prices `--sessionModel` through `canonicalModelId`, now exported from
+`scripts/depth-bands.mjs`, so a `[1m]`, Bedrock or Vertex id prices like the bare id. An id still unpriced keeps the default
+and warns, naming the id as given and its canonical form. The planning-waves Estimate step prints the output's `warnings`
+with the figure.
+
+**Why:** a branch review found the playbook passes the transcript's model verbatim, so a wrapped id silently priced a
+1-task inline cut at 0.71 instead of 0.35 on the Opus default.
+
+**Budgets:** `playbooks/planning-waves.md` gains one clause.
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 72582
+```
+
 ## 2026-11-21 — The handoff's `planning:` line is a true-end line, and the root README names the cost gate (#450)
 
 **Decision:** `references/handoff.md` carries the `planning:` line only at the planning stage's true end, where

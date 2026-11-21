@@ -175,6 +175,31 @@ test("the CLI prices the coordinator on --sessionModel, and falls back with a wa
   assert.match(unknown.warnings[0], /claude-nope-9/);
 });
 
+test("the CLI prices a host-wrapped --sessionModel id like its bare id, and warns only on an id still unpriced after canonicalizing", () => {
+  const dir = makeTempDir("plan-strategy-");
+  const cut = writeInto(dir, "cut.json", JSON.stringify(wideCut([3])));
+  const run = (...extra) => {
+    const r = spawnSync("node", [SCRIPT, cut, "--planningStrategy", "inline", ...extra], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout);
+  };
+  const base = run();
+  const bare = run("--sessionModel", "claude-sonnet-5-5");
+  assert.ok(bare.est < base.est, "the bare id must price below the default, or the wrapped checks pass vacuously");
+  for (const wrapped of ["claude-sonnet-5-5[1m]", "eu.anthropic.claude-sonnet-5-5-v1:0"]) {
+    const out = run("--sessionModel", wrapped);
+    assert.equal(out.est, bare.est, wrapped);
+    assert.equal(out.projection.usd, bare.projection.usd, wrapped);
+    assert.deepEqual(out.warnings, [], wrapped);
+  }
+  const unknown = run("--sessionModel", "claude-nope-9[1m]");
+  assert.equal(unknown.est, base.est, "the default session model prices it");
+  assert.equal(unknown.projection.usd, base.projection.usd);
+  assert.equal(unknown.warnings.length, 1);
+  assert.match(unknown.warnings[0], /claude-nope-9\[1m\]/, "names the id as given");
+  assert.match(unknown.warnings[0], /claude-nope-9\b(?!\[)/, "names the canonical form when canonicalizing changed it");
+});
+
 test("the CLI exits 2 on a usage error and 1 on an unreadable cut", () => {
   const dir = makeTempDir("plan-strategy-");
   const good = writeInto(dir, "cut.json", JSON.stringify(wideCut([3])));
