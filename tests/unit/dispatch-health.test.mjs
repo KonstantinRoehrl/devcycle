@@ -9,7 +9,7 @@ import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { nextReviewRound, parseLedgerLine, taskEntries } from "../../scripts/task-ledger.mjs";
 import {
   DEATH_CAP, DISPATCH_ENDED, HOLD_CAP, HOLD_GRACE_MS, QUIET_MS, UNBOUND_MS, deathRoute, deathsOf, dispatchHealth, endedOutcome, endedRole, formatDispatch, lastMilestone,
-  currentDispatchStartMs, holdReason, holdStop, markEnded, markStopped, recordDeath, WAIT_MAX_MS, waitForDispatches,
+  currentDispatchStartMs, holdReason, holdStop, markEnded, markStopped, readTranscript, recordDeath, recordRunning, WAIT_MAX_MS, waitForDispatches,
 } from "../../scripts/dispatch-health.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
 
@@ -395,4 +395,39 @@ test("the CLI's --wait takes 1 to WAIT_MAX_MS milliseconds and prints the same l
   const r = spawnSync(process.execPath, [cli, "--record", "--wait", "60000"], { cwd: w.root, encoding: "utf8", env });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /→ redispatch-implementer \(recorded\)\n$/);
+});
+
+// #454: the recovery inventory reads why a session stopped and which call it was in from this one reader.
+test("readTranscript reports the last API error and each tool call, a returned one as completed", () => {
+  const t = readTranscript(FIX("api-error"));
+  assert.equal(t.apiError, "You've hit your session limit · resets 5:40pm (Europe/Vienna)");
+  assert.deepEqual(t.calls, [{ id: "toolu_1", name: "Bash", summary: "node scripts/plan-assemble.mjs w --out p", completed: true }]);
+  assert.equal(t.pendingCall, null);
+  assert.equal(t.terminal, true, "the API error message is the transcript's end");
+  assert.equal(readTranscript(FIX("final-text")).apiError, null);
+});
+
+test("readTranscript's pending call is the last one with no result: a Bash command's first line, an Agent's description", () => {
+  const t = readTranscript(FIX("pending-bash"));
+  assert.deepEqual(t.pendingCall, { name: "Bash", summary: "node scripts/plan-check.mjs plan.md" });
+  assert.deepEqual(t.calls.map((c) => [c.id, c.name, c.summary, c.completed]), [
+    ["toolu_a", "Agent", "plan-checker: round 1 — batch 1", true],
+    ["toolu_b", "Bash", "node scripts/plan-check.mjs plan.md", false],
+  ]);
+  assert.equal(t.apiError, null);
+  assert.deepEqual(readTranscript(FIX("torn")).calls.map((c) => [c.name, c.summary, c.completed]), [["Read", "", true], ["SubagentHandback", "", true]]);
+  const empty = join(makeTempDir("dispatch-health-empty-"), "agent-e1.jsonl");
+  writeFileSync(empty, "");
+  const none = readTranscript(empty);
+  assert.deepEqual([none.apiError, none.calls, none.pendingCall], [null, [], null]);
+});
+
+test("recordRunning: only an open record bound to an agent transcript that reads running", () => {
+  const w = world({ agents: { a1: "pending-tool" }, mtime: T0 + 60_000 });
+  const at = { env: w.env, now: T0 + 2 * 60_000 };
+  assert.equal(recordRunning({ agentId: "a1", sessionId: SID }, at), true);
+  assert.equal(recordRunning({ agentId: "a1", sessionId: SID, endedAt: "2026-10-28T08:01:30Z" }, at), false);
+  assert.equal(recordRunning({ sessionId: SID }, at), false, "an unbound record of an earlier session is an orphan");
+  assert.equal(recordRunning({ agentId: "zz9", sessionId: SID }, at), false, "no transcript for the agent");
+  assert.equal(recordRunning(null, at), false);
 });
