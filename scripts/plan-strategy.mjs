@@ -9,7 +9,8 @@
 import { readFileSync } from "node:fs";
 import { isMain } from "./is-main.mjs";
 import { parseFlags } from "./cli-flags.mjs";
-import { PROFILE, draftTier, projectPlanning, taskTokens, taskWeight } from "./plan-cost.mjs";
+import { PLANNING_MODELS, PROFILE, draftTier, projectPlanning, taskTokens, taskWeight } from "./plan-cost.mjs";
+import { priceFor } from "./pricing.mjs";
 
 export { PROFILE, taskWeight };
 
@@ -96,12 +97,12 @@ function capWarnings(grouping, n) {
   return warnings.map((warning) => `; warning: ${warning}`).join("");
 }
 
-export function chooseStrategy(cut, knob = "auto") {
+export function chooseStrategy(cut, knob = "auto", models = PLANNING_MODELS) {
   if (!KNOBS.includes(knob)) throw new RangeError(`unknown planningStrategy "${knob}", expected one of ${KNOBS.join(", ")}`);
   const metrics = cutMetrics(cut);
   const decide = (strategy, reason, { fork = false, grouping } = {}) => {
     const rounds = grouping ? grouping.rounds : [];
-    const projection = projectPlanning({ strategy, fork, rounds }, cut);
+    const projection = projectPlanning({ strategy, fork, rounds }, cut, models);
     return {
       strategy,
       fork,
@@ -189,7 +190,7 @@ export function parseCut(text) {
   return { cut: kept, errors };
 }
 
-const USAGE = "usage: plan-strategy.mjs <task-cut.json> [--planningStrategy <value>]";
+const USAGE = "usage: plan-strategy.mjs <task-cut.json> [--planningStrategy <value>] [--sessionModel <model id>]";
 
 function usage(message) {
   if (message) console.error(`plan-strategy: ${message}`);
@@ -200,7 +201,7 @@ function usage(message) {
 function main(argv) {
   let parsed;
   try {
-    parsed = parseFlags(argv, { "--planningStrategy": "value" }, { allowPositionals: true, requireValues: "nonEmpty" });
+    parsed = parseFlags(argv, { "--planningStrategy": "value", "--sessionModel": "value" }, { allowPositionals: true, requireValues: "nonEmpty" });
   } catch (e) {
     usage(e.message);
   }
@@ -220,8 +221,17 @@ function main(argv) {
     for (const error of errors) console.error(`plan-strategy: ${error}`);
     process.exit(1);
   }
-  const { strategy, fork, groups, drafters, est, projection, reason, metrics, rounds } = chooseStrategy(cut, knob);
-  console.log(JSON.stringify({ strategy, fork, groups, drafters, est, projection, reason, metrics, rounds }, null, 2));
+  // The session model prices the coordinator and fork drafters; an id the price table does not hold
+  // keeps the default and says so, because a guessed price would be presented as a measured one.
+  const warnings = [];
+  const models = { ...PLANNING_MODELS };
+  const sessionModel = flags["--sessionModel"];
+  if (sessionModel !== undefined) {
+    if (priceFor(sessionModel)) models.session = sessionModel;
+    else warnings.push(`--sessionModel ${sessionModel} has no price in scripts/pricing.mjs; priced the session as ${PLANNING_MODELS.session}`);
+  }
+  const { strategy, fork, groups, drafters, est, projection, reason, metrics, rounds } = chooseStrategy(cut, knob, models);
+  console.log(JSON.stringify({ strategy, fork, groups, drafters, est, projection, reason, metrics, rounds, warnings }, null, 2));
 }
 
 if (isMain(import.meta.url, process.argv[1])) main(process.argv.slice(2));

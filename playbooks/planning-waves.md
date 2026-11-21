@@ -71,8 +71,10 @@ not just what they contain. Two goals govern every boundary decision, together:
 **3+ independent feasibility unknowns** → parallel spikes. Drafting follows a decision table, run once the
 task cut exists: write the cut as `.devcycle/plan-work/<run id>/task-cut.json` (the shape
 `scripts/plan-strategy.mjs` documents) and run
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-strategy.mjs" <cut path> --planningStrategy <value>`. Log its `strategy`,
-`groups`, `drafters` and `est`, and the cut path as `cut`, as stage-log key `drafting-plan`, then draft by `strategy`: `inline`, every task in
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-strategy.mjs" <cut path> --planningStrategy <value> --sessionModel <id>`, the id
+being `model` in `node "${CLAUDE_PLUGIN_ROOT}/scripts/depth-probe.mjs" --json` (omit the flag when the probe fails). Log its
+`strategy`, `groups`, `drafters` and `est`, the cut path as `cut`, and `spent`, the dollars of planning already spent, printed by
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-stats.mjs" spent --state .devcycle/state.md`, as stage-log key `drafting-plan`, then draft by `strategy`: `inline`, every task in
 this session; `checkpointed`, inline in one segment per wave group, logging `plan-group-<k>` as a segment's
 tasks are written; `grouped`, rounds of group drafters; `delegated`, one drafter per task; `split`, the spec is too large for one plan:
 report the suggestion to split it, and the user decides, either splitting or forcing an arm with `planningStrategy`. Read

@@ -80,6 +80,15 @@ test("grouped prices a drafter per group on its tier, a merge segment and one ch
   assert.deepEqual([delegated.byRole.drafter.count, delegated.dispatches], [3, 4]);
 });
 
+test("a cheaper session model prices the coordinator lower and dispatches the same", () => {
+  const choice = { strategy: "grouped", fork: false, rounds: [oneRound] };
+  const sonnet = projectPlanning(choice, cut, { ...PLANNING_MODELS, session: "claude-sonnet-5-5" });
+  const opus = projectPlanning(choice, cut);
+  assert.ok(sonnet.byRole.coordinator.usd < opus.byRole.coordinator.usd, `${sonnet.byRole.coordinator.usd} vs ${opus.byRole.coordinator.usd}`);
+  assert.equal(sonnet.dispatches, opus.dispatches);
+  assert.equal(sonnet.byRole.drafter.usd, opus.byRole.drafter.usd, "a fast-tier drafter does not follow the session model");
+});
+
 test("a split has no projection", () => {
   assert.equal(projectPlanning({ strategy: "split", fork: false, rounds: [] }, cut), null);
 });

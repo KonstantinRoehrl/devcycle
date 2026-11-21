@@ -5,6 +5,30 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-21 — The planning estimate covers the whole stage, and the projection prices the session's own model (#450)
+
+**Decision:** the cut logs `spent`, the planning dollars already spent, beside `est` in the `drafting-plan` row, read by
+`plan-stats.mjs spent` through the same `planningActual` the handoff uses. `planningEstimate` returns `est + spent`, so the
+`plan-stats` row's `estUsd` compares like with like with the actual; a row with no `spent` keeps `est` alone. The budget
+question still gates `projection.usd`, the projected cost of the remaining planning. `plan-strategy.mjs` takes
+`--sessionModel <id>`, which the playbook reads from `depth-probe.mjs --json`, and prices the coordinator and fork
+drafters on it; an id `pricing.mjs` does not price keeps the default and adds a `warnings` entry.
+
+**Why:** the projection prices only the draft, merge and check dispatches, while the actual holds the feasibility,
+research and spike spend before the cut, so the error was biased negative by that sunk cost and the calibration bound
+could only pass by fitting constants that absorb it. The session model was fixed at Opus 5.5 whatever the session ran.
+
+**Budgets:** the playbook's cut step gains two lines, and every closure citing it carries them.
+
+```text
+budget: surface-budget.json surfaceTotal 7240
+budget: context-budget.json commands/cycle.md 90144
+budget: context-budget.json playbooks/planning-waves.md 72309
+budget: context-budget.json playbooks/reviewing-the-branch.md 62285
+budget: context-budget.json playbooks/scoping-the-request.md 37521
+budget: context-budget.json playbooks/verifying-on-device.md 67589
+```
+
 ## 2026-11-20 — Planning prints its projected cost, asks over a budget and can clear mid-stage (#450)
 
 **Decision:** at the task cut, planning prints `plan-strategy.mjs`'s `projection` and whether it is calibrated.

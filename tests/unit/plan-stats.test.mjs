@@ -228,6 +228,34 @@ test("planningEstimate is the drafting-plan row's numeric est, and null for any 
   assert.equal(planningEstimate([{ key: "research-map", data: { est: 9 } }]), null);
 });
 
+test("planningEstimate covers the whole stage: est plus the spend logged at the cut, est alone without it, null without est", () => {
+  const plan = (data) => ({ stage: "planning", key: "drafting-plan", data: { strategy: "inline", ...data } });
+  assert.equal(planningEstimate([plan({ est: 4.2, spent: 1.1 })]), 5.3);
+  assert.equal(planningEstimate([plan({ est: 4.2, spent: 0 })]), 4.2);
+  assert.equal(planningEstimate([plan({ est: 4.2 })]), 4.2, "an older run logged no spent");
+  assert.equal(planningEstimate([plan({ spent: 1.1 })]), null, "no est, nothing to add to");
+  assert.equal(planningEstimate([plan({ est: 4.2, spent: "1.1" })]), 4.2, "a non-number spent is ignored");
+  assert.equal(planningEstimate([plan({ est: 4.2, spent: null })]), 4.2, "an unreadable spend is ignored");
+});
+
+test("spent prints the planning dollars so far to cents, null when unreadable, and exits 2 without --state", () => {
+  const { repo, runsDir, runId } = seededRepo();
+  process.env.DEVCYCLE_RUNS_DIR = runsDir;
+  const spent = cli(["spent", "--state", ".devcycle/state.md"], { cwd: repo, runsDir, projects: projectsDir(repo) });
+  assert.equal(spent.status, 0, spent.stderr);
+  assert.equal(spent.stdout, "2.13\n");
+  const unreadable = cli(["spent", "--state", ".devcycle/state.md"], { cwd: repo, runsDir });
+  assert.equal(unreadable.status, 0, unreadable.stderr);
+  assert.equal(unreadable.stdout, "null\n");
+  for (const args of [["spent"], ["spent", "--bogus", "x"]]) {
+    const r = cli(args, { cwd: repo, runsDir });
+    assert.equal(r.status, 2, r.stdout);
+    assert.match(r.stderr, /^plan-stats: /);
+    assert.match(r.stderr, /usage: plan-stats\.mjs spent --state <state\.md>/);
+  }
+  assert.equal(rows(repo, runId).filter((o) => o.kind === "plan-stats").length, 0, "spent appends nothing");
+});
+
 test("planningLine prints each dollar figure to two decimals, and ? for an unknown one", () => {
   assert.equal(planningLine({ strategy: "grouped", drafters: 2, estUsd: 4.2, actualUsd: 3.456 }),
     "planning: strategy=grouped drafters=2 est=$4.20 actual=$3.46");

@@ -156,6 +156,25 @@ test("the CLI prints the decision as JSON and refuses a malformed cut", () => {
   assert.match(bad.stderr, /plan-strategy: the cut must be a JSON array of tasks/);
 });
 
+test("the CLI prices the coordinator on --sessionModel, and falls back with a warning on an id it cannot price", () => {
+  const dir = makeTempDir("plan-strategy-");
+  const cut = writeInto(dir, "cut.json", JSON.stringify(wideCut([3])));
+  const run = (...extra) => {
+    const r = spawnSync("node", [SCRIPT, cut, "--planningStrategy", "inline", ...extra], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout);
+  };
+  const base = run();
+  assert.deepEqual(base.warnings, []);
+  const sonnet = run("--sessionModel", "claude-sonnet-5-5");
+  assert.ok(sonnet.est < base.est, `${sonnet.est} vs ${base.est}`);
+  assert.deepEqual(sonnet.warnings, []);
+  const unknown = run("--sessionModel", "claude-nope-9");
+  assert.equal(unknown.est, base.est, "the default session model prices it");
+  assert.equal(unknown.warnings.length, 1);
+  assert.match(unknown.warnings[0], /claude-nope-9/);
+});
+
 test("the CLI exits 2 on a usage error and 1 on an unreadable cut", () => {
   const dir = makeTempDir("plan-strategy-");
   const good = writeInto(dir, "cut.json", JSON.stringify(wideCut([3])));

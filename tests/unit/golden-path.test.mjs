@@ -2837,7 +2837,7 @@ test("planning-waves runs the decision table and honours planningStrategy", () =
   assert.match(section, /stage-log key `drafting-plan`/);
   for (const arm of ["inline", "checkpointed", "grouped", "grouped-fork", "status-quo", "auto"]) assert.ok(section.includes(`\`${arm}\``), `the section names \`${arm}\``);
   assert.match(section, /`plan-group-<k>`/);
-  assert.match(read("references/stage-log.md"), /`drafting-plan` \(`--data` `strategy`, `groups`, `drafters`, `est`, and `cut`, the task-cut path\)/);
+  assert.match(read("references/stage-log.md"), /`drafting-plan` \(`--data` `strategy`, `groups`, `drafters`, `est`, `spent`, the planning dollars spent before the cut, and `cut`, the task-cut path\)/);
   assert.match(read("references/stage-log.md"), /`plan-group-<k>`/);
   assert.match(read("references/config.md"), /\| `planningStrategy` \| `playbooks\/planning-waves\.md` \| `auto` — the decision table, `scripts\/plan-strategy\.mjs` \|/);
 });

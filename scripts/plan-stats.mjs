@@ -23,6 +23,7 @@ import { sumKnown } from "./doctor-planning.mjs";
 const RUN_RECORD = fileURLToPath(new URL("./run-record.mjs", import.meta.url));
 const STRATEGIES = ["inline", "delegated", "grouped", "checkpointed"];
 const USAGE = "usage: plan-stats.mjs --state <state.md> --plan <path> --spec <path> --strategy inline|delegated|grouped|checkpointed";
+const SPENT_USAGE = "usage: plan-stats.mjs spent --state <state.md>";
 
 // The plan template puts "## Dispatch Map" last, and a plan may quote the heading earlier, so the
 // last heading is the map. Null when the plan has none.
@@ -56,10 +57,13 @@ export function planStats({ planText, specText, rows, strategy }) {
   };
 }
 
-// The estimate the planning stage logged when it chose how to draft, or null when it logged none.
+// The estimate for the whole planning stage: what the stage logged when it chose how to draft (the
+// remaining cost) plus the spend it logged at the cut, so it compares with planningActual, which
+// holds both. A row without a numeric spent (an older run) is the estimate alone; no est is null.
 export function planningEstimate(stageRows) {
-  const est = stageRows.find((r) => r.key === "drafting-plan")?.data?.est;
-  return typeof est === "number" ? est : null;
+  const { est, spent } = stageRows.find((r) => r.key === "drafting-plan")?.data ?? {};
+  if (typeof est !== "number") return null;
+  return typeof spent === "number" ? Math.round((est + spent) * 1e6) / 1e6 : est;
 }
 
 // The coordinator's context depth at handoff, as a percent of its window to one decimal. Null when
@@ -94,10 +98,12 @@ export function planningLine({ strategy, drafters, estUsd, actualUsd }) {
   return `planning: strategy=${strategy} drafters=${drafters} est=${dollars(estUsd)} actual=${dollars(actualUsd)}`;
 }
 
-function die(msg) {
+function die(msg, code = 1) {
   console.error(`plan-stats: ${msg}`);
-  process.exit(1);
+  process.exit(code);
 }
+
+const usageError = (msg) => die(msg, 2);
 
 function readText(path, what) {
   try {
@@ -107,7 +113,35 @@ function readText(path, what) {
   }
 }
 
+// The run id of a state file and the run's own records, which name its sessions.
+function runOf(statePath, cwd) {
+  const runId = field(readText(statePath, "state file"), "run");
+  if (!/^[0-9a-f]{16}$/.test(runId ?? "")) die(`no run id in ${statePath}`);
+  const toplevel = gitToplevel(cwd);
+  const rows = [];
+  eachRecord(recordPath(toplevel, runId), (row) => { rows.push(row); });
+  return { runId, toplevel, rows };
+}
+
+const sessionHashesOf = (rows) => rows.filter((r) => r.kind === "session").map((r) => r.sessionHash);
+
+// `spent`: the planning dollars spent so far, which the cut logs beside its estimate.
+function spent(argv) {
+  let flags;
+  try {
+    ({ flags } = parseFlags(argv, { "--state": "value" }, { requireValues: "nonEmpty" }));
+  } catch (e) {
+    usageError(`${e.message} — ${SPENT_USAGE}`);
+  }
+  if (!flags["--state"]) usageError(`--state is required — ${SPENT_USAGE}`);
+  const cwd = process.cwd();
+  const { rows } = runOf(flags["--state"], cwd);
+  const usd = planningActual(process.env, cwd, sessionHashesOf(rows));
+  console.log(usd === null ? "null" : usd.toFixed(2));
+}
+
 function main(argv) {
+  if (argv[0] === "spent") return spent(argv.slice(1));
   let flags;
   try {
     ({ flags } = parseFlags(argv, { "--state": "value", "--plan": "value", "--spec": "value", "--strategy": "value" },
@@ -118,18 +152,13 @@ function main(argv) {
   for (const name of ["--state", "--plan", "--spec", "--strategy"]) if (!flags[name]) die(`${name} is required — ${USAGE}`);
   const strategy = flags["--strategy"];
   if (!STRATEGIES.includes(strategy)) die(`strategy must be one of ${STRATEGIES.join(", ")}, got "${strategy}"`);
-  const runId = field(readText(flags["--state"], "state file"), "run");
-  if (!/^[0-9a-f]{16}$/.test(runId ?? "")) die(`no run id in ${flags["--state"]}`);
+  const cwd = process.cwd();
+  const { runId, toplevel, rows } = runOf(flags["--state"], cwd);
   const planText = readText(flags["--plan"], "plan");
   const specText = readText(flags["--spec"], "spec");
-
-  const cwd = process.cwd();
-  const toplevel = gitToplevel(cwd);
-  const rows = [];
-  eachRecord(recordPath(toplevel, runId), (row) => { rows.push(row); });
   const estUsd = planningEstimate(readStage(dirname(flags["--state"]), { run: runId, stage: "planning" }));
   const stats = { ...planStats({ planText, specText, rows, strategy }), estUsd, coordinatorDepthPct: coordinatorDepth(process.env, cwd) };
-  const actualUsd = planningActual(process.env, cwd, rows.filter((r) => r.kind === "session").map((r) => r.sessionHash));
+  const actualUsd = planningActual(process.env, cwd, sessionHashesOf(rows));
 
   const appended = spawnSync(process.execPath, [RUN_RECORD, "append", "--run", runId, "--repo", toplevel,
     "--kind", "plan-stats", "--stage", "planning",
