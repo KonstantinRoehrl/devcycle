@@ -2,10 +2,11 @@
 // two signals this module owns: (a) a rejected `rate_limit_event`, whose `resetsAt` (epoch seconds)
 // is when the window reopens, and (b) an error result whose text names the limit, the reset being
 // its `|<epoch seconds>` suffix. The unattended driver and the planning benchmark both wait one
-// out, so both read it here.
+// out, so both read it here. The same pattern also labels an interactive session's API-error text
+// (`stopLabel`) for /devcycle:continue's recovery gate.
 
-// What a result's text says when a usage limit ended the session.
-export const USAGE_LIMIT_TEXT = /usage limit|rate limit|hit your limit/i;
+// What a result's or an interactive API error's text says when a usage limit ended the session.
+export const USAGE_LIMIT_TEXT = /usage limit|rate limit|hit your (?:[\w-]+ )?limit|session limit|weekly limit/i;
 
 // How long past a limit's reset a waiter sleeps before its next session, so it never starts a
 // session the instant the window reopens.
@@ -37,3 +38,13 @@ export function textLimit(resultText) {
 /** Milliseconds to wait out a limit resetting at `resetAt` (epoch seconds) from `nowMs`: to the reset plus the margin, never negative. */
 export const resetWaitMs = (resetAt, nowMs) => Math.max(resetAt * 1000 - nowMs, 0) + RESET_MARGIN_MS;
 
+/**
+ * Why an interactive session stopped, from its last API error's text.
+ * @param {string|null|undefined} apiErrorText the text of the transcript's last `isApiErrorMessage` entry
+ * @returns {"usage-limit"|"api-error"|"unknown"} "unknown" when there is no text (null, undefined or
+ *   blank); "usage-limit" when the text names a usage limit; "api-error" for any other text
+ */
+export function stopLabel(apiErrorText) {
+  if (!apiErrorText?.trim()) return "unknown";
+  return USAGE_LIMIT_TEXT.test(apiErrorText) ? "usage-limit" : "api-error";
+}
