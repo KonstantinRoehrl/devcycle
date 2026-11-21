@@ -5,6 +5,19 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-21 — The interface lock checks consumers verbatim, and a pass's error is its worst replay's (#450)
+
+**Decision:** `scripts/interface-lock.mjs` accepts a consumed code span only when it equals, whitespace collapsed, a
+whole Produces item of the locked task or one of that item's code spans. The plan gate's `crossTask` leg
+(`scripts/cross-task-check.mjs`) accepts any substring of the producer's joined Produces lines. The lock stays the
+stricter of the two, because a drafter writes against it before the producer exists: a consumer that pins part of a
+signature is drift the lock must catch then. The gate reads a finished plan, whose Produces prose embeds the spans.
+`scripts/cost-model-fit.mjs` judges a pass by its worst replay, never by a median: the signed error of largest
+magnitude, a tie going to the positive one, so misses of opposite sign cannot cancel into a pass that reads calibrated.
+
+**Why:** the PR #474 branch review found the lock tightened in 4128c0b with no entry here, and the worst-replay rule
+(863b99d) stated only in a code comment.
+
 ## 2026-11-21 — A re-logged `drafting-plan` row keeps `spent` (#450)
 
 **Decision:** a **Switch strategy** or **Reduce scope** re-log of `drafting-plan` carries every field, `spent` included, so
@@ -44,7 +57,8 @@ projection read one table: the bench's `estimate` reads the per-task rates and t
 parameters, so the two disagree until a benchmark pass fits one from the other.
 
 **Why:** a branch review found the handoff rule unsatisfiable at a checkpoint and the one-table claim false, since on a
-12-task cut the two models differ by a factor of 20 to 40.
+12-task cut of three-file tasks the bench estimate runs about 17 times the projection under `grouped`, about twice under
+`grouped-fork`, and 0.7 to 1.3 times under `inline` and `checkpointed`.
 
 **Budgets:** `references/handoff.md` gains two lines, and every closure citing it carries them.
 

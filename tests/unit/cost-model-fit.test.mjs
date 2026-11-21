@@ -196,3 +196,9 @@ test("cli refuses --rates with --runs, neither and an unknown flag with exit 2, 
   assert.equal(r.status, 1);
   assert.match(r.stderr, new RegExp(`^cost-model-fit: cannot read ${missing}: ENOENT`));
 });
+
+test("ratesReport: a tie between opposite-sign misses goes to the positive one, whichever comes first", () => {
+  const passOf = (id, ...errors) => ({ id, results: errors.map((e, i) => result(`small-${i}`, "inline", 1, e)) });
+  assert.deepEqual(ratesReport([passOf("negative-first", -25, 25)]).passes, [{ id: "negative-first", errorPct: 25 }]);
+  assert.deepEqual(ratesReport([passOf("positive-first", 25, -25)]).passes, [{ id: "positive-first", errorPct: 25 }]);
+});

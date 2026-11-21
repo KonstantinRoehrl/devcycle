@@ -221,6 +221,7 @@ two readers use different ones: `estimate` reads the per-task rates (`PLANNING_R
 fitted role parameters (`PROFILE` and `ROLE_PARAMS`). They stay separate until a benchmark pass fits one
 from the other, and until then the projection is labelled uncalibrated. `node scripts/cost-model-fit.mjs --rates <dir> [--json]`
 searches `<dir>` recursively for `results.json`, one pass per file found, and reports each arm's
-planning dollars per task, each replay's projection error and a calibration verdict. That verdict does
+planning dollars per task, each replay's projection error and a calibration verdict. A pass's error is its worst replay's, the signed miss of
+largest magnitude, so misses of opposite sign cannot cancel the way they would in a median. That verdict does
 not set the projection's `calibrated` flag, which reads the passes recorded in
 [`scripts/plan-cost.mjs`](../../../scripts/plan-cost.mjs) (`CALIBRATION`).
