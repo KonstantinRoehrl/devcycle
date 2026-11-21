@@ -165,7 +165,7 @@ test("the CLI prices the coordinator on --sessionModel, and falls back with a wa
     return JSON.parse(r.stdout);
   };
   const base = run();
-  assert.deepEqual(base.warnings, []);
+  assert.deepEqual(base.warnings, ["no --sessionModel given; priced the session as claude-opus-5-5"]);
   const sonnet = run("--sessionModel", "claude-sonnet-5-5");
   assert.ok(sonnet.est < base.est, `${sonnet.est} vs ${base.est}`);
   assert.deepEqual(sonnet.warnings, []);
@@ -198,6 +198,32 @@ test("the CLI prices a host-wrapped --sessionModel id like its bare id, and warn
   assert.equal(unknown.warnings.length, 1);
   assert.match(unknown.warnings[0], /claude-nope-9\[1m\]/, "names the id as given");
   assert.match(unknown.warnings[0], /claude-nope-9\b(?!\[)/, "names the canonical form when canonicalizing changed it");
+});
+
+test("the CLI prices a dated snapshot --sessionModel as its undated priced id, and keeps a dated id the table prices as given", () => {
+  const dir = makeTempDir("plan-strategy-");
+  const cut = writeInto(dir, "cut.json", JSON.stringify(wideCut([3])));
+  const run = (...extra) => {
+    const r = spawnSync("node", [SCRIPT, cut, "--planningStrategy", "inline", ...extra], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout);
+  };
+  const base = run();
+  const bare = run("--sessionModel", "claude-sonnet-5-5");
+  assert.ok(bare.est < base.est, "the bare id must price below the default, or the dated check passes vacuously");
+  for (const dated of ["claude-sonnet-5-5-20251101", "claude-sonnet-5-5-20251101[1m]"]) {
+    const out = run("--sessionModel", dated);
+    assert.equal(out.est, bare.est, dated);
+    assert.equal(out.projection.usd, bare.projection.usd, dated);
+    assert.deepEqual(out.warnings, [], dated);
+  }
+  const haiku = run("--sessionModel", "claude-haiku-4-5-20251001");
+  assert.ok(haiku.est < bare.est, "a dated id the table prices keeps its own price");
+  assert.deepEqual(haiku.warnings, []);
+  const unknownDated = run("--sessionModel", "claude-nope-9-20251101");
+  assert.equal(unknownDated.est, base.est, "the default session model prices it");
+  assert.equal(unknownDated.warnings.length, 1);
+  assert.match(unknownDated.warnings[0], /claude-nope-9-20251101/);
 });
 
 test("the CLI exits 2 on a usage error and 1 on an unreadable cut", () => {
