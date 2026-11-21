@@ -90,7 +90,7 @@ and whether it is calibrated (`projection.calibrated`); a `split` has none. Prin
 strategy** · **Reduce scope**, labelling the figure "uncalibrated" while `projection.calibrated` is false, and log
 the answer as stage-log key `budget-answer` with `--data`. **Switch strategy** re-runs the table with the arm the
 user names as `--planningStrategy`, **Reduce scope** re-runs it on the cut the user narrows, and either logs
-`drafting-plan` again; an Other answer appends `user-correction-at-gate` (`references/ledger.md` owns the condition).
+`drafting-plan` again with every field, `spent` included; an Other answer appends `user-correction-at-gate` (`references/ledger.md` owns the condition).
 
 **Checkpoint.** `inline` and `checkpointed` log `plan-draft-<n>` as each task file lands. `checkpointed` writes
 `pack.md` after the cut, and an `inline` checkpoint before its handoff, in the shape

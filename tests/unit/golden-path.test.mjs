@@ -2840,6 +2840,14 @@ test("planning-waves runs the decision table and honours planningStrategy", () =
   assert.match(read("references/stage-log.md"), /`drafting-plan` \(`--data` `strategy`, `groups`, `drafters`, `est`, `spent`, the planning dollars spent before the cut, and `cut`, the task-cut path\)/);
   assert.match(read("references/stage-log.md"), /`plan-group-<k>`/);
   assert.match(read("references/config.md"), /\| `planningStrategy` \| `playbooks\/planning-waves\.md` \| `auto` — the decision table, `scripts\/plan-strategy\.mjs` \|/);
+  const flatSection = section.replace(/\s+/g, " ");
+  for (const phrase of [
+    "--planningStrategy <value> --sessionModel <id>",
+    "(omit the flag when the probe fails)",
+    'scripts/plan-stats.mjs" spent --state .devcycle/state.md',
+    "as stage-log key `drafting-plan`",
+  ]) assert.ok(flatSection.includes(phrase), `§ Delegated planning — thresholds no longer says: ${phrase}`);
+  assert.ok(flatSection.indexOf('plan-stats.mjs" spent') < flatSection.indexOf("as stage-log key `drafting-plan`"), "spent is read before the drafting-plan row is logged");
 });
 
 // #450: the projected-cost gate, the mid-planning checkpoint and the handoff's planning: line. Each
@@ -2863,6 +2871,7 @@ test("planning prints the projection, asks over planningBudgetUSD, checkpoints m
     "--state .devcycle/state.md --ready --action clear --completed 'planning group <k> of <m>'",
     "whose first field is `Session ended mid-planning: group <k> of <m>`, with the context action `Clear + /devcycle:continue`",
     "drafts from the `missing` and `nextGroup` of the `plan-resume.mjs` call",
+    "either logs `drafting-plan` again with every field, `spent` included",
   ]) assert.ok(section.includes(phrase), `§ Projected cost, budget and checkpoints no longer says: ${phrase}`);
   assert.ok(section.indexOf("log `plan-checkpoint-<k>`") < section.indexOf("handoff-mark.mjs"), "the checkpoint must be logged before the handoff is marked ready");
   assert.ok(!section.includes("node \"${CLAUDE_PLUGIN_ROOT}/scripts/plan-resume.mjs\""), "references/resume.md holds plan-resume's one invocation; the playbook cites it");

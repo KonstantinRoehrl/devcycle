@@ -5,6 +5,20 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-21 — A re-logged `drafting-plan` row keeps `spent` (#450)
+
+**Decision:** a **Switch strategy** or **Reduce scope** re-log of `drafting-plan` carries every field, `spent` included, so
+`planningEstimate` keeps comparing the whole stage.
+
+**Why:** a branch review found a re-log could drop `spent`, since a re-log replaces the earlier row and `planningEstimate`
+then fell back to `est` alone.
+
+**Budgets:** `playbooks/planning-waves.md` gains one clause.
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 72617
+```
+
 ## 2026-11-21 — `plan-strategy.mjs` prices a host-wrapped session model id as its bare id (#450)
 
 **Decision:** `scripts/plan-strategy.mjs` prices `--sessionModel` through `canonicalModelId`, now exported from
