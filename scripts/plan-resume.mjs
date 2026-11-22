@@ -50,7 +50,8 @@ function postDraftSteps({ rows, path, assembled, checker, planOnDisk }) {
     const { expected, filled = 0 } = checker.get(1) ?? {};
     // A round with no edge to check has no batch to dispatch, so it is done whatever its row says.
     const status = expected === 0 ? "done" : stepStatus(round, expected > 0 && filled === expected, filled > 0);
-    steps.push({ id: "checker-round-1", status });
+    // The batch counts are additive: they let the recovery inventory say how much of an unlogged round exists.
+    steps.push({ id: "checker-round-1", status, ...(expected === undefined ? {} : { expected, filled }) });
     if (round?.data?.findings > 0) {
       const repair = rowOf(rows, "plan-repair-1");
       steps.push({ id: "plan-repair-1", status: stepStatus(repair, assembly !== undefined && repair !== undefined && loggedAfter(rows, assembly, repair)) });

@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, copyFileSync, mkdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, mkdirSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
@@ -116,6 +116,39 @@ test("planning's ambiguous assembly follows the last session's transcript, never
   assert.equal(status([call("Bash", "git status")]), "redo");
 });
 
+// Delegated planning over ten tasks, Tasks 2-10 each consuming Task 1: nine edges, so the edge checker's
+// round 1 holds two batches. `batches` are the batch files already filled, with no checker-round-1 row.
+function checkerCycle(batches) {
+  const c = cycle({ stage: "planning", rows: ["- plan: docs/plan.md", "- spec: docs/spec.md"] });
+  c.log("drafting-plan", { data: { strategy: "delegated", groups: 0, drafters: 0, est: 1 } });
+  for (let num = 1; num <= 10; num++) {
+    const deps = num === 1 ? "none" : "Task 1 (consumes f1)";
+    writeInto(c.root, `${WORK}/tasks/task-${num}.md`, `### Task ${num}: T${num}\n\n**Files:**\n- Create: \`f${num}.mjs\`\n\n**Dependencies:** ${deps}\n`);
+  }
+  for (const n of batches) writeInto(c.root, `${WORK}/checker/round-1/batch-${n}.md`, "0 findings\n");
+  return c;
+}
+const checkerRound = (c, calls) => ADAPTERS.planning(c.ctx(transcriptOf(calls))).find(({ id }) => id === "checker-round-1");
+const BATCH_CALL = (n) => call("Agent", `plan-checker: round 1 — batch ${n}`);
+
+test("a checker round with only some of its batch files is redo naming how many exist, never re-verify, whatever the transcript says", () => {
+  const c = checkerCycle([1]);
+  const round = checkerRound(c, [BATCH_CALL(1)]);
+  assert.equal(round.status, "redo");
+  assert.match(round.evidence, /1 of 2 batch files/);
+  assert.equal(round.check, undefined);
+});
+
+test("a checker round with every batch file but no logged row stays re-verify, and its check fails once a batch file is gone", () => {
+  const c = checkerCycle([1, 2]);
+  const round = checkerRound(c, [BATCH_CALL(1), BATCH_CALL(2)]);
+  assert.equal(round.status, "re-verify");
+  const check = () => spawnSync("sh", ["-c", round.check], { cwd: c.root, encoding: "utf8", env: { ...process.env, CLAUDE_PLUGIN_ROOT: process.cwd() } });
+  assert.equal(check().status, 0, check().stderr);
+  rmSync(join(c.root, `${WORK}/checker/round-1/batch-2.md`));
+  assert.notEqual(check().status, 0, "a passing check must mean the round is complete");
+});
+
 test("planning whose position cannot be read is one redo item naming why", () => {
   const items = ADAPTERS.planning(cycle({ stage: "planning", run: null }).ctx());
   assert.equal(items.length, 1);
@@ -134,6 +167,37 @@ test("on-device numbers the checklist's items and marks each logged or batch-ans
     { id: "item-2", status: "redo", evidence: RELAUNCHED },
     { id: "item-3", status: "done", evidence: "#3 passed (confirmed from batch)" },
   ]);
+});
+
+// An on-device cycle with two checklist items whose first walk logged #1 FAILED and #2 passed, the results
+// report written, the user having decided to fix #1 (`decision` is another ledger outcome to use instead).
+// `fixRound` adds the review-round line that opens the re-walk; `rewalk` logs #1's verdict for that round.
+function walkedCycle({ fixRound = false, rewalk = null, decision = "fix" } = {}) {
+  const c = cycle({ stage: "on-device", rows: ["- checklist: docs/checklist.md", "- spec: docs/spec.md", "- ledger: .devcycle/ledger.md"] });
+  const failed = "- #1 the banner shows: FAILED — crashes — severity: high";
+  writeInto(c.root, "docs/checklist.md", "- [ ] the banner shows\n- [ ] the list sorts\n");
+  writeInto(c.root, "docs/on-device-results.md", `${failed}\n- #2 the list sorts: passed\n`);
+  writeInto(c.root, ".devcycle/ledger.md", [
+    `- [2026-11-21T15:00:00Z] task=on-device event=user-decision outcome=failed-item #1 the banner shows: ${decision} ref=docs/on-device-results.md`,
+    ...(fixRound ? ["- [2026-11-21T15:01:00Z] task=on-device event=review-round outcome=round 1 ref=docs/spec.md"] : []), "",
+  ].join("\n"));
+  c.log("item-1", { data: { line: failed, round: 0 } });
+  c.log("item-2", { data: { line: "- #2 the list sorts: passed", round: 0 } });
+  if (rewalk) c.log("item-1", { data: { line: rewalk, round: 1 } });
+  return c;
+}
+const statuses = (c) => Object.fromEntries(ADAPTERS["on-device"](c.ctx()).map(({ id, status }) => [id, status]));
+
+test("an on-device item that failed in an earlier walk is redo once a fix round has started, until the re-walk logs it", () => {
+  const items = ADAPTERS["on-device"](walkedCycle({ fixRound: true }).ctx());
+  assert.deepEqual(items.map(({ id, status }) => `${id}=${status}`), ["item-1=redo", "item-2=done"]);
+  assert.match(items[0].evidence, /earlier walk \(round 0\).*#1 the banner shows: FAILED/);
+  assert.deepEqual(statuses(walkedCycle({ fixRound: true, rewalk: "- #1 the banner shows: passed (re-walk, round 1)" })), { "item-1": "done", "item-2": "done" });
+});
+
+test("an on-device failure stays done on the first walk, and when the user carried it over instead of fixing it", () => {
+  assert.deepEqual(statuses(walkedCycle()), { "item-1": "done", "item-2": "done" });
+  assert.deepEqual(statuses(walkedCycle({ fixRound: true, decision: "accept" })), { "item-1": "done", "item-2": "done" });
 });
 
 test("every other stage falls back to the stage log: this run's logged keys are done, and another run's are not", () => {

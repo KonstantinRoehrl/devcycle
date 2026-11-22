@@ -265,6 +265,8 @@ test("readPlanPosition checks the logged assembly against the plan on disk and a
   assert.equal(steps().steps["checker-round-1"], "pending", "an empty batch file is no finished batch");
   writeInto(run.root, batch, "0 findings\n");
   assert.equal(steps().steps["checker-round-1"], "ambiguous", "a filled batch file without the round's row");
+  assert.deepEqual(readPlanPosition(run.state).steps.find(({ id }) => id === "checker-round-1"), { id: "checker-round-1", status: "ambiguous", expected: 1, filled: 1 },
+    "the step carries the batch counts the recovery inventory reads");
   writeInto(run.root, batch, "");
   run.log("checker-round-1", { ref: `${WORK}/checker/round-1`, data: { findings: 0 } });
   assert.equal(steps().steps["checker-round-1"], "redo", "the round's row with its batch file still empty");

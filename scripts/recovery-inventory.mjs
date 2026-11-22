@@ -14,6 +14,7 @@ import { PER_TASK_DIRS, ledgerSlotState } from "./ledger-slot.mjs";
 import { field } from "./md-field.mjs";
 import { pathInsideRoot, readPlanPosition } from "./plan-resume.mjs";
 import { readStage } from "./stage-log.mjs";
+import { resultsPathFor, routing } from "./on-device-routing.mjs";
 import { gateCommand, taskFileMap } from "./task-files.mjs";
 import { parseLedgerLine } from "./task-ledger.mjs";
 import { planProgress } from "./wave-setup.mjs";
@@ -59,12 +60,17 @@ function planGate(root, stateText) {
   return { status: "re-verify", evidence: "stage-log plan-gate", check: `node "\${CLAUDE_PLUGIN_ROOT}/scripts/plan-check.mjs" ${plan}${specFlag}` };
 }
 
+// plan-resume prints its position and exits 0 whatever the round holds, so the check reads the round's batch
+// counts from that output and fails unless every batch file is there.
+const CHECKER_ROUND_CHECK = 'node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-resume.mjs" --state .devcycle/state.md | node -e '
+  + `'const s = JSON.parse(require("fs").readFileSync(0, "utf8")).steps.find((step) => step.id === "checker-round-1"); process.exit(s && s.filled === s.expected ? 0 : 1)'`;
+
 // What a re-verify step reruns before it is trusted, so no re-verify item reaches the gate without one.
 function stepCheck(id, { root, run, stateText }) {
   if (id === "plan-gate") return planGate(root, stateText).check;
   if (id === "plan-assembled")
     return `node "\${CLAUDE_PLUGIN_ROOT}/scripts/plan-assemble.mjs" .devcycle/plan-work/${run} --out ${field(stateText, "plan")} --state .devcycle/state.md`;
-  if (/^checker-round-\d+$/.test(id)) return 'node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-resume.mjs" --state .devcycle/state.md';
+  if (/^checker-round-\d+$/.test(id)) return CHECKER_ROUND_CHECK;
   return undefined;
 }
 
@@ -79,9 +85,12 @@ function planning({ root, devcycleDir, stateText, run, transcript }) {
     ...position.drafted.map((n) => ({ id: `plan-draft-${n}`, status: "done", evidence: `stage-log plan-draft-${n} and its task file` })),
     ...position.missing.map((n) => ({ id: `plan-draft-${n}`, status: "redo", evidence: `no plan-draft-${n} row with its task file` })),
   ];
-  for (const { id, status } of position.steps) {
+  for (const { id, status, expected, filled } of position.steps) {
     if (status === "pending") continue;
-    if (status === "ambiguous") {
+    if (status === "ambiguous" && filled < expected) {
+      // A round with a batch still to run is unfinished whatever the transcript shows.
+      items.push({ id, status: "redo", evidence: `${filled} of ${expected} batch files on disk; the round dispatches the rest` });
+    } else if (status === "ambiguous") {
       const resolved = resolveAmbiguous({ id, transcript });
       const check = resolved.status === "re-verify" ? stepCheck(id, { root, run, stateText }) : undefined;
       items.push({ id, ...resolved, ...(check ? { check } : {}) });
@@ -92,20 +101,42 @@ function planning({ root, devcycleDir, stateText, run, transcript }) {
   return items;
 }
 
+// The walk's round and the failed items it still owes, from on-device-routing.mjs, the owner of both:
+// its `round` counts the fix rounds begun, which is the round a walk entered now logs its verdicts under
+// (playbooks/verifying-on-device.md § Entering a walk). `open` holds the FAILED items not waived or accepted.
+function walkState({ root, stateText, checklist, resultsText }) {
+  const ledger = recordedValue(stateText, "ledger");
+  const ledgerPath = ledger ? pathInsideRoot(root, ledger) : null;
+  const entries = ledgerPath ? orElse(() => readFileSync(ledgerPath, "utf8"), "").split("\n").map(parseLedgerLine).filter(Boolean) : [];
+  const { round, failed, carried } = routing({ resultsText, entries, specPath: recordedValue(stateText, "spec"), checklist, cap: null });
+  const kept = new Set(carried.map(({ n }) => n));
+  return { round, open: new Set(failed.map(({ n }) => n).filter((n) => !kept.has(n))) };
+}
+
 // Items are the checklist's boxes in order, numbered as its report lines are (#<n>, references/checklist.md).
+// A verdict is kept only for the walk's own round (the playbook's rule), so an open failure logged under an
+// earlier round is redo: the fix round re-walks it, or the user is asked again.
 function onDevice({ root, devcycleDir, stateText, run, stage }) {
   const checklist = pathInsideRoot(root, field(stateText, "checklist"));
   const text = checklist ? orElse(() => readFileSync(checklist, "utf8"), "") : "";
   const count = text.split("\n").filter((line) => CHECKLIST_ITEM.test(line)).length;
   const verdicts = new Map();
   for (const { key, data } of stageRows({ root, devcycleDir, run, stage })) {
-    if (key === "batch-answer") for (const [n, line] of Object.entries(data?.lines ?? {})) verdicts.set(Number(n), String(line));
+    const round = Number(data?.round ?? 0);
+    if (key === "batch-answer") for (const [n, line] of Object.entries(data?.lines ?? {})) verdicts.set(Number(n), { line: String(line), round });
     const item = key.match(ITEM_KEY);
-    if (item) verdicts.set(Number(item[1]), String(data?.line ?? `stage-log ${key}`));
+    if (item) verdicts.set(Number(item[1]), { line: String(data?.line ?? `stage-log ${key}`), round });
   }
+  const resultsText = checklist ? orElse(() => readFileSync(resultsPathFor(checklist), "utf8"), "") : "";
+  const walk = orElse(() => walkState({ root, stateText, checklist: field(stateText, "checklist"), resultsText }), { round: 0, open: new Set() });
+  const current = Math.max(walk.round, ...[...verdicts.values()].map(({ round }) => round));
   return Array.from({ length: count }, (_, i) => {
     const n = i + 1;
-    return verdicts.has(n) ? { id: `item-${n}`, status: "done", evidence: verdicts.get(n) } : { id: `item-${n}`, status: "redo", evidence: RELAUNCHED };
+    const verdict = verdicts.get(n);
+    if (!verdict) return { id: `item-${n}`, status: "redo", evidence: RELAUNCHED };
+    if (verdict.round < current && walk.open.has(n))
+      return { id: `item-${n}`, status: "redo", evidence: `from an earlier walk (round ${verdict.round}), still open: ${verdict.line}` };
+    return { id: `item-${n}`, status: "done", evidence: verdict.line };
   });
 }
 
