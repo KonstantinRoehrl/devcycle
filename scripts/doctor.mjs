@@ -225,9 +225,10 @@ export function isDevcycleSession(records) {
     if (DEVCYCLE_PREFIX.test(r.attributionSkill ?? "")) return true;
     const content = r.message?.content;
     if (!Array.isArray(content)) continue;
-    // Nothing devcycle emits today reaches this arm — the plugin ships no skills, and
-    // validate.mjs check 3 forbids naming a playbook by a `devcycle:` id. It stays for
-    // pre-v0.12 transcripts, which are the corpus on any machine that ran an earlier release.
+    // A `Skill` call naming one of devcycle's skills (`devcycle:write-issue`,
+    // `devcycle:triage-issues`, since 2026-11-22) reaches this arm and marks the session
+    // devcycle's; validate.mjs check 3 still forbids naming a playbook by a `devcycle:` id. It
+    // also serves pre-v0.12 transcripts, which are the corpus on any machine that ran an earlier release.
     for (const item of content) {
       if (
         item &&

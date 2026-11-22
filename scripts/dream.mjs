@@ -354,9 +354,10 @@ function isSelfRecord(r) {
   if (SELF_ATTRIBUTION_RE.test(r.attributionSkill ?? "")) return true;
   const content = r.message?.content;
   if (!Array.isArray(content)) return false;
-  // Nothing devcycle emits today reaches this arm — the plugin ships no skills, and
-  // validate.mjs check 3 forbids naming a playbook by a `devcycle:` id — so it is here for
-  // pre-v0.12 transcripts alone, on the same reasoning as the retired id above.
+  // devcycle's skills (`write-issue`, `triage-issues`) are not self records, so a `Skill` call
+  // naming one never matches SELF_ATTRIBUTION_RE; with validate.mjs check 3 forbidding a
+  // playbook by a `devcycle:` id, this arm is here for pre-v0.12 transcripts alone, on the same
+  // reasoning as the retired id above.
   for (const item of content)
     if (
       item &&
