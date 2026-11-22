@@ -268,12 +268,12 @@
     {
       "id": "tsc", "sweep": "dead-code", "stacks": ["js-ts"], "kinds": ["dead-code"],
       "adapter": "tsc", "version": "6.0.3", "needsDependencies": true, "okExit": [0, 2],
-      "when": { "anyFile": ["tsconfig.json"] },
+      "when": { "anyFile": ["tsconfig.json"] }, "projects": { "config": "tsconfig.json", "cap": 20 },
       "command": { "local": "node_modules/.bin/tsc", "fetch": ["npx", "-y", "-p", "typescript@6.0.3", "tsc"], "versionArgs": ["--version"] },
       "modes": {
         "static": {
           "invocations": [
-            { "id": "main", "args": ["-p", "tsconfig.json", "--noEmit", "--noUnusedLocals", "--noUnusedParameters", "--allowUnreachableCode", "false", "--tsBuildInfoFile", "{scratch}/tsc.tsbuildinfo", "--pretty", "false"] }
+            { "id": "main", "args": ["-p", "{project}", "--noEmit", "--noUnusedLocals", "--noUnusedParameters", "--allowUnreachableCode", "false", "--tsBuildInfoFile", "{scratch}/{projectSlug}.tsbuildinfo", "--pretty", "false"] }
           ]
         }
       }
@@ -309,7 +309,7 @@
     },
     {
       "id": "cargo-machete", "sweep": "dead-code", "stacks": ["rust"], "kinds": ["dead-code"],
-      "adapter": "raw", "version": "0.9.2", "okExit": [0, 1],
+      "adapter": "raw", "outputFormat": "cargo-machete", "version": "0.9.2", "okExit": [0, 1],
       "command": { "path": "cargo-machete", "versionArgs": ["--version"] },
       "modes": { "static": { "invocations": [ { "id": "main", "args": ["."] } ] } }
     },
@@ -332,7 +332,7 @@
     },
     {
       "id": "purgecss", "sweep": "dead-code", "stacks": ["web"], "kinds": ["dead-code"],
-      "adapter": "raw", "version": "9.1.0", "okExit": [0],
+      "adapter": "raw", "outputFormat": "purgecss-json", "version": "9.1.0", "okExit": [0],
       "command": { "fetch": ["npx", "-y", "purgecss@9.1.0"] },
       "modes": { "static": { "invocations": [ { "id": "main", "args": ["--css", "**/*.css", "--content", "**/*.{html,js,ts,jsx,tsx,vue,svelte}", "--rejected"] } ] } }
     },

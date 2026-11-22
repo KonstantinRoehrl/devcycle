@@ -71,9 +71,9 @@ test("finalize: verdicts become one entry per uncleared cluster, in blast-radius
     { culpritKind: "dead-code", canonicalLocation: "src", title: "1 dead-code item in src", severity: "medium", confidence: "suspected", affectedFiles: ["src/orphan.ts"] },
   ]);
   assert.deepEqual(Object.keys(counts.categories), KINDS);
-  assert.deepEqual(counts.categories["dead-code"], { verified: 2, suspected: 1, cleared: 2 });
-  assert.deepEqual(counts.categories["test-only-code"], { verified: 1, suspected: 1, cleared: 0 });
-  assert.deepEqual(counts.categories["stale-todo"], { verified: 0, suspected: 0, cleared: 0 });
+  assert.deepEqual(counts.categories["dead-code"], { verified: 2, suspected: 1, cleared: 2, complete: false });
+  assert.deepEqual(counts.categories["test-only-code"], { verified: 1, suspected: 1, cleared: 0, complete: false });
+  assert.deepEqual(counts.categories["stale-todo"], { verified: 0, suspected: 0, cleared: 0, complete: true });
   assert.deepEqual(JSON.parse(readFileSync(join(dir, "entries.json"), "utf8")), entries);
   assert.deepEqual(JSON.parse(readFileSync(join(dir, "counts.json"), "utf8")), counts);
 });
@@ -136,12 +136,13 @@ test("finalize --run appends one sweep-count row per kind once and trends agains
   if (saved === undefined) delete process.env.DEVCYCLE_RUNS_DIR; else process.env.DEVCYCLE_RUNS_DIR = saved;
   mkdirSync(recordDir, { recursive: true });
   const runLine = (runId, startedAt) => JSON.stringify({ kind: "run", runId, startedAt });
-  const countLine = (runId, category, verified, suspected) =>
-    JSON.stringify({ kind: "sweep-count", runId, sweep: "dead-code", category, verified, suspected, cleared: 0 });
+  const countLine = (runId, category, verified, suspected, complete = true) =>
+    JSON.stringify({ kind: "sweep-count", runId, sweep: "dead-code", category, verified, suspected, cleared: 0, complete });
   const older = "a".repeat(16), newer = "b".repeat(16), uncounted = "c".repeat(16), current = "d".repeat(16);
   writeFileSync(join(recordDir, `${older}.jsonl`), [runLine(older, "2026-01-01T00:00:00Z"), countLine(older, "dead-code", 9, 9)].join("\n") + "\n");
   writeFileSync(join(recordDir, `${newer}.jsonl`), [runLine(newer, "2026-06-01T00:00:00Z"), countLine(newer, "dead-code", 1, 1)].join("\n") + "\n");
   writeFileSync(join(recordDir, `${uncounted}.jsonl`), runLine(uncounted, "2026-12-01T00:00:00Z") + "\n");
+  writeFileSync(join(dir, "coverage.json"), JSON.stringify({ ...COVERAGE, fullKinds: KINDS }));
   const verdicts = join(dir, "verdicts.json");
   writeFileSync(verdicts, JSON.stringify(VERDICTS));
   const cli = () => spawnSync(process.execPath, [SCRIPT, "finalize", "--dir", dir, "--verdicts", verdicts, "--run", current, "--repo", dir],
@@ -152,10 +153,10 @@ test("finalize --run appends one sweep-count row per kind once and trends agains
   const rows = () => readFileSync(join(recordDir, `${current}.jsonl`), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
   assert.deepEqual(rows().map((r) => r.category), KINDS);
   assert.deepEqual(rows().find((r) => r.category === "dead-code"),
-    { kind: "sweep-count", runId: current, sweep: "dead-code", category: "dead-code", verified: 2, suspected: 1, cleared: 2 });
+    { kind: "sweep-count", runId: current, sweep: "dead-code", category: "dead-code", verified: 2, suspected: 1, cleared: 2, complete: true });
   const section = readFileSync(join(dir, "section.md"), "utf8");
   assert.ok(section.includes("- dead-code 2 → 3"), section);
-  assert.ok(section.includes("- test-only-code 0 → 2"));
+  assert.ok(section.includes("- test-only-code: not comparable: earlier pass was incomplete"), "a kind the earlier pass never counted has no baseline");
   const second = cli();
   assert.equal(JSON.parse(second.stdout).ratchet, "already-recorded");
   assert.equal(rows().length, KINDS.length);
@@ -165,4 +166,46 @@ test("finalize without --verdicts exits 1 and names the missing flag", () => {
   const r = spawnSync(process.execPath, [SCRIPT, "finalize", "--dir", sweepDir()], { encoding: "utf8" });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /^hygiene-sweep: --verdicts is required; usage: /);
+});
+
+function recordsFor(runs) {
+  const prior = process.env.DEVCYCLE_RUNS_DIR;
+  process.env.DEVCYCLE_RUNS_DIR = runs;
+  const dir = runsDirForRepo(gitToplevel(runs));
+  if (prior === undefined) delete process.env.DEVCYCLE_RUNS_DIR; else process.env.DEVCYCLE_RUNS_DIR = prior;
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+function trendingWith({ fullKinds, earlier, startedAt = "2026-06-15T00:00:00Z" }) {
+  const dir = sweepDir();
+  writeFileSync(join(dir, "coverage.json"), JSON.stringify({ ...COVERAGE, fullKinds }));
+  const runs = makeTempDir("hygiene-runs-");
+  const recordDir = recordsFor(runs);
+  const current = "d".repeat(16);
+  writeFileSync(join(recordDir, `${current}.jsonl`), JSON.stringify({ kind: "run", runId: current, startedAt }) + "\n");
+  for (const [runId, when, complete, verified = 0] of earlier) {
+    const lines = [JSON.stringify({ kind: "run", runId, startedAt: when }),
+      ...KINDS.map((category) => JSON.stringify({ kind: "sweep-count", runId, sweep: "dead-code", category, verified, suspected: 0, cleared: 0, complete }))];
+    writeFileSync(join(recordDir, `${runId}.jsonl`), lines.join("\n") + "\n");
+  }
+  const verdicts = join(dir, "verdicts.json");
+  writeFileSync(verdicts, JSON.stringify(VERDICTS));
+  const r = spawnSync(process.execPath, [SCRIPT, "finalize", "--dir", dir, "--verdicts", verdicts, "--run", current, "--repo", runs],
+    { encoding: "utf8", env: { ...process.env, DEVCYCLE_RUNS_DIR: runs } });
+  assert.equal(r.status, 0, r.stderr);
+  return readFileSync(join(dir, "section.md"), "utf8");
+}
+
+test("finalize: Trending says not comparable, never a direction, when either pass was incomplete", () => {
+  const priorIncomplete = trendingWith({ fullKinds: KINDS, earlier: [["a".repeat(16), "2026-01-01T00:00:00Z", false]] });
+  assert.ok(priorIncomplete.includes("- dead-code: not comparable: earlier pass was incomplete"), priorIncomplete);
+  assert.doesNotMatch(priorIncomplete, /dead-code \d+ →/);
+  const thisIncomplete = trendingWith({ fullKinds: ["stale-todo"], earlier: [["a".repeat(16), "2026-01-01T00:00:00Z", true]] });
+  assert.ok(thisIncomplete.includes("- dead-code: not comparable: this pass was incomplete"), thisIncomplete);
+  assert.ok(thisIncomplete.includes("- stale-todo 0 → 0"), "a kind complete on both sides still trends");
+});
+
+test("finalize: the Trending baseline is strictly earlier than the pass being finalized", () => {
+  const section = trendingWith({ fullKinds: KINDS, earlier: [["a".repeat(16), "2026-01-01T00:00:00Z", true], ["b".repeat(16), "2026-12-01T00:00:00Z", true, 5]] });
+  assert.ok(section.includes("- dead-code 0 → 3"), `a later pass must not be the baseline:\n${section}`);
 });

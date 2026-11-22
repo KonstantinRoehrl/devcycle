@@ -514,3 +514,23 @@ test("apply-pass --sweep-coverage: a malformed coverage file rejects the pass", 
   rejects(r, ["--pass", pass, "--date", "2026-09-01", "--sweep-coverage", coverageFile({ sweepKinds: [] })],
     /sweepKinds and fullKinds must be arrays of strings/);
 });
+
+test("apply-pass --sweep-coverage: a sweep kind that no source produces keeps the lens kind's resolution rules", () => {
+  const r = root();
+  const GAP_ID = findingId("test-coverage-gap", "scripts/c.mjs");
+  apply(r, [
+    entry({ culpritKind: "over-exported", canonicalLocation: "scripts/a.mjs", affectedFiles: ["scripts/a.mjs"] }),
+    entry({ culpritKind: "test-coverage-gap", canonicalLocation: "scripts/c.mjs", affectedFiles: ["scripts/c.mjs"] }),
+  ], "2026-09-01");
+  const cov = coverageFile({ sweepKinds: ["over-exported", "test-coverage-gap"], sourcedKinds: ["over-exported"], fullKinds: [] });
+  const withoutResolve = apply(r, unrelated, "2026-09-08", ["--sweep-coverage", cov]);
+  assert.deepEqual(withoutResolve.resolved, [], "a lens-rule kind still needs --resolve");
+  const out = apply(r, unrelated, "2026-09-09", ["--resolve", "--sweep-coverage", cov]);
+  assert.deepEqual(out.resolved.map((x) => x.id), [GAP_ID], "the unsourced kind resolves under --resolve; the partly swept one stays");
+  assert.ok(readMaintenanceFindings(r).some((x) => x.findingId === SWEEP_ID));
+});
+
+test("apply-pass --sweep-coverage: a malformed sourcedKinds rejects the pass", () => {
+  rejects(root(), ["--pass", passFile([entry()]), "--date", "2026-09-01", "--sweep-coverage",
+    coverageFile({ sweepKinds: [], fullKinds: [], sourcedKinds: "dead-code" })], /sourcedKinds must be an array of strings/);
+});

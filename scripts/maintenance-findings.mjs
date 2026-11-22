@@ -213,13 +213,17 @@ const passRow = (r) => ({
 
 // One pass's store update, computed and validated whole before anything is written, so a bad
 // entry anywhere leaves the store exactly as it was.
-// sweepCoverage is { sweepKinds, fullKinds } or null: a sweep kind resolves only when every source
-// behind it ran in full this pass; a lens kind (or a legacy record with no kind) resolves under resolve.
+// sweepCoverage is { sweepKinds, fullKinds, sourcedKinds? } or null: a sweep kind some source produces
+// resolves only when every source behind it ran in full this pass; a kind no source produces (the
+// sweep's registry lists it, nothing emits it), a lens kind, or a legacy record with no kind resolves
+// under resolve. Without sourcedKinds every sweep kind counts as sourced.
 export function applyPass({ root, ref = null, entries, date, resolve = false, dryRun = false, sweepCoverage = null }) {
   if (!isValidCalendarDate(date ?? "")) throw new Error(`--date must be a real YYYY-MM-DD date, got "${date}"`);
   const isKindList = (v) => Array.isArray(v) && v.every((k) => typeof k === "string");
   if (sweepCoverage && !(isKindList(sweepCoverage.sweepKinds) && isKindList(sweepCoverage.fullKinds)))
     throw new Error("--sweep-coverage: sweepKinds and fullKinds must be arrays of strings");
+  if (sweepCoverage?.sourcedKinds !== undefined && !isKindList(sweepCoverage.sourcedKinds))
+    throw new Error("--sweep-coverage: sourcedKinds must be an array of strings");
   if (!Array.isArray(entries)) throw new Error("the pass file must hold a JSON array of findings");
   const incoming = new Map();
   entries.forEach((e, i) => {
@@ -271,7 +275,8 @@ export function applyPass({ root, ref = null, entries, date, resolve = false, dr
     // resolution comes back uncorroborated in gaps.
     const { sections, gaps } = verifyMaintenance(stored, { detectedIds: new Set(incoming.keys()) });
     const verified = new Set(sections.resolved.map((row) => row.id));
-    const keeps = (r) => (sweepCoverage?.sweepKinds.includes(r.culpritKind)
+    const gated = (kind) => sweepCoverage?.sweepKinds.includes(kind) && (sweepCoverage.sourcedKinds ?? sweepCoverage.sweepKinds).includes(kind);
+    const keeps = (r) => (gated(r.culpritKind)
       ? sweepCoverage.fullKinds.includes(r.culpritKind)
       : resolve);
     const ids = new Set(stored.filter((r) => verified.has(r.findingId) && keeps(r)).map((r) => r.findingId));
@@ -389,7 +394,8 @@ const VERBS = {
         } catch (e) {
           throw new Error(`cannot read the coverage file ${coveragePath}: ${e.message}`);
         }
-        sweepCoverage = { sweepKinds: coverage?.sweepKinds, fullKinds: coverage?.fullKinds };
+        sweepCoverage = { sweepKinds: coverage?.sweepKinds, fullKinds: coverage?.fullKinds,
+          ...(coverage?.sourcedKinds === undefined ? {} : { sourcedKinds: coverage.sourcedKinds }) };
       }
       return JSON.stringify(applyPass({
         root, ref, entries, date, resolve: Boolean(flags["--resolve"]), dryRun: Boolean(flags["--dry-run"]), sweepCoverage,

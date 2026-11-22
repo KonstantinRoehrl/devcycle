@@ -1,11 +1,16 @@
 // The hygiene sweep's output adapters, one per registry `adapter` value. Each turns a tool's runs
 // into candidates. The spine has already failed a tool whose run errored or exited outside its
 // `okExit`, so an adapter judges only its own output. `raw` serves every tool without its own
-// parser: it keeps the lines that name a tracked file and a line number, and leaves the full output
-// in the tool's scratch directory for verification to read.
+// parser: it keeps the lines that name a tracked file and a line number, parses the two outputs
+// that carry none (`outputFormat`), and surfaces every other line the tool's filter lets through as
+// a candidate on the file it names, so non-empty output is never read as a clean run. The full
+// output stays in the tool's scratch directory for verification to read.
 import { relative } from "node:path";
 
 const LOCATION = /^(.+?)[:(](\d+)/;
+const PATH_TOKEN = /[^\s"'`()[\]<>:,;]+/g;
+const MACHETE_HEADER = /^(\S.*?) -- (.+):$/;
+const DETAIL_CAP = 500;
 
 function relativize(path, repoRoot) {
   const prefix = repoRoot.endsWith("/") ? repoRoot : `${repoRoot}/`;
@@ -13,21 +18,83 @@ function relativize(path, repoRoot) {
   return rel.replace(/^\.\//, "");
 }
 
+const firstLine = (text) => (text ?? "").split("\n").find((l) => l.trim())?.trim() ?? "no output";
+
+function failedExit(run, what) {
+  return { ok: false, candidates: [], note: `${run.invocationId}: exit ${run.status} reported ${what}, but its output held none: ${firstLine(run.stderr || run.stdout)}` };
+}
+
+// cargo-machete lists `<crate> -- <manifest>:` and then one indented dependency name per line.
+function macheteFindings(run, ctx) {
+  const found = [];
+  let manifest = null;
+  for (const line of run.stdout.split("\n")) {
+    const header = MACHETE_HEADER.exec(line);
+    if (header) { manifest = relativize(header[2], ctx.repoRoot); continue; }
+    if (manifest && /^\s+\S+\s*$/.test(line)) found.push({ file: manifest, symbol: line.trim(), detail: `unused dependency: ${line.trim()}` });
+    else manifest = null;
+  }
+  return { found };
+}
+
+// `purgecss --rejected` prints a JSON array of { css, file, rejected: [selector] }.
+function purgecssFindings(run, ctx) {
+  let parsed;
+  try { parsed = JSON.parse(run.stdout); } catch { parsed = null; }
+  if (!Array.isArray(parsed)) return { error: `${run.invocationId}: unparseable purgecss JSON` };
+  const found = parsed.flatMap((entry) => (Array.isArray(entry?.rejected) ? entry.rejected : []).map((selector) =>
+    ({ file: relativize(String(entry.file ?? ""), ctx.repoRoot), symbol: String(selector), detail: `purgecss rejected selector: ${selector}` })));
+  return { found };
+}
+
+const FORMATS = { "cargo-machete": macheteFindings, "purgecss-json": purgecssFindings };
+
+function locatedLines(run, ctx, tracked, candidates, unlocated) {
+  const filter = ctx.tool.lineFilter ? new RegExp(ctx.tool.lineFilter) : null;
+  let recognised = 0;
+  for (const [stream, text] of [["stdout", run.stdout], ["stderr", run.stderr]]) {
+    if (stream === "stderr" && !filter) continue;
+    for (const line of text.split("\n").map((l) => l.trim())) {
+      if (!line || (filter && !filter.test(line))) continue;
+      recognised += 1;
+      const m = LOCATION.exec(line);
+      if (m) {
+        const file = relativize(m[1], ctx.repoRoot);
+        if (tracked.has(file)) candidates.push({ kind: ctx.tool.kinds[0], file, line: Number(m[2]), symbol: null, detail: line, noisy: true });
+        continue;
+      }
+      const named = [...line.matchAll(PATH_TOKEN)].map((t) => relativize(t[0], ctx.repoRoot)).find((f) => tracked.has(f));
+      unlocated.push({ file: named ?? null, line });
+    }
+  }
+  return recognised;
+}
+
 export const raw = {
   normalize(runs, ctx) {
-    const filter = ctx.tool.lineFilter ? new RegExp(ctx.tool.lineFilter) : null;
     const tracked = new Set(ctx.files);
+    const kind = ctx.tool.kinds[0];
     const candidates = [];
+    const unlocated = [];
+    const format = FORMATS[ctx.tool.outputFormat];
     for (const run of runs) {
-      for (const line of `${run.stdout}\n${run.stderr}`.split("\n").map((l) => l.trim())) {
-        if (!line || (filter && !filter.test(line))) continue;
-        const m = LOCATION.exec(line);
-        if (!m) continue;
-        const file = relativize(m[1], ctx.repoRoot);
-        if (!tracked.has(file)) continue;
-        candidates.push({ kind: ctx.tool.kinds[0], file, line: Number(m[2]), symbol: null, detail: line, noisy: true });
+      let recognised;
+      if (format) {
+        const { found, error } = format(run, ctx);
+        if (error) return { ok: false, candidates: [], note: error };
+        recognised = found.length;
+        for (const f of found) if (tracked.has(f.file)) candidates.push({ kind, file: f.file, line: null, symbol: f.symbol, detail: f.detail, noisy: true });
+      } else {
+        recognised = locatedLines(run, ctx, tracked, candidates, unlocated);
       }
+      if (run.status !== 0 && run.status !== null && recognised === 0) return failedExit(run, "findings");
     }
+    const anchor = ctx.anchorFiles?.[0] ?? ctx.files[0] ?? null;
+    const byFile = new Map();
+    for (const u of unlocated) byFile.set(u.file ?? anchor, [...(byFile.get(u.file ?? anchor) ?? []), u.line]);
+    if (byFile.has(null)) return { ok: false, candidates: [], note: "output names no tracked file and the repo has none to anchor it on" };
+    for (const [file, lines] of byFile)
+      candidates.push({ kind, file, line: null, symbol: null, detail: lines.join(" | ").slice(0, DETAIL_CAP), noisy: true });
     return { ok: true, candidates, note: `tool-run, heuristic-normalized; full output in ${relative(ctx.repoRoot, ctx.scratch)}` };
   },
 };
@@ -118,9 +185,11 @@ export const tsc = {
     const candidates = [];
     let others = 0;
     for (const run of runs) {
+      let diagnostics = 0;
       for (const line of run.stdout.split("\n")) {
         const m = TSC_DIAGNOSTIC.exec(line.trim());
         if (!m) continue;
+        diagnostics += 1;
         const [, path, row, , code, message] = m;
         if (!UNUSED_SYMBOL_CODES.has(code)) { others += 1; continue; }
         const file = relativize(path, ctx.repoRoot);
@@ -128,6 +197,7 @@ export const tsc = {
         candidates.push({ kind: ctx.tool.kinds[0], file, line: Number(row), symbol: /'([^']+)'/.exec(message)?.[1] ?? null,
           detail: `${code}: ${message}`, noisy: false });
       }
+      if (run.status !== 0 && run.status !== null && diagnostics === 0) return failedExit(run, "diagnostics");
     }
     return { ok: true, candidates, note: others ? `${others} other diagnostics ignored` : null };
   },

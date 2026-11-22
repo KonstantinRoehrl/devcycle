@@ -17,24 +17,24 @@ function lines(runsDir) {
   return readFileSync(join(repoDir, readdirSync(repoDir)[0]), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
 }
 
-test("append --kind sweep-count stores the three counts as integers", () => {
+test("append --kind sweep-count stores the three counts as integers and the completeness as a boolean", () => {
   const runsDir = makeTempDir("runs-"), repo = makeTempDir("repo-");
   const id = newRun(repo, runsDir);
   run(["append", "--run", id, "--kind", "sweep-count", "--sweep", "dead-code", "--category", "over-exported",
-    "--verified", "3", "--suspected", "1", "--cleared", "2", "--repo", repo], runsDir);
+    "--verified", "3", "--suspected", "1", "--cleared", "2", "--complete", "true", "--repo", repo], runsDir);
   const row = lines(runsDir).find((o) => o.kind === "sweep-count");
   assert.deepEqual(row, { kind: "sweep-count", runId: id, sweep: "dead-code", category: "over-exported",
-    verified: 3, suspected: 1, cleared: 2 });
+    verified: 3, suspected: 1, cleared: 2, complete: true });
 });
 
 test("sweep-count rejects a negative count and a missing category", () => {
   const runsDir = makeTempDir("runs-"), repo = makeTempDir("repo-");
   const id = newRun(repo, runsDir);
   const neg = tryRun(["append", "--run", id, "--kind", "sweep-count", "--sweep", "dead-code", "--category", "dead-code",
-    "--verified", "-1", "--suspected", "0", "--cleared", "0", "--repo", repo], runsDir);
+    "--verified", "-1", "--suspected", "0", "--cleared", "0", "--complete", "true", "--repo", repo], runsDir);
   assert.notEqual(neg.status, 0);
   const missing = tryRun(["append", "--run", id, "--kind", "sweep-count", "--sweep", "dead-code",
-    "--verified", "0", "--suspected", "0", "--cleared", "0", "--repo", repo], runsDir);
+    "--verified", "0", "--suspected", "0", "--cleared", "0", "--complete", "true", "--repo", repo], runsDir);
   assert.notEqual(missing.status, 0);
   assert.equal(lines(runsDir).filter((o) => o.kind === "sweep-count").length, 0);
 });
@@ -54,4 +54,18 @@ test("sweep-consent rejects a non-boolean answer", () => {
   const r = tryRun(["append", "--run", id, "--kind", "sweep-consent", "--consentExecuting", "yes",
     "--consentCoverage", "false", "--repo", repo], runsDir);
   assert.notEqual(r.status, 0);
+});
+
+test("sweep-count stores whether its category was swept completely, and refuses a row without it", () => {
+  const runsDir = makeTempDir("runs-"), repo = makeTempDir("repo-");
+  const id = newRun(repo, runsDir);
+  run(["append", "--run", id, "--kind", "sweep-count", "--sweep", "dead-code", "--category", "dead-code",
+    "--verified", "1", "--suspected", "0", "--cleared", "0", "--complete", "false", "--repo", repo], runsDir);
+  assert.equal(lines(runsDir).find((o) => o.kind === "sweep-count").complete, false);
+  const missing = tryRun(["append", "--run", id, "--kind", "sweep-count", "--sweep", "dead-code", "--category", "over-exported",
+    "--verified", "0", "--suspected", "0", "--cleared", "0", "--repo", repo], runsDir);
+  assert.notEqual(missing.status, 0);
+  const wrong = tryRun(["append", "--run", id, "--kind", "sweep-count", "--sweep", "dead-code", "--category", "over-exported",
+    "--verified", "0", "--suspected", "0", "--cleared", "0", "--complete", "maybe", "--repo", repo], runsDir);
+  assert.notEqual(wrong.status, 0);
 });

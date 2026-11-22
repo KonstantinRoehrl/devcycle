@@ -390,9 +390,10 @@
         "category": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
         "verified": { "type": "integer", "minimum": 0 },
         "suspected": { "type": "integer", "minimum": 0 },
-        "cleared": { "type": "integer", "minimum": 0 }
+        "cleared": { "type": "integer", "minimum": 0 },
+        "complete": { "type": "boolean" }
       },
-      "required": ["kind", "runId", "sweep", "category", "verified", "suspected", "cleared"],
+      "required": ["kind", "runId", "sweep", "category", "verified", "suspected", "cleared", "complete"],
       "additionalProperties": false
     },
     {

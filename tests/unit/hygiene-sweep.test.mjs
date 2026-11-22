@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
@@ -185,4 +185,138 @@ test("the CLI sweeps a git repo, reads the staleTodoDays override, and refuses a
   const r = spawnSync("node", [SCRIPT, "run", "--repo", repo], { encoding: "utf8" });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /^hygiene-sweep: --out is required/);
+});
+
+const gitRepo = (files) => {
+  const repo = repoWith(files);
+  const g = (...a) => execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...a],
+    { env: { ...process.env, GIT_AUTHOR_DATE: "2020-01-01T00:00:00Z", GIT_COMMITTER_DATE: "2020-01-01T00:00:00Z" } });
+  g("init", "-q"); g("add", "."); g("commit", "-q", "-m", "init");
+  return repo;
+};
+const sweepOnly = (repo, over = {}) => runSweep({ repoRoot: repo, outDir: join(makeTempDir("hyg-out-"), "s"), registry: { ...registry(), tools: [] },
+  runTool: () => ok(), onPath: () => true, ...over });
+
+test("a repo whose file list cannot be read stops the run instead of reading as a clean sweep", () => {
+  const notGit = repoWith({ "a.js": "// TODO: old\n" });
+  assert.throws(() => sweepOnly(notGit), /git ls-files failed/);
+  const r = spawnSync("node", [SCRIPT, "run", "--out", join(makeTempDir("hyg-out-"), "s"), "--repo", notGit], { encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^hygiene-sweep: git ls-files failed/);
+});
+
+test("a failed git log is a named degraded source, and a failed git blame keeps stale-todo out of the full kinds", () => {
+  const repo = repoWith({ "a.js": "// TODO: old\n" });
+  const { coverage } = sweepOnly(repo, { files: ["a.js"] });
+  assert.ok((coverage.degraded ?? []).some((d) => /git log failed.*file count/.test(d)), JSON.stringify(coverage.degraded));
+  assert.equal(row(coverage, "stale-todo").status, "partial");
+  assert.match(row(coverage, "stale-todo").note, /git blame failed for 1 file/);
+  assert.ok(!coverage.fullKinds.includes("stale-todo"));
+  assert.ok(coverage.fullKinds.includes("commented-out-code"), "a source that did not need git stays complete");
+  const healthy = sweepOnly(gitRepo({ "a.js": "// TODO: old\n" })).coverage;
+  assert.deepEqual(healthy.degraded, []);
+  assert.equal(row(healthy, "stale-todo").status, "ran");
+});
+
+test("a git blame capped at 200 files marks stale-todo partial and names the cap", () => {
+  const many = Object.fromEntries(Array.from({ length: 201 }, (_, i) => [`f${i}.js`, "// TODO: old\n"]));
+  const { coverage } = sweepOnly(gitRepo(many));
+  assert.equal(row(coverage, "stale-todo").status, "partial");
+  assert.match(row(coverage, "stale-todo").note, /git blame capped at 200 files; 1 file with a TODO was not aged/);
+  assert.ok(!coverage.fullKinds.includes("stale-todo"));
+});
+
+test("a tracked text file over the read cap makes the scanners that read it partial, a large binary does not", () => {
+  const big = "x = 1\n".repeat(200_000);
+  const repo = repoWith({ "big.js": big, "logo.png": big });
+  const { coverage } = sweepOnly(repo, { files: ["big.js", "logo.png"], churn: new Map() });
+  assert.equal(row(coverage, "commented-out-code").status, "partial");
+  assert.match(row(coverage, "commented-out-code").note, /1 file over 1 MB not scanned \(big\.js\)/);
+  assert.ok(!coverage.fullKinds.includes("commented-out-code"));
+  const binaryOnly = sweepOnly(repoWith({ "logo.png": big }), { files: ["logo.png"], churn: new Map() }).coverage;
+  assert.equal(row(binaryOnly, "static-assets").status, "ran");
+});
+
+test("a tool whose config is only in a subdirectory is named unavailable and keeps the kind open", () => {
+  const reg = registry();
+  const pick = (files) => Object.fromEntries(selectTools(reg, { stacks: ["js-ts"], files, consent: { executing: true } })
+    .map((s) => [s.tool.id, s.status]));
+  const nested = pick(["package.json", "packages/a/tsconfig.json", "packages/a/eslint.config.js"]);
+  assert.equal(nested.tsc, "unavailable");
+  assert.equal(nested.eslint, "unavailable");
+  assert.equal(pick(["package.json", "tsconfig.json"]).tsc, "run");
+  reg.tools = reg.tools.filter((t) => t.id === "tsc");
+  const repo = repoWith({ "package.json": "{}", "packages/a/tsconfig.json": "{}" });
+  const { coverage } = sweepOnly(repo, { registry: reg, files: ["package.json", "packages/a/tsconfig.json"], churn: new Map() });
+  assert.equal(row(coverage, "tsc").status, "unavailable");
+  assert.match(row(coverage, "tsc").note, /packages\/a\/tsconfig\.json.*repo root/);
+  assert.ok(!coverage.fullKinds.includes("dead-code"));
+});
+
+const tscRepo = (configs, extra = {}) => repoWith({ "package.json": "{}", "src/a.ts": "export {}\n", ...Object.fromEntries(
+  Object.entries(configs).map(([k, v]) => [k, typeof v === "string" ? v : JSON.stringify(v)])), ...extra });
+const tscSweep = (repo, runner) => {
+  const reg = registry();
+  reg.tools = [tool(reg, "tsc")];
+  const argvs = [];
+  const runTool = ({ argv }) => { argvs.push(argv); return runner(argv); };
+  const tracked = ["package.json", "src/a.ts", ...readdirSync(repo).filter((n) => n.startsWith("tsconfig") || /^p\d+\.json$/.test(n))];
+  return { ...runSweep({ repoRoot: repo, outDir: join(makeTempDir("hyg-out-"), "s"), registry: reg, runTool, files: tracked,
+    churn: new Map(), onPath: () => true }), argvs };
+};
+const projectsRun = (argvs) => argvs.filter((a) => a.includes("--noEmit")).map((a) => a[a.lastIndexOf("-p") + 1]);
+const UNUSED = "src/a.ts(1,21): error TS6133: 'x' is declared but its value is never read.\n";
+
+test("tsc on a solution-style tsconfig runs each referenced project and reports their findings", () => {
+  const repo = tscRepo({
+    "tsconfig.json": '// Vite solution config\n{ "files": [], "references": [ { "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }, ], }\n',
+    "tsconfig.app.json": {}, "tsconfig.node.json": {},
+  });
+  const result = tscSweep(repo, (argv) => (argv.includes("tsconfig.app.json") ? ok(UNUSED, 2) : ok()));
+  assert.deepEqual(projectsRun(result.argvs), ["tsconfig.app.json", "tsconfig.node.json"], "the root solution file is never the checked project");
+  assert.deepEqual(result.candidates.filter((c) => c.source === "tsc").map((c) => [c.file, c.symbol]), [["src/a.ts", "x"]]);
+  assert.equal(row(result.coverage, "tsc").status, "ran");
+  assert.match(row(result.coverage, "tsc").note, /solution tsconfig\.json: 2 referenced projects/);
+  const infoFiles = result.argvs.filter((a) => a.includes("--noEmit")).map((a) => a[a.indexOf("--tsBuildInfoFile") + 1]);
+  assert.equal(new Set(infoFiles).size, 2, "each project gets its own build info file");
+});
+
+test("tsc on a plain tsconfig still checks that one project, and a missing or over-cap reference makes the row partial", () => {
+  const plain = tscSweep(tscRepo({ "tsconfig.json": { include: ["src"] } }), () => ok());
+  assert.deepEqual(projectsRun(plain.argvs), ["tsconfig.json"]);
+  assert.equal(row(plain.coverage, "tsc").status, "ran");
+  const refs = (n) => ({ files: [], references: Array.from({ length: n }, (_, i) => ({ path: `./p${i}.json` })) });
+  const capped = tscSweep(tscRepo({ "tsconfig.json": refs(22), ...Object.fromEntries(Array.from({ length: 22 }, (_, i) => [`p${i}.json`, {}])) }), () => ok());
+  assert.equal(projectsRun(capped.argvs).length, 20);
+  assert.equal(row(capped.coverage, "tsc").status, "partial");
+  assert.match(row(capped.coverage, "tsc").note, /2 referenced projects over the cap of 20 not checked/);
+  assert.ok(!capped.coverage.fullKinds.includes("dead-code"));
+  const missing = tscSweep(tscRepo({ "tsconfig.json": refs(2), "p0.json": {} }), () => ok());
+  assert.equal(row(missing.coverage, "tsc").status, "partial");
+  assert.match(row(missing.coverage, "tsc").note, /p1\.json: not found/);
+  const none = tscSweep(tscRepo({ "tsconfig.json": refs(1) }), () => ok());
+  assert.equal(row(none.coverage, "tsc").status, "failed");
+});
+
+test("staticcheck: a failed go run is a failed row, while U1000 findings with the same exit code stay a run", () => {
+  const reg = registry();
+  reg.tools = [tool(reg, "staticcheck")];
+  const repo = repoWith({ "go.mod": "module x\n", "main.go": "package main\n" });
+  const go = (stdout, stderr, status) => runSweep({ repoRoot: repo, outDir: join(makeTempDir("hyg-out-"), "s"), registry: reg,
+    runTool: ({ argv }) => (argv.includes("--version") ? ok() : { status, stdout, stderr, error: null }),
+    files: ["go.mod", "main.go"], churn: new Map(), onPath: () => true }).coverage;
+  const broken = go("", "go: honnef.co/go/tools@v0.8.2: network unreachable\n", 1);
+  assert.equal(row(broken, "staticcheck").status, "failed");
+  assert.ok(!broken.fullKinds.includes("dead-code"));
+  const found = go("main.go:1:6: func f is unused (U1000)\n", "", 1);
+  assert.equal(row(found, "staticcheck").status, "ran");
+  assert.equal(row(go("", "", 0), "staticcheck").status, "ran");
+});
+
+test("coverage names every kind some source produces, so a kind with no source is not gated by it", () => {
+  const { coverage } = sweepOnly(repoWith({ "a.js": "x\n" }), { files: ["a.js"], churn: new Map() });
+  const sourced = coverage.sourcedKinds ?? [];
+  assert.ok(sourced.includes("dead-code") && sourced.includes("stale-todo"), `sourcedKinds: ${JSON.stringify(coverage.sourcedKinds)}`);
+  assert.ok(!sourced.includes("test-coverage-gap"));
+  assert.deepEqual(sourced.filter((k) => !coverage.sweepKinds.includes(k)), []);
 });

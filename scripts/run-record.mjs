@@ -261,7 +261,7 @@ function main() {
   const floatFields = new Set(["cost", "usd", "fenceShare", "nonTestFenceShare", "subagentUsd",
     "estUsd", "coordinatorDepthPct"]);
   const boolFields = new Set(["background", "fork", "windowAssumed", "isAborted", "explicitModel",
-    "consentExecuting", "consentCoverage"]);
+    "consentExecuting", "consentCoverage", "complete"]);
   const objectFields = new Set(["reads"]);
 
   if (sub === "new") {

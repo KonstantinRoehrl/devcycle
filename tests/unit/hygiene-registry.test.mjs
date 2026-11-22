@@ -72,3 +72,21 @@ test("loadRegistry refuses an invalid file and an unreadable one", () => {
   assert.throws(() => loadRegistry(bad), /^Error: invalid hygiene registry: .*version/);
   assert.throws(() => loadRegistry(join(dir, "missing.json")), /cannot read /);
 });
+
+test("the registry owns tsc's per-project expansion and the raw tools' output formats", () => {
+  const reg = loadRegistry();
+  assert.deepEqual(tool(reg, "tsc").projects, { config: "tsconfig.json", cap: 20 });
+  assert.ok(tool(reg, "tsc").modes.static.invocations[0].args.includes("{project}"));
+  assert.equal(tool(reg, "cargo-machete").outputFormat, "cargo-machete");
+  assert.equal(tool(reg, "purgecss").outputFormat, "purgecss-json");
+});
+
+test("validateRegistry checks the project expansion fields and the raw output formats", () => {
+  expectError((r) => { tool(r, "tsc").projects = { config: "tsconfig.json", cap: 0 }; }, /^tools\[tsc\]\.projects: /);
+  expectError((r) => { tool(r, "tsc").projects = { config: "/etc/tsconfig.json", cap: 5 }; }, /^tools\[tsc\]\.projects: /);
+  expectError((r) => { delete tool(r, "tsc").projects; }, /^tools\[tsc\]\.modes\.static\.invocations\[main\]\.args: .*\{project\}/);
+  expectError((r) => { tool(r, "vulture").modes.static.invocations[0].args = ["{project}"]; },
+    /^tools\[vulture\]\.modes\.static\.invocations\[main\]\.args: .*\{project\}/);
+  expectError((r) => { tool(r, "purgecss").outputFormat = "yaml"; }, /^tools\[purgecss\]\.outputFormat: /);
+  expectError((r) => { tool(r, "tsc").outputFormat = "cargo-machete"; }, /^tools\[tsc\]\.outputFormat: .*raw/);
+});

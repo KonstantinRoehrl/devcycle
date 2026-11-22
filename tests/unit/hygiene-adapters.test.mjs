@@ -102,3 +102,67 @@ test("the spine runs knip and tsc through the registry, and missing node_modules
   const noDeps = sweep(false);
   assert.ok(noDeps.candidates.filter((c) => c.source === "knip" || c.source === "tsc").every((c) => c.noisy));
 });
+
+const MACHETE_FOUND = "Analyzing dependencies of crates in this directory...\n" +
+  "cargo-machete found the following unused dependencies in this directory:\n" +
+  "mycrate -- ./Cargo.toml:\n\tserde\n\tanyhow\nnested -- ./crates/nested/Cargo.toml:\n\tregex\nDone!\n";
+const MACHETE_CLEAN = "Analyzing dependencies of crates in this directory...\n" +
+  "cargo-machete didn't find any unused dependencies in this directory. Good job!\nDone!\n";
+const rawCtx = (id, over = {}) => ({ tool: tool(id), mode: "static", repoRoot: "/repo", scratch: "/repo/.out/tools/x",
+  files: ["Cargo.toml", "crates/nested/Cargo.toml", "src/a.css", "src/b.css", "app.py", "go.mod", "svc/main.go"], ...over });
+
+test("raw: cargo-machete's unused dependencies, which carry no line number, become candidates on their manifest", () => {
+  const found = ADAPTERS.raw.normalize([run("main", MACHETE_FOUND, 1)], rawCtx("cargo-machete"));
+  assert.equal(found.ok, true);
+  assert.deepEqual(found.candidates.map(brief), [
+    "dead-code|Cargo.toml|null|serde|true", "dead-code|Cargo.toml|null|anyhow|true", "dead-code|crates/nested/Cargo.toml|null|regex|true",
+  ]);
+  assert.match(found.candidates[0].detail, /unused dependency/);
+  assert.deepEqual(ADAPTERS.raw.normalize([run("main", MACHETE_CLEAN, 0)], rawCtx("cargo-machete")).candidates, []);
+});
+
+test("raw: purgecss's rejected selectors become candidates per css file, and a file with none is clean", () => {
+  const json = JSON.stringify([
+    { css: ".used{}", file: "/repo/src/a.css", rejected: [".unused", ".old"] },
+    { css: ".kept{}", file: "/repo/src/b.css", rejected: [] },
+  ]);
+  const found = ADAPTERS.raw.normalize([run("main", json, 0)], rawCtx("purgecss"));
+  assert.equal(found.ok, true);
+  assert.deepEqual(found.candidates.map(brief), ["dead-code|src/a.css|null|.unused|true", "dead-code|src/a.css|null|.old|true"]);
+  const clean = ADAPTERS.raw.normalize([run("main", JSON.stringify([{ css: "", file: "/repo/src/b.css", rejected: [] }]), 0)], rawCtx("purgecss"));
+  assert.deepEqual(clean.candidates, []);
+  const garbled = ADAPTERS.raw.normalize([run("main", "Error: no css files found", 0)], rawCtx("purgecss"));
+  assert.equal(garbled.ok, false);
+  assert.match(garbled.note, /unparseable purgecss JSON/);
+});
+
+test("raw: a line that passes the tool's filter but names no line number is never dropped", () => {
+  const line = "warning IDE0051: Private member 'Widget.unused' is unused [/repo/App/App.csproj]";
+  const found = ADAPTERS.raw.normalize([run("main", `Build started\n${line}\n`, 0)],
+    rawCtx("dotnet-build", { files: ["App/App.csproj", "App/Widget.cs"] }));
+  assert.equal(found.ok, true);
+  assert.deepEqual(found.candidates.map((c) => [c.file, c.line, c.noisy]), [["App/App.csproj", null, true]]);
+  assert.ok(found.candidates[0].detail.includes("IDE0051"));
+  const unnamed = ADAPTERS.raw.normalize([run("main", "warning IDE0051: Private member 'Widget.unused' is unused\n", 0)],
+    rawCtx("dotnet-build", { files: ["App/App.csproj", "App/Widget.cs"], anchorFiles: ["App/App.csproj"] }));
+  assert.deepEqual(unnamed.candidates.map((c) => c.file), ["App/App.csproj"], "anchored on the stack's own manifest");
+});
+
+test("raw: a findings exit code with no recognised finding line is a failed run, not a clean one", () => {
+  const golint = (stdout, stderr, status = 1) => ADAPTERS.raw.normalize([{ invocationId: "main", status, stdout, stderr, error: null }], rawCtx("staticcheck"));
+  const broken = golint("", "go: downloading honnef.co/go/tools v0.8.2\ngo: honnef.co/go/tools@v0.8.2: network unreachable\n");
+  assert.equal(broken.ok, false);
+  assert.match(broken.note, /exit 1/);
+  const found = golint("svc/main.go:3:6: func unused is unused (U1000)\n", "");
+  assert.equal(found.ok, true);
+  assert.deepEqual(found.candidates.map(brief), ["dead-code|svc/main.go|3|null|true"]);
+  assert.equal(golint("", "", 0).ok, true, "exit 0 with no output is a clean run");
+  const vulture = ADAPTERS.raw.normalize([run("main", "", 3)], rawCtx("vulture"));
+  assert.equal(vulture.ok, false, "vulture's findings exit with no finding line cannot be a clean run");
+});
+
+test("tsc: a diagnostics exit with no diagnostic line is a failed run", () => {
+  const broken = ADAPTERS.tsc.normalize([run("main", "error TS5083: Cannot read file '/repo/tsconfig.json'.\n", 2)], ctx({ tool: tool("tsc") }));
+  assert.equal(broken.ok, false);
+  assert.match(broken.note, /exit 2/);
+});

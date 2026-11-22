@@ -5,6 +5,21 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — The hygiene sweep's coverage rules grow the reference (#478)
+
+**Decision:** a sweep kind is complete only if every source behind it ran in full and could have found
+something; a capped, size-skipped or project-skipping scan is a `partial` row, and a failed git source
+is a named degraded source. The reference states these rules, the `complete` field on each `sweep-count`
+row and the `sourcedKinds` rule for kinds no source produces; its closure and the runtime surface grow.
+
+**Why:** a branch review found paths that read as "ran, nothing found" without the check running, which
+let stored findings resolve wrongly. The coverage statement has to say what each such path means.
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 77218
+budget: surface-budget.json surfaceTotal 7397
+```
+
 ## 2026-11-22 — maintain verifies its hygiene sweep in a ninth dispatch and mints its own run record (#478, #183)
 
 **Decision:** maintain's pass ceiling rises from 8 to 9 total LLM dispatches. The ninth is one

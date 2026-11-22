@@ -47,16 +47,19 @@ mode, any tool without installed dependencies) never ranks as verified.
 One finding per cluster, its `canonicalLocation` the cluster anchor with no line, so the store's
 persistence works unchanged. The section orders clusters by blast radius; the document's
 severity-first rank is unchanged. `finalize --run <id>` appends one `sweep-count` row per kind
-(`sweep`, `category`, `verified`, `suspected`, `cleared`) to the pass's run record, once. Trending
-compares against the latest earlier counted pass on this machine (run records are per machine) and
-says so when there is none. A sweep kind's stored record may resolve only when every source behind it
+(`sweep`, `category`, `verified`, `suspected`, `cleared`, `complete`) to the pass's run record, once.
+Trending compares against the latest counted pass that started strictly earlier on this machine (run
+records are per machine), says so when there is none, and says "not comparable" for a kind either pass
+did not sweep completely. A sweep kind's stored record may resolve only when every source behind it
 ran in full this pass: `coverage.json`'s `fullKinds`, passed to
-`maintenance-findings.mjs apply-pass --sweep-coverage`.
+`maintenance-findings.mjs apply-pass --sweep-coverage`; a kind no source produces (`sourcedKinds`
+omits it) keeps the lens kinds' resolution rules.
 
 ## Coverage statement
 
-Per kind: tool-checked, heuristic-only or not covered; every failed, unavailable or unconsented source
-by name; "dependencies not installed" without `node_modules`; "no dead-code tool for this stack;
+Per kind: tool-checked, heuristic-only or not covered; every failed, unavailable, unconsented or
+partial source (a capped or size-skipped scan, a solution tsconfig's unchecked projects) and every
+degraded git source by name, each keeping its kind out of `fullKinds`; "dependencies not installed" without `node_modules`; "no dead-code tool for this stack;
 heuristic scan only" for a stack no registry tool names; and the registry's `notCovered` list. The
 sweep runs in every pass and at every depth (`lean`, `standard`, `thorough`), whatever the
 `<concern>`; the statement says when it was partial.
@@ -70,7 +73,8 @@ spawned from an argv array without a shell. The registry's validation pins the f
 ## Dead code
 
 knip runs from a scratch config with every plugin off unless executing consent was given; its unused
-files and dependencies are then noisy. tsc is the repo's own when installed, else the pin. Other
+files and dependencies are then noisy. tsc is the repo's own when installed, else the pin; on a solution-style tsconfig it checks each
+referenced project. Other
 stacks' tools use the raw adapter: their output reaches verification verbatim. Built-in scanners cover
 commented-out code, stale TODOs (older than `staleTodoDays`, which a repo-root `.devcycle-hygiene.json`
 `{ "staleTodoDays": <n> }` overrides), unused environment variables, CSS custom properties, classes

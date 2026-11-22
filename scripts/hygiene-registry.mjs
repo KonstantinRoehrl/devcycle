@@ -11,9 +11,11 @@ const SIGNAL_RE = /^(\*\.[A-Za-z0-9]+|[^/*]+)$/;
 const VERSION_RE = /^v?\d+(\.\d+)*$/;
 const SEVERITIES = ["critical", "high", "medium", "low"];
 const ADAPTERS = ["knip", "tsc", "raw"];
+const OUTPUT_FORMATS = ["lines", "cargo-machete", "purgecss-json"];
 const MODES = ["static", "executing"];
 const FORBIDDEN_ARGS = ["--fix", "--write", "--with-metadata", "--output-file"];
-// `{scratch}` is the only placeholder; a brace group with commas is a glob, not a placeholder.
+// `{scratch}` is a placeholder everywhere; `{project}` and `{projectSlug}` only for a tool with `projects`.
+// A brace group with commas is a glob, not a placeholder.
 const PLACEHOLDER_RE = /\{([A-Za-z_][\w-]*)\}/g;
 
 const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
@@ -21,11 +23,13 @@ const isStringArray = (v) => Array.isArray(v) && v.every((s) => typeof s === "st
 const isNonEmptyStringArray = (v) => isStringArray(v) && v.length > 0;
 const subsetOf = (values, allowed) => values.every((v) => allowed.includes(v));
 
-function placeholderErrors(path, value) {
+const PROJECT_PLACEHOLDERS = ["project", "projectSlug"];
+
+function placeholderErrors(path, value, allowProject = false) {
   const text = typeof value === "string" ? value : JSON.stringify(value);
   return [...text.matchAll(PLACEHOLDER_RE)]
-    .filter(([, name]) => name !== "scratch")
-    .map(([token]) => `${path}: placeholder ${token} is not supported; only {scratch} is`);
+    .filter(([, name]) => name !== "scratch" && !(allowProject && PROJECT_PLACEHOLDERS.includes(name)))
+    .map(([token]) => `${path}: placeholder ${token} is not supported; ${allowProject ? "only {scratch}, {project} and {projectSlug} are" : "only {scratch} is"}`);
 }
 
 function argErrors(path, args) {
@@ -38,7 +42,7 @@ function argErrors(path, args) {
   return errors;
 }
 
-function modeErrors(path, mode) {
+function modeErrors(path, mode, hasProjects) {
   if (!isObject(mode)) return [`${path}: must be an object`];
   const errors = [];
   const { invocations, files, env } = mode;
@@ -52,7 +56,9 @@ function modeErrors(path, mode) {
       if (seen.has(inv.id)) errors.push(`${at}: duplicate id`);
       seen.add(inv.id);
       if (!isStringArray(inv.args)) return errors.push(`${at}.args: must be an array of strings`);
-      errors.push(...argErrors(`${at}.args`, inv.args), ...placeholderErrors(`${at}.args`, inv.args));
+      errors.push(...argErrors(`${at}.args`, inv.args), ...placeholderErrors(`${at}.args`, inv.args, hasProjects));
+      if (hasProjects && !inv.args.includes("{project}"))
+        errors.push(`${at}.args: a tool with projects must name its checked project as {project}`);
     });
   }
   if (files !== undefined) {
@@ -108,6 +114,14 @@ function optionalFieldErrors(path, tool) {
     }
   }
   if (tool.needsDependencies !== undefined && typeof tool.needsDependencies !== "boolean") errors.push(`${path}.needsDependencies: must be a boolean`);
+  if (tool.outputFormat !== undefined && (!OUTPUT_FORMATS.includes(tool.outputFormat) || tool.adapter !== "raw"))
+    errors.push(`${path}.outputFormat: must be one of ${OUTPUT_FORMATS.join(", ")}, and only on a raw-adapter tool`);
+  if (tool.projects !== undefined) {
+    const { config, cap } = isObject(tool.projects) ? tool.projects : {};
+    const inRepo = typeof config === "string" && config && !config.startsWith("/") && !config.split("/").includes("..");
+    if (!inRepo || !Number.isInteger(cap) || cap <= 0)
+      errors.push(`${path}.projects: must be { config: a relative path inside the repo, cap: a positive integer }`);
+  }
   return errors;
 }
 
@@ -127,7 +141,7 @@ function toolErrors(tool, index, stackKeys, sweeps) {
   errors.push(...commandErrors(path, tool), ...optionalFieldErrors(path, tool));
   if (!isObject(tool.modes) || !Object.keys(tool.modes).length || !subsetOf(Object.keys(tool.modes), MODES))
     errors.push(`${path}.modes: must be a non-empty object keyed by ${MODES.join(" | ")}`);
-  else for (const [name, mode] of Object.entries(tool.modes)) errors.push(...modeErrors(`${path}.modes.${name}`, mode));
+  else for (const [name, mode] of Object.entries(tool.modes)) errors.push(...modeErrors(`${path}.modes.${name}`, mode, tool.projects !== undefined));
   if (tool.adapter === "knip" && isObject(tool.modes) && tool.modes.static) errors.push(...knipConfigErrors(`${path}.modes.static.files`, tool));
   return errors;
 }
