@@ -192,8 +192,8 @@ marker with the version the change lands in, since only the release computes tha
 - version: "unreleased"
   change: added
   key: planningStrategy
-  values: [auto, status-quo, inline, grouped, grouped-fork, checkpointed]
-  note: "auto now runs the planning decision table (inline up to 12 tasks, otherwise checkpointed or grouped by the task cut's coupling and width); checkpointed drafts inline in one segment per wave group, grouped drafts in rounds of plan-drafter dispatches held to an interface lock, and grouped-fork is grouped with forked drafters (experimental)"
+  values: [auto, status-quo, inline, grouped, checkpointed]
+  note: "auto now runs the planning decision table (inline up to 12 tasks, otherwise checkpointed or grouped by the task cut's coupling and width); checkpointed drafts inline in one segment per wave group, grouped drafts in rounds of plan-drafter dispatches held to an interface lock; a grouped-fork value was trialled and dropped before any release"
 - version: "unreleased"
   change: added
   key: planningBudgetUSD

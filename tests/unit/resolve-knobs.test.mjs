@@ -33,14 +33,17 @@ test("the roster carries the 20 shipped knobs in config.md's roster order", () =
 
 test("planningStrategy is a non-live enum, auto unless set, and compares like any recorded knob", () => {
   assert.deepEqual(ROSTER.find((e) => e.key === "planningStrategy"),
-    { key: "planningStrategy", kind: "enum", values: ["auto", "status-quo", "inline", "grouped", "grouped-fork", "checkpointed"], fallback: "auto" });
-  for (const value of ["status-quo", "inline", "grouped", "grouped-fork", "checkpointed"]) {
+    { key: "planningStrategy", kind: "enum", values: ["auto", "status-quo", "inline", "grouped", "checkpointed"], fallback: "auto" });
+  for (const value of ["status-quo", "inline", "grouped", "checkpointed"]) {
     const { knobs, explicit } = resolveKnobs(with_({ planningStrategy: value }));
     assert.deepEqual([knobs.planningStrategy, explicit], [value, ["planningStrategy"]], value);
   }
   const { knobs, explicit, warnings } = resolveKnobs(with_({ planningStrategy: "parallel" }));
   assert.deepEqual([knobs.planningStrategy, explicit], ["auto", []]);
-  assert.deepEqual(warnings, ["planningStrategy=parallel is not one of auto | status-quo | inline | grouped | grouped-fork | checkpointed; using auto"]);
+  assert.deepEqual(warnings, ["planningStrategy=parallel is not one of auto | status-quo | inline | grouped | checkpointed; using auto"]);
+  const dropped = resolveKnobs(with_({ planningStrategy: "grouped-fork" }));
+  assert.deepEqual([dropped.knobs.planningStrategy, dropped.explicit], ["auto", []]);
+  assert.deepEqual(dropped.warnings, ["planningStrategy=grouped-fork is not one of auto | status-quo | inline | grouped | checkpointed; using auto"]);
   assert.deepEqual(compareKnobs({ planningStrategy: "auto" }, resolveKnobs(with_({ planningStrategy: "inline" })).knobs),
     [{ key: "planningStrategy", old: "auto", new: "inline" }]);
 });

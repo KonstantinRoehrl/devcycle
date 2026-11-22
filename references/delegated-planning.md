@@ -89,10 +89,6 @@ draft for it and returns `interface-delta: Task <n> <what>`. The coordinator, wh
 (the producer's drafter patches its task by `SendMessage`, then `interface-lock.mjs write <work-dir> --round <n> --tasks <producer task> --relock`, then the
 consumer is re-sent) or tells the drafter to hold the pin.
 
-**Fork arm.** Under `grouped-fork` each group is dispatched as `subagent_type: "fork"` once the pack is written, its
-description still opening `plan-drafter: `. A fork inherits the coordinator's model, so the sensor records it as not
-explicitly routed. The arm is an experiment: the benchmark pass settles it, in a `docs/decisions/README.md` entry.
-
 ## The merge
 
 The coordinator writes its own Dispatch Map to `dispatch-map.md`, then assembles the plan with

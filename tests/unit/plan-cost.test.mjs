@@ -21,7 +21,7 @@ test("the profile, the fitted role parameters, the rates and the calibration rec
     drafter: { F: 17303, t: 30.5, r: 26177, o: 36901, n: 14 },
     checker: { F: 19235, t: 9, r: 31331, o: 6367, n: 5 },
   });
-  assert.deepEqual(PLANNING_RATES, { "status-quo": 5.3, inline: 1.4, grouped: 3, "grouped-fork": 2.5, checkpointed: 1.4 });
+  assert.deepEqual(PLANNING_RATES, { "status-quo": 1.34, inline: 0.97, grouped: 1.11, checkpointed: 1.4 });
   assert.equal(EXECUTION_RATE, 2.5);
   assert.deepEqual(CALIBRATION, { passes: [], maxErrorPct: 35 });
   assert.deepEqual(PLANNING_MODELS, { session: "claude-opus-5-5", fast: "claude-haiku-5-5" });
@@ -56,16 +56,16 @@ test("one dispatch costs its cache writes, its linear re-reads and its output", 
 });
 
 test("inline is one coordinator segment, checkpointed one per wave", () => {
-  assert.deepEqual(projectPlanning({ strategy: "inline", fork: false, rounds: [] }, cut), {
+  assert.deepEqual(projectPlanning({ strategy: "inline", rounds: [] }, cut), {
     dispatches: 0, tokens: 92000, usd: 2.31, calibrated: false,
     byRole: { coordinator: { count: 1, tokens: 92000, usd: 2.31 }, drafter: { count: 0, tokens: 0, usd: 0 }, checker: { count: 0, tokens: 0, usd: 0 } },
   });
-  const checkpointed = projectPlanning({ strategy: "checkpointed", fork: false, rounds: [] }, cut);
+  const checkpointed = projectPlanning({ strategy: "checkpointed", rounds: [] }, cut);
   assert.deepEqual([checkpointed.byRole.coordinator.count, checkpointed.tokens, checkpointed.usd], [2, 120000, 2.19]);
 });
 
 test("grouped prices a drafter per group on its tier, a merge segment and one checker per 8 pairs", () => {
-  const grouped = projectPlanning({ strategy: "grouped", fork: false, rounds: [oneRound] }, cut);
+  const grouped = projectPlanning({ strategy: "grouped", rounds: [oneRound] }, cut);
   assert.deepEqual(grouped, {
     dispatches: 3, tokens: 242373, usd: 0.44, calibrated: false,
     byRole: {
@@ -74,14 +74,12 @@ test("grouped prices a drafter per group on its tier, a merge segment and one ch
       checker: { count: 1, tokens: 56933, usd: 0.01 },
     },
   });
-  const fork = projectPlanning({ strategy: "grouped", fork: true, rounds: [oneRound] }, cut);
-  assert.equal(fork.byRole.drafter.usd, 2.19);
-  const delegated = projectPlanning({ strategy: "delegated", fork: false, rounds: [] }, cut);
+  const delegated = projectPlanning({ strategy: "delegated", rounds: [] }, cut);
   assert.deepEqual([delegated.byRole.drafter.count, delegated.dispatches], [3, 4]);
 });
 
 test("a cheaper session model prices the coordinator lower and dispatches the same", () => {
-  const choice = { strategy: "grouped", fork: false, rounds: [oneRound] };
+  const choice = { strategy: "grouped", rounds: [oneRound] };
   const sonnet = projectPlanning(choice, cut, { ...PLANNING_MODELS, session: "claude-sonnet-5-5" });
   const opus = projectPlanning(choice, cut);
   assert.ok(sonnet.byRole.coordinator.usd < opus.byRole.coordinator.usd, `${sonnet.byRole.coordinator.usd} vs ${opus.byRole.coordinator.usd}`);
@@ -90,5 +88,5 @@ test("a cheaper session model prices the coordinator lower and dispatches the sa
 });
 
 test("a split has no projection", () => {
-  assert.equal(projectPlanning({ strategy: "split", fork: false, rounds: [] }, cut), null);
+  assert.equal(projectPlanning({ strategy: "split", rounds: [] }, cut), null);
 });

@@ -28,7 +28,7 @@ export const ROSTER = [
   { key: "taskReviewerModel", kind: "model", fallback: "auto" },
   { key: "branchReviewModel", kind: "model", fallback: "auto" },
   { key: "walkthroughModel", kind: "model", fallback: "auto" },
-  { key: "planningStrategy", kind: "enum", values: ["auto", "status-quo", "inline", "grouped", "grouped-fork", "checkpointed"], fallback: "auto" },
+  { key: "planningStrategy", kind: "enum", values: ["auto", "status-quo", "inline", "grouped", "checkpointed"], fallback: "auto" },
   { key: "planningBudgetUSD", kind: "usd", fallback: "0" },
   { key: "learnStalenessSessions", kind: "count", min: 0, fallback: "5" },
   { key: "learnStalenessDays", kind: "count", min: 0, fallback: "14" },

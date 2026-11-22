@@ -24,7 +24,7 @@ const { spawnSpec } = agentCli;
 
 export const ARMS = ["status-quo", "inline"];
 // Arms a pass runs only when --arms names them.
-export const OPT_IN_ARMS = ["grouped", "grouped-fork", "checkpointed"];
+export const OPT_IN_ARMS = ["grouped", "checkpointed"];
 const KNOWN_ARMS = [...ARMS, ...OPT_IN_ARMS];
 export const SIZES = ["small", "medium", "large"];
 // A manifest entry's planned task count when it names none, by size.
@@ -32,8 +32,8 @@ export const DEFAULT_TASKS = { small: 3, medium: 7, large: 12 };
 // The per-task rates the spend estimate uses are scripts/plan-cost.mjs's.
 export const RATES = { planning: PLANNING_RATES, execution: EXECUTION_RATE };
 // The default stays at the user's target: a small, a medium and a large entry at default sizes estimates
-// $182.40 (the estimate takes the upper ends of #442's rates on purpose), so such a pass needs a smaller
-// corpus or an explicit --budget above the target, which is the user's call.
+// $85.82 at the measured median rates, under it. A pass estimated above the budget is refused and needs a
+// smaller corpus or an explicit --budget above the estimate, which is the user's call.
 export const DEFAULT_BUDGET = 150;
 // Seconds one headless leg may run before it is killed and its replay recorded as an error.
 export const DEFAULT_LEG_TIMEOUT_SECONDS = 7200;
@@ -322,7 +322,7 @@ function score(argv, root) {
 // Subcommand name to handler (argv, root) → exit code.
 export const SUBCOMMANDS = { estimate, run, score };
 
-const USAGE = "usage: plan-bench.mjs <estimate|run|score> [--manifest <path>] [--arms status-quo,inline,grouped,grouped-fork,checkpointed] [--entries <id,…>] [--budget <usd>] [--pass <id>] " +
+const USAGE = "usage: plan-bench.mjs <estimate|run|score> [--manifest <path>] [--arms status-quo,inline,grouped,checkpointed] [--entries <id,…>] [--budget <usd>] [--pass <id>] " +
   "[run: --go-ahead <token> --plugin-dir <checkout> --model <id> --implementer-model <id> --claude <bin> --leg-timeout <seconds>]";
 
 export function main(argv, root = gitToplevel(process.cwd())) {
