@@ -1,5 +1,17 @@
 # Changelog
 
+`/devcycle:maintain` now runs a verified code-hygiene sweep, the quality catalog holds code to a clearer standard, and two new standalone skills draft issues and triage a backlog. The sweep ships its dead-code part first; the rest of #478 stays open.
+
+**Hygiene sweep (#478, sections A and B).** A registry (`references/hygiene-sweeps.json`) and an audit-only contract (`references/hygiene-sweeps.md`) define each sweep kind, and `scripts/hygiene-sweep.mjs` runs them with typed outcomes, so a check that was vacuous or failed can no longer read as a completed sweep. The dead-code sweep reads recorded `knip` and `tsc` output through adapters and adds CSS, Angular and static-asset scanners, tested against a fixture repository of decoys with a mutation check. `/devcycle:maintain` runs the sweep as part of its pass, a `finalize` step settles the outcome, resolution flags are tied to the confirmed run, and sweep-kind findings are kept when a pass finalized no sweep. The run record gains `sweep-count` and `sweep-consent` kinds.
+
+**Quality criteria (#485).** `references/quality-criteria.md` splits the bundled "dead, unreachable, bloated, or undocumented code" bullet into separate criteria, sharpens duplication into duplicated logic, and adds a single-source-of-truth rule and a documentation standard, each naming its measuring source. Sweep-only method stays out of the catalog, which every planning run loads.
+
+**Issue skills and shared issue folding (#488, #489, #490).** `skills/write-issue` drafts a verified, privacy-screened issue and files it only on your confirmation, and `skills/triage-issues` fetches the whole open backlog, ranks and clusters it into one-PR groups and reports a delta against the last run. `scripts/validate.mjs` allows `skills/<id>/SKILL.md` again as a thin pointer at one playbook. The pipeline both use now lives in `references/issue-folding.md`, and `scripts/issue-intake.mjs` checks the number of issues it fetched against GitHub's own count, so a silent truncation stops the run instead of ranking a partial backlog. Findings rank by Impact, then Severity, then Priority. The redaction screen gains `--source-repo`, which screens a draft for another repository against the private source repository's own identity terms. Doctor's issue drafts now carry write-issue's context section, so an agent that picks one up cold learns why it matters and how to prove it fixed.
+
+**Records.** `docs/decisions/README.md` records the planning-overhaul closeout, keeping #443 and #442 open.
+
+**Known issues.** #478 stays open: sections beyond the dead-code sweep are not built yet. #485 is advanced by this release; close it by hand if its remaining checklist is met.
+
 ## 0.33.0 — 2026-11-22
 
 - feat(planning): observable, tier-routed and cost-gated planning, plus resume recovery after an uncontrolled stop (#442, #454)
