@@ -5,6 +5,20 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — maintain runs the hygiene-sweep spine as a step 4 fact source (#478)
+
+**Decision:** step 4 of the maintain playbook runs `scripts/hygiene-sweep.mjs run`, the deterministic
+spine that detects stacks, runs `references/hygiene-sweeps.json`'s tools by this pass's consent, and
+writes candidate clusters and coverage rows.
+
+**Why:** #478 A makes the sweep a tooling fact source, so the LLM only verifies. The sentence that
+runs it grows the maintain playbook's closure and the runtime surface.
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 69118
+budget: surface-budget.json surfaceTotal 7285
+```
+
 ## 2026-11-22 — The quality catalog splits dead, bloat and undocumented code and adds single source of truth and a documentation standard (#485)
 
 **Decision:** `references/quality-criteria.md` replaces the bundled "dead, unreachable, bloated, or

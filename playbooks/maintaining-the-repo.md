@@ -58,7 +58,9 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
    (`${CLAUDE_PLUGIN_ROOT}/scripts/duplication-check.mjs`), dead-export detection
    (`node "${CLAUDE_PLUGIN_ROOT}/scripts/dead-export-check.mjs"`), and cross-reference / broken-link
    checking (`node "${CLAUDE_PLUGIN_ROOT}/scripts/xref-check.mjs"`) — and hand the lenses those facts
-   as evidence. The dead-export and xref checks are **advisory**: their findings print to stdout as
+   as evidence. The dead-code sweep runs first: `node "${CLAUDE_PLUGIN_ROOT}/scripts/hygiene-sweep.mjs" run --out .devcycle/maintain/sweep-<date>`
+   writes candidate clusters and coverage rows — tooling facts like the others.
+   The dead-export and xref checks are **advisory**: their findings print to stdout as
    evidence and they exit 0 even with findings, so only a non-zero (`abort`) exit — the tool could not
    run — omits the fact and is named in the coverage statement. Never spend an LLM lens re-deriving a
    tooling fact; a tool that is unreachable has its fact omitted and named in the coverage statement.
