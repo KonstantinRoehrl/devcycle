@@ -25,9 +25,10 @@ export const ROLE_PARAMS = Object.freeze({
 // USD per planned task. status-quo, inline and grouped are the medians of `cost-model-fit.mjs --rates
 // .devcycle/plan-bench/passes` over every scored replay (n = 7, 5 and 2), printed on 2026-11-22. They
 // are per-task figures across small, medium and one large entry, so a single large cut can sit far
-// from them. checkpointed has one replay and
-// keeps its assumed rate (#442's 0.32.x upper end) until a second one measures it. Execution is $2.5 (the
-// observed Phase 1 medium baseline, about $5.5 for about 2 tasks).
+// from them, and across three plugin vintages (phase1-baseline and phase2a ran before the context pack
+// and contract-only plans; the phase3 passes alone would put `inline` near 0.71). checkpointed has one
+// replay and keeps its assumed rate (#442's 0.32.x upper end) until a second one measures it. Execution
+// is $2.5 (the observed Phase 1 medium baseline, about $5.5 for about 2 tasks).
 export const PLANNING_RATES = Object.freeze({ "status-quo": 1.34, inline: 0.97, grouped: 1.11, checkpointed: 1.4 });
 export const EXECUTION_RATE = 2.5;
 

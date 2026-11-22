@@ -555,7 +555,7 @@ test("namesModel: a named model is explicit; none, empty or inherit is not", () 
   for (const sidecar of [{}, { model: "" }, { model: "inherit" }, { model: 3 }]) assert.equal(namesModel(sidecar), false, JSON.stringify(sidecar));
 });
 
-test("a forked drafter's agent-cost row says its model was not named", () => {
+test("a drafter that inherited its parent's model has an agent-cost row saying the model was not named", () => {
   const fx = fixture();
   writeSidecar(fx, { agentType: "fork", isFork: true, description: "plan-drafter: Tasks 1-3", model: "inherit" });
   assert.equal(callHook(fx).status, 0);

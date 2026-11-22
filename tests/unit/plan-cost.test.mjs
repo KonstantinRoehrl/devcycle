@@ -56,16 +56,16 @@ test("one dispatch costs its cache writes, its linear re-reads and its output", 
 });
 
 test("inline is one coordinator segment, checkpointed one per wave", () => {
-  assert.deepEqual(projectPlanning({ strategy: "inline", fork: false, rounds: [] }, cut), {
+  assert.deepEqual(projectPlanning({ strategy: "inline", rounds: [] }, cut), {
     dispatches: 0, tokens: 92000, usd: 2.31, calibrated: false,
     byRole: { coordinator: { count: 1, tokens: 92000, usd: 2.31 }, drafter: { count: 0, tokens: 0, usd: 0 }, checker: { count: 0, tokens: 0, usd: 0 } },
   });
-  const checkpointed = projectPlanning({ strategy: "checkpointed", fork: false, rounds: [] }, cut);
+  const checkpointed = projectPlanning({ strategy: "checkpointed", rounds: [] }, cut);
   assert.deepEqual([checkpointed.byRole.coordinator.count, checkpointed.tokens, checkpointed.usd], [2, 120000, 2.19]);
 });
 
 test("grouped prices a drafter per group on its tier, a merge segment and one checker per 8 pairs", () => {
-  const grouped = projectPlanning({ strategy: "grouped", fork: false, rounds: [oneRound] }, cut);
+  const grouped = projectPlanning({ strategy: "grouped", rounds: [oneRound] }, cut);
   assert.deepEqual(grouped, {
     dispatches: 3, tokens: 242373, usd: 0.44, calibrated: false,
     byRole: {
@@ -74,15 +74,12 @@ test("grouped prices a drafter per group on its tier, a merge segment and one ch
       checker: { count: 1, tokens: 56933, usd: 0.01 },
     },
   });
-  // The fork arm is gone: a `fork` flag in the choice changes nothing, the drafters stay on the fast tier.
-  const forkFlag = projectPlanning({ strategy: "grouped", fork: true, rounds: [oneRound] }, cut);
-  assert.deepEqual(forkFlag, grouped);
-  const delegated = projectPlanning({ strategy: "delegated", fork: false, rounds: [] }, cut);
+  const delegated = projectPlanning({ strategy: "delegated", rounds: [] }, cut);
   assert.deepEqual([delegated.byRole.drafter.count, delegated.dispatches], [3, 4]);
 });
 
 test("a cheaper session model prices the coordinator lower and dispatches the same", () => {
-  const choice = { strategy: "grouped", fork: false, rounds: [oneRound] };
+  const choice = { strategy: "grouped", rounds: [oneRound] };
   const sonnet = projectPlanning(choice, cut, { ...PLANNING_MODELS, session: "claude-sonnet-5-5" });
   const opus = projectPlanning(choice, cut);
   assert.ok(sonnet.byRole.coordinator.usd < opus.byRole.coordinator.usd, `${sonnet.byRole.coordinator.usd} vs ${opus.byRole.coordinator.usd}`);
@@ -91,5 +88,5 @@ test("a cheaper session model prices the coordinator lower and dispatches the sa
 });
 
 test("a split has no projection", () => {
-  assert.equal(projectPlanning({ strategy: "split", fork: false, rounds: [] }, cut), null);
+  assert.equal(projectPlanning({ strategy: "split", rounds: [] }, cut), null);
 });

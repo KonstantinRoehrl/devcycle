@@ -198,8 +198,8 @@ one `small`, one `medium` and one `large` entry at their default sizes estimates
 budget, and is not refused. A pass estimated above `--budget` is refused, and the refusal names the two ways
 forward: a smaller corpus (fewer `--entries`, a smaller `size` or `tasks`) or an explicit `--budget` above
 the estimate, which is the user's decision, not the harness's. A median is not an upper end, so the estimate
-can sit below the true cost of a large cut: the large `status-quo` replay was estimated at $16.08 (12 tasks
-at 1.34) and spent $38.60 in `phase3-p2-large`. `run` also refuses to
+can sit below the true cost of a large cut: the current estimate for the large `status-quo` cut is $16.08
+(12 tasks at 1.34), while the `phase3-p2-large` replay spent $38.60 planning 20 tasks. `run` also refuses to
 start in a driven (unattended) session, where `DEVCYCLE_DRIVE_TOKEN` is set (`estimate` stays allowed),
 and refuses when the installed plugin list cannot be read, since the arm could then not be forced.
 `PLAN_BENCH_STUB_ONLY=1` makes `run` refuse the real `claude` and demand `--claude <stub>`; the tests set

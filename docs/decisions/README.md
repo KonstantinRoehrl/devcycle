@@ -20,8 +20,8 @@ arms with no usable replay are unmeasured, five replays: the large `grouped` and
 **Why:** the paid pass 2 (about $67.50 of the $390) left two usable large replays, `status-quo` and `inline` on
 `instruction-economy`. A DNS outage (`ENOTFOUND`, about 02:00) ended the rest in seconds, and the harness records
 that as a terminal `error` at $0. The user chose to record what the data supports over a harness retry and a third
-pass over the missing replays (priced under **How to apply**). The spec asks for two passes before a threshold becomes a gate (§9.9) and
-for the projection to be within ±35% before it is enforced (§7); neither holds.
+pass over the missing replays (priced under **How to apply**). The spec asks for two passes before a threshold
+becomes a gate (§9.9) and for the projection to be within ±35% before it is enforced (§7); neither holds.
 `cost-model-fit.mjs` reports 0 of 2 scored passes within ±35%, and the large projections miss by +428.7% (`inline`:
 est $29.27, actual planning $5.54) and −64.6% (`status-quo`: est $13.54, actual $38.21). Refitting the projection's
 role parameters on those replays and recording the refit's own error as a pass would be circular. The refit rates
@@ -56,10 +56,11 @@ unmeasured on large `inline`. Nothing is released from this effort.
 
 **How to apply:** a later effort that wants these measured fixes `scripts/plan-bench-pass.mjs` to retry a transient
 API error (`ENOTFOUND`, an unreachable API) with backoff instead of ending the replay, then runs the five missing
-replays with the user's go-ahead (`node scripts/plan-bench.mjs estimate` prices them at $108.59: $30.12 for the large
-`grouped` and `checkpointed`, `--entries instruction-economy --arms grouped,checkpointed`, plus $78.47 for the
-medium `status-quo`, `inline` and `checkpointed`, `--entries implementer-stop-hold --arms
-status-quo,inline,checkpointed`; an estimate at the median rates, and large cuts have run well above it), and refits the rates, records the passes in `CALIBRATION` and revisits
+replays with the user's go-ahead (`node scripts/plan-bench.mjs estimate` prices them at $108.59: $30.12 for the
+large `grouped` and `checkpointed` with `--entries instruction-economy --arms grouped,checkpointed`, plus $78.47
+for the medium `status-quo`, `inline` and `checkpointed` with
+`--entries implementer-stop-hold --arms status-quo,inline,checkpointed`; an estimate at the median rates, and
+large cuts have run well above it), and refits the rates, records the passes in `CALIBRATION` and revisits
 the thresholds from two passes. Until then read `auto`'s thresholds as untuned and the estimate as advisory.
 
 ## 2026-11-22 — The fork arm is dropped (#450)
