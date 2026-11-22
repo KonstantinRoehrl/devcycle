@@ -27,7 +27,7 @@ export const THRESHOLDS = Object.freeze({
   delegatedFromTasks: 5,
 });
 
-export const KNOBS = Object.freeze(["auto", "inline", "checkpointed", "grouped", "grouped-fork", "status-quo"]);
+export const KNOBS = Object.freeze(["auto", "inline", "checkpointed", "grouped", "status-quo"]);
 
 const groupBaseTokens = () => PROFILE.sharedPrefixTokens + PROFILE.packTokens;
 
@@ -101,12 +101,11 @@ function capWarnings(grouping, n) {
 export function chooseStrategy(cut, knob = "auto", models = PLANNING_MODELS) {
   if (!KNOBS.includes(knob)) throw new RangeError(`unknown planningStrategy "${knob}", expected one of ${KNOBS.join(", ")}`);
   const metrics = cutMetrics(cut);
-  const decide = (strategy, reason, { fork = false, grouping } = {}) => {
+  const decide = (strategy, reason, { grouping } = {}) => {
     const rounds = grouping ? grouping.rounds : [];
-    const projection = projectPlanning({ strategy, fork, rounds }, cut, models);
+    const projection = projectPlanning({ strategy, rounds }, cut, models);
     return {
       strategy,
-      fork,
       groups: grouping ? grouping.rounds.reduce((sum, round) => sum + round.groups.length, 0) : 0,
       drafters: grouping ? grouping.drafters : 0,
       est: projection ? projection.usd : null,
@@ -118,10 +117,9 @@ export function chooseStrategy(cut, knob = "auto", models = PLANNING_MODELS) {
   };
   if (knob === "inline") return decide("inline", "the planningStrategy knob forces inline drafting");
   if (knob === "checkpointed") return decide("checkpointed", "the planningStrategy knob forces checkpointed drafting");
-  if (knob === "grouped" || knob === "grouped-fork") {
+  if (knob === "grouped") {
     const grouping = groupCut(cut);
-    const reason = `the planningStrategy knob forces grouped drafting${knob === "grouped-fork" ? " with fork drafters" : ""}`;
-    return decide("grouped", reason + capWarnings(grouping, metrics.n), { fork: knob === "grouped-fork", grouping });
+    return decide("grouped", "the planningStrategy knob forces grouped drafting" + capWarnings(grouping, metrics.n), { grouping });
   }
   if (knob === "status-quo") {
     return metrics.n >= THRESHOLDS.delegatedFromTasks
@@ -222,7 +220,7 @@ function main(argv) {
     for (const error of errors) console.error(`plan-strategy: ${error}`);
     process.exit(1);
   }
-  // The session model prices the coordinator and fork drafters. A dated snapshot the table does not hold
+  // The session model prices the coordinator. A dated snapshot the table does not hold
   // falls back to its undated id (the grammar's owner is pricing.mjs), and an id neither form prices keeps
   // the default and says so, because a guessed price would be presented as a measured one. An omitted flag
   // says so too: the default is Opus, so a Sonnet session would otherwise be silently overpriced.
@@ -242,8 +240,8 @@ function main(argv) {
       warnings.push(`--sessionModel ${named} has no price in scripts/pricing.mjs; priced the session as ${PLANNING_MODELS.session}`);
     }
   }
-  const { strategy, fork, groups, drafters, est, projection, reason, metrics, rounds } = chooseStrategy(cut, knob, models);
-  console.log(JSON.stringify({ strategy, fork, groups, drafters, est, projection, reason, metrics, rounds, warnings }, null, 2));
+  const { strategy, groups, drafters, est, projection, reason, metrics, rounds } = chooseStrategy(cut, knob, models);
+  console.log(JSON.stringify({ strategy, groups, drafters, est, projection, reason, metrics, rounds, warnings }, null, 2));
 }
 
 if (isMain(import.meta.url, process.argv[1])) main(process.argv.slice(2));

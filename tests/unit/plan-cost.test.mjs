@@ -21,7 +21,7 @@ test("the profile, the fitted role parameters, the rates and the calibration rec
     drafter: { F: 17303, t: 30.5, r: 26177, o: 36901, n: 14 },
     checker: { F: 19235, t: 9, r: 31331, o: 6367, n: 5 },
   });
-  assert.deepEqual(PLANNING_RATES, { "status-quo": 5.3, inline: 1.4, grouped: 3, "grouped-fork": 2.5, checkpointed: 1.4 });
+  assert.deepEqual(PLANNING_RATES, { "status-quo": 1.34, inline: 0.97, grouped: 1.11, checkpointed: 1.4 });
   assert.equal(EXECUTION_RATE, 2.5);
   assert.deepEqual(CALIBRATION, { passes: [], maxErrorPct: 35 });
   assert.deepEqual(PLANNING_MODELS, { session: "claude-opus-5-5", fast: "claude-haiku-5-5" });
@@ -74,8 +74,9 @@ test("grouped prices a drafter per group on its tier, a merge segment and one ch
       checker: { count: 1, tokens: 56933, usd: 0.01 },
     },
   });
-  const fork = projectPlanning({ strategy: "grouped", fork: true, rounds: [oneRound] }, cut);
-  assert.equal(fork.byRole.drafter.usd, 2.19);
+  // The fork arm is gone: a `fork` flag in the choice changes nothing, the drafters stay on the fast tier.
+  const forkFlag = projectPlanning({ strategy: "grouped", fork: true, rounds: [oneRound] }, cut);
+  assert.deepEqual(forkFlag, grouped);
   const delegated = projectPlanning({ strategy: "delegated", fork: false, rounds: [] }, cut);
   assert.deepEqual([delegated.byRole.drafter.count, delegated.dispatches], [3, 4]);
 });

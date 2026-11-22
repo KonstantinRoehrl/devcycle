@@ -14,11 +14,11 @@ import { PLANNING_RATES, EXECUTION_RATE } from "../../scripts/plan-cost.mjs";
 const SCRIPT = new URL("../../scripts/plan-bench.mjs", import.meta.url).pathname;
 const entry = (over) => ({ id: "small-1", size: "small", repoPath: "/repo", baseSha: "71cc4ff", specPath: "docs/s.md", ...over });
 
-test("the default arms are status-quo and inline, three more are opt-in, and the default task counts and rates are pinned", () => {
+test("the default arms are status-quo and inline, two more are opt-in, and the default task counts and rates are pinned", () => {
   assert.deepEqual(ARMS, ["status-quo", "inline"]);
-  assert.deepEqual(OPT_IN_ARMS, ["grouped", "grouped-fork", "checkpointed"]);
+  assert.deepEqual(OPT_IN_ARMS, ["grouped", "checkpointed"]);
   assert.deepEqual(DEFAULT_TASKS, { small: 3, medium: 7, large: 12 });
-  assert.deepEqual(RATES, { planning: { "status-quo": 5.3, inline: 1.4, grouped: 3, "grouped-fork": 2.5, checkpointed: 1.4 }, execution: 2.5 });
+  assert.deepEqual(RATES, { planning: { "status-quo": 1.34, inline: 0.97, grouped: 1.11, checkpointed: 1.4 }, execution: 2.5 });
   // The rates are plan-cost's, never a second copy.
   assert.equal(RATES.planning, PLANNING_RATES);
   assert.equal(RATES.execution, EXECUTION_RATE);
@@ -60,12 +60,12 @@ test("estimatePass prices planning per arm and execution only for executing entr
   const { entries } = validateManifest({ entries: [entry(), entry({ id: "med-1", size: "medium" })] });
   const { rows, totalUsd } = estimatePass({ entries, arms: ARMS });
   assert.deepEqual(rows, [
-    { id: "small-1", arm: "status-quo", tasks: 3, planningUsd: 15.9, executionUsd: 0, usd: 15.9 },
-    { id: "small-1", arm: "inline", tasks: 3, planningUsd: 4.2, executionUsd: 0, usd: 4.2 },
-    { id: "med-1", arm: "status-quo", tasks: 7, planningUsd: 37.1, executionUsd: 17.5, usd: 54.6 },
-    { id: "med-1", arm: "inline", tasks: 7, planningUsd: 9.8, executionUsd: 17.5, usd: 27.3 },
+    { id: "small-1", arm: "status-quo", tasks: 3, planningUsd: 4.02, executionUsd: 0, usd: 4.02 },
+    { id: "small-1", arm: "inline", tasks: 3, planningUsd: 2.91, executionUsd: 0, usd: 2.91 },
+    { id: "med-1", arm: "status-quo", tasks: 7, planningUsd: 9.38, executionUsd: 17.5, usd: 26.88 },
+    { id: "med-1", arm: "inline", tasks: 7, planningUsd: 6.79, executionUsd: 17.5, usd: 24.29 },
   ]);
-  assert.equal(totalUsd, 102);
+  assert.equal(totalUsd, 58.1);
 });
 
 test("goAheadToken is 12 hex characters and changes with any input", () => {
@@ -126,21 +126,24 @@ test("cli estimate prints the table, the estimate and a go-ahead token, exit 0 w
   const r = cli(["estimate", "--manifest", `${root}/.devcycle/plan-bench/manifest.json`], root);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^\| Entry \| Arm \| Tasks \| Planning \$ \| Execution \$ \| Total \$ \|$/m);
-  assert.match(r.stdout, /^\| med-1 \| status-quo \| 7 \| 37\.10 \| 17\.50 \| 54\.60 \|$/m);
-  assert.match(r.stdout, /^estimate: \$102\.00 for pass 1 \(budget \$150\.00\)$/m);
+  assert.match(r.stdout, /^\| med-1 \| status-quo \| 7 \| 9\.38 \| 17\.50 \| 26\.88 \|$/m);
+  assert.match(r.stdout, /^estimate: \$58\.10 for pass 1 \(budget \$150\.00\)$/m);
   assert.match(r.stdout, /^go-ahead: [0-9a-f]{12}$/m);
 });
 
 test("cli estimate prices an opt-in arm and rejects an unknown one", () => {
   const root = benchRoot({ entries: [gitEntry()] });
   const manifest = `${root}/.devcycle/plan-bench/manifest.json`;
-  const ok = cli(["estimate", "--manifest", manifest, "--arms", "grouped,grouped-fork"], root);
+  const ok = cli(["estimate", "--manifest", manifest, "--arms", "grouped,checkpointed"], root);
   assert.equal(ok.status, 0, ok.stderr);
-  assert.match(ok.stdout, /^\| small-1 \| grouped \| 3 \| 9\.00 \| 0\.00 \| 9\.00 \|$/m);
-  assert.match(ok.stdout, /^\| small-1 \| grouped-fork \| 3 \| 7\.50 \| 0\.00 \| 7\.50 \|$/m);
+  assert.match(ok.stdout, /^\| small-1 \| grouped \| 3 \| 3\.33 \| 0\.00 \| 3\.33 \|$/m);
+  assert.match(ok.stdout, /^\| small-1 \| checkpointed \| 3 \| 4\.20 \| 0\.00 \| 4\.20 \|$/m);
+  const dropped = cli(["estimate", "--manifest", manifest, "--arms", "grouped-fork"], root);
+  assert.notEqual(dropped.status, 0);
+  assert.match(dropped.stderr, /unknown arm grouped-fork/);
   const bad = cli(["estimate", "--manifest", manifest, "--arms", "parallel"], root);
   assert.notEqual(bad.status, 0);
-  assert.match(bad.stderr, /unknown arm parallel; expected status-quo, inline, grouped, grouped-fork, checkpointed/);
+  assert.match(bad.stderr, /unknown arm parallel; expected status-quo, inline, grouped, checkpointed/);
 });
 
 test("cli estimate refuses past --budget with exit 2 and prints no token", () => {
@@ -153,10 +156,10 @@ test("cli estimate refuses past --budget with exit 2 and prints no token", () =>
 
 test("the budget refusal names both ways forward: a smaller corpus, or an explicit --budget that is the user's call", () => {
   const root = benchRoot({ entries: [gitEntry(), gitEntry({ id: "med-1", size: "medium" }), gitEntry({ id: "big", size: "large" })] });
-  const r = cli(["estimate", "--manifest", `${root}/.devcycle/plan-bench/manifest.json`], root);
+  const r = cli(["estimate", "--manifest", `${root}/.devcycle/plan-bench/manifest.json`, "--budget", "80"], root);
   assert.equal(r.status, 2);
-  assert.match(r.stdout, /^estimate: \$182\.40 for pass 1 \(budget \$150\.00\)$/m);
-  assert.match(r.stdout, /^refused: the estimate exceeds --budget \$150\.00$/m);
+  assert.match(r.stdout, /^estimate: \$85\.82 for pass 1 \(budget \$80\.00\)$/m);
+  assert.match(r.stdout, /^refused: the estimate exceeds --budget \$80\.00$/m);
   assert.match(r.stdout, /^next: either shrink the corpus \(fewer --entries, a smaller `size` or `tasks` in the manifest\), or rerun with an explicit --budget above the estimate, which is the user's decision to make$/m);
 });
 
@@ -165,7 +168,7 @@ test("cli estimate narrows by --arms and --entries, and rejects an unknown arm, 
   const m = `${root}/.devcycle/plan-bench/manifest.json`;
   const r = cli(["estimate", "--manifest", m, "--arms", "inline", "--entries", "small-1"], root);
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^estimate: \$4\.20 for pass 1/m);
+  assert.match(r.stdout, /^estimate: \$2\.91 for pass 1/m);
   assert.equal(cli(["estimate", "--manifest", m, "--arms", "parallel"], root).status, 1);
   assert.match(cli(["estimate", "--manifest", m, "--entries", "nope"], root).stderr, /no manifest entry nope/);
   const bad = benchRoot({ entries: [gitEntry({ size: "huge" })] });

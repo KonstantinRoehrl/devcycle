@@ -22,17 +22,20 @@ export const ROLE_PARAMS = Object.freeze({
   checker: Object.freeze({ F: 19235, t: 9, r: 31331, o: 6367, n: 5 }),
 });
 
-// USD per planned task (assumption: #442's 0.32.x figures, upper ends) until cost-model-fit
-// calibrates them: status-quo $4.4-5.3 planning, inline $0.4-1.4, execution $2.5 (the observed Phase 1 medium baseline, about $5.5 for about 2 tasks).
-// The grouped, grouped-fork and checkpointed planning rates are assumptions until a pass calibrates them.
-export const PLANNING_RATES = Object.freeze({ "status-quo": 5.3, inline: 1.4, grouped: 3, "grouped-fork": 2.5, checkpointed: 1.4 });
+// USD per planned task. status-quo, inline and grouped are the medians of `cost-model-fit.mjs --rates
+// .devcycle/plan-bench/passes` over every scored replay (n = 7, 5 and 2), printed on 2026-11-22. They
+// are per-task figures across small, medium and one large entry, so a single large cut can sit far
+// from them. checkpointed has one replay and
+// keeps its assumed rate (#442's 0.32.x upper end) until a second one measures it. Execution is $2.5 (the
+// observed Phase 1 medium baseline, about $5.5 for about 2 tasks).
+export const PLANNING_RATES = Object.freeze({ "status-quo": 1.34, inline: 0.97, grouped: 1.11, checkpointed: 1.4 });
 export const EXECUTION_RATE = 2.5;
 
 // A pass entry is { id, errorPct }: the projection's error against what that benchmark pass spent.
 export const CALIBRATION = Object.freeze({ passes: Object.freeze([]), maxErrorPct: 35 });
 
-// The session model prices the coordinator and every fork drafter; the fast tier prices a drafter
-// that references/model-routing.md § Planning dispatches routes to it, and every edge checker.
+// The session model prices the coordinator; the fast tier prices a drafter that
+// references/model-routing.md § Planning dispatches routes to it, and every edge checker.
 export const PLANNING_MODELS = Object.freeze({ session: "claude-opus-5-5", fast: "claude-haiku-5-5" });
 
 // One edge-checker dispatch checks this many consumer/producer pairs (references/delegated-planning.md § Edge checker).
@@ -84,10 +87,10 @@ const checkerSegment = (model) => {
 };
 
 export function projectPlanning(choice, cut, models = PLANNING_MODELS) {
-  const { strategy, fork, rounds } = choice;
+  const { strategy, rounds } = choice;
   const byNum = new Map(cut.map((task) => [task.num, task]));
   const draftersOf = (groups) =>
-    groups.map((tasks) => draftSegment(tasks, fork ? models.session : models[draftTier(tasks)]));
+    groups.map((tasks) => draftSegment(tasks, models[draftTier(tasks)]));
   const segments = [];
   const add = (role, list) => segments.push(...list.map((segment) => ({ ...segment, role })));
   if (strategy === "inline") {

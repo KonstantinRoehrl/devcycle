@@ -24,7 +24,7 @@ const { spawnSpec } = agentCli;
 
 export const ARMS = ["status-quo", "inline"];
 // Arms a pass runs only when --arms names them.
-export const OPT_IN_ARMS = ["grouped", "grouped-fork", "checkpointed"];
+export const OPT_IN_ARMS = ["grouped", "checkpointed"];
 const KNOWN_ARMS = [...ARMS, ...OPT_IN_ARMS];
 export const SIZES = ["small", "medium", "large"];
 // A manifest entry's planned task count when it names none, by size.
@@ -322,7 +322,7 @@ function score(argv, root) {
 // Subcommand name to handler (argv, root) → exit code.
 export const SUBCOMMANDS = { estimate, run, score };
 
-const USAGE = "usage: plan-bench.mjs <estimate|run|score> [--manifest <path>] [--arms status-quo,inline,grouped,grouped-fork,checkpointed] [--entries <id,…>] [--budget <usd>] [--pass <id>] " +
+const USAGE = "usage: plan-bench.mjs <estimate|run|score> [--manifest <path>] [--arms status-quo,inline,grouped,checkpointed] [--entries <id,…>] [--budget <usd>] [--pass <id>] " +
   "[run: --go-ahead <token> --plugin-dir <checkout> --model <id> --implementer-model <id> --claude <bin> --leg-timeout <seconds>]";
 
 export function main(argv, root = gitToplevel(process.cwd())) {

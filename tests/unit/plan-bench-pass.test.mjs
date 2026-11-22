@@ -308,7 +308,7 @@ test("cli run prints the estimate and refuses without the matching go-ahead (exi
   const bin = join(makeFakeBin("claude", FAKE_CLAUDE), "claude");
   const r = cli(["run", "--claude", bin], root, { PB_STUB_LOG: log });
   assert.equal(r.status, 3, r.stderr);
-  assert.match(r.stdout, /^estimate: \$6\.70 for pass 1/m);
+  assert.match(r.stdout, /^estimate: \$2\.31 for pass 1/m);
   assert.match(r.stdout, /^no go-ahead: /m);
   const wrong = cli(["run", "--claude", bin, "--go-ahead", "000000000000"], root, { PB_STUB_LOG: log });
   assert.equal(wrong.status, 3);
