@@ -465,3 +465,52 @@ test("stranded: a bad or unresolvable --base exits non-zero", () => {
     assert.match(res.stderr, pattern);
   }
 });
+
+const coverageFile = (obj) => {
+  const p = join(makeTempDir("cov-"), "coverage.json");
+  writeFileSync(p, JSON.stringify(obj));
+  return p;
+};
+const SWEEP_ID = findingId("over-exported", "scripts/a.mjs");
+const LENS_ID = findingId("dead-machinery", "scripts/b.mjs#old");
+const seedTwo = (r) => apply(r, [
+  entry({ culpritKind: "over-exported", canonicalLocation: "scripts/a.mjs", affectedFiles: ["scripts/a.mjs"] }),
+  entry({ culpritKind: "dead-machinery", canonicalLocation: "scripts/b.mjs#old", affectedFiles: ["scripts/b.mjs"] }),
+], "2026-09-01");
+const unrelated = [entry({ culpritKind: "dead-code", canonicalLocation: "scripts/z.mjs" })];
+
+test("apply-pass --sweep-coverage: a fully swept kind resolves without --resolve; a lens kind stays open", () => {
+  const r = root();
+  seedTwo(r);
+  const cov = coverageFile({ sweep: "dead-code", sweepKinds: ["over-exported", "dead-code"], fullKinds: ["over-exported"], rows: [] });
+  const out = apply(r, unrelated, "2026-09-08", ["--sweep-coverage", cov]);
+  assert.deepEqual(out.resolved.map((x) => x.id), [SWEEP_ID]);
+  assert.deepEqual(out.gaps.map((g) => g.id), [SWEEP_ID]);
+  assert.ok(readMaintenanceFindings(r).some((x) => x.findingId === LENS_ID), "the lens record is kept");
+});
+
+test("apply-pass --sweep-coverage: a sweep kind not fully covered stays open even with --resolve", () => {
+  const r = root();
+  seedTwo(r);
+  const cov = coverageFile({ sweepKinds: ["over-exported"], fullKinds: [] });
+  const out = apply(r, unrelated, "2026-09-08", ["--resolve", "--sweep-coverage", cov]);
+  assert.deepEqual(out.resolved.map((x) => x.id), [LENS_ID]);
+  assert.deepEqual(out.gaps.map((g) => g.id), [LENS_ID]);
+  assert.ok(readMaintenanceFindings(r).some((x) => x.findingId === SWEEP_ID), "the partly swept record is kept");
+});
+
+test("apply-pass without --sweep-coverage keeps today's --resolve behavior for sweep kinds", () => {
+  const r = root();
+  seedTwo(r);
+  const out = apply(r, unrelated, "2026-09-08", ["--resolve"]);
+  assert.deepEqual(out.resolved.map((x) => x.id).sort(), [LENS_ID, SWEEP_ID].sort());
+});
+
+test("apply-pass --sweep-coverage: a malformed coverage file rejects the pass", () => {
+  const r = root();
+  const pass = passFile([entry()]);
+  rejects(r, ["--pass", pass, "--date", "2026-09-01", "--sweep-coverage", coverageFile({ sweepKinds: "dead-code", fullKinds: [] })],
+    /sweepKinds and fullKinds must be arrays of strings/);
+  rejects(r, ["--pass", pass, "--date", "2026-09-01", "--sweep-coverage", coverageFile({ sweepKinds: [] })],
+    /sweepKinds and fullKinds must be arrays of strings/);
+});

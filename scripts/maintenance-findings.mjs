@@ -213,8 +213,13 @@ const passRow = (r) => ({
 
 // One pass's store update, computed and validated whole before anything is written, so a bad
 // entry anywhere leaves the store exactly as it was.
-export function applyPass({ root, ref = null, entries, date, resolve = false, dryRun = false }) {
+// sweepCoverage is { sweepKinds, fullKinds } or null: a sweep kind resolves only when every source
+// behind it ran in full this pass; a lens kind (or a legacy record with no kind) resolves under resolve.
+export function applyPass({ root, ref = null, entries, date, resolve = false, dryRun = false, sweepCoverage = null }) {
   if (!isValidCalendarDate(date ?? "")) throw new Error(`--date must be a real YYYY-MM-DD date, got "${date}"`);
+  const isKindList = (v) => Array.isArray(v) && v.every((k) => typeof k === "string");
+  if (sweepCoverage && !(isKindList(sweepCoverage.sweepKinds) && isKindList(sweepCoverage.fullKinds)))
+    throw new Error("--sweep-coverage: sweepKinds and fullKinds must be arrays of strings");
   if (!Array.isArray(entries)) throw new Error("the pass file must hold a JSON array of findings");
   const incoming = new Map();
   entries.forEach((e, i) => {
@@ -261,14 +266,18 @@ export function applyPass({ root, ref = null, entries, date, resolve = false, dr
     summary[isNew ? "new" : "persisting"].push(passRow(rec));
   }
   const resolved = [];
-  if (resolve) {
+  if (resolve || sweepCoverage) {
     // verifyMaintenance owns which undetected records resolve; it runs no verify: here, so every
     // resolution comes back uncorroborated in gaps.
     const { sections, gaps } = verifyMaintenance(stored, { detectedIds: new Set(incoming.keys()) });
-    const ids = new Set(sections.resolved.map((row) => row.id));
+    const verified = new Set(sections.resolved.map((row) => row.id));
+    const keeps = (r) => (sweepCoverage?.sweepKinds.includes(r.culpritKind)
+      ? sweepCoverage.fullKinds.includes(r.culpritKind)
+      : resolve);
+    const ids = new Set(stored.filter((r) => verified.has(r.findingId) && keeps(r)).map((r) => r.findingId));
     resolved.push(...stored.filter((r) => ids.has(r.findingId)));
     summary.resolved = resolved.map(passRow);
-    summary.gaps = gaps;
+    summary.gaps = gaps.filter((g) => ids.has(g.id));
   }
   if (!dryRun) {
     for (const rec of toWrite) summary.written.push(relative(root, recordMaintenanceFinding(root, rec)));
@@ -357,7 +366,7 @@ function toplevel(cwd) {
 
 const VERBS = {
   "apply-pass": {
-    flags: { "--pass": "value", "--date": "value", "--resolve": "none", "--dry-run": "none", "--root": "value", "--ref": "value" },
+    flags: { "--pass": "value", "--date": "value", "--resolve": "none", "--sweep-coverage": "value", "--dry-run": "none", "--root": "value", "--ref": "value" },
     run: (root, flags) => {
       const passPath = requireValue(flags, "--pass");
       if (!passPath) throw new Error("--pass <file.json> is required");
@@ -371,8 +380,19 @@ const VERBS = {
       } catch (e) {
         throw new Error(`cannot read the pass file ${passPath}: ${e.message}`);
       }
+      const coveragePath = requireValue(flags, "--sweep-coverage", "a coverage JSON file") ?? null;
+      let sweepCoverage = null;
+      if (coveragePath) {
+        let coverage;
+        try {
+          coverage = JSON.parse(readFileSync(coveragePath, "utf8"));
+        } catch (e) {
+          throw new Error(`cannot read the coverage file ${coveragePath}: ${e.message}`);
+        }
+        sweepCoverage = { sweepKinds: coverage?.sweepKinds, fullKinds: coverage?.fullKinds };
+      }
       return JSON.stringify(applyPass({
-        root, ref, entries, date, resolve: Boolean(flags["--resolve"]), dryRun: Boolean(flags["--dry-run"]),
+        root, ref, entries, date, resolve: Boolean(flags["--resolve"]), dryRun: Boolean(flags["--dry-run"]), sweepCoverage,
       }));
     },
   },
