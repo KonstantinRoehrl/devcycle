@@ -19,6 +19,7 @@ one line per entry; the hub (`README.md`) mirrors this roster in its surface tab
 | `first-run-config.md` | devcycle's first-run configuration dialogue. |
 | `handoff.md` | What happens at a stage boundary — the handoff block, the three-value context action, the one-block-per-stage rule, and the await gate. |
 | `impact-scoring.md` | How devcycle quantifies what a culprit cost. |
+| `issue-folding.md` | How a caller folds a repo's open GitHub issues into ranked, verified claims — fetch and screen, decompose, classify, verify, rank and cluster — with each step's maintain and triage switch. |
 | `ledger.md` | The ledger's own write format — its preamble records and its per-event line. |
 | `loops.md` | What every bounded loop does when it runs out of rounds — the cap, the exhaustion statuses, and how each outcome is reported. |
 | `model-routing.md` | How a `*Model` knob's value becomes a dispatch model — the session and fast tiers, the ladder, and the ceiling. |

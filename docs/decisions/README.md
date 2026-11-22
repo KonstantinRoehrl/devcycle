@@ -5,6 +5,56 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — The issue-folding pipeline gets its own reference (no issue)
+
+**Decision:** `references/issue-folding.md` owns fetch-and-screen, decompose, classify, verify, rank and cluster, with a per-step caller switch; maintain step 7 keeps only its own parts.
+
+**Why:** a second caller, the issue triager, needs the same pipeline, and one owner per concept (`CONTRIBUTING.md`) rules out a copy; no existing reference fits, since `references/findings.md` owns how a finding is said and `references/delegation.md` who runs a dispatch, not this sequence.
+
+**Budgets:** the runtime surface grows by the new reference, and every closure that reaches it or `references/delegation.md`, `references/README.md` or `commands/maintain.md` grows with it, `playbooks/maintaining-the-repo.md` most.
+
+```text
+budget: surface-budget.json surfaceTotal 7277
+budget: context-budget.json commands/maintain.md 19121
+budget: context-budget.json playbooks/executing-waves.md 122677
+budget: context-budget.json playbooks/learning-from-sessions.md 66856
+budget: context-budget.json playbooks/maintaining-the-repo.md 71341
+budget: context-budget.json playbooks/planning-waves.md 73430
+budget: context-budget.json playbooks/receiving-review.md 127486
+budget: context-budget.json playbooks/reviewing-code.md 104295
+budget: context-budget.json playbooks/scoping-the-request.md 38199
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 97838
+```
+
+## 2026-11-22 — Findings rank Impact first, and Priority replaces Complexity (no issue)
+
+**Decision:** a finding's ranking has three axes, owned by `references/findings.md`. Impact is what the project
+gains once the finding is fixed or built (`high`, `medium`, `low`), and compounding gains rank higher. Severity
+keeps its four levels and its blocking rule, and now also weighs blast radius. Priority is the tie-break between
+findings of equal Impact and Severity: effort as a T-shirt size grounded by `Effort estimate`, dependency order,
+and relevance. The audit document's field list is `Category · Impact · Priority · How to verify/reproduce ·
+Suggested fix direction · Effort estimate`, and its order is Impact (desc) → Severity (desc) → Priority, with the
+document's sections grouped by Impact level.
+
+**Why:** Impact used to restate Severity's blast radius, so the old document order ranked one quantity twice,
+and a ranked list should lead with what a fix gains. The blocking rule stays on Severity alone, and the machine
+form (the panel's confirmed, then severity, then file order) is unchanged. `/devcycle:maintain`'s committed store
+and `rankByTrending`'s severity-primary trending order are out of reach on purpose: no schema change and no ledger
+migration.
+
+**Supersedes:** the 2026-08-06-era Document fields and Ordering text in `references/findings.md` (Complexity,
+"Impact if unaddressed", Severity-first document order).
+
+**Budgets:** four playbook closures grow by the new wording in `references/findings.md`, `commands/review.md` and
+`playbooks/profiling-sessions.md`.
+
+```text
+budget: context-budget.json playbooks/profiling-sessions.md 43654
+budget: context-budget.json playbooks/receiving-review.md 127477
+budget: context-budget.json playbooks/reviewing-code.md 104286
+budget: context-budget.json playbooks/writing-the-findings-document.md 68966
+```
+
 ## 2026-11-22 — The planning overhaul closes out on the data in hand: the ship gate is accepted as unmet, #443 and #442 stay open (#442)
 
 **Decision:** the P1/P2/P3/P8 ship gate (spec §10) is **accepted as unmet**. There is no third benchmark pass, no

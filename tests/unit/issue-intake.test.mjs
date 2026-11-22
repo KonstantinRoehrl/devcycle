@@ -3,14 +3,17 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, readdirSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { intake, isCulpritBracketTitle } from "../../scripts/issue-intake.mjs";
+import { spawnSync } from "node:child_process";
+import { intake, isCulpritBracketTitle, GH_TIMEOUT_MS, GH_MAX_BUFFER, openIssueTotalArgs } from "../../scripts/issue-intake.mjs";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..", "..");
 const fixture = (name) => JSON.parse(readFileSync(join(here, "..", "fixtures", "maintain", "issues", name), "utf8"));
 
-const fakeGh = (issues) => (args) => {
+// Answers the open-issue total query and the list call; `total` defaults to the list length.
+const fakeGh = (issues, { total = issues.length } = {}) => (args) => {
+  if (args[0] === "api" && args[1] === "graphql") return `${total}\n`;
   if (args[0] === "issue" && args[1] === "list") return JSON.stringify(issues);
   throw new Error(`unexpected gh call: ${args.join(" ")}`);
 };
@@ -124,4 +127,75 @@ test("an unwritable scratch dir keeps the originals instead of failing intake (#
   assert.equal(r.available, true);
   assert.equal(r.issues.length, 1);
   assert.equal(r.issues[0].title, issues[0].title);
+});
+
+const plain = (number) => ({ number, title: `fix: thing ${number}`, body: "b", url: `u${number}` });
+
+test("the list is fetched with --limit equal to GitHub's open-issue total", () => {
+  const calls = [];
+  const issues = [plain(1), plain(2), plain(3)];
+  const gh = (args) => { calls.push(args); return fakeGh(issues)(args); };
+  const r = intake({ repo: "o/r", ghRunner: gh, redactRunner: noRedact });
+  assert.equal(r.available, true);
+  assert.deepEqual(calls[0], openIssueTotalArgs("o/r"));
+  const list = calls.find((a) => a[0] === "issue");
+  assert.equal(list[list.indexOf("--limit") + 1], "3");
+  assert.equal(r.counts.total, 3);
+  assert.equal(r.counts.fetched, 3);
+});
+
+test("a fetched count that differs from the total fails loudly, never a truncated list", () => {
+  const r = intake({ repo: "o/r", ghRunner: fakeGh([plain(1), plain(2)], { total: 5 }), redactRunner: noRedact });
+  assert.equal(r.available, false);
+  assert.equal(r.reason, "count-mismatch: fetched 2 of 5 open issues");
+  assert.deepEqual(r.issues, []);
+});
+
+test("an unreadable total degrades to available:false with a count-unavailable reason", () => {
+  const gh = (args) => (args[0] === "api" ? "not a number" : "[]");
+  const r = intake({ repo: "o/r", ghRunner: gh, redactRunner: noRedact });
+  assert.equal(r.available, false);
+  assert.match(r.reason, /^count-unavailable: /);
+});
+
+test("a zero total returns an empty success without calling the list", () => {
+  const gh = (args) => { if (args[0] === "issue") throw new Error("list must not run"); return "0"; };
+  const r = intake({ repo: "o/r", ghRunner: gh, redactRunner: noRedact });
+  assert.equal(r.available, true);
+  assert.equal(r.counts.total, 0);
+  assert.deepEqual(r.issues, []);
+});
+
+test("includeTracked keeps devcycle's own bracket-titled issues, tagged tracked", () => {
+  const issues = [fixture("issue-culprit-bracket.json"), fixture("issue-44-multibug.json")];
+  const r = intake({ repo: "o/r", includeTracked: true, ghRunner: fakeGh(issues), redactRunner: noRedact });
+  assert.equal(r.available, true);
+  assert.deepEqual(r.excludedCulprit, []);
+  assert.equal(r.counts.tracked, 1);
+  assert.deepEqual(r.issues.map((i) => [i.number, i.tracked]).sort((a, b) => a[0] - b[0]), [[44, false], [117, true]]);
+});
+
+test("without includeTracked the tracked issues stay excluded and every kept issue says tracked:false", () => {
+  const issues = [fixture("issue-culprit-bracket.json"), fixture("issue-44-multibug.json")];
+  const r = intake({ repo: "o/r", ghRunner: fakeGh(issues), redactRunner: noRedact });
+  assert.equal(r.counts.tracked, 0);
+  assert.deepEqual(r.issues.map((i) => i.tracked), [false]);
+});
+
+test("the total query is the GraphQL open-issue count for owner and name", () => {
+  const args = openIssueTotalArgs("octo/widgets");
+  assert.equal(args[0], "api");
+  assert.ok(args.includes("owner=octo") && args.includes("name=widgets"));
+  assert.match(args.find((a) => a.startsWith("query=")), /issues\(states:OPEN\)\{totalCount\}/);
+});
+
+test("the gh runner is sized for a full fetch", () => {
+  assert.equal(GH_TIMEOUT_MS, 30000);
+  assert.equal(GH_MAX_BUFFER, 64 * 1024 * 1024);
+});
+
+test("--limit is no longer accepted by the CLI", () => {
+  const r = spawnSync(process.execPath, [join(root, "scripts/issue-intake.mjs"), "--repo", "o/r", "--limit", "5"], { encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /--limit/);
 });

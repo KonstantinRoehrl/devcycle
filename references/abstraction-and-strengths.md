@@ -68,7 +68,7 @@ surface a **strength** — a pattern that concretely and measurably does the rig
 evidentiary bar a defect finding would need (a traced `file:line`, not an impression) — alongside
 its defects. This is not a consolation prize for a lens that found nothing wrong, and it is not
 softening: a lens still reports every defect it finds at full severity. A strength is additive, reported through
-`findings.md`'s own `## Strengths` shape, which is deliberately lighter than the severity-ordered
+`findings.md`'s own `## Strengths` shape, which is deliberately lighter than the ranked
 defect list and never dilutes, delays, or substitutes for it.
 
 Reported this way, a strength earns its place the same way a promoted lesson does in

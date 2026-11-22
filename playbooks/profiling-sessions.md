@@ -87,7 +87,7 @@ name it the same way and say the figure is an estimate.
 
 ## Severity, ranking, and systemic recommendations
 
-The script's candidate lines carry no severity — assigning it is this playbook's job, using
+The script's candidate lines carry no severity or Impact level — assigning both is this playbook's job, using
 `${CLAUDE_PLUGIN_ROOT}/references/findings.md`'s vocabulary **verbatim** and ranking the list
 in that file's document-form order. The dollar figure rides along per finding as a supporting
 field, never the sort key: quote the figure the report already carries, scored by

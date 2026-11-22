@@ -16,7 +16,7 @@ code), and a **PR link** when one exists. Locations inside findings stay plain `
 Where `playbooks/reviewing-code.md` step 4 noted a precondition between findings — one finding's
 reliability resting on another's fix landing first, in this document or in the tracker — the document
 states the dependency explicitly and closes with a **suggested sequencing** line ordering the affected
-findings; this supplements the severity/impact/complexity ranking in `findings.md`'s Ordering, it
+findings; this supplements the Impact/Severity/Priority ranking in `findings.md`'s Ordering, it
 does not replace it.
 
 Write `docs/audits/YYYY-MM-DD-<topic>.md` and **do not commit it**: the audit report is a local

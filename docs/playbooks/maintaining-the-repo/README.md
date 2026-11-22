@@ -19,10 +19,10 @@ owns the panel dispatch and dedup-and-rank, then hands off to
 `docs/audits/` document itself.
 
 Two things this playbook still owns end to end. First, a second input source folds in at every
-depth: the target repo's own open GitHub issues, fetched read-only, decomposed into
-independently verifiable claims, classified (bug/refactor fragments become candidates, feature
-fragments are counted but excluded), verified against an existing lens methodology, then ranked
-into the same list as the lens findings — distinguished only by provenance, never by rank.
+depth: the target repo's own open GitHub issues, fetched read-only and folded through the shared
+pipeline `references/issue-folding.md` owns, then ranked into the same list as the lens findings —
+distinguished only by provenance, never by rank. The playbook keeps only what is maintain's own: the
+scoping-gate exclusion, the coverage statement and the merge.
 Second, cross-pass memory: each finding gets a stable id and is compared against the prior-pass
 store to render as new, persisting, or dismissed; it can be dismissed with a load-bearing reason;
 and, only on the user's confirmation after a complete pass, a finding no longer detected is
