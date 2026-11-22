@@ -1,6 +1,6 @@
-import { test } from "node:test";
+import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, copyFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, copyFileSync, mkdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
@@ -211,4 +211,183 @@ test("the CLI exits 2 with its usage line on bad flags, and 1 naming the error o
   const missing = inventory(["--state", join(makeTempDir("recovery-none-"), "state.md")]);
   assert.equal(missing.status, 1);
   assert.match(missing.stderr, /^recovery-inventory: /);
+});
+
+// The execution and branch-review adapters. Each cycle is a throwaway checkout whose state file, plan,
+// ledger, per-task files and review rounds are written by hand; the transcript root is a fixture.
+describe("the execution and branch-review adapters", () => {
+  const RUN = "00000000000000a1";
+  const SPEC = "docs/spec.md";
+  const GATE = "node --test tests/unit/*.test.mjs";
+  const INVENTORY_CLI = join(process.cwd(), "scripts/recovery-inventory.mjs");
+  const LENS_CLI = join(process.cwd(), "scripts/lens-results.mjs");
+  const EXECUTION_PLAN = [
+    "# Fixture plan", "", `**Verification gate:** \`${GATE}\``, "",
+    "### Task 1: First", "**Files:**", "- Modify: src/a.mjs", "**Evidence:** red-green", "",
+    "### Task 2: Second", "**Files:**", "- Modify: src/b.mjs", "**Evidence:** red-green", "",
+    "### Task 3: Third", "**Files:**", "- Modify: src/b.mjs", "**Evidence:** red-green", "",
+    "### Task 4: Fourth", "**Files:**", "- Modify: src/d.mjs", "**Evidence:** red-green", "",
+    "## Dispatch Map", "", "- Wave 1: Task 1, Task 2 (file-disjoint)", "- Wave 2: Task 3, Task 4 (needs Task 2 committed)", "",
+  ].join("\n");
+  const ledgerLine = (stamp, task, event, outcome, ref = "none") => `- [${stamp}] task=${task} event=${event} outcome=${outcome} ref=${ref}`;
+  const stampAt = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const AN_HOUR_AGO = stampAt(Date.now() - 3_600_000);
+
+  // A cycle at `stage` with its plan, spec and sources committed, `.devcycle/` ignored, and — when
+  // `ledger` is given — a ledger of those lines under a preamble naming `ledgerPlan` and `ledgerRun`.
+  function recoveryCycle({ stage, ledger = null, plan = "docs/plan.md", ledgerPlan = "docs/plan.md", ledgerRun = RUN }) {
+    const repo = realpathSync(makeRepo());
+    writeInto(repo, ".gitignore", ".devcycle/\n");
+    writeInto(repo, "docs/plan.md", EXECUTION_PLAN);
+    writeInto(repo, SPEC, "# Spec\n");
+    for (const file of ["src/a.mjs", "src/b.mjs", "src/d.mjs"]) writeInto(repo, file, "export {};\n");
+    commitAll(repo, "fixture");
+    const statePath = writeInto(repo, ".devcycle/state.md", [
+      "# devcycle state", `- stage: ${stage}`, `- root: ${repo}`, "- branch: feat/x (cut from main at 0000000)",
+      "- request: fixture cycle", `- plan: ${plan}`, `- spec: ${SPEC}`, "- ledger: .devcycle/ledger.md", `- run: ${RUN}`,
+    ].join("\n") + "\n");
+    if (ledger) writeInto(repo, ".devcycle/ledger.md", [`Plan: \`${ledgerPlan}\``, `Run: \`${ledgerRun}\``, "", ...ledger, ""].join("\n"));
+    const devcycleDir = join(repo, ".devcycle");
+    const ctx = { root: repo, devcycleDir, stateText: readFileSync(statePath, "utf8"), run: RUN, stage, transcript: null };
+    return { repo, statePath, devcycleDir, ctx };
+  }
+
+  // The inventory as /devcycle:continue runs it: the CLI, from the cycle's root.
+  function inventoryCli({ repo, statePath }) {
+    const r = spawnSync(process.execPath, [INVENTORY_CLI, "--state", statePath], {
+      cwd: repo, encoding: "utf8", env: { ...process.env, CLAUDE_CONFIG_DIR: makeTempDir("recovery-inventory-config-") },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout);
+  }
+
+  // A single-engine round directory: the lens set saved by lens-results.mjs, `recorded` lenses stored.
+  function singleEngineRound(repo, { ref = "HEAD~1..HEAD", recorded = [] } = {}) {
+    const payloads = makeTempDir("recovery-inventory-payloads-");
+    const lens = (...args) => {
+      const r = spawnSync(process.execPath, [LENS_CLI, ...args], { cwd: repo, encoding: "utf8" });
+      assert.equal(r.status, 0, r.stderr);
+    };
+    const payload = (name, value) => {
+      const path = join(payloads, `${name}.json`);
+      writeFileSync(path, JSON.stringify(value));
+      return path;
+    };
+    const dir = ".devcycle/review/round-1";
+    lens("save-lenses", "--dir", dir, "--ref", ref, "--from",
+      payload("set", { lenses: [{ key: "alpha", charter: "alpha review." }, { key: "beta", charter: "beta review." }], specPath: SPEC }));
+    for (const key of recorded) lens("record", "--dir", dir, "--lens", key, "--from", payload(key, { findings: [], strengths: [] }));
+  }
+
+  const OWN_ROUND = [ledgerLine(AN_HOUR_AGO, "branch", "review-round", "round 1 (single)", SPEC)];
+
+  test("execution renders each task's ledger position: committed is done, an accepted review is re-verified by its green gate, the rest redo", () => {
+    const { ctx } = recoveryCycle({ stage: "execution", ledger: [
+      ledgerLine(AN_HOUR_AGO, 1, "committed", "accepted", "abc1234"),
+      ledgerLine(AN_HOUR_AGO, 2, "review-verdict", "accepted"),
+      ledgerLine(AN_HOUR_AGO, 3, "dispatched", "implementer retry 0", ".devcycle/briefs/3-implementer.md"),
+    ] });
+    assert.deepEqual(ADAPTERS.execution(ctx), [
+      { id: "task-1", status: "done", evidence: "ledger: committed → done" },
+      { id: "task-2", status: "re-verify", evidence: "ledger: accepted → commit", check: GATE },
+      { id: "task-3", status: "redo", evidence: "ledger: dispatched → redispatch-implementer" },
+      { id: "task-4", status: "redo", evidence: "ledger: not-dispatched → dispatch-implementer" },
+    ]);
+  });
+
+  test("execution under a previous cycle's ledger slot lists each per-task directory present as ignored", () => {
+    const { repo, ctx } = recoveryCycle({ stage: "execution", ledger: [ledgerLine(AN_HOUR_AGO, 1, "committed", "accepted", "abc1234")],
+      ledgerPlan: "docs/old-plan.md" });
+    writeInto(repo, ".devcycle/briefs/1-implementer.md", "old brief\n");
+    writeInto(repo, ".devcycle/reports/1.md", "old report\n");
+    assert.deepEqual(ADAPTERS.execution(ctx), [
+      { id: ".devcycle/briefs/", status: "ignored", evidence: "previous cycle's slot" },
+      { id: ".devcycle/reports/", status: "ignored", evidence: "previous cycle's slot" },
+    ]);
+  });
+
+  test("execution fails open to one redo item when wave-setup cannot read the position", () => {
+    const { repo, ctx } = recoveryCycle({ stage: "execution", ledger: [] });
+    const [item, ...rest] = ADAPTERS.execution({ ...ctx, devcycleDir: join(repo, "no-such-dir") });
+    assert.deepEqual(rest, []);
+    assert.deepEqual([item.id, item.status], ["execution", "redo"]);
+    assert.match(item.evidence, /^wave-setup could not read the position: /);
+  });
+
+  test("at execution each uncommitted path names the first task whose Files block holds it; elsewhere none is claimed", () => {
+    const byPath = (a, b) => a.path.localeCompare(b.path);
+    const dirty = (repo) => {
+      writeInto(repo, "src/a.mjs", "export const a = 1;\n");
+      writeInto(repo, "src/b.mjs", "export const b = 1;\n");
+      writeInto(repo, "notes.txt", "scratch\n");
+    };
+    const execution = recoveryCycle({ stage: "execution", ledger: [] });
+    dirty(execution.repo);
+    const env = { CLAUDE_CONFIG_DIR: makeTempDir("recovery-inventory-config-") };
+    assert.deepEqual(recoveryInventory({ statePath: execution.statePath, env }).uncommitted.sort(byPath), [
+      { path: "notes.txt", task: null }, { path: "src/a.mjs", task: "1" }, { path: "src/b.mjs", task: "2" },
+    ]);
+    const scoping = recoveryCycle({ stage: "scoping" });
+    dirty(scoping.repo);
+    assert.deepEqual(recoveryInventory({ statePath: scoping.statePath, env }).uncommitted.sort(byPath), [
+      { path: "notes.txt", task: null }, { path: "src/a.mjs", task: null }, { path: "src/b.mjs", task: null },
+    ]);
+  });
+
+  test("a plan: path outside the cycle's root reads as no plan, so no uncommitted path is claimed", () => {
+    const outside = writeInto(makeTempDir("recovery-inventory-outside-"), "plan.md", EXECUTION_PLAN);
+    const c = recoveryCycle({ stage: "execution", plan: outside });
+    writeInto(c.repo, "src/a.mjs", "export const a = 1;\n");
+    const env = { CLAUDE_CONFIG_DIR: makeTempDir("recovery-inventory-config-") };
+    assert.deepEqual(recoveryInventory({ statePath: c.statePath, env }).uncommitted, [{ path: "src/a.mjs", task: null }]);
+  });
+
+  test("branch review ignores a round directory no review-round line of this cycle's spec opened", () => {
+    const { repo, ctx } = recoveryCycle({ stage: "branch-review",
+      ledger: [ledgerLine(AN_HOUR_AGO, "branch", "review-round", "round 1 (single)", "docs/old-spec.md")] });
+    writeInto(repo, ".devcycle/review/round-1/alpha.json", "{}\n");
+    assert.deepEqual(ADAPTERS["branch-review"](ctx), [{ id: "review-round-1", status: "ignored", evidence: "not this cycle's round" }]);
+  });
+
+  test("branch review ignores a round directory whose lens files are older than the line that opened it", () => {
+    const { repo, ctx } = recoveryCycle({ stage: "branch-review", ledger: OWN_ROUND });
+    const file = writeInto(repo, ".devcycle/review/round-1/alpha.json", "{}\n");
+    const before = new Date(Date.now() - 2 * 3_600_000);
+    utimesSync(file, before, before);
+    assert.deepEqual(ADAPTERS["branch-review"](ctx), [{ id: "review-round-1", status: "ignored", evidence: "not this cycle's round" }]);
+  });
+
+  test("a single-engine round reports each lens done or redo as lens-results missing gives them", () => {
+    const c = recoveryCycle({ stage: "branch-review", ledger: OWN_ROUND });
+    singleEngineRound(c.repo, { recorded: ["alpha"] });
+    assert.deepEqual(inventoryCli(c).items, [
+      { id: "review-round-1-lens-alpha", status: "done", evidence: "round-1: a current result is stored" },
+      { id: "review-round-1-lens-beta", status: "redo", evidence: "round-1: no current result; single dispatches it again" },
+    ]);
+  });
+
+  test("a single-engine round whose saved ref no longer resolves is one redo item", () => {
+    const c = recoveryCycle({ stage: "branch-review", ledger: OWN_ROUND });
+    singleEngineRound(c.repo, { ref: "HEAD~1..gone-branch" });
+    const items = inventoryCli(c).items;
+    assert.deepEqual(items.map(({ id, status }) => ({ id, status })), [{ id: "review-round-1", status: "redo" }]);
+    assert.match(items[0].evidence, /"gone-branch" does not resolve to a commit/);
+  });
+
+  test("a panel round is redo with its lens file count, a round opened after a verdict takes the next number, and a logged refutation is done", () => {
+    const { repo, devcycleDir, ctx } = recoveryCycle({ stage: "branch-review", ledger: [
+      ...OWN_ROUND,
+      ledgerLine(AN_HOUR_AGO, "branch", "review-verdict", "rejected (2 blocking)", SPEC),
+      ledgerLine(AN_HOUR_AGO, "branch", "review-round", "round 2 (panel)", SPEC),
+    ] });
+    for (const name of ["_args.json", "alpha.json", "_refutation.json"]) writeInto(repo, `.devcycle/review/round-1/${name}`, "{}\n");
+    for (const name of ["_args.json", "alpha.json", "beta.json"]) writeInto(repo, `.devcycle/review/round-2/${name}`, "{}\n");
+    mkdirSync(join(repo, ".devcycle/review/notes"));
+    logStep(devcycleDir, { run: RUN, stage: "branch-review", key: "refutation-1", ref: ".devcycle/review/round-1" });
+    assert.deepEqual(ADAPTERS["branch-review"](ctx), [
+      { id: "review-round-1", status: "redo", evidence: "1 lens result file on disk; the panel resumes the missing lenses itself" },
+      { id: "review-round-2", status: "redo", evidence: "2 lens result files on disk; the panel resumes the missing lenses itself" },
+      { id: "refutation-1", status: "done", evidence: "stage-log refutation-1" },
+    ]);
+  });
 });

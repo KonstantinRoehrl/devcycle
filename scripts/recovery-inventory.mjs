@@ -4,14 +4,19 @@
 // the evidence. It owns no stage's resume verdict -- each adapter renders the owner that stage's playbook
 // already resumes from -- only the cross-stage pieces: the detection verdict, the label, the ignored
 // list and the uncommitted paths. Read-only: it writes nothing.
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
-import { orElse, uncommittedPaths, uncontrolledStop } from "./cycle-position.mjs";
+import { orElse, planOf, recordedValue, uncommittedPaths, uncontrolledStop } from "./cycle-position.mjs";
 import { isMain } from "./is-main.mjs";
+import { missing } from "./lens-results.mjs";
+import { PER_TASK_DIRS, ledgerSlotState } from "./ledger-slot.mjs";
 import { field } from "./md-field.mjs";
 import { pathInsideRoot, readPlanPosition } from "./plan-resume.mjs";
 import { readStage } from "./stage-log.mjs";
+import { gateCommand, taskFileMap } from "./task-files.mjs";
+import { parseLedgerLine } from "./task-ledger.mjs";
+import { planProgress } from "./wave-setup.mjs";
 
 const USAGE = "usage: recovery-inventory.mjs --state <path>";
 const CHECKLIST_ITEM = /^- \[[ xX]\] /;
@@ -106,7 +111,108 @@ function onDevice({ root, devcycleDir, stateText, run, stage }) {
 
 const stageLogAdapter = (ctx) => stageRows(ctx).map(({ key }) => ({ id: key, status: "done", evidence: `stage-log ${key}` }));
 
-export const ADAPTERS = { planning, "on-device": onDevice };
+const planTextOf = (root, plan) => {
+  const path = pathInsideRoot(root, plan);
+  return path ? orElse(() => readFileSync(path, "utf8"), "") : "";
+};
+
+// references/resume.md § Resuming a wave's per-task position decides each task's next step through
+// wave-setup.mjs; this only renders it. An accepted review not yet committed is re-verified by the green
+// gate its commit runs.
+function execution({ root, devcycleDir, stateText, run }) {
+  let progress;
+  try {
+    progress = planProgress({ root, statePath: join(devcycleDir, "state.md") });
+  } catch (err) {
+    return [{ id: "execution", status: "redo", evidence: `wave-setup could not read the position: ${err.message}` }];
+  }
+  const plan = planOf(stateText);
+  if (!progress) {
+    if (orElse(() => ledgerSlotState({ root, plan, run }), "fresh") !== "stale") return [];
+    return PER_TASK_DIRS.filter((dir) => existsSync(join(devcycleDir, dir)))
+      .map((dir) => ({ id: `.devcycle/${dir}/`, status: "ignored", evidence: "previous cycle's slot" }));
+  }
+  const planText = planTextOf(root, plan);
+  return [...progress.positions].map(([task, { position, next }]) => {
+    const item = { id: `task-${task}`, evidence: `ledger: ${position} → ${next}` };
+    if (position === "committed") return { ...item, status: "done" };
+    if (position !== "accepted") return { ...item, status: "redo" };
+    const gate = gateCommand(planText, Number(task))?.cmd ?? "the task's own test command (the plan pins no gate for it)";
+    return { ...item, status: "re-verify", check: gate };
+  });
+}
+
+// At execution, the first task whose Files block holds each uncommitted path. A re-dispatched implementer
+// reconciles its own uncommitted edits (the existing cut-off rule), so naming the task is all this adds.
+function claimant(root, stateText, stage) {
+  const plan = stage === "execution" ? planOf(stateText) : null;
+  const files = plan ? [...orElse(() => taskFileMap(planTextOf(root, plan)), new Map())].sort(([a], [b]) => a - b) : [];
+  return (path) => {
+    const owner = files.find(([, paths]) => paths.has(path));
+    return owner ? String(owner[0]) : null;
+  };
+}
+
+// When each of this cycle's branch-review rounds opened. playbooks/reviewing-the-branch.md § Findings loop
+// logs a round's review-round line before its reviewers run, and the round writes round-<d>, <d> being one
+// more than the spec's review-verdict lines before that line. A dead round and the round finishing it share
+// a directory, so the first line's stamp is the one its files postdate.
+function roundOpenings(root, devcycleDir, stateText, run) {
+  const spec = recordedValue(stateText, "spec");
+  const opened = new Map();
+  if (!spec || orElse(() => ledgerSlotState({ root, plan: planOf(stateText), run }), "stale") === "stale") return opened;
+  let verdicts = 0;
+  for (const text of orElse(() => readFileSync(join(devcycleDir, "ledger.md"), "utf8"), "").split("\n")) {
+    const entry = parseLedgerLine(text);
+    if (entry?.task !== "branch" || entry.ref !== spec) continue;
+    if (entry.event === "review-verdict") verdicts++;
+    else if (entry.event === "review-round" && !opened.has(verdicts + 1)) opened.set(verdicts + 1, Date.parse(entry.stamp));
+  }
+  return opened;
+}
+
+// The underscore files (_args.json, _lenses.json, _refutation.json) are a round's bookkeeping, not lens
+// results: the rule scripts/cycle-position.mjs's branchReviewSummary counts by.
+const lensFiles = (names) => names.filter((name) => !name.startsWith("_"));
+
+function roundItems(dir, d, openedAt) {
+  const id = `review-round-${d}`;
+  const names = orElse(() => readdirSync(dir), []);
+  const thisCycle = openedAt !== undefined && lensFiles(names).every((name) => orElse(() => statSync(join(dir, name)).mtimeMs, 0) >= openedAt);
+  if (!thisCycle) return [{ id, status: "ignored", evidence: "not this cycle's round" }];
+  if (names.includes("_lenses.json")) {
+    let found;
+    try {
+      // missing() resolves the saved ref in this process's working directory: the cycle's checkout, where
+      // /devcycle:continue runs the inventory.
+      found = missing(dir);
+    } catch (err) {
+      return [{ id, status: "redo", evidence: `round-${d}: lens-results could not check the saved lenses (${err.message}); the round reruns` }];
+    }
+    return [
+      ...found.results.map(({ lens }) => ({ id: `review-round-${d}-lens-${lens}`, status: "done", evidence: `round-${d}: a current result is stored` })),
+      ...found.missing.map((lens) => ({ id: `review-round-${d}-lens-${lens}`, status: "redo", evidence: `round-${d}: no current result; single dispatches it again` })),
+    ];
+  }
+  if (names.includes("_args.json")) {
+    const count = lensFiles(names).length;
+    return [{ id, status: "redo", evidence: `${count} lens result ${count === 1 ? "file" : "files"} on disk; the panel resumes the missing lenses itself` }];
+  }
+  return [{ id, status: "redo", evidence: `round-${d}: no saved lens set or panel arguments; the round reruns` }];
+}
+
+// A round directory counts only when this cycle's ledger opened it and its lens files postdate that line;
+// the playbook removes any other before reuse. The stage log adds each logged refutation-<n>.
+function branchReview(ctx) {
+  const { root, devcycleDir, stateText, run } = ctx;
+  const reviewDir = join(devcycleDir, "review");
+  const opened = roundOpenings(root, devcycleDir, stateText, run);
+  const rounds = orElse(() => readdirSync(reviewDir), [])
+    .map((name) => Number(name.match(/^round-(\d+)$/)?.[1] ?? 0)).filter(Boolean).sort((a, b) => a - b);
+  return [...rounds.flatMap((d) => roundItems(join(reviewDir, `round-${d}`), d, opened.get(d))), ...stageLogAdapter(ctx)];
+}
+
+export const ADAPTERS = { planning, "on-device": onDevice, execution, "branch-review": branchReview };
 export const adapterFor = (stage) => ADAPTERS[stage] ?? stageLogAdapter;
 
 function summaryLines(stage, items, uncommitted) {
@@ -132,7 +238,8 @@ export function recoveryInventory({ statePath, env = process.env, now = Date.now
   } catch (e) {
     items = [{ id: stage, status: "redo", evidence: `the inventory could not read this stage's position: ${e.message}` }];
   }
-  const uncommitted = orElse(() => uncommittedPaths(root), []).map((path) => ({ path, task: null }));
+  const claim = claimant(root, stateText, stage);
+  const uncommitted = orElse(() => uncommittedPaths(root), []).map((path) => ({ path, task: claim(path) }));
   return {
     uncontrolled: stop !== null, stage, label: stop?.label ?? "unknown", since: stop?.since ?? null,
     items, uncommitted, summary: summaryLines(stage, items, uncommitted),
