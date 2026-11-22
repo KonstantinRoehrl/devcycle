@@ -13,9 +13,12 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 
 **Supersedes:** the 2026-08-06 entry, in part: `skills/` is no longer banned, and its trigger-phrase and budget concerns are now enforced rather than avoided.
 
-**Budgets:** none yet; the skills that land later add their `budget:` lines to the block below.
+**Budgets:** the `write-issue` skill adds `skills/write-issue/SKILL.md` and `playbooks/writing-issues.md` as context-budget keys, and the runtime surface grows by them and by the routing and docs-hub rows; the skills that land later add their `budget:` lines to the block below.
 
 ```text
+budget: surface-budget.json surfaceTotal 7358
+budget: context-budget.json skills/write-issue/SKILL.md 1396
+budget: context-budget.json playbooks/writing-issues.md 5171
 ```
 
 ## 2026-11-22 — The issue-folding pipeline gets its own reference (no issue)

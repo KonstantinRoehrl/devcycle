@@ -20,8 +20,8 @@ and the full inventory of everything the plugin ships.
 
 ## Commands
 
-The `/devcycle:*` slash commands are the whole invocable surface; everything below them is
-machinery a command loads by path.
+The `/devcycle:*` slash commands and the skills below are the whole invocable surface; everything below them is
+machinery a command or skill loads by path.
 
 | Command | What it does |
 | --- | --- |
@@ -35,6 +35,14 @@ machinery a command loads by path.
 | [`/devcycle:onboard`](../commands/onboard.md) | Bootstraps tier-2 setup: detects real build/test/lint commands, scaffolds `CLAUDE.md`, and proposes a permission allowlist. Standalone. |
 | [`/devcycle:maintain`](../commands/maintain.md) | Assesses a repository's longitudinal health — how its abstractions and history trend over time — and writes a ranked findings document. Read-only, standalone. |
 | [`/devcycle:reconcile`](../commands/reconcile.md) | The respond arm of the review write-back path: triages a PR's review comments into fixes and consent-gated replies that disclose Claude Code authorship, then resolves the threads it closed from its side. |
+
+## Skills
+
+Standalone helpers a model or you can invoke by asking; each points at one playbook and starts no cycle.
+
+| Skill | What it does |
+| --- | --- |
+| [`write-issue`](../skills/write-issue/SKILL.md) | Turns a rough problem, idea or finding into a complete, verified, screened issue in whichever repo it belongs to, and files, edits or comments only after you confirm. |
 
 ## Playbooks
 
@@ -58,6 +66,7 @@ directly.
 | [`onboarding-a-repo`](playbooks/onboarding-a-repo/README.md) | Detects a repo's real build/test/lint commands and scaffolds its setup. |
 | [`maintaining-the-repo`](playbooks/maintaining-the-repo/README.md) | The longitudinal-health engine behind `/devcycle:maintain`. |
 | [`receiving-review`](playbooks/receiving-review/README.md) | The respond arm of the review write-back path: the standalone reconcile stage that triages a PR's review comments into fixes and consent-gated replies that disclose Claude Code authorship, then resolves the threads it closed from its side. |
+| [`writing-issues`](playbooks/writing-issues/README.md) | The issue writer behind `write-issue`: target, verify, draft, screen, duplicate check, then a confirmed filing. |
 
 ## Machinery
 

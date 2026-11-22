@@ -1338,7 +1338,7 @@ const resumePlaybooks = () => [...stageEntries().values()].filter((entry) => ent
 // record behind it — `cycle.md` mints one, `continue.md` resumes one, everything else has none.
 const playbooksReachedFrom = (runBearing) => {
   const reached = new Set();
-  for (const path of surfaceFiles().filter((p) => p.startsWith("commands/"))) {
+  for (const path of surfaceFiles().filter((p) => p.startsWith("commands/") || p.startsWith("skills/"))) {
     const text = read(path);
     if (text.includes(RUN_RECORD) !== runBearing) continue;
     for (const [, target] of text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(playbooks\/[A-Za-z0-9._-]+\.md)/g))
