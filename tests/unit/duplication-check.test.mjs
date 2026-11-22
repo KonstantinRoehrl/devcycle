@@ -433,3 +433,22 @@ test("a bare path is an error, not a silent scan of the cwd", () => {
     },
   );
 });
+
+test("scans skills/<id>/SKILL.md one level down", () => {
+  const shared =
+    "The coordinator owns every commit in the cycle and the implementer never runs " +
+    "git add or git commit itself, leaving all of its work unstaged in the working " +
+    "tree for the coordinator to review.\n";
+  const dir = makeFixture({
+    "playbooks/doing-things.md": `# Doing things\n\n${shared}`,
+    "skills/do-things/SKILL.md": `---\nname: do-things\ndescription: "d"\n---\n\n${shared}`,
+  });
+  try {
+    assert.throws(
+      () => execFileSync(process.execPath, [SCRIPT], { ...PIPE, cwd: dir }),
+      /DUPLICATION CHECK FAILED[\s\S]*skills\/do-things\/SKILL\.md:paragraph 1/
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

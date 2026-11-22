@@ -9,7 +9,8 @@ import { pathToFileURL } from "node:url";
 import { parseFlags } from "./cli-flags.mjs";
 
 // The grammar's vocabulary, owned here and imported by context-closure.mjs, context-report.mjs and
-// stage-entry.mjs, so a path one of them recognises is a path all of them recognise.
+// stage-entry.mjs, so a path one of them recognises is a path all of them recognise. Skills are
+// scanned (`skillFiles`) but never cited by path, so they stay out of this vocabulary.
 export const GRAMMAR_DIRS = ["commands", "playbooks", "references"];
 const NAME = "[A-Za-z0-9._-]+";
 const PLUGIN_ROOT_VAR = String.raw`\$\{CLAUDE_PLUGIN_ROOT\}`;
@@ -293,16 +294,24 @@ export function referenceReaders(surface) {
   return readers;
 }
 
-export const grammarFiles = (root) =>
-  GRAMMAR_DIRS.flatMap((d) =>
+// Every shipped `skills/<id>/SKILL.md`, relative to `root` and sorted; `[]` when there is no skills/.
+export const skillFiles = (root) =>
+  existsSync(join(root, "skills"))
+    ? readdirSync(join(root, "skills")).sort().map((id) => `skills/${id}/SKILL.md`).filter((rel) => existsSync(join(root, rel)))
+    : [];
+
+export const grammarFiles = (root) => [
+  ...GRAMMAR_DIRS.flatMap((d) =>
     existsSync(join(root, d)) ? readdirSync(join(root, d)).filter((f) => f.endsWith(".md")).map((f) => `${d}/${f}`) : []
-  );
+  ),
+  ...skillFiles(root),
+];
 
 // The whole-tree half of the grammar: which references nothing reads any more. Agents count as
 // readers here, as in check 11, because a subagent's citation is still a read.
 export function referenceHits(root) {
   const md = (d) => (existsSync(join(root, d)) ? readdirSync(join(root, d)).filter((f) => f.endsWith(".md")) : []);
-  const surface = [...GRAMMAR_DIRS, "agents"].flatMap((d) => md(d).map((f) => `${d}/${f}`));
+  const surface = [...[...GRAMMAR_DIRS, "agents"].flatMap((d) => md(d).map((f) => `${d}/${f}`)), ...skillFiles(root)];
   const scriptsDir = join(root, "scripts");
   const scripts = existsSync(scriptsDir)
     ? readdirSync(scriptsDir, { recursive: true }).filter((f) => statSync(join(scriptsDir, f)).isFile())

@@ -4,12 +4,13 @@ The single owner of the user-facing surface. No existing reference fits: `${CLAU
 owns knobs and profiles, `references/model-routing.md` owns model routing,
 `${CLAUDE_PLUGIN_ROOT}/references/delegation.md` owns who does the work once a
 stage is running, and none of them maps a user's intent to an entry point or says what a command may
-do before its first confirmation. Every entry point appears exactly once. `scripts/validate.mjs`
-fails the build when a command is missing from this table, when a row names no command, when a
+do before its first confirmation. The table covers skills as well as commands: a skill is `read-only` or `confirm-first`, and
+`scripts/validate.mjs` fails a skill missing from the table. Every entry point appears exactly once. `scripts/validate.mjs`
+fails the build when a command is missing from this table, when a row names no command or skill, when a
 command is listed twice, when a `consequence` cell is not one of the classes below (or that list
 is unreadable), when the classes below and the classes the script's own clauses act on disagree in
-either direction, when a `consequence` disagrees with the command's `disable-model-invocation`
-frontmatter, when a `confirm-first` row names no justification in the prose below, or when a
+either direction, when a command's `consequence` disagrees with its `disable-model-invocation`
+frontmatter, when a skill's `consequence` is anything but `read-only` or `confirm-first` (a skill carries no `disable-model-invocation`), when a `confirm-first` row names no justification in the prose below, or when a
 command's own description names `read-only`, `side-effectful` or `confirm-first` and its row
 assigns a different one. `resume` is not scanned: those three are hyphenated jargon that only ever
 appear as a class claim, while `resume` is an ordinary verb a description may use without claiming
@@ -41,12 +42,19 @@ any consequence.
 | profile cost, depth, model routing, config drift | `doctor` | read-only | yes |
 | bootstrap devcycle in a repo | `onboard` | side-effectful | no |
 | triage, fix, and reply to a PR's review comments | `reconcile` | confirm-first | yes |
+| write up a problem, idea or finding as a verified issue | `write-issue` | confirm-first | yes |
+| triage the open issue backlog into ordered, clustered work | `triage-issues` | read-only | yes |
 
 **`reconcile`'s justification.** Model-invocable by deliberate exception so a wrapper skill can
 call the reconcile stage programmatically after a review lands. It makes no commit and posts no
 reply before its first user confirmation, and it surfaces conflicting cycle state rather than
 overwriting one. It earns its own verb rather than folding into `review` because the
 call-site names the intent — reconciling an existing PR's comments, not producing new findings.
+
+**`write-issue`'s justification.** Model-invocable by deliberate exception so a session that hits a
+defect mid-task can offer the write-up when asked. It files, edits or comments on nothing before
+the user confirms the shown draft and its target, and applies labels only with push access and a
+further confirmation.
 
 **`cycle`'s justification.** Model-invocable by deliberate exception (`docs/design/README.md` §4
 amendment 4, reversed 2026-07-24) so a wrapper skill can call the pipeline programmatically. It creates

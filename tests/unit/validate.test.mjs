@@ -633,14 +633,123 @@ test("consequence vocabulary: a top-level bullet past the end of the list is not
   ok(runValidate(dir));
 });
 
-// --- check 7: skills/ is not part of the surface any more ---
+// --- check 7: a skill is a standalone helper pointing at one playbook ---
 
-test("structure check: a resurrected skills/ directory fails", () => {
+const SKILL_ROW = "| show the fixture things | `show-things` | read-only | yes |\n";
+const skillMd = ({ name = "show-things", extra = "", description = "Show the fixture things on request.", body } = {}) =>
+  `---\nname: ${name}\ndescription: "${description}"\n${extra}---\n\n# show-things\n\n` +
+  (body ?? "Follow `${CLAUDE_PLUGIN_ROOT}/playbooks/demoing-things.md`.\n\nReport per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.\n");
+// A green fixture with one skill, its routing row, an output reference to read and a measured budget.
+const withSkill = ({ id = "show-things", row = SKILL_ROW, ...md } = {}) => {
   const dir = makePluginFixture();
-  writeInto(dir, "skills/x/SKILL.md", "---\nname: x\ndescription: Use when x is needed.\n---\n");
-  const { status, stderr } = runValidate(dir);
-  assert.equal(status, 1);
-  assert.match(stderr, /skills\/.*no longer part of the surface/);
+  writeInto(dir, "references/output.md", "# Output\n\nHow a fixture reports.\n");
+  writeInto(dir, `skills/${id}/SKILL.md`, skillMd(md));
+  writeInto(dir, ROUTING_PATH, routing(row));
+  budgetEntryPoints(dir, `skills/${id}/SKILL.md`);
+  return dir;
+};
+
+test("skills check: a thin skill pointing at one playbook passes", () => {
+  ok(runValidate(withSkill()));
+});
+
+test("skills check: a file beside SKILL.md fails", () => {
+  const dir = withSkill();
+  writeInto(dir, "skills/show-things/notes.md", "# Notes\n");
+  failsWith(runValidate(dir), /skills\/show-things\/notes\.md: a skill directory holds only SKILL\.md/);
+});
+
+test("skills check: a frontmatter name that differs from the directory id fails", () => {
+  failsWith(runValidate(withSkill({ name: "something-else" })), /frontmatter name "something-else" must equal the directory id "show-things"/);
+});
+
+test("skills check: a frontmatter key beyond name and description fails", () => {
+  failsWith(runValidate(withSkill({ extra: "disable-model-invocation: true\n" })), /frontmatter carries exactly name and description/);
+});
+
+test("skills check: a gerund skill id fails", () => {
+  const dir = withSkill({ id: "listing", name: "listing", row: "| list | `listing` | read-only | yes |\n" });
+  failsWith(runValidate(dir), /skills\/listing: skill ids are verbs, not gerunds/);
+});
+
+test("skills check: a skill id that a command already uses fails", () => {
+  const dir = withSkill({ id: "cycle", name: "cycle", row: "" });
+  failsWith(runValidate(dir), /skills\/cycle: shares its id with commands\/cycle\.md/);
+});
+
+test("skills check: a body reading two playbooks fails", () => {
+  const body = "Follow `${CLAUDE_PLUGIN_ROOT}/playbooks/demoing-things.md`, then `${CLAUDE_PLUGIN_ROOT}/playbooks/other-thing-doing.md`.\n\nReport per `${CLAUDE_PLUGIN_ROOT}/references/output.md`.\n";
+  failsWith(runValidate(withSkill({ body })), /reads 2 playbooks — a skill points at exactly one/);
+});
+
+test("skills check: a body with no Report-per read of references/output.md fails", () => {
+  failsWith(runValidate(withSkill({ body: "Follow `${CLAUDE_PLUGIN_ROOT}/playbooks/demoing-things.md`.\n" })), /carries no "Report per" read of references\/output\.md/);
+});
+
+test("skills check: a playbook that writes the state file cannot back a skill", () => {
+  const dir = withSkill();
+  playbook(dir, "Write `.devcycle/state.md` with the stage.\n");
+  rebaseline(dir);
+  failsWith(runValidate(dir), /playbooks\/demoing-things\.md:\d+: uses the cycle machinery, but skills\/show-things\/SKILL\.md points at it/);
+});
+
+test("skills check: a playbook that runs the handoff machinery cannot back a skill", () => {
+  const dir = withSkill();
+  playbook(dir, "Run `handoff-mark.mjs --ready` at the end.\n");
+  rebaseline(dir);
+  failsWith(runValidate(dir), /uses the cycle machinery/);
+});
+
+test("skills check: a playbook that only denies using the state file passes", () => {
+  const dir = withSkill();
+  playbook(dir, "It starts no cycle and creates, reads, or writes no `.devcycle/state.md`.\n");
+  rebaseline(dir);
+  ok(runValidate(dir));
+});
+
+test("skills check: a skill missing from the routing table fails", () => {
+  failsWith(runValidate(withSkill({ row: "" })), /skills\/show-things\/SKILL\.md: missing from the routing table/);
+});
+
+test("skills check: a side-effectful skill fails — a skill is read-only or confirm-first", () => {
+  const dir = withSkill({ row: "| show | `show-things` | side-effectful | no |\n" });
+  failsWith(runValidate(dir), /consequence "side-effectful" — a skill is read-only or confirm-first/);
+});
+
+test("skills check: a confirm-first skill with no justification fails", () => {
+  const dir = withSkill({ row: "| show | `show-things` | confirm-first | yes |\n" });
+  failsWith(runValidate(dir), /`show-things` is confirm-first but names no justification/);
+});
+
+test("skills check: a skill description that names another class fails the parity check", () => {
+  failsWith(runValidate(withSkill({ description: "Show the fixture things. Side-effectful." })), /skills\/show-things\/SKILL\.md: description says "side-effectful"/);
+});
+
+test("skills check: devcycle:<id> resolves to a skill", () => {
+  const dir = withSkill();
+  playbook(dir, "Offer `devcycle:show-things` when the user asks.\n");
+  rebaseline(dir);
+  ok(runValidate(dir));
+});
+
+test("skills check: a skill's description counts toward the description budget", () => {
+  failsWith(runValidate(withSkill({ description: "x".repeat(6001) })), /total description budget \d+ > 6000/);
+});
+
+test("skills check: a skill with no context-budget entry fails check 15", () => {
+  const dir = withSkill();
+  const context = JSON.parse(readFileSync(join(dir, CONTEXT_PATH), "utf8"));
+  delete context["skills/show-things/SKILL.md"];
+  writeInto(dir, CONTEXT_PATH, JSON.stringify(context, null, 2) + "\n");
+  recordBudgets(dir);
+  failsWith(runValidate(dir), /skills\/show-things\/SKILL\.md: no entry in tests\/fixtures\/context-budget\.json/);
+});
+
+test("skills check: a SKILL.md over commandMax fails check 9", () => {
+  const dir = withSkill();
+  writeInto(dir, "tests/fixtures/surface-budget.json", JSON.stringify({ surfaceTotal: 3620, commandMax: 5, playbookMax: 154 }, null, 2) + "\n");
+  recordBudgets(dir);
+  failsWith(runValidate(dir), /skills\/show-things\/SKILL\.md: \d+ lines > 5/);
 });
 
 // --- check 8: commands are verbs, playbooks are gerunds ---

@@ -49,19 +49,23 @@ Verified mechanics this design relies on (checked against official docs 2026-07-
 - Team distribution: a repo's `.claude/settings.json` can declare `extraKnownMarketplaces` + `enabledPlugins`;
   teammates are prompted after workspace trust (v2.1.195+).
 - Plugin skills are namespaced (`devcycle:skill-name`) — no collisions with repo or personal
-  skills. devcycle ships none: since 2026-08-06 its orchestration prose lives in `playbooks/`,
-  loaded by path, so the only `devcycle:` ids that resolve are its commands and agents (§3).
+  skills. devcycle ships two, `devcycle:write-issue` and `devcycle:triage-issues`, as standalone
+  helpers only (the 2026-11-22 decision superseding 2026-08-06 in part); orchestration prose still
+  lives in `playbooks/`, loaded by path, and a skill's playbook may not use the state file or the
+  stage machinery (`scripts/validate.mjs` check 7), so the `devcycle:` ids that resolve are its
+  commands, skills and agents (§3).
 
 ---
 
 ## 3. Plugin Blueprint
 
-**Five layers, one directory each** (restructured 2026-08-06), so a file's layer is readable
+**Five layers, one directory each except L0's two** (restructured 2026-08-06), so a file's layer is readable
 from its path and enforceable per-directory rather than by convention:
 
 | layer | directory | holds | rules |
 | --- | --- | --- | --- |
-| L0 | `commands/` | the ten entry points | the only surface listed to a user; names are verbs; per-file line budget owned by tests/fixtures/surface-budget.json |
+| L0 | `commands/` | the ten slash commands | listed to a user; names are verbs; per-file line budget owned by tests/fixtures/surface-budget.json |
+| L0 | `skills/` | on-request standalone helpers | each `skills/<id>/SKILL.md` is frontmatter (`name` = the directory id, `description`) plus a pointer at one playbook with no cycle preconditions; names are verbs; capped by the command line budget |
 | L1 | `playbooks/` | orchestration prose | loaded by path, in no roster, no frontmatter; names are gerunds; per-file line budget owned by tests/fixtures/surface-budget.json |
 | L2 | `agents/` | typed workers | separately dispatched contexts; names are role nouns; no `model:` in frontmatter |
 | L3 | `references/` | shared concepts | exactly one owner, at least one consumer; loaded on demand (§15.1) |
@@ -78,7 +82,7 @@ devcycle/                (public GitHub repo)
 │   ├── plugin.json               # name, version (bump per release), dependency on superpowers
 │   │                             # userConfig (see §7)
 │   └── marketplace.json          # source "./", allowCrossMarketplaceDependenciesOn: ["claude-plugins-official"]
-├── commands/                     # L0 — the whole user-facing surface; intents mapped in docs/routing.md
+├── commands/                     # L0 — the ten slash commands; intents mapped in docs/routing.md
 │   ├── cycle.md                  # entry: input-maturity triage → stage walk; model-invocable (wrappers can call it)
 │   ├── continue.md               # resume from .devcycle/state.md after /clear (see §5)
 │   ├── review.md                 # a branch, this repo, or a file set, scoped by argument; starts no cycle (see §15.3)
@@ -89,6 +93,9 @@ devcycle/                (public GitHub repo)
 │   ├── onboard.md                # bootstrap tier-2 in a repo; starts no cycle (see §8)
 │   ├── stop.md                   # stop a cycle at once, at any stage, and record the position `/devcycle:continue` resumes from
 │   └── reconcile.md              # triage/fix/reply to a PR's review comments; re-enters the branch's cycle when one exists
+├── skills/                       # L0 — on-request standalone helpers; validate.mjs check 7 owns their shape
+│   ├── write-issue/SKILL.md      # drafts a verified, screened issue; files it only on confirmation
+│   └── triage-issues/SKILL.md    # ranks and clusters a repo's open backlog; never acts on GitHub
 ├── playbooks/                    # L1 — loaded only as ${CLAUDE_PLUGIN_ROOT}/playbooks/<name>.md
 │   ├── scoping-the-request.md    # rough idea → bounded scope; batched AskUserQuestion; nothing assumed;
 │   │                             # hands off to superpowers:brainstorming
@@ -105,7 +112,9 @@ devcycle/                (public GitHub repo)
 │   ├── learning-from-sessions.md # observe → propose → confirm → land, one loop (see §8)
 │   ├── profiling-sessions.md     # token/context/routing/startup-cost analysis, ranked by impact
 │   ├── maintaining-the-repo.md   # longitudinal-health engine behind /devcycle:maintain; wraps reviewing-code
-│   └── onboarding-a-repo.md      # bootstrap tier-2 in any repo (see §8)
+│   ├── onboarding-a-repo.md      # bootstrap tier-2 in any repo (see §8)
+│   ├── writing-issues.md         # the write-issue skill's playbook: verify, screen, draft, file on confirmation
+│   └── triaging-issues.md        # the triage-issues skill's playbook: rank and cluster the open backlog, read-only
 ├── agents/                       # L2
 │   ├── implementer.md            # brief-driven implementer template
 │   ├── task-reviewer.md          # per-task reviewer; read-only apart from its own findings file
@@ -358,7 +367,7 @@ gated by `userConfig.crossModelReview`.
 - **Commands are verbs, playbooks are gerunds, agents are role nouns.** `doctor` is the single
   recorded exception, justified by `brew doctor` / `flutter doctor` / `npm doctor` — a noun
   every developer already reads as "diagnose this".
-- Commands (the whole user-facing surface, seven from 2026-08-06, eight since 2026-08-22,
+- Commands (the user-facing slash commands, seven from 2026-08-06, eight since 2026-08-22,
   nine since 2026-08-26, ten since 2026-10-30):
   `/devcycle:cycle`, `/devcycle:continue`, `/devcycle:stop` (halts a cycle at any stage and records
   where it was), `/devcycle:review`, `/devcycle:verify`,
@@ -367,6 +376,7 @@ gated by `userConfig.crossModelReview`.
   (triage a PR's review comments into fixes and consented replies; re-enters the branch's
   cycle when one exists). `docs/routing.md` maps each
   to the intent it serves and what it may do before its first confirmation.
+- Skills (since 2026-11-22): `devcycle:write-issue`, `devcycle:triage-issues` — verbs like commands, each pointing at one gerund playbook (`writing-issues`, `triaging-issues`), so a `devcycle:<id>` still never names a playbook.
 - Playbooks: verb-first gerunds, listed in §3. They are addressed by path, never as
   `devcycle:<name>`, so a playbook name is never a user-typed string.
 - Agents: `devcycle:implementer`, `devcycle:task-reviewer`,

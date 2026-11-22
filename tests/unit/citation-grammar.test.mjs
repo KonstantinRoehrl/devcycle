@@ -18,6 +18,8 @@ import {
   SECTION_READ,
   unparsedSectionReads,
   PLUGIN_ROOT_PATH,
+  grammarFiles,
+  skillFiles,
 } from "../../scripts/citation-grammar.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/citation-grammar.mjs", import.meta.url));
@@ -357,4 +359,16 @@ test("PLUGIN_ROOT_PATH reads a plugin path in either root spelling, quoted or no
   ]) assert.equal(span.match(PLUGIN_ROOT_PATH)?.[2], path, span);
   for (const span of ["scripts/x.mjs", `"${P}/scripts/x.mjs`, "$(git rev-parse --show-toplevel)/x.md", "${HOME}/x.md"])
     assert.equal(PLUGIN_ROOT_PATH.test(span), false, span);
+});
+
+test("grammarFiles covers skills/<id>/SKILL.md, and skillFiles is empty with no skills/", () => {
+  const dir = makeTempDir("grammar-skills-");
+  try {
+    writeInto(dir, "playbooks/doing-things.md", "# Doing things\n");
+    assert.deepEqual(skillFiles(dir), []);
+    writeInto(dir, "skills/do-things/SKILL.md", "---\nname: do-things\n---\n");
+    writeInto(dir, "skills/a-first/SKILL.md", "---\nname: a-first\n---\n");
+    assert.deepEqual(skillFiles(dir), ["skills/a-first/SKILL.md", "skills/do-things/SKILL.md"]);
+    assert.deepEqual(grammarFiles(dir), ["playbooks/doing-things.md", "skills/a-first/SKILL.md", "skills/do-things/SKILL.md"]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

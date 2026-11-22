@@ -13,14 +13,15 @@ import { DECISIONS_DOC } from "./doc-paths.mjs";
 import { isMain } from "./is-main.mjs";
 
 // Surface dirs mirror scripts/validate.mjs check 9 (SURFACE = playbooks, commands, agents,
-// references). Keep this list in sync with validate.mjs.
-const SURFACE_DIRS = ["playbooks/", "commands/", "agents/", "references/"];
+// references, skills). Keep this list in sync with validate.mjs.
+const SURFACE_DIRS = ["playbooks/", "commands/", "agents/", "references/", "skills/"];
 const SURFACE_BUDGET = "tests/fixtures/surface-budget.json";
 const CONTEXT_BUDGET = "tests/fixtures/context-budget.json";
 const isSurface = (f) => SURFACE_DIRS.some((d) => f.startsWith(d)) && f.endsWith(".md");
-// context-budget.json keys every entry point -- each command and each playbook -- and each
+// context-budget.json keys every entry point -- each command, each skill and each playbook -- and each
 // high-fan-in reference, so editing one grows its own budget.
-const isEntryPoint = (f) => (f.startsWith("commands/") || f.startsWith("playbooks/")) && f.endsWith(".md");
+const isEntryPoint = (f) =>
+  ((f.startsWith("commands/") || f.startsWith("playbooks/")) && f.endsWith(".md")) || /^skills\/[^/]+\/SKILL\.md$/.test(f);
 // validate.mjs check 15 also charges each entry point for the bytes of every reference it cites --
 // so editing a reference grows a budget no entry point in the Files block appears to touch. That is
 // the shape the recurring failure took.
