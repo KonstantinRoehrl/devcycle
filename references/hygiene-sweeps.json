@@ -1,0 +1,347 @@
+{
+  "version": 1,
+  "stacks": {
+    "js-ts": { "signals": ["package.json", "tsconfig.json", "jsconfig.json"] },
+    "python": { "signals": ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt"] },
+    "go": { "signals": ["go.mod"] },
+    "rust": { "signals": ["Cargo.toml"] },
+    "dotnet": { "signals": ["*.csproj", "*.fsproj", "*.sln"] },
+    "web": { "signals": ["*.css", "*.scss", "*.less", "*.html", "*.vue", "*.svelte"] },
+    "angular": { "signals": ["angular.json"] }
+  },
+  "sweeps": {
+    "dead-code": {
+      "kinds": {
+        "dead-code": { "severity": "medium" },
+        "test-only-code": { "severity": "medium" },
+        "over-exported": { "severity": "low" },
+        "test-coverage-gap": { "severity": "low" },
+        "commented-out-code": { "severity": "low" },
+        "stale-todo": { "severity": "low" },
+        "unused-env-var": { "severity": "low" }
+      },
+      "notCovered": [
+        "unused fonts",
+        "database functions or RPCs called from nowhere",
+        "always-on or always-off feature flags",
+        "unused config keys other than environment variables"
+      ]
+    }
+  },
+  "scanners": {
+    "commented-out-code": { "sweep": "dead-code", "kinds": ["commented-out-code"], "stacks": null },
+    "stale-todo": { "sweep": "dead-code", "kinds": ["stale-todo"], "stacks": null },
+    "unused-env-var": { "sweep": "dead-code", "kinds": ["unused-env-var"], "stacks": null },
+    "css-custom-properties": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": ["web"] },
+    "css-classes-keyframes": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": ["web"] },
+    "angular-io": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": ["angular"] },
+    "static-assets": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": null }
+  },
+  "config": { "staleTodoDays": 365, "configFile": ".devcycle-hygiene.json" },
+  "tools": [
+    {
+      "id": "knip", "sweep": "dead-code", "stacks": ["js-ts"], "kinds": ["dead-code", "test-only-code", "over-exported"],
+      "adapter": "knip", "version": "6.44.2", "needsDependencies": true,
+      "command": { "fetch": ["npx", "-y", "knip@6.44.2"] },
+      "modes": {
+        "static": {
+          "files": {
+            "knip.json": {
+              "entry": ["**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs}"],
+              "angular": false,
+              "astro": false,
+              "astro-db": false,
+              "astro-markdoc": false,
+              "astro-og-canvas": false,
+              "ava": false,
+              "babel": false,
+              "biome": false,
+              "borp": false,
+              "buf": false,
+              "bumpp": false,
+              "bun": false,
+              "c8": false,
+              "capacitor": false,
+              "catalyst": false,
+              "changelogen": false,
+              "changelogithub": false,
+              "changesets": false,
+              "commitizen": false,
+              "commitlint": false,
+              "convex": false,
+              "create-typescript-app": false,
+              "cspell": false,
+              "cucumber": false,
+              "cypress": false,
+              "danger": false,
+              "dependency-cruiser": false,
+              "docusaurus": false,
+              "dotenv": false,
+              "drizzle": false,
+              "electron-forge": false,
+              "electron-vite": false,
+              "eleventy": false,
+              "esbuild": false,
+              "eslint": false,
+              "eve": false,
+              "execa": false,
+              "expo": false,
+              "expo-router": false,
+              "expressive-code": false,
+              "fast": false,
+              "filesystem-routing": false,
+              "flue": false,
+              "fumadocs": false,
+              "gatsby": false,
+              "github-action": false,
+              "github-actions": false,
+              "glob": false,
+              "graphql-codegen": false,
+              "hardhat": false,
+              "husky": false,
+              "i18next-parser": false,
+              "jasmine": false,
+              "jest": false,
+              "karma": false,
+              "knex": false,
+              "kysely-codegen": false,
+              "ladle": false,
+              "laravel-vite-plugin": false,
+              "lefthook": false,
+              "lingui": false,
+              "lint-staged": false,
+              "linthtml": false,
+              "lit": false,
+              "lockfile-lint": false,
+              "lost-pixel": false,
+              "lunaria": false,
+              "markdownlint": false,
+              "marko": false,
+              "mastra": false,
+              "mcp": false,
+              "mdx": false,
+              "mdxlint": false,
+              "metro": false,
+              "mise": false,
+              "mocha": false,
+              "moonrepo": false,
+              "msw": false,
+              "nano-spawn": false,
+              "nano-staged": false,
+              "nest": false,
+              "netlify": false,
+              "next": false,
+              "next-intl": false,
+              "next-mdx": false,
+              "nitro": false,
+              "node": false,
+              "node-modules-inspector": false,
+              "nodemon": false,
+              "npm-package-json-lint": false,
+              "nuxt": false,
+              "nuxtjs-i18n": false,
+              "nx": false,
+              "nyc": false,
+              "oclif": false,
+              "openapi-ts": false,
+              "openclaw": false,
+              "orval": false,
+              "osls": false,
+              "oxfmt": false,
+              "oxlint": false,
+              "panda-css": false,
+              "parcel": false,
+              "payload": false,
+              "pino": false,
+              "playwright": false,
+              "playwright-ct": false,
+              "playwright-test": false,
+              "plop": false,
+              "pm2": false,
+              "pnpm": false,
+              "postcss": false,
+              "pre-commit": false,
+              "preconstruct": false,
+              "prettier": false,
+              "prisma": false,
+              "purgecss": false,
+              "quasar": false,
+              "qwik": false,
+              "railway": false,
+              "raycast": false,
+              "react-cosmos": false,
+              "react-email": false,
+              "react-native": false,
+              "react-router": false,
+              "relay": false,
+              "release-it": false,
+              "remark": false,
+              "remix": false,
+              "rolldown": false,
+              "rollup": false,
+              "rsbuild": false,
+              "rslib": false,
+              "rspack": false,
+              "rstest": false,
+              "sanity": false,
+              "semantic-release": false,
+              "sentry": false,
+              "serverless-framework": false,
+              "simple-git-hooks": false,
+              "size-limit": false,
+              "solidjs-vite-plugin": false,
+              "sst": false,
+              "starlight": false,
+              "stencil": false,
+              "storybook": false,
+              "stryker": false,
+              "stylelint": false,
+              "svelte": false,
+              "sveltejs-package": false,
+              "sveltekit": false,
+              "svgo": false,
+              "svgr": false,
+              "swc": false,
+              "syncpack": false,
+              "tailwind": false,
+              "tanstack-router": false,
+              "taskfile": false,
+              "tauri": false,
+              "temporal": false,
+              "textlint": false,
+              "travis": false,
+              "ts-node": false,
+              "tsd": false,
+              "tsdown": false,
+              "tsrs": false,
+              "tsup": false,
+              "tsx": false,
+              "turbo": false,
+              "typedoc": false,
+              "typescript": false,
+              "typescript-content-mapper": false,
+              "unbuild": false,
+              "unocss": false,
+              "unplugin-auto-import": false,
+              "unplugin-icons": false,
+              "unplugin-vue-components": false,
+              "unplugin-vue-i18n": false,
+              "unplugin-vue-markdown": false,
+              "unplugin-vue-router": false,
+              "varlock": false,
+              "vercel": false,
+              "vercel-og": false,
+              "vike": false,
+              "vite": false,
+              "vite-plugin-pages": false,
+              "vite-plugin-pwa": false,
+              "vite-plugin-vue-layouts-next": false,
+              "vite-plus": false,
+              "vite-pwa-assets-generator": false,
+              "vitepress": false,
+              "vitest": false,
+              "vue": false,
+              "webdriver-io": false,
+              "webpack": false,
+              "wireit": false,
+              "wrangler": false,
+              "wxt": false,
+              "xo": false,
+              "yarn": false,
+              "yorkie": false,
+              "zx": false
+            }
+          },
+          "invocations": [
+            { "id": "default", "args": ["--config", "{scratch}/knip.json", "--reporter", "json", "--no-progress", "--no-exit-code"] },
+            { "id": "production", "args": ["--config", "{scratch}/knip.json", "--reporter", "json", "--no-progress", "--no-exit-code", "--production"] }
+          ]
+        },
+        "executing": {
+          "invocations": [
+            { "id": "default", "args": ["--reporter", "json", "--no-progress", "--no-exit-code"] },
+            { "id": "production", "args": ["--reporter", "json", "--no-progress", "--no-exit-code", "--production"] }
+          ]
+        }
+      }
+    },
+    {
+      "id": "tsc", "sweep": "dead-code", "stacks": ["js-ts"], "kinds": ["dead-code"],
+      "adapter": "tsc", "version": "6.0.3", "needsDependencies": true, "okExit": [0, 2],
+      "when": { "anyFile": ["tsconfig.json"] }, "projects": { "config": "tsconfig.json", "cap": 20 },
+      "command": { "local": "node_modules/.bin/tsc", "fetch": ["npx", "-y", "-p", "typescript@6.0.3", "tsc"], "versionArgs": ["--version"] },
+      "modes": {
+        "static": {
+          "invocations": [
+            { "id": "main", "args": ["-p", "{project}", "--noEmit", "--noUnusedLocals", "--noUnusedParameters", "--allowUnreachableCode", "false", "--tsBuildInfoFile", "{scratch}/{projectSlug}.tsbuildinfo", "--pretty", "false"] }
+          ]
+        }
+      }
+    },
+    {
+      "id": "vulture", "sweep": "dead-code", "stacks": ["python"], "kinds": ["dead-code"],
+      "adapter": "raw", "version": "2.16", "okExit": [0, 3],
+      "command": { "path": "vulture", "versionArgs": ["--version"] },
+      "modes": { "static": { "invocations": [ { "id": "main", "args": [".", "--min-confidence", "60", "--sort-by-size"] } ] } }
+    },
+    {
+      "id": "staticcheck", "sweep": "dead-code", "stacks": ["go"], "kinds": ["dead-code"],
+      "adapter": "raw", "version": "v0.8.2", "okExit": [0, 1], "lineFilter": "\\(U1000\\)",
+      "command": { "fetch": ["go", "run", "honnef.co/go/tools/cmd/staticcheck@v0.8.2"] },
+      "modes": { "static": { "invocations": [ { "id": "main", "args": ["-checks", "U1000", "./..."] } ] } }
+    },
+    {
+      "id": "deadcode", "sweep": "dead-code", "stacks": ["go"], "kinds": ["dead-code"],
+      "adapter": "raw", "version": "v0.52.0", "okExit": [0],
+      "command": { "fetch": ["go", "run", "golang.org/x/tools/cmd/deadcode@v0.52.0"] },
+      "modes": { "static": { "invocations": [ { "id": "main", "args": ["-test", "./..."] } ] } }
+    },
+    {
+      "id": "cargo-check", "sweep": "dead-code", "stacks": ["rust"], "kinds": ["dead-code"],
+      "adapter": "raw", "version": "repo-toolchain", "okExit": [0], "lineFilter": "never used|never read|never constructed|unused",
+      "command": { "path": "cargo", "versionArgs": ["--version"] },
+      "modes": {
+        "executing": {
+          "env": { "CARGO_TARGET_DIR": "{scratch}/target" },
+          "invocations": [ { "id": "main", "args": ["check", "--locked", "--all-targets", "--message-format=short"] } ]
+        }
+      }
+    },
+    {
+      "id": "cargo-machete", "sweep": "dead-code", "stacks": ["rust"], "kinds": ["dead-code"],
+      "adapter": "raw", "outputFormat": "cargo-machete", "version": "0.9.2", "okExit": [0, 1],
+      "command": { "path": "cargo-machete", "versionArgs": ["--version"] },
+      "modes": { "static": { "invocations": [ { "id": "main", "args": ["."] } ] } }
+    },
+    {
+      "id": "dotnet-build", "sweep": "dead-code", "stacks": ["dotnet"], "kinds": ["dead-code"],
+      "adapter": "raw", "version": "repo-toolchain", "okExit": [0], "lineFilter": "IDE0051|IDE0052|CS0162",
+      "command": { "path": "dotnet", "versionArgs": ["--version"] },
+      "modes": {
+        "executing": {
+          "env": { "DOTNET_CLI_HOME": "{scratch}/home", "DOTNET_SKIP_FIRST_TIME_EXPERIENCE": "1", "DOTNET_NOLOGO": "1" },
+          "files": {
+            ".globalconfig": "is_global = true\ndotnet_diagnostic.IDE0051.severity = warning\ndotnet_diagnostic.IDE0052.severity = warning\ndotnet_diagnostic.CS0162.severity = warning\n",
+            "p.props": "<Project><ItemGroup><GlobalAnalyzerConfigFiles Include=\"{scratch}/.globalconfig\" /></ItemGroup></Project>\n"
+          },
+          "invocations": [
+            { "id": "main", "args": ["build", "-nologo", "-p:EnforceCodeStyleInBuild=true", "-p:CustomBeforeMicrosoftCommonProps={scratch}/p.props", "-p:BaseIntermediateOutputPath={scratch}/obj/", "-p:BaseOutputPath={scratch}/bin/", "--no-incremental"] }
+          ]
+        }
+      }
+    },
+    {
+      "id": "purgecss", "sweep": "dead-code", "stacks": ["web"], "kinds": ["dead-code"],
+      "adapter": "raw", "outputFormat": "purgecss-json", "version": "9.1.0", "okExit": [0],
+      "command": { "fetch": ["npx", "-y", "purgecss@9.1.0"] },
+      "modes": { "static": { "invocations": [ { "id": "main", "args": ["--css", "**/*.css", "--content", "**/*.{html,js,ts,jsx,tsx,vue,svelte}", "--rejected"] } ] } }
+    },
+    {
+      "id": "eslint", "sweep": "dead-code", "stacks": ["js-ts"], "kinds": ["dead-code"],
+      "adapter": "raw", "version": "10.14.0", "okExit": [0, 1], "lineFilter": "no-unused-|no-unreachable",
+      "when": { "anyFile": ["eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", "eslint.config.ts", ".eslintrc.json", ".eslintrc.js"] },
+      "command": { "local": "node_modules/.bin/eslint", "versionArgs": ["--version"] },
+      "modes": { "executing": { "invocations": [ { "id": "main", "args": ["-f", "unix", "--cache", "--cache-location", "{scratch}/eslintcache", "."] } ] } }
+    }
+  ]
+}

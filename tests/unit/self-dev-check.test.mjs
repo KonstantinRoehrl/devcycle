@@ -11,7 +11,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, commitAll, writeInto, sh } from "./helpers.mjs";
-import { preflight, assertLanding, pluginDigest, repoCounterpart } from "../../scripts/self-dev-check.mjs";
+import { preflight, assertLanding, pluginDigest, repoCounterpart, isDevcycleSource } from "../../scripts/self-dev-check.mjs";
 import { hashTree, digest40 } from "../../scripts/tree-hash.mjs";
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "scripts", "self-dev-check.mjs");
@@ -301,4 +301,37 @@ test("a repo's untracked .claude/ content — a worktree checkout, local setting
   const out = preflight({ pluginRoot, repoRoot }).lines.join("\n");
   assert.match(out, /matches the repo/);
   assert.doesNotMatch(out, /worktrees|settings\.local/);
+});
+
+test("isDevcycleSource: true for a same-named repo, including the plugin's own checkout", () => {
+  const plugin = makePlugin();
+  const repo = makeTempDir("sdc-repo-");
+  writeInto(repo, ".claude-plugin/plugin.json", manifestJson("devcycle", "1.0.0"));
+  assert.equal(isDevcycleSource(plugin, repo), true);
+  assert.equal(isDevcycleSource(plugin, plugin), true, "no same-path short-circuit");
+});
+
+test("isDevcycleSource: false for another plugin, a nameless manifest, or no manifest", () => {
+  const plugin = makePlugin();
+  const other = makeTempDir("sdc-repo-");
+  writeInto(other, ".claude-plugin/plugin.json", manifestJson("other", "1.0.0"));
+  const nameless = makeTempDir("sdc-repo-");
+  writeInto(nameless, ".claude-plugin/plugin.json", "{}\n");
+  assert.equal(isDevcycleSource(plugin, other), false);
+  assert.equal(isDevcycleSource(plugin, nameless), false);
+  assert.equal(isDevcycleSource(plugin, makeTempDir("sdc-repo-")), false);
+  const namelessPlugin = makeTempDir("sdc-plugin-");
+  writeInto(namelessPlugin, ".claude-plugin/plugin.json", "{}\n");
+  assert.equal(isDevcycleSource(namelessPlugin, nameless), false, "two nameless manifests never match");
+});
+
+test("--is-source prints source for a devcycle-named repo and not-source otherwise, exit 0", () => {
+  const mine = makeTempDir("sdc-repo-");
+  writeInto(mine, ".claude-plugin/plugin.json", manifestJson("devcycle", "9.9.9"));
+  const yes = spawnSync(process.execPath, [SCRIPT, "--is-source", "--repo", mine], { encoding: "utf8" });
+  assert.equal(yes.status, 0, yes.stderr);
+  assert.equal(yes.stdout.trim(), "source");
+  const no = spawnSync(process.execPath, [SCRIPT, "--is-source", "--repo", makeTempDir("sdc-repo-")], { encoding: "utf8" });
+  assert.equal(no.status, 0, no.stderr);
+  assert.equal(no.stdout.trim(), "not-source");
 });

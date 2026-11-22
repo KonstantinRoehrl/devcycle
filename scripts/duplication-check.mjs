@@ -15,7 +15,7 @@ import { join, relative } from "node:path";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { DESIGN_DOC } from "./doc-paths.mjs";
 
-const DIRS = ["agents", "commands", "playbooks", "references"];
+const DIRS = ["agents", "commands", "playbooks", "references", "skills"];
 const THRESHOLD = 0.8; // shingle Jaccard: near-verbatim restatement
 const CONTENT_THRESHOLD = 0.55; // content-word Jaccard: the same rule in different words
 const SHINGLE_SIZE = 5; // words per shingle
@@ -76,6 +76,13 @@ function targetFiles() {
   for (const dir of [...DIRS].sort()) {
     const abs = join(root, dir);
     if (!existsSync(abs)) continue;
+    if (dir === "skills") {
+      for (const id of [...readdirSync(abs)].sort()) {
+        const skill = join(abs, id, "SKILL.md");
+        if (existsSync(skill)) files.push(skill);
+      }
+      continue;
+    }
     for (const name of [...readdirSync(abs)].sort())
       if (name.endsWith(".md")) files.push(join(abs, name));
   }

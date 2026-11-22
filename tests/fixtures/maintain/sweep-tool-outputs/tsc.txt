@@ -1,0 +1,3 @@
+src/app/hero.component.ts(1,34): error TS2307: Cannot find module '@angular/core' or its corresponding type declarations.
+src/app/routed.component.ts(1,34): error TS2307: Cannot find module '@angular/core' or its corresponding type declarations.
+src/widget.ts(2,11): error TS6133: 'neverRead' is declared but its value is never read.

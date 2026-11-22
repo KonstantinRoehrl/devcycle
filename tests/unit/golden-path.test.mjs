@@ -495,14 +495,29 @@ test("harvested: auditing-a-repo/finding-format — every contract field, value 
   for (const field of ["Title", "Severity", "Location(s)", "What's wrong", "Why it's wrong", "Confidence", "Measured against"])
     assert.ok(t.includes(`| ${field} |`), `core field missing: ${field}`);
   // Scoped to the document-fields list itself. A bare `t.includes(field)` passed on prose
-  // elsewhere in the file — "Impact" is satisfied by the sentence at :52 and "Complexity" by
-  // :53 — so deleting the list left the assertion green.
+  // elsewhere in the file, so deleting the list left the assertion green.
   const docFields = t.match(/\*\*Document fields[^*]*\*\*\n\n([\s\S]*?)\n\n/)?.[1];
   assert.ok(docFields, "references/findings.md no longer carries the document-fields list");
-  for (const field of ["Category", "Impact", "Complexity", "Impact if unaddressed", "How to verify/reproduce", "Suggested fix direction", "Effort estimate"])
+  for (const field of ["Category", "Impact", "Priority", "How to verify/reproduce", "Suggested fix direction", "Effort estimate"])
     assert.ok(docFields.includes(field), `document-tier field missing: ${field}`);
+  for (const retired of ["Complexity", "Impact if unaddressed"])
+    assert.ok(!docFields.includes(retired), `retired document field still listed: ${retired}`);
   assert.match(t, /T-shirt size \(S \/ M \/ L \/ XL\)/);
-  assert.match(t, /Severity \(desc\) → Impact \(desc\) →\s+Complexity \(asc\)/);
+  assert.match(t, /Impact is what the project gains once the finding is fixed or built, in three levels: `high`, `medium`, `low`/);
+  assert.match(t, /blast radius/);
+  assert.match(t, /Impact \(desc\) → Severity \(desc\) →\s+Priority/);
+  assert.match(t, /sections grouped by Impact level/);
+  assert.match(t, /Severity alone decides what blocks/);
+  assert.ok(!/Complexity \(asc\)/.test(t), "the old Complexity (asc) tie-break is still in references/findings.md");
+});
+
+test("the old severity-first document order is gone from every reader of findings.md's Ordering", () => {
+  const stale = [/severity-ordered defect list/, /severity\/impact\/complexity ranking/, /fix complexity/, /Severity \(desc\) → Impact \(desc\)/];
+  for (const file of ["references/findings.md", "references/abstraction-and-strengths.md", "playbooks/writing-the-findings-document.md", "commands/review.md"])
+    for (const pattern of stale) assert.ok(!pattern.test(read(file)), `${file} still matches ${pattern}`);
+  assert.doesNotMatch(read("playbooks/maintaining-the-repo.md"), /severity-first/, "maintain's rank step still names the retired severity-first document order");
+  assert.match(read("commands/review.md"), /ranked by impact, severity and priority/);
+  assert.match(read("playbooks/profiling-sessions.md"), /carry no severity or Impact level/);
 });
 
 test("harvested: auditing-a-repo/frontier-reporting — the frontier is named file by file in the coverage statement", () => {
@@ -1295,13 +1310,26 @@ const TOKEN = "user-correction-at-gate";
 // so a surface not yet demoted still matches.
 const OWNER_REF = OWNER;
 
-// Every runtime surface file, the same four directories `scripts/validate.mjs` counts.
-const surfaceFiles = () =>
-  ["commands", "playbooks", "references", "agents"].flatMap((dir) =>
+// Every runtime surface file, the same four directories `scripts/validate.mjs` counts, plus every
+// shipped `skills/<id>/SKILL.md`.
+const surfaceFiles = () => [
+  ...["commands", "playbooks", "references", "agents"].flatMap((dir) =>
     readdirSync(join(root, dir))
       .filter((f) => f.endsWith(".md"))
       .map((f) => `${dir}/${f}`)
-  );
+  ),
+  ...(existsSync(join(root, "skills"))
+    ? readdirSync(join(root, "skills"))
+        .map((id) => `skills/${id}/SKILL.md`)
+        .filter((p) => existsSync(join(root, p)))
+    : []),
+];
+
+test("surfaceFiles reaches every shipped skills/<id>/SKILL.md", () => {
+  const skills = existsSync(join(root, "skills")) ? readdirSync(join(root, "skills")).map((id) => `skills/${id}/SKILL.md`) : [];
+  for (const p of skills) assert.ok(surfaceFiles().includes(p), `surfaceFiles() misses ${p}`);
+  assert.ok(surfaceFiles().every((p) => existsSync(join(root, p))), "surfaceFiles() lists a path that does not exist");
+});
 
 // `references/stages.json` is the single owner of the stage → playbook mapping; a command that
 // follows it reaches every playbook it routes to, exactly as if it named the path inline.
@@ -1311,7 +1339,7 @@ const resumePlaybooks = () => [...stageEntries().values()].filter((entry) => ent
 // record behind it — `cycle.md` mints one, `continue.md` resumes one, everything else has none.
 const playbooksReachedFrom = (runBearing) => {
   const reached = new Set();
-  for (const path of surfaceFiles().filter((p) => p.startsWith("commands/"))) {
+  for (const path of surfaceFiles().filter((p) => p.startsWith("commands/") || p.startsWith("skills/"))) {
     const text = read(path);
     if (text.includes(RUN_RECORD) !== runBearing) continue;
     for (const [, target] of text.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/(playbooks\/[A-Za-z0-9._-]+\.md)/g))

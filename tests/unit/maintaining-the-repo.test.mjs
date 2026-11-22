@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const pb = readFileSync(join(root, "playbooks/maintaining-the-repo.md"), "utf8");
+const folding = () => readFileSync(join(root, "references/issue-folding.md"), "utf8");
 
 test("orientation is graph-first via the extracted helper with an Explore fallback", () => {
   assert.match(pb, /graph-availability\.mjs/);
@@ -35,7 +36,8 @@ test("history is dispatched at the fast tier within its traversal bound", () => 
 
 test("fan-out ceiling: bounded concurrent + total lenses with a hard stop", () => {
   assert.match(pb, /at most 5|5 concurrent/i);
-  assert.match(pb, /at most 8|8 total/i);
+  assert.match(pb, /at most 9 total LLM dispatches/);
+  assert.match(pb, /\+ 1 sweep verification/);
   assert.match(pb, /hard stop|20%/i);
 });
 
@@ -50,26 +52,48 @@ test("issue-folding: fetch is read-only via issue-intake.mjs, runs at all depths
   assert.match(pb, /all (profile )?depths|every depth|lean.*standard.*thorough/i);
 });
 
-test("decompose-before-classify, with the #44 shape as the worked example", () => {
-  assert.match(pb, /decompose/i);
-  assert.match(pb, /#44/);
-  assert.match(pb, /before class/i);
+test("the issue-folding reference owns the six steps, in order", () => {
+  const t = folding();
+  const at = ["## Fetch and screen", "## Decompose", "## Classify", "## Verify", "## Rank", "## Cluster"].map((h) => t.indexOf(`\n${h}\n`));
+  assert.ok(at.every((i) => i > 0), `missing a step heading: ${at}`);
+  assert.deepEqual([...at].sort((a, b) => a - b), at);
 });
 
-test("feature-shaped fragments are excluded from ranking but counted", () => {
-  assert.match(pb, /feature/i);
-  assert.match(pb, /exclud/i);
-  assert.match(pb, /count/i);
+test("decompose-before-classify, with the #44 shape as the worked example, lives in the reference only", () => {
+  assert.match(folding(), /#44/);
+  assert.match(folding(), /decompos/i);
+  assert.doesNotMatch(pb, /#44|Decompose before classify|whichever existing lens methodology|same severity-first ordering/);
 });
 
-test("verification routes an in-scope fragment through existing lens methodology", () => {
-  assert.match(pb, /verif/i);
-  assert.match(pb, /lens methodology|whichever.*lens|existing lens/i);
+test("each step that differs carries a maintain/triage switch, and only triage clusters", () => {
+  const t = folding();
+  const section = (h) => t.split(`\n${h}\n`)[1].split("\n## ")[0];
+  for (const h of ["## Fetch and screen", "## Classify", "## Verify", "## Rank"]) {
+    assert.match(section(h), /- \*\*maintain:\*\*/, `${h} has no maintain switch`);
+    assert.match(section(h), /- \*\*triage:\*\*/, `${h} has no triage switch`);
+  }
+  assert.match(section("## Cluster"), /maintain does not cluster\./);
+  assert.match(section("## Fetch and screen"), /--include-tracked/);
+  assert.match(section("## Classify"), /feature[\s\S]*count/i);
+  assert.match(section("## Verify"), /lens methodology/);
+  assert.match(section("## Verify"), /landed commit or PR/);
+  assert.match(section("## Verify"), /highest Impact level/);
+  assert.match(section("## Rank"), /references\/findings\.md/);
+  assert.match(section("## Rank"), /Origin: github-issue #<n>/);
+  assert.match(section("## Cluster"), /\/devcycle:cycle/);
 });
 
-test("issue findings merge into the same ranked list, tagged by origin", () => {
-  assert.match(pb, /origin/i);
-  assert.match(pb, /same (ranked )?list|alongside lens/i);
+test("maintain step 7 reads the reference and keeps its own parts", () => {
+  assert.ok(pb.includes("${CLAUDE_PLUGIN_ROOT}/references/issue-folding.md"));
+  assert.match(pb, /issue-intake\.mjs" --repo <owner\/name> --scratch \.devcycle\/issue-intake\/<pass>`/);
+  assert.doesNotMatch(pb, /--include-tracked/);
+  assert.match(pb, /count-mismatch/);
+  assert.match(pb, /coverage statement/);
+  assert.match(pb, /counts\.excludedCulprit/);
+});
+
+test("the issue-folding reference issues no gh mutation", () => {
+  assert.doesNotMatch(folding(), /gh\s+issue\s+(close|comment|edit|label|delete|reopen|create)\b/);
 });
 
 test("no gh issue mutation anywhere in the issue code path (playbook + script)", () => {

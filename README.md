@@ -32,7 +32,7 @@ native planning and execution engines that overlay their upstream counterparts o
 ```mermaid
 ---
 title: devcycle — where to start
-accDescr: Command-level map of devcycle's ten slash commands. /devcycle:onboard scaffolds a new repo before the first cycle; /devcycle:cycle runs the guided pipeline through Scope/Design, Plan, Build, Review, and Ship; /devcycle:stop halts a running cycle at any stage and records where it was; /devcycle:continue resumes a stopped cycle; and /devcycle:review, /devcycle:doctor, /devcycle:verify, /devcycle:learn, /devcycle:maintain, and /devcycle:reconcile each run standalone at any time.
+accDescr: Command-level map of devcycle's ten slash commands. /devcycle:onboard scaffolds a new repo before the first cycle; /devcycle:cycle runs the guided pipeline through Scope/Design, Plan, Build, Review, and Ship; /devcycle:stop halts a running cycle at any stage and records where it was; /devcycle:continue resumes a stopped cycle; /devcycle:review, /devcycle:doctor, /devcycle:verify, /devcycle:learn, /devcycle:maintain, and /devcycle:reconcile each run standalone at any time; and two skills, write-issue and triage-issues, run on request in any repo.
 ---
 flowchart LR
     CYCLE(["/devcycle:cycle"]):::tool
@@ -69,14 +69,20 @@ flowchart LR
 ```
 Command-level only — for stage internals, see `docs/pipeline/`.
 
-Those ten commands are devcycle's entire surface — everything else it ships is machinery they
-load. The full stage-level pipeline is in [`docs/pipeline/`](docs/pipeline/README.md).
+Those ten commands and two skills — `write-issue` and `triage-issues`, which run when you ask for
+an issue to be written or the backlog triaged — are devcycle's entire surface; everything else it
+ships is machinery they load. The full stage-level pipeline is in [`docs/pipeline/`](docs/pipeline/README.md).
 
 Two of the standalone commands form a review write-back path around a pull request:
 `/devcycle:review` **produces** a ranked findings document and can **file** those findings back
 onto an open PR, and `/devcycle:reconcile` **responds** to a PR's own review comments — triaging
 them into fixes and consent-gated replies. Both post through one shared comment-body shape, so
 what Claude files and what it replies look the same on the PR.
+
+The two skills work in whichever repo you are in: `write-issue` drafts a verified, screened issue
+in the repo it belongs to and files it only on your confirmation, and `triage-issues` turns a
+repo's open backlog into a ranked, clustered report without ever acting on GitHub. `triage-issues`
+shares `/devcycle:maintain`'s issue-folding pipeline; `write-issue` checks its claims against the code.
 
 - [Install](#install)
 - [Use](#use)
@@ -238,6 +244,11 @@ plugin ships. Start there.
   run starts — by content hash, via `scripts/tree-hash.mjs` — and the finish stage fails when an
   expected deliverable is absent from the branch or the installed copy was written to during the
   run. It is inert in every other repo.
+- `/devcycle:maintain`'s hygiene sweep: `scripts/hygiene-sweep.mjs` runs the tools pinned in
+  `references/hygiene-sweeps.json` and the built-in scanners into `.devcycle/maintain/`, fetching a
+  pinned tool through `npx` when the repo has none, and one verification dispatch confirms each
+  candidate before it ranks. A tool that can run repo code runs only on that pass's consent. The
+  plugin-only checks run only in devcycle's own source (`self-dev-check.mjs --is-source`).
 - The evidence-and-verification contract's gates: planning runs `scripts/plan-check.mjs` in its
   self-review — one fail-closed gate over ten legs, including the budget-fixture and
   authored-claims checks, which also runs on each drafted task and on the plan assembled from them — and `/devcycle:cycle` runs

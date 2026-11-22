@@ -6,7 +6,8 @@ running against).
 ## What this is
 
 devcycle is a Claude Code plugin. `commands/*.md` are its runtime entry points (what
-`/devcycle:*` loads), `playbooks/*.md` are the behavior specs each stage follows, and
+`/devcycle:*` loads), `skills/<id>/SKILL.md` are two standalone helpers, each a pointer at one
+playbook, `playbooks/*.md` are the behavior specs each stage follows, and
 `references/*.md` are the shared mechanism docs those playbooks and commands point to
 instead of restating. There is no build step and no `package.json` — scripts run directly
 under Node. The pinned Node version is in `.nvmrc`.

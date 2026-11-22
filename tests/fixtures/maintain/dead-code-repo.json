@@ -1,0 +1,16 @@
+{
+  "angular.json": "{}\n",
+  "package.json": "{\n  \"name\": \"dead-code-fixture\",\n  \"private\": true,\n  \"main\": \"src/index.ts\",\n  \"dependencies\": {\n    \"left-pad\": \"1.3.0\"\n  }\n}\n",
+  "src/app/app.component.html": "<app-hero [name]=\"title\"></app-hero>\n",
+  "src/app/app.routes.ts": "import { RoutedComponent } from \"./routed.component\";\n\nexport const routes = [{ path: \"item/:id\", component: RoutedComponent }];\n",
+  "src/app/hero.component.ts": "import { Component, Input } from \"@angular/core\";\n\n@Component({ selector: \"app-hero\", template: \"<p>{{ name }}</p>\" })\nexport class HeroComponent {\n  @Input() name = \"\";\n  @Input() unboundInput = \"\";\n}\n",
+  "src/app/routed.component.ts": "import { Component, Input } from \"@angular/core\";\n\n@Component({ selector: \"app-routed\", template: \"<p>{{ id }}</p>\" })\nexport class RoutedComponent {\n  @Input() id = \"\";\n}\n",
+  "src/color.ts": "export enum Color {\n  Red,\n  Green,\n}\n",
+  "src/index.ts": "import { used } from \"./util\";\nimport { Widget } from \"./widget\";\nimport { Color } from \"./color\";\nimport { routes } from \"./app/app.routes\";\nimport { HeroComponent } from \"./app/hero.component\";\n\nexport const buttonClass = (variant: string) => `btn-${variant}`;\nexport const app = [used(), new Widget().render(), Color.Red, routes, HeroComponent];\n",
+  "src/orphan.ts": "export const orphan = 1;\n",
+  "src/styles.css": ":root {\n  --used-token: 2px;\n  --unused-token: 1px;\n}\n\n.btn-primary {\n  margin: var(--used-token);\n}\n",
+  "src/util.spec.ts": "import { specOnly } from \"./util\";\n\nspecOnly();\n",
+  "src/util.ts": "export function used() { return helper(); }\nexport function helper() { return 1; }\nexport function unusedExport() { return 2; }\nexport function specOnly() { return 3; }\n",
+  "src/widget.ts": "export class Widget {\n  private neverRead = 5;\n  render() { return \"w\"; }\n}\n",
+  "tsconfig.json": "{\n  \"compilerOptions\": { \"strict\": true, \"target\": \"ES2022\", \"module\": \"ESNext\", \"moduleResolution\": \"Bundler\", \"noEmit\": true },\n  \"include\": [\"src\"]\n}\n"
+}

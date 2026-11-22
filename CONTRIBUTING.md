@@ -22,7 +22,7 @@ is honoured at runtime — only that the text and the artifacts that encode thos
 present and consistent. The fixture's own header says so; keep that boundary honest rather
 than writing a test whose name implies a behavioural claim it cannot make.
 
-Assertions that cut across the surface — commands, playbooks, references, agents, workflows —
+Assertions that cut across the surface — commands, skills, playbooks, references, agents, workflows —
 belong in this file. That is deliberate: every other suite under `tests/unit/` is scoped to
 one script, and a parallel golden-path suite would just split the same subject in two. When
 you add a rule to a playbook that a file can be read to confirm, add the assertion here in
@@ -41,6 +41,10 @@ suite per script. The two workflow engines are run end to end with fake `claude`
 executables placed first on `PATH`, so a full pipeline is exercised without a model call. If
 you change `review-panel.js`, `mechanical-sweep.js`, or any `scripts/*.mjs`, extend that
 script's suite with the behavior you changed.
+
+Fixtures recorded from a real tool carry their provenance next to them:
+`tests/fixtures/maintain/README.md` names the tool, pin and command behind each recorded sweep
+output, and `tests/unit/hygiene-sweep-fixture.test.mjs` fails when a pin moves without a re-recording.
 
 **Enforcement scripts deny on ambiguity.** A script or hook whose job is to block or gate — a
 `PreToolUse` hook, a plan or evidence check, an intake's read-only guard — treats every input it
@@ -64,12 +68,13 @@ a CLI from a module" names the actual fix: add the shebang.
 A rule lives in exactly one file, and every other file that needs it names that file by path
 rather than restating it. For anything cross-cutting that owner is a `references/*.md` file;
 `references/quality-criteria.md` § Universal criteria states the criterion reviews measure
-against, as "duplication vs. reuse". Adding a pointer next to a retained copy is worse than
-either alone — the reader now has to work out which copy is authoritative — so a change that
-moves a rule deletes the prose it moved. `scripts/duplication-check.mjs` is the mechanized
-floor here, not the whole rule: it catches near-identical prose, and a second pass over content
-words catches a fair share of the same rule restated in different words, but neither pass
-judges whether the surviving copy is the right owner.
+against, as "duplicated logic" and § Single source of truth. Adding a pointer next to a
+retained copy is worse than either alone — the reader now has to work out which copy is
+authoritative — so a change that moves a rule deletes the prose it moved.
+`scripts/duplication-check.mjs` is the mechanized floor here, not the whole rule: it catches
+near-identical prose, and a second pass over content words catches a fair share of the same
+rule restated in different words, but neither pass judges whether the surviving copy is the
+right owner.
 
 ## Citations
 
@@ -104,9 +109,9 @@ runs everything except `doctor.mjs` — that one is local-only, so it's the one 
 catch for you:
 
 ```
-node scripts/validate.mjs             # manifests, command frontmatter, description budget, routing table (incl. description/consequence parity), fences, tracked docs the ignore rules veto — CI
+node scripts/validate.mjs             # manifests, command/skill frontmatter, description budget, routing table (incl. description/consequence parity), fences, tracked docs the ignore rules veto — CI
 node scripts/redaction-check.mjs      # no machine paths, session ids, or deny-listed terms — CI
-node scripts/duplication-check.mjs    # duplicated prose across commands/playbooks/agents/references, and within a file — CI
+node scripts/duplication-check.mjs    # duplicated prose across commands/skills/playbooks/agents/references, and within a file — CI
 node scripts/temp-dir-check.mjs       # temp dirs created outside makeTempDir, which owns removing them — CI
 node scripts/stop-cycle.mjs list      # the cycles /devcycle:stop can stop, each with its stage and branch — local
 node scripts/stage-log.mjs read --state .devcycle/state.md --stage <stage>   # what a stage logged as finished, which is what a resume skips — local
@@ -143,7 +148,7 @@ a newer `budget: <fixture-basename> <key> retired` line, since older entries are
 a reference's entry is removed only with its file, so check 15 fails one retired while the file
 still exists.
 
-A command or playbook fewer than five lines under its `commandMax` or `playbookMax` ceiling draws
+A command, skill or playbook fewer than five lines under its `commandMax` or `playbookMax` ceiling draws
 `validate: notice: <file>: <n> lines, fewer than 5 under the <key> ceiling <max>`. The notice never
 fails the build; it warns that a few more lines will. Trim the file before adding to it, or raise the
 ceiling with a decisions entry as above.

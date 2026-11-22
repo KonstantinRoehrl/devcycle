@@ -5,6 +5,238 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — The sweep's resolution refusal and the documentation criteria name their sources (#478, #485)
+
+**Decision:** the maintain playbook states that a pass with no finalized sweep passes no
+`--sweep-coverage` and that the resolution flags travel together, only on a confirmed run; the
+Documentation standard and the undocumented-code criterion name the doc-comment conventions and
+Fowler's Comments smell as their measuring sources. The playbook's closure, the two other closures
+that read `references/quality-criteria.md`, and the runtime surface grow by that text.
+
+**Why:** a decline could still delete records through `--sweep-coverage` alone, and a criterion with
+no named source is an unsupported opinion by the catalog's own Precedence rule.
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 80075
+budget: context-budget.json playbooks/planning-waves.md 75704
+budget: context-budget.json playbooks/reviewing-code.md 106569
+budget: surface-budget.json surfaceTotal 7583
+```
+
+## 2026-11-22 — The hygiene sweep's coverage rules grow the reference (#478)
+
+**Decision:** a sweep kind is complete only if every source behind it ran in full and could have found
+something; a capped, size-skipped or project-skipping scan is a `partial` row, and a failed git source
+is a named degraded source. The reference states these rules, the `complete` field on each `sweep-count`
+row and the `sourcedKinds` rule for kinds no source produces; its closure and the runtime surface grow.
+
+**Why:** a branch review found paths that read as "ran, nothing found" without the check running, which
+let stored findings resolve wrongly. The coverage statement has to say what each such path means.
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 77218
+budget: surface-budget.json surfaceTotal 7397
+```
+
+## 2026-11-22 — maintain verifies its hygiene sweep in a ninth dispatch and mints its own run record (#478, #183)
+
+**Decision:** maintain's pass ceiling rises from 8 to 9 total LLM dispatches. The ninth is one
+session-tier verification dispatch, shared by every hygiene sweep, that confirms the sweep's candidate
+clusters in blast-radius order; what its budget does not reach stays `suspected (not verified: budget)`,
+ranked below verified findings and never dropped. A pass mints its own run record at step 1 and records
+its sweep consent there, so `finalize --run` and the lens-cost rows name a real run. The plugin-only
+checks run only when `self-dev-check.mjs --is-source` prints `source`. The lens cap stays 5.
+
+**Why:** the 8 were already spent (5 lenses, history, issue decompose, issue verification). Folding sweep
+verification into issue verification would overrun the per-dispatch delegation budget on a real repo.
+Because the sweeps share one dispatch, this is the only raise the sweep family needs. The step rewrite
+grows the maintain playbook's closure and the runtime surface.
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 76801
+budget: surface-budget.json surfaceTotal 7393
+```
+
+## 2026-11-22 — The hygiene-sweep contract is an audit-only reference (#478)
+
+**Decision:** `references/hygiene-sweeps.md` owns the sweep contract (flow, classes and consent,
+verification, ratchet, coverage statement, safety) and the dead-code method. Only the maintain
+playbook cites it, so planning's closure does not grow.
+
+**Why:** #478 A asks for one contract every sweep reuses. Its readers are maintain's entry points,
+whose playbook closure and the runtime surface grow by its size.
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 73958
+budget: surface-budget.json surfaceTotal 7363
+```
+
+## 2026-11-22 — maintain runs the hygiene-sweep spine as a step 4 fact source (#478)
+
+**Decision:** step 4 of the maintain playbook runs `scripts/hygiene-sweep.mjs run`, the deterministic
+spine that detects stacks, runs `references/hygiene-sweeps.json`'s tools by this pass's consent, and
+writes candidate clusters and coverage rows.
+
+**Why:** #478 A makes the sweep a tooling fact source, so the LLM only verifies. The sentence that
+runs it grows the maintain playbook's closure and the runtime surface.
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 69118
+budget: surface-budget.json surfaceTotal 7285
+```
+
+## 2026-11-22 — The quality catalog splits dead, bloat and undocumented code and adds single source of truth and a documentation standard (#485)
+
+**Decision:** `references/quality-criteria.md` replaces the bundled "dead, unreachable, bloated, or
+undocumented code" bullet with three criteria, sharpens "duplication vs. reuse" into duplicated
+logic, and adds § Single source of truth and § Documentation standard, each naming its measuring
+source. Sweep-only method stays out of the catalog.
+
+**Why:** the bundled bullets were too thin to hold an implementer to, and the catalog reaches every
+implementer brief through planning's per-task excerpt (#485). The catalog is in the refs-only
+closure of `playbooks/planning-waves.md` and `playbooks/reviewing-code.md`, so both grow by its
+delta, as does the runtime surface's line total.
+
+```text
+budget: surface-budget.json surfaceTotal 7283
+budget: context-budget.json playbooks/planning-waves.md 75539
+budget: context-budget.json playbooks/reviewing-code.md 105982
+```
+
+## 2026-11-22 — Doctor's issue drafts carry write-issue's context section (no issue)
+
+**Decision:** doctor appends `playbooks/writing-issues.md` § The context section below the script's draft and re-screens the whole draft, through the cross-repo screen when this checkout is not the draft's target; `--issue-body`, the `Drafted:` marker, `outer_loop` counting and both gates are unchanged.
+
+**Why:** a doctor issue is picked up cold by an agent session, and the script's block carries the evidence but not why it matters, what the user was doing or how to prove it fixed; the section is model-written, so the "never hand-composed" rule narrows to the script's block rather than going away.
+
+**Budgets:** the runtime surface and the `playbooks/profiling-sessions.md` context entry grow by the new step 2 and the reworded steps 1, 3 and 7.
+
+```text
+budget: surface-budget.json surfaceTotal 7436
+budget: context-budget.json playbooks/profiling-sessions.md 44309
+```
+
+## 2026-11-22 — Branch-review fixes for the issue-skills branch (no issue)
+
+**Decision:** the redaction screen's `--source-repo` match treats only letters and digits as word characters, so a private name inside a hyphen- or underscore-joined compound is caught; `issue-triage.mjs` gains `next`, which names each report so a same-day rerun keeps the earlier one for the delta; `write-issue` screens its title by carrying it on a `title:` line of the screened draft; and the docs that still described skills as absent or the findings order as severity-first are corrected.
+
+**Why:** a draft naming `secret-ledger-api` passed the screen, a second triage run on one day overwrote the first and compared the file with itself, and the title was filed without ever being screened.
+
+**Budgets:** the runtime surface and the `playbooks/maintaining-the-repo.md`, `playbooks/triaging-issues.md` and `playbooks/writing-issues.md` context entries grow by the reworded steps.
+
+```text
+budget: surface-budget.json surfaceTotal 7429
+budget: context-budget.json playbooks/maintaining-the-repo.md 71479
+budget: context-budget.json playbooks/triaging-issues.md 21401
+budget: context-budget.json playbooks/writing-issues.md 5404
+```
+
+## 2026-11-22 — Skills return as standalone helpers, enforced by the validator (no issue)
+
+**Decision:** `skills/<id>/SKILL.md` is allowed again, as a frontmatter (`name`, `description`) plus a pointer at one playbook and `references/output.md`; `scripts/validate.mjs` check 7 enforces the shape, and checks 3, 6, 9 and 15 and the description budget count skills alongside commands.
+
+**Why:** it answers the 2026-08-06 entry's two reasons. Stage prose stays unreachable by trigger phrase, because a skill's playbook may not use `.devcycle/state.md` or the stage machinery, and the validator fails one that does. The description budget stays one number, because skill descriptions count toward the same 6000 characters. The skills are on-request helpers that run in any repo (write an issue, triage a backlog), which the command ceiling (`COMMAND_CEILING = 10`, reached) rules out as commands.
+
+**Supersedes:** the 2026-08-06 entry, in part: `skills/` is no longer banned, and its trigger-phrase and budget concerns are now enforced rather than avoided.
+
+**Budgets:** the `write-issue` skill adds `skills/write-issue/SKILL.md` and `playbooks/writing-issues.md` as context-budget keys, and the runtime surface grows by them and by the routing and docs-hub rows; the `triage-issues` skill adds `skills/triage-issues/SKILL.md` and `playbooks/triaging-issues.md` the same way.
+
+```text
+budget: surface-budget.json surfaceTotal 7427
+budget: context-budget.json skills/write-issue/SKILL.md 1396
+budget: context-budget.json playbooks/writing-issues.md 5171
+budget: context-budget.json skills/triage-issues/SKILL.md 1392
+budget: context-budget.json playbooks/triaging-issues.md 21039
+```
+
+## 2026-11-22 — The issue-folding pipeline gets its own reference (no issue)
+
+**Decision:** `references/issue-folding.md` owns fetch-and-screen, decompose, classify, verify, rank and cluster, with a per-step caller switch; maintain step 7 keeps only its own parts.
+
+**Why:** a second caller, the issue triager, needs the same pipeline, and one owner per concept (`CONTRIBUTING.md`) rules out a copy; no existing reference fits, since `references/findings.md` owns how a finding is said and `references/delegation.md` who runs a dispatch, not this sequence.
+
+**Budgets:** the runtime surface grows by the new reference, and every closure that reaches it or `references/delegation.md`, `references/README.md` or `commands/maintain.md` grows with it, `playbooks/maintaining-the-repo.md` most.
+
+```text
+budget: surface-budget.json surfaceTotal 7277
+budget: context-budget.json commands/maintain.md 19121
+budget: context-budget.json playbooks/executing-waves.md 122677
+budget: context-budget.json playbooks/learning-from-sessions.md 66856
+budget: context-budget.json playbooks/maintaining-the-repo.md 71341
+budget: context-budget.json playbooks/planning-waves.md 73430
+budget: context-budget.json playbooks/receiving-review.md 127486
+budget: context-budget.json playbooks/reviewing-code.md 104295
+budget: context-budget.json playbooks/scoping-the-request.md 38199
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 97838
+```
+
+## 2026-11-22 — Findings rank Impact first, and Priority replaces Complexity (no issue)
+
+**Decision:** a finding's ranking has three axes, owned by `references/findings.md`. Impact is what the project
+gains once the finding is fixed or built (`high`, `medium`, `low`), and compounding gains rank higher. Severity
+keeps its four levels and its blocking rule, and now also weighs blast radius. Priority is the tie-break between
+findings of equal Impact and Severity: effort as a T-shirt size grounded by `Effort estimate`, dependency order,
+and relevance. The audit document's field list is `Category · Impact · Priority · How to verify/reproduce ·
+Suggested fix direction · Effort estimate`, and its order is Impact (desc) → Severity (desc) → Priority, with the
+document's sections grouped by Impact level.
+
+**Why:** Impact used to restate Severity's blast radius, so the old document order ranked one quantity twice,
+and a ranked list should lead with what a fix gains. The blocking rule stays on Severity alone, and the machine
+form (the panel's confirmed, then severity, then file order) is unchanged. `/devcycle:maintain`'s committed store
+and `rankByTrending`'s severity-primary trending order are out of reach on purpose: no schema change and no ledger
+migration.
+
+**Supersedes:** the 2026-08-06-era Document fields and Ordering text in `references/findings.md` (Complexity,
+"Impact if unaddressed", Severity-first document order).
+
+**Budgets:** four playbook closures grow by the new wording in `references/findings.md`, `commands/review.md` and
+`playbooks/profiling-sessions.md`.
+
+```text
+budget: context-budget.json playbooks/profiling-sessions.md 43654
+budget: context-budget.json playbooks/receiving-review.md 127477
+budget: context-budget.json playbooks/reviewing-code.md 104286
+budget: context-budget.json playbooks/writing-the-findings-document.md 68966
+```
+
+## 2026-11-22 — The planning overhaul closes out on the data in hand: the ship gate is accepted as unmet, #443 and #442 stay open (#442)
+
+**Decision:** the P1/P2/P3/P8 ship gate (spec §10) is **accepted as unmet**. There is no third benchmark pass, no
+`scripts/plan-bench-pass.mjs` retry fix and no paid spend, so the five unmeasured replays stay unmeasured.
+`CALIBRATION`, `PLANNING_RATES` and the `scripts/plan-strategy.mjs` `THRESHOLDS` stay as they are. The rule: a child
+issue closes when its code and doc criteria hold on live code, and each unmet or unmeasured benchmark bar is declined
+by name, with its figure. By that rule #444, #445, #446, #447, #448, #449 and #450 close. #443 stays open on one unmet
+code criterion. #442 stays open, because its literal line needs every child closed or declined. Every check below ran on
+2026-11-22 against `dev` at `79a0c63`.
+
+**Why:** the user chose the data in hand over a retry fix and a third pass (2026-11-22). Closing from the release or
+from the earlier entry's table alone was ruled out: that table covers the rubric, not each child's own guards, docs and
+tests, so each child was re-checked against live code. A failed code criterion is not a benchmark bar, so #443 cannot be
+declined by the rule, and the user kept it open. The re-review of PR #477's merged diff (`0baf4a4..48786ac`) also
+recovered its two unrecorded round-2 lows: a dead `grouped-fork` entry in `scripts/plan-resume.mjs` and a $38.60 total
+quoted as planning spend in `docs/playbooks/planning-waves/README.md`. Both are filed as #480 and are not fixed here.
+
+| Issue | Verdict | Verified on live code | Declined, with figure |
+| --- | --- | --- | --- |
+| #443 | **stays open** | Small cuts never delegate: `scripts/plan-strategy.mjs` `chooseStrategy` runs inline at 12 tasks or fewer or 30 weight points or fewer, and `status-quo` delegates only from 5 tasks (`THRESHOLDS` `inlineMaxTasks: 12`, `inlineMaxWeight: 30`, `delegatedFromTasks: 5`; `tests/unit/plan-strategy.test.mjs`). `references/delegated-planning.md` states groups of at most 3 and 4 concurrent drafters. **Gap:** the ceil(N/3) drafter cap lives only in `scripts/plan-strategy.mjs`, and no `plan-check.mjs` leg and no stage-log validation fails a delegated plan whose drafter count exceeds it without a recorded reason. `capWarnings` only warns, and only when the grouped arm is forced; `auto` already falls back to `checkpointed` when grouping needs more than ceil(N/3) drafters, and `status-quo` applies no cap | P3 on a 12-task run: no 12-task replay, and large `status-quo` ran 1.35 dispatches per task against a bar of 0.5. P10: not shown to hold |
+| #444 | **closes** | `references/model-routing.md` drops the "fifth of the price" figure and cites `scripts/pricing.mjs`; doctor's `drafters:` line reports turns per drafter (`scripts/doctor-planning.mjs`) | P7 at 100% explicit model: 100% on every kept arm with rows, 50% and 40% only on the removed fork arm, 3 replays without rows. P10 and the redraft rate: not measured |
+| #445 | **closes** | `agents/plan-drafter.md` forbids printing source files through Bash (`tests/unit/plan-drafter.test.mjs`); `hooks/dispatch-sensor.mjs` records `sourcePrints` per planning dispatch and doctor prints `source prints:` (`scripts/doctor-planning.mjs`); doctor's generic "Startup floor by agent type" table (`scripts/doctor.mjs`) lists `plan-drafter` when the corpus holds its sessions; the fork verdict is recorded in "The fork arm is dropped (#450)". P6 is met where measured (0% to 10.0%) | The drafter startup floor below 51k and a zero source-print count: neither is in any pass's `results.json` |
+| #446 | **closes** | `scripts/brief-completeness-check.mjs` still fails a contract-only `red-green` task that lacks its failing test or gate output (`tests/unit/brief-completeness-check.test.mjs`); `playbooks/planning-waves.md` self-review item 6 sets 5× and 20% non-test fences; `references/evidence.md` and the entry "Contract-only plans: the 0.32.0 full-code default reversed" are updated | P8 on large (7.6× `inline`, 20.5× `status-quo`) and on medium `status-quo` (5.94×, from the stalled `phase3` replay that "Phase 3 closes on partial benchmark data" left out of its nine; only its byte ratio fails, its non-test fence share is 12.6%). The median drafter tool calls per task. P10: not measured |
+| #447 | **closes** | Rounds run in wave order and the interface lock checks consumers verbatim (`references/delegated-planning.md`, `scripts/interface-lock.mjs`, `tests/unit/interface-lock.test.mjs`). No guard matches the literal `(unrun: depends on Task N)` marker; the round order and the lock prevent it | Checker findings per run (results record only `checkerRounds`). P11's +20% relative bar: no same-entry pair |
+| #448 | **closes** | A finding fix is a `SendMessage` continuation recorded as role `repair` (`references/delegated-planning.md`, `tests/unit/dispatch-sensor.test.mjs`). No replay in any pass reports "context budget reached" (verified: `grep -rli 'context budget reached' .devcycle/plan-bench/passes` prints nothing) | P9: 2 to 5 gate failures, met by 2 of 9 replays. The cost ceiling of one short continuation is unenforced |
+| #449 | **closes** | Doctor prints the P1–P12 planning breakdown for every run with a planning stage, deduplicates continuations and reports sensor gaps with a cause (`scripts/doctor-planning.mjs`, `scripts/doctor.mjs`, `tests/unit/doctor-planning*.test.mjs`); the benchmark is documented in `docs/playbooks/planning-waves/README.md` § Benchmarking planning strategies | The 0.32.2 baseline figures, which "The planning benchmark replays headless, answers gates by resuming, and clones" already declined: the status-quo arm run here is the baseline |
+| #450 | **closes** | Planning prints its projected cost and asks Proceed, Switch strategy or Reduce scope above `planningBudgetUSD` (`playbooks/planning-waves.md` § Projected cost, budget and checkpoints); a mid-stage clear resumes to the same plan state (`tests/unit/plan-resume.test.mjs`); doctor reports the projection error (`scripts/doctor-planning.mjs`) | The 6-task inline run with at most one checkpoint: unmeasured. ±35% after calibration: 0 of 2 passes (+428.7% `inline`, −64.6% `status-quo`) |
+| #442 | **stays open** | Box one: every child except #443 closes with this entry. Box three, the doctor planning breakdown, holds (`scripts/doctor.mjs`, `scripts/doctor-planning.mjs`, `tests/unit/doctor-planning-report.test.mjs`) | Box two, the benchmark, is consciously declined; the P1–P12 table is in "Phase 3 closes on partial benchmark data". P1 met; P2 met where measured, none on large; P3 not met; P8 not met on large (and on the stalled medium `status-quo` replay, 5.94×); P10 not shown to hold. #442 words P8's fence bar as 30% code fences, while the code measures 20% non-test fences ("P8 measures non-test code fences (#443, #447)") |
+
+**Supersedes:** the sentence "and the planning overhaul's acceptance (#442) stays open" in "Phase 3 closes on partial
+benchmark data", now replaced by the dispositions above, and that entry's **How to apply** follow-up, which is no
+longer planned. Its recipe and replay pricing stay there as the way back. `auto`'s thresholds stay untuned and the
+projection stays advisory.
+
+**How to apply:** #443 closes once a `plan-check.mjs` leg or a stage-log validation fails a delegated plan over the
+ceil(N/3) drafter cap without a recorded reason, and #442 closes with it. A later effort that wants the declined bars
+measured starts from the **How to apply** of "Phase 3 closes on partial benchmark data".
+
 ## 2026-11-22 — Phase 3 closes on partial benchmark data: the rates are refit, the calibration and thresholds stay (#450, #442)
 
 **Decision:** `PLANNING_RATES` in `scripts/plan-cost.mjs` takes the medians that

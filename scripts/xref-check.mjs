@@ -16,7 +16,7 @@ import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { DESIGN_DOC } from "./doc-paths.mjs";
 import { slug } from "./md-sections.mjs";
 
-const DIRS = ["agents", "commands", "playbooks", "references"];
+const DIRS = ["agents", "commands", "playbooks", "references", "skills"];
 const ROOT_FILES = [DESIGN_DOC, "CONTRIBUTING.md"];
 const args = process.argv.slice(2);
 const KNOWN_FLAGS = { "--dir": "value" };

@@ -227,3 +227,20 @@ test("a gap's remedy gives the missing file's own reason and keys the override o
   );
   assert.doesNotMatch(log.out + fixture.out, /override: (?:playbooks|agents)\//);
 });
+
+const SKILL_ONLY = [
+  "# Plan",
+  "### Task 1: Add a skill",
+  "**Files:**",
+  "- Create: `skills/x/SKILL.md`",
+  "## Dispatch Map",
+  "- Wave 1: Task 1",
+  "",
+].join("\n");
+
+test("a skill edit needs both budget fixtures — a SKILL.md is surface and an entry point", () => {
+  const { code, out } = run(SKILL_ONLY);
+  assert.equal(code, 1);
+  assert.match(out, /Task 1 edits skills\/x\/SKILL\.md but its Files omit tests\/fixtures\/surface-budget\.json/);
+  assert.match(out, /Task 1 edits skills\/x\/SKILL\.md but its Files omit tests\/fixtures\/context-budget\.json/);
+});

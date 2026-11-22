@@ -20,8 +20,8 @@ and the full inventory of everything the plugin ships.
 
 ## Commands
 
-The `/devcycle:*` slash commands are the whole invocable surface; everything below them is
-machinery a command loads by path.
+The `/devcycle:*` slash commands and the skills below are the whole invocable surface; everything below them is
+machinery a command or skill loads by path.
 
 | Command | What it does |
 | --- | --- |
@@ -35,6 +35,15 @@ machinery a command loads by path.
 | [`/devcycle:onboard`](../commands/onboard.md) | Bootstraps tier-2 setup: detects real build/test/lint commands, scaffolds `CLAUDE.md`, and proposes a permission allowlist. Standalone. |
 | [`/devcycle:maintain`](../commands/maintain.md) | Assesses a repository's longitudinal health — how its abstractions and history trend over time — and writes a ranked findings document. Read-only, standalone. |
 | [`/devcycle:reconcile`](../commands/reconcile.md) | The respond arm of the review write-back path: triages a PR's review comments into fixes and consent-gated replies that disclose Claude Code authorship, then resolves the threads it closed from its side. |
+
+## Skills
+
+Standalone helpers a model or you can invoke by asking; each points at one playbook and starts no cycle.
+
+| Skill | What it does |
+| --- | --- |
+| [`write-issue`](../skills/write-issue/SKILL.md) | Turns a rough problem, idea or finding into a complete, verified, screened issue in whichever repo it belongs to, and files, edits or comments only after you confirm. |
+| [`triage-issues`](../skills/triage-issues/SKILL.md) | Reads a repo's whole open backlog, verifies the claims that matter on your branch, and writes a ranked, clustered report with one task text per cluster and a delta against the last run. Never acts on GitHub. |
 
 ## Playbooks
 
@@ -58,6 +67,8 @@ directly.
 | [`onboarding-a-repo`](playbooks/onboarding-a-repo/README.md) | Detects a repo's real build/test/lint commands and scaffolds its setup. |
 | [`maintaining-the-repo`](playbooks/maintaining-the-repo/README.md) | The longitudinal-health engine behind `/devcycle:maintain`. |
 | [`receiving-review`](playbooks/receiving-review/README.md) | The respond arm of the review write-back path: the standalone reconcile stage that triages a PR's review comments into fixes and consent-gated replies that disclose Claude Code authorship, then resolves the threads it closed from its side. |
+| [`writing-issues`](playbooks/writing-issues/README.md) | The issue writer behind `write-issue`: target, verify, draft, screen, duplicate check, then a confirmed filing. |
+| [`triaging-issues`](playbooks/triaging-issues/README.md) | The backlog triager behind `triage-issues`, on the shared issue-folding pipeline. |
 
 ## Machinery
 
@@ -71,8 +82,9 @@ run locally.
 | [`workflows/mechanical-sweep.js`](../workflows/mechanical-sweep.js) | Pilot-first bulk edit engine behind the sweep path. |
 | [`workflows/lib/agent-cli.js`](../workflows/lib/agent-cli.js) | The subprocess layer both workflow engines share to drive `claude` in print mode. |
 | [`workflows/lib/result-store.js`](../workflows/lib/result-store.js) | The per-lens result files both branch-review engines keep under `.devcycle/review/<round>/`, and the keys that decide when a stopped round's finished work is reused. |
-| [`scripts/self-dev-check.mjs`](../scripts/self-dev-check.mjs) | The self-development landing guard, inert unless the repo under work is this plugin's own source: `--preflight` records what the installed copy holds when a run starts and reports how far it has drifted from the repo, `--assert` fails the finish stage when an expected deliverable is absent from the branch or the installed copy was written to during the run, and `--plugin-digest` mints the run record's content-based plugin identifier. |
+| [`scripts/self-dev-check.mjs`](../scripts/self-dev-check.mjs) | The self-development landing guard, inert unless the repo under work is this plugin's own source: `--preflight` records what the installed copy holds when a run starts and reports how far it has drifted from the repo, `--assert` fails the finish stage when an expected deliverable is absent from the branch or the installed copy was written to during the run, `--plugin-digest` mints the run record's content-based plugin identifier, and `--is-source` answers whether the repo under work is devcycle's own source, from its manifest alone, for maintain's plugin-only checks. |
 | [`scripts/tree-hash.mjs`](../scripts/tree-hash.mjs) | Content identity for a directory tree — the per-file hashes and rolling digest both the landing guard and the run record's plugin identifier read, independent of any version string or VCS state. |
+| [`scripts/hygiene-sweep.mjs`](../scripts/hygiene-sweep.mjs) | `/devcycle:maintain`'s hygiene-sweep spine. `run` detects the target repo's stacks, runs `references/hygiene-sweeps.json`'s tools by the pass's consent and the built-in scanners, and writes candidate clusters and coverage rows. `finalize` folds the verification dispatch's verdicts into pass-file entries, the **Dead code** section and the run record's per-kind counts. |
 | [`scripts/depth-probe.mjs`](../scripts/depth-probe.mjs) | The depth gate's probe: measures one transcript's last usage record against the running model's context window and prints its depth band; `--agent <id>` measures a subagent's transcript instead of the session's. A model id that names no priced model or family version (after unwrapping `[1m]`, Bedrock and Vertex forms) is measured against an assumed 1M window, labelled as assumed; an unpriced version older than its family's newest priced model has no known window, so its band is reported unknown and the probe exits 1. |
 | [`scripts/plan-check.mjs`](../scripts/plan-check.mjs) | Planning's one plan gate: ten legs over the plan file (`--draft` runs five of them on one drafted task file), fail-closed on a missing `## Dispatch Map`, one compact line on success (plus a note count per leg that has notes); while a run is active it appends a `gate-ran` run-record event carrying `pass` or `fail`, and on `fail` a `legs` field naming the failing legs. `--help` prints each leg's description and the five override line forms, which `playbooks/planning-waves.md` self-review item 7 points to. |
 | [`scripts/spec-claims.mjs`](../scripts/spec-claims.mjs) | The spec-claims handoff: `write` stamps the spec reviewer's confirmed claims with the spec's sha256 and HEAD into `.devcycle/spec-claims.md`; `check` reports which still hold (same spec hash, cited paths unchanged since that HEAD) and lists the rest to re-verify. |

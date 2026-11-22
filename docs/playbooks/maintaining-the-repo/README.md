@@ -10,8 +10,7 @@ that hand-off — a box pointing at another box would say nothing a sentence doe
 What this playbook contributes on top of the engine: it resolves a maintenance depth (`lean` /
 `standard` / `thorough`) that gates which criteria apply, orients the pass graph-first (an
 availability probe picks a graph-backed research dispatch over a bounded `Explore` fallback),
-and runs a deterministic-facts pre-pass — dependency audit, lint, the duplication and dead-export
-checks, cross-reference checking — so the engine's lenses receive tooling facts instead of
+and runs a deterministic-facts pre-pass — dependency audit, lint, a dead-code hygiene sweep whose candidates one verification dispatch confirms, and the duplication, dead-export and cross-reference checks only when the repo is devcycle's own source — so the engine's lenses receive tooling facts instead of
 re-deriving them. The confirmed criteria (plus **Abstraction** at `standard`, plus a history
 inspector's signal at `thorough`) are then handed to `reviewing-code.md` at `repo` scope, which
 owns the panel dispatch and dedup-and-rank, then hands off to
@@ -19,10 +18,10 @@ owns the panel dispatch and dedup-and-rank, then hands off to
 `docs/audits/` document itself.
 
 Two things this playbook still owns end to end. First, a second input source folds in at every
-depth: the target repo's own open GitHub issues, fetched read-only, decomposed into
-independently verifiable claims, classified (bug/refactor fragments become candidates, feature
-fragments are counted but excluded), verified against an existing lens methodology, then ranked
-into the same list as the lens findings — distinguished only by provenance, never by rank.
+depth: the target repo's own open GitHub issues, fetched read-only and folded through the shared
+pipeline `references/issue-folding.md` owns, then ranked into the same list as the lens findings —
+distinguished only by provenance, never by rank. The playbook keeps only what is maintain's own: the
+scoping-gate exclusion, the coverage statement and the merge.
 Second, cross-pass memory: each finding gets a stable id and is compared against the prior-pass
 store to render as new, persisting, or dismissed; it can be dismissed with a load-bearing reason;
 and, only on the user's confirmation after a complete pass, a finding no longer detected is
@@ -32,7 +31,12 @@ that never landed. The store is written through one command, in a worktree on it
 or, when doc tracking vetoes committing it, left uncommitted in the session's checkout (the
 playbook's step 8) — which is the only write this otherwise read-only playbook makes.
 
-A fan-out ceiling bounds the whole pass: at most 5 concurrent panel lenses and 8 total LLM
+Each pass mints its own run record and asks, every time, whether the sweep may run repo code: its
+executing-class tools and, separately, a coverage run. The answers go on that record, with the
+sweep's per-kind counts, which **Trending** compares against the latest earlier pass on this machine.
+A dead-code finding resolves out of the store only when every source behind its kind ran in full and the pass finalized its sweep.
+
+A fan-out ceiling bounds the whole pass: at most 5 concurrent panel lenses and 9 total LLM
 dispatches, with a hard stop at the ≥20% context-depth band. The playbook mutates no code and no
 GitHub issue at any depth; selecting a finding to act on starts a separate `/devcycle:cycle`.
 

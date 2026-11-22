@@ -6,7 +6,9 @@
 //
 // Detection is by plugin name rather than by path, so a worktree of the same repo still counts.
 // Equal roots mean no separate installed copy exists — developing devcycle without having it
-// installed is legitimate, and there is then nothing to diverge from.
+// installed is legitimate, and there is then nothing to diverge from. `isDevcycleSource` is the
+// name test alone, without the root comparison: `--is-source` answers it for maintain's
+// plugin-only checks, which apply to devcycle's source from either checkout.
 //
 // Why content hashes and not the two obvious signals: a version string is equal across a stale
 // cache and the repo (that is the reported bug), mtime moves for every file on a legitimate plugin
@@ -24,7 +26,7 @@ import { field } from "./md-field.mjs";
 
 const MANIFEST_REL = ".devcycle/plugin-manifest.json";
 const STATE_REL = ".devcycle/state.md";
-const MODES = ["--preflight", "--assert", "--plugin-digest"];
+const MODES = ["--preflight", "--assert", "--plugin-digest", "--is-source"];
 // The script's own location, which is the installed copy whenever the pipeline invokes it by its
 // plugin path.
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -49,13 +51,19 @@ function readPluginManifest(root) {
   }
 }
 
-// Inert unless the repo under work IS this plugin's own source. A manifest with no `name` at all
-// is never a match: two nameless manifests would otherwise compare equal and turn every plugin
-// repo into devcycle's source tree.
-function isSelfDevelopment(pluginRoot, repoRoot) {
-  if (norm(pluginRoot) === norm(repoRoot)) return false;
+// True iff the repo under work is this plugin's own source, by manifest name alone — no path
+// comparison, so it holds from the plugin's own checkout and from an installed copy alike. A
+// manifest with no `name` at all is never a match: two nameless manifests would otherwise compare
+// equal and turn every plugin repo into devcycle's source tree.
+export function isDevcycleSource(pluginRoot, repoRoot) {
   const mine = readPluginManifest(pluginRoot)?.name;
   return typeof mine === "string" && mine === readPluginManifest(repoRoot)?.name;
+}
+
+// Inert unless the repo under work IS this plugin's own source and a separate copy of it is
+// running: equal roots mean no installed copy exists to diverge from.
+function isSelfDevelopment(pluginRoot, repoRoot) {
+  return norm(pluginRoot) !== norm(repoRoot) && isDevcycleSource(pluginRoot, repoRoot);
 }
 
 // #237 review: Claude Code writes one `.in_use/<pid>` lock file into the installed plugin root per
@@ -291,6 +299,7 @@ function main(argv) {
     "--preflight": "none",
     "--assert": "none",
     "--plugin-digest": "none",
+    "--is-source": "none",
     "--expect": "value",
     "--repo": "value",
   });
@@ -298,6 +307,8 @@ function main(argv) {
   if (modes.length !== 1) throw new Error(`name exactly one mode: ${MODES.join(", ")}`);
   const repoRoot = requireValue(flags, "--repo") ?? process.cwd();
 
+  if (modes[0] === "--is-source")
+    return { ok: true, lines: [isDevcycleSource(PLUGIN_ROOT, repoRoot) ? "source" : "not-source"] };
   if (modes[0] === "--plugin-digest") return { ok: true, lines: [pluginDigest(PLUGIN_ROOT)] };
   if (modes[0] === "--preflight")
     return { ok: true, lines: preflight({ pluginRoot: PLUGIN_ROOT, repoRoot }).lines };
