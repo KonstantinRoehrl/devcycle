@@ -379,6 +379,33 @@
         "committedBefore", "committedAfter", "exitReason", "stallCount"
       ],
       "additionalProperties": false
+    },
+    {
+      "title": "sweep-count",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "sweep-count" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "sweep": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "category": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "verified": { "type": "integer", "minimum": 0 },
+        "suspected": { "type": "integer", "minimum": 0 },
+        "cleared": { "type": "integer", "minimum": 0 }
+      },
+      "required": ["kind", "runId", "sweep", "category", "verified", "suspected", "cleared"],
+      "additionalProperties": false
+    },
+    {
+      "title": "sweep-consent",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "sweep-consent" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "consentExecuting": { "type": "boolean" },
+        "consentCoverage": { "type": "boolean" }
+      },
+      "required": ["kind", "runId", "consentExecuting", "consentCoverage"],
+      "additionalProperties": false
     }
   ]
 }
