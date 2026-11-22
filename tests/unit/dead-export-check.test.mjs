@@ -161,3 +161,36 @@ test("a --dir with no value fails instead of scanning the cwd", () => {
     assert.match(res.stderr, /--dir requires a path argument/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("#183: an .mjs export under workflows/ is no longer an export site", () => {
+  const dir = makeFixture({
+    "scripts/a.mjs": "export const live = 1;\n",
+    "scripts/b.mjs": "import { live } from './a.mjs';\n",
+    "workflows/w.mjs": "export const orphanInWorkflows = 1;\n",
+  });
+  try {
+    const res = run(["--dir", dir], dir);
+    assert.equal(res.status, 0, res.stderr);
+    assert.doesNotMatch(res.stdout, /orphanInWorkflows/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("#183: CommonJS workflows/*.js is named as not covered", () => {
+  const dir = makeFixture({
+    "scripts/a.mjs": "export const live = 1;\n",
+    "scripts/b.mjs": "import { live } from './a.mjs';\n",
+    "workflows/lib/x.js": "module.exports = { x: 1 };\n",
+  });
+  try {
+    const res = run(["--dir", dir], dir);
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /^dead-export-check: not covered: workflows\/\*\.js \(CommonJS exports are not parsed\)$/m);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("#183: no workflows/ directory, no not-covered line", () => {
+  const dir = makeFixture({ "scripts/a.mjs": "export const live = 1;\n", "scripts/b.mjs": "import { live } from './a.mjs';\n" });
+  try {
+    assert.doesNotMatch(run(["--dir", dir], dir).stdout, /not covered/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

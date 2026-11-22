@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Reports exported symbols under scripts/ and workflows/ that NO non-test module imports —
+// Reports exported symbols under scripts/ that NO non-test module imports —
 // the "production-dead, maybe still tested" signal the maintain pre-pass's dead-code
 // criterion needs. Tests do not count as use, by design: an export whose only importer is a
 // test file is reported.
@@ -17,7 +17,8 @@ import { readFileSync, readdirSync, lstatSync, existsSync } from "node:fs";
 import { join, relative, resolve, dirname, sep } from "node:path";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 
-const EXPORT_DIRS = ["scripts", "workflows"];
+// workflows/ holds CommonJS .js, which this script does not parse; it is named as not covered at the end.
+const EXPORT_DIRS = ["scripts"];
 const args = process.argv.slice(2);
 const KNOWN_FLAGS = { "--dir": "value" };
 const root = process.cwd();
@@ -149,11 +150,12 @@ const resolveSpec = (fromDir, spec) =>
   spec && spec.startsWith(".") ? resolve(fromDir, spec) : null; // relative specs only
 
 // Two decoupled corpora:
-//  - Export sites: non-test *.mjs under scripts/ + workflows/. These are the modules whose
-//    exports are judged live-or-dead, and the abort condition is keyed to THIS set — a run
-//    that cannot read any exporting module is never reported clean.
+//  - Export sites: non-test *.mjs under scripts/ only; workflows/*.js is CommonJS and not
+//    covered. These are the modules whose exports are judged live-or-dead, and the abort
+//    condition is keyed to THIS set — a run that cannot read any exporting module is never
+//    reported clean.
 //  - Use sites: every non-test *.mjs under scanRoot (minus PRUNED_USE_DIRS), so an import
-//    from hooks/ (or any dir) marks a scripts//workflows/ export live.
+//    from hooks/ (or any dir) marks a scripts/ export live.
 const exportSites = [];
 for (const dirName of [...EXPORT_DIRS].sort()) {
   const abs = join(scanRoot, dirName);
@@ -191,6 +193,21 @@ for (const [file, mod] of [...modules].sort((a, b) => a[0].localeCompare(b[0])))
     if (!mod.usedNames.has(name)) dead.push(`${relative(root, file)}:${name}`);
 }
 
+// True when dir holds a .js file at any depth; symlinks are not followed, as in collectSources.
+function holdsJs(dir) {
+  let names;
+  try {
+    names = readdirSync(dir);
+  } catch (e) {
+    abort(`cannot read ${dir}: ${e.message}`);
+  }
+  return names.some((name) => {
+    const p = join(dir, name);
+    if (isRegularDir(p)) return holdsJs(p);
+    return name.endsWith(".js") && lstatSync(p).isFile();
+  });
+}
+
 const moduleCount = modules.size;
 const exportCount = [...modules.values()].reduce((n, m) => n + m.names.size, 0);
 if (dead.length) {
@@ -200,4 +217,7 @@ if (dead.length) {
   console.log(`dead-export-check: ok (${exportCount} export(s) across ${moduleCount} module(s); 0 dead)`);
 }
 for (const n of [...new Set(notes)].sort()) console.log(`  - ${n}`);
+const workflowsDir = join(scanRoot, "workflows");
+if (existsSync(workflowsDir) && holdsJs(workflowsDir))
+  console.log("dead-export-check: not covered: workflows/*.js (CommonJS exports are not parsed)");
 process.exit(0);
