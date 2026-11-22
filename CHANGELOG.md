@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.34.0 — 2026-11-22
+
+- feat(maintain): verified hygiene sweep, write-issue and triage-issues skills, and shared issue folding (#478, #485, #489)
+
 `/devcycle:maintain` now runs a verified code-hygiene sweep, the quality catalog holds code to a clearer standard, and two new standalone skills draft issues and triage a backlog. The sweep ships its dead-code part first; the rest of #478 stays open.
 
 **Hygiene sweep (#478, sections A and B).** A registry (`references/hygiene-sweeps.json`) and an audit-only contract (`references/hygiene-sweeps.md`) define each sweep kind, and `scripts/hygiene-sweep.mjs` runs them with typed outcomes, so a check that was vacuous or failed can no longer read as a completed sweep. The dead-code sweep reads recorded `knip` and `tsc` output through adapters and adds CSS, Angular and static-asset scanners, tested against a fixture repository of decoys with a mutation check. `/devcycle:maintain` runs the sweep as part of its pass, a `finalize` step settles the outcome, resolution flags are tied to the confirmed run, and sweep-kind findings are kept when a pass finalized no sweep. The run record gains `sweep-count` and `sweep-consent` kinds.
