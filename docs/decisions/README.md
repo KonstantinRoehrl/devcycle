@@ -5,6 +5,24 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — The sweep's resolution refusal and the documentation criteria name their sources (#478, #485)
+
+**Decision:** the maintain playbook states that a pass with no finalized sweep passes no
+`--sweep-coverage` and that the resolution flags travel together, only on a confirmed run; the
+Documentation standard and the undocumented-code criterion name the doc-comment conventions and
+Fowler's Comments smell as their measuring sources. The playbook's closure, the two other closures
+that read `references/quality-criteria.md`, and the runtime surface grow by that text.
+
+**Why:** a decline could still delete records through `--sweep-coverage` alone, and a criterion with
+no named source is an unsupported opinion by the catalog's own Precedence rule.
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 77501
+budget: context-budget.json playbooks/planning-waves.md 75695
+budget: context-budget.json playbooks/reviewing-code.md 106138
+budget: surface-budget.json surfaceTotal 7400
+```
+
 ## 2026-11-22 — The hygiene sweep's coverage rules grow the reference (#478)
 
 **Decision:** a sweep kind is complete only if every source behind it ran in full and could have found

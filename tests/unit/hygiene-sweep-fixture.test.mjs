@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runSweep } from "../../scripts/hygiene-sweep.mjs";
@@ -90,4 +90,21 @@ test("mutation: without the route entry the routed component's input is flagged"
   const c = find(sweep({ ...TREE, "src/app/app.routes.ts": mutated }), file, symbol);
   assert.ok(c, "decoy is no candidate at all after the mutation");
   assert.equal(c.cleared, null);
+});
+
+test("the recorded tool outputs are listed with the registry's pins, so a pin bump forces a re-recording", () => {
+  const registry = JSON.parse(readFileSync(new URL("../../references/hygiene-sweeps.json", import.meta.url), "utf8"));
+  const rows = readFileSync(join(FIXTURES, "README.md"), "utf8").split("\n")
+    .filter((line) => /^\| `[^`]+` \|/.test(line)).map((line) => line.split("|").map((cell) => cell.trim()));
+  assert.deepEqual(rows.map((r) => r[1].replaceAll("`", "")).sort(), readdirSync(join(FIXTURES, "sweep-tool-outputs")).filter((f) => f !== ".gitkeep").sort(),
+    "every recording has a provenance row, and every row names a recording");
+  for (const [, file, tool, version, command] of rows) {
+    const pinned = registry.tools.find((t) => t.id === tool)?.version;
+    assert.equal(version, pinned, `${file}: recorded from ${tool} ${version}, registry pins ${pinned}: re-record and update the row`);
+    assert.ok(command.includes(`@${pinned}`) || command.startsWith("the command above"), `${file}: command does not cite the pin`);
+  }
+});
+
+test("the contributor guide lists the maintain fixtures", () => {
+  assert.match(readFileSync(new URL("../../CONTRIBUTING.md", import.meta.url), "utf8"), /tests\/fixtures\/maintain\/README\.md/);
 });

@@ -34,7 +34,7 @@ playbook's step 8) — which is the only write this otherwise read-only playbook
 Each pass mints its own run record and asks, every time, whether the sweep may run repo code: its
 executing-class tools and, separately, a coverage run. The answers go on that record, with the
 sweep's per-kind counts, which **Trending** compares against the latest earlier pass on this machine.
-A dead-code finding resolves out of the store only when every source behind its kind ran in full.
+A dead-code finding resolves out of the store only when every source behind its kind ran in full and the pass finalized its sweep.
 
 A fan-out ceiling bounds the whole pass: at most 5 concurrent panel lenses and 9 total LLM
 dispatches, with a hard stop at the ≥20% context-depth band. The playbook mutates no code and no

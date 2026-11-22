@@ -42,6 +42,10 @@ executables placed first on `PATH`, so a full pipeline is exercised without a mo
 you change `review-panel.js`, `mechanical-sweep.js`, or any `scripts/*.mjs`, extend that
 script's suite with the behavior you changed.
 
+Fixtures recorded from a real tool carry their provenance next to them:
+`tests/fixtures/maintain/README.md` names the tool, pin and command behind each recorded sweep
+output, and `tests/unit/hygiene-sweep-fixture.test.mjs` fails when a pin moves without a re-recording.
+
 **Enforcement scripts deny on ambiguity.** A script or hook whose job is to block or gate — a
 `PreToolUse` hook, a plan or evidence check, an intake's read-only guard — treats every input it
 cannot classify as the blocking outcome, never as a pass, and its suite names each ambiguity class

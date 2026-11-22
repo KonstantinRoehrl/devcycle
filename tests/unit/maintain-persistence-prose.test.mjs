@@ -152,3 +152,26 @@ test("step 8 folds the sweep in and resolves a sweep kind only when its sources 
   assert.match(step8, /fullKinds/);
   assert.match(step8, /a sweep gap is not one of these/);
 });
+
+const resolutionBullet = between(step8, "**Resolution", "   - **Offer dismissal");
+
+test("every apply-pass instruction carries the resolution flags together, tied to the confirmed dry run", () => {
+  assert.doesNotMatch(playbook, /apply-pass \[--resolve\]/, "the bracketed form lets --sweep-coverage alone delete records");
+  assert.match(resolutionBullet, /only on a confirmed run/);
+  assert.match(resolutionBullet, /a decline passes neither/);
+  assert.match(step8, /Run `apply-pass --root <worktree>`[^.]*confirmed dry run's resolution flags/);
+});
+
+test("sweep resolution is refused when the pass has no finalized sweep, and the statement says why", () => {
+  assert.match(resolutionBullet, /no finalized sweep/);
+  assert.match(resolutionBullet, /pass no `--sweep-coverage`/);
+});
+
+const criteria = read("../../references/quality-criteria.md");
+
+test("the documentation criteria name a measuring source beyond the repo's convention", () => {
+  const section = between(criteria, "## Documentation standard", "## Multi-file feature chains");
+  assert.match(section, /Measured against the repo's/);
+  for (const source of ["PEP 257", "Go doc comments", "TSDoc"]) assert.match(section, new RegExp(source));
+  assert.match(between(criteria, "- **undocumented code**", "- docs-vs-reality"), /measured against:/);
+});

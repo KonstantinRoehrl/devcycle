@@ -33,7 +33,7 @@ Apply regardless of stack:
   diagnostics, e.g. TypeScript `noUnusedLocals`, ESLint `no-unused-vars`);
 - **bloat** — code larger than its job: needless layers, options or generality (Fowler's
   *Refactoring*: Speculative Generality);
-- **undocumented code** — code that fails the Documentation standard below;
+- **undocumented code** — code that fails the Documentation standard below (measured against: its sources);
 - docs-vs-reality drift — documentation that exists and is wrong: a README flag, endpoint,
   or setup step the code no longer honours (distinct from undocumented code above, which is
   documentation that is missing);
@@ -106,7 +106,8 @@ by reading it: exported surface with a non-obvious contract has a one-line purpo
 decision states its why where it lives (a magic number's unit and source, a workaround's issue
 link, an ordering or invariant); a module states what it owns. Flagged: comments that restate the
 code, stale comments, commented-out code, a TODO with no issue, documentation longer than what it
-explains. Shorter wins. The repo's own documentation convention outranks this standard.
+explains. Shorter wins. Measured against the repo's documentation convention, then the stack's doc-comment
+convention (PEP 257, Go doc comments, TSDoc, .NET XML docs) and Fowler's *Refactoring* (Comments smell).
 
 ## Multi-file feature chains
 

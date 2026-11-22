@@ -149,12 +149,14 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
      failed, a hard stop fired, or the coverage statement names an unswept lens area, lens-kind
      resolution is refused and **Resolved since last pass** renders "not assessed: partial pass" for
      those kinds; a sweep gap is not one of these conditions. A sweep kind can resolve only when
-     `<dir>/coverage.json` lists it in `fullKinds`, meaning every source behind it ran in full. Re-run
-     the dry run with `--sweep-coverage <dir>/coverage.json`, adding `--resolve` unless lens-kind
-     resolution was refused, show its `resolved` rows, and ask the user to confirm; declined, it
-     renders "not assessed: declined". A resolved record is deleted, not written — a closed loop is
-     not a longitudinal artifact, so the store never accumulates settled history, and a recurrence
-     re-enters as new. `apply-pass` never runs a record's `verify:`, so every resolution is also in
+     `<dir>/coverage.json` lists it in `fullKinds` (every source behind it ran in full). With no finalized sweep
+     (a failed or skipped verification, no `finalize`, or an earlier hard stop), pass no `--sweep-coverage`
+     and say why in the coverage statement. Re-run the dry run with the resolution flags (`--resolve` unless
+     lens-kind resolution was refused, plus `--sweep-coverage <dir>/coverage.json`), show its `resolved`
+     rows, and ask the user to confirm: the real `apply-pass` takes them only on a confirmed run, and
+     a decline passes neither and renders "not assessed: declined". A resolved record is deleted, not written
+     — a closed loop is not a longitudinal artifact, so the store never accumulates settled history, and a
+     recurrence re-enters as new. `apply-pass` never runs a record's `verify:`, so every resolution is also in
      `gaps`: render them, so a moved-not-fixed finding stays visible.
    - **Offer dismissal.** A finding is `dismissed` only with a **load-bearing** reason — `dismiss --id
      <id> --reason "<text>"`, plus `--title` when the stored title is blank; a bare skip is not a
@@ -177,7 +179,7 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
    - **Write and land.** On either commit answer, cut the branch per
      `${CLAUDE_PLUGIN_ROOT}/references/branch.md` § Committing's standalone-worktree rule:
      `git worktree add -b chore/maintenance-findings-<date> .devcycle/maintain/wt-<date> "$base"` (a
-     taken name gets `-2`, `-3`, …). Run `apply-pass [--resolve] [--sweep-coverage <dir>/coverage.json] --root <worktree>`, then each accepted
+     taken name gets `-2`, `-3`, …). Run `apply-pass --root <worktree>` with the confirmed dry run's resolution flags, then each accepted
      `dismiss --root <worktree>`, then commit the `written` paths with `git add` and the `deleted`
      paths with `git rm` — two pathspec commits, `docs(maintenance): record the <date> pass's
      findings` and `docs(maintenance): remove findings resolved since the last pass`. On *open a PR*,
