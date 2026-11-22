@@ -17,10 +17,10 @@ that read `references/quality-criteria.md`, and the runtime surface grow by that
 no named source is an unsupported opinion by the catalog's own Precedence rule.
 
 ```text
-budget: context-budget.json playbooks/maintaining-the-repo.md 77501
-budget: context-budget.json playbooks/planning-waves.md 75695
-budget: context-budget.json playbooks/reviewing-code.md 106138
-budget: surface-budget.json surfaceTotal 7400
+budget: context-budget.json playbooks/maintaining-the-repo.md 80075
+budget: context-budget.json playbooks/planning-waves.md 75704
+budget: context-budget.json playbooks/reviewing-code.md 106569
+budget: surface-budget.json surfaceTotal 7583
 ```
 
 ## 2026-11-22 — The hygiene sweep's coverage rules grow the reference (#478)
