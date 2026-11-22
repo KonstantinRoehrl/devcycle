@@ -49,13 +49,15 @@ than four at once; above `25` tasks planning suggests splitting the spec. Drafte
 `references/plan-task-format.md` instead of this playbook, and each writes its task to a work file, `.devcycle/plan-work/<run id>/tasks/task-<n>.md`, after running the
 `--draft` gate on it. On every path the work files are the canonical copy: `scripts/plan-assemble.mjs`
 assembles the plan from them without the coordinator reading a draft, and a later fix goes into the task
-file and is re-assembled. Under `grouped`, after each round `scripts/interface-lock.mjs` copies the
+file and is re-assembled. Each assembly logs `plan-assembled` with the plan's content hash and writes the
+state file's `plan:` row, so the plan path is recorded the moment the plan exists. Under `grouped`, after each round `scripts/interface-lock.mjs` copies the
 round's `Produces` items into `interfaces.lock.md`; later rounds' drafters reproduce what they consume
 verbatim, the script checks it, and a drafter that must change a locked interface returns an
 `interface-delta` for the coordinator to accept or refuse. Across tasks, the plan gate's `crossTask` leg
 scans for placeholders and back-references, and one fast-tier checker dispatch per batch of up to eight
-producer-to-consumer pairs writes its findings to a file, returning the path and a count. A finding goes back to its task's
-drafter as a patch rather than a redraft, and after one checker round and one repair round, whatever is
+producer-to-consumer pairs writes its findings to a file, returning the path and a count; the round is logged as
+`checker-round-<n>` with its finding count. A finding goes back to its task's drafter as a patch rather
+than a redraft, logged as `plan-repair-<n>` before the re-assembly, and after one checker round and one repair round, whatever is
 still open goes to the user, per
 [`references/delegated-planning.md`](../../../references/delegated-planning.md). Every planning
 dispatch names its model, at the tier
@@ -94,7 +96,7 @@ line instead of a fix — `- Blast-radius override:`, `- Content-coupling overri
 fixing the plan or recording an override, never by handing off around it. On success the gate
 prints one ok line, with each leg's notes (such as cleared overrides) reduced to a count unless
 `--verbose` lists them; a failing run always lists them. A run in progress records a `gate-ran`
-event with its result.
+event with its result, and planning logs `plan-gate` with the exit code after every gate run.
 
 The plan's required final section, the `## Dispatch Map`, groups every task into waves — a wave
 holds only dependency-ready, file-disjoint tasks, never two tasks that touch the same file even
@@ -156,8 +158,16 @@ A depth probe runs after each `plan-group-<k>` under `checkpointed`, or once und
 and emits a mid-stage handoff, `Session ended mid-planning: group <k> of <m>`, whose context action is
 clear and continue. Nothing asks the user to accept a checkpoint. The next session resumes from disk:
 [`references/resume.md`](../../../references/resume.md) § Resuming at the recorded stage reads the
-planning position that `scripts/plan-resume.mjs` prints, and the drafters read the context pack that
+planning position that `scripts/plan-resume.mjs` prints — the tasks still to draft, then `next`, the
+post-draft step to continue at (`assemble`, `checker`, `repair`, `gate` or `present`) — and the drafters
+read the context pack that
 [`references/delegated-planning.md`](../../../references/delegated-planning.md) § The context pack owns.
+
+A session that ends with no checkpoint — a usage limit, an API error — resumes from the same position,
+behind the recovery gate [`references/resume.md`](../../../references/resume.md) § The state file owns:
+[`scripts/recovery-inventory.mjs`](../../../scripts/recovery-inventory.mjs) shows each post-draft step as
+done, re-verify or redo. An assembly counts as done only while its logged hash and a fresh re-assembly
+both match the plan file, and the plan gate always reruns.
 
 At handoff, [`scripts/plan-stats.mjs`](../../../scripts/plan-stats.mjs) prints the planning line, whose
 format [`references/handoff.md`](../../../references/handoff.md) owns, and records `estUsd` (the

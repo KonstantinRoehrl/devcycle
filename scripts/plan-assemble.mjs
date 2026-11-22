@@ -3,19 +3,30 @@
 // coordinator's plan-header.md, each tasks/task-<n>.md and dispatch-map.md. A task file is the
 // canonical copy while planning; the plan it assembles keeps the shape executing-waves reads.
 // assemblePlan() is pure and names every id defect at once; the CLI reads the work directory, writes
-// the plan atomically, and `edges` lists the producer->consumer pairs a repair pass checks.
+// the plan atomically (with --state, logging stage-log key `plan-assembled` and the state's `plan:` row),
+// and `edges` lists the producer->consumer pairs a repair pass checks.
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { isMain } from "./is-main.mjs";
 import { parseFlags } from "./cli-flags.mjs";
 import { atomicWrite } from "./atomic-write.mjs";
+import { withStateRow } from "./handoff-mark.mjs";
+import { field } from "./md-field.mjs";
+import { logStep, readStage } from "./stage-log.mjs";
+import { UsageError } from "./task-ledger.mjs";
 import { parseDispatchMap, planEdges, taskBlocks } from "./task-files.mjs";
 
-const USAGE = "usage: plan-assemble.mjs <work-dir> --out <plan-path> | edges <work-dir> [--batch <n>]";
+const USAGE = "usage: plan-assemble.mjs <work-dir> --out <plan-path> [--state <path>] | edges <work-dir> [--batch <n>]";
 const TASK_FILE_RE = /^task-(\d+)\.md$/;
 
 const fileNumber = (name) => Number(name.match(TASK_FILE_RE)[1]);
 const byFileNumber = (a, b) => fileNumber(a.name) - fileNumber(b.name);
+
+// The one plan-hash owner: plan-assemble logs it and plan-resume compares the plan on disk against it.
+// The older local sha256 helpers (doctor, maintenance-findings, drive-lock) stay as they are; folding
+// them in is out of this change's scope.
+export const sha256Hex = (text) => createHash("sha256").update(text).digest("hex");
 
 // A CLI argument naming a positive integer in digits only, so `0x10`, `1e1` and `01` are refused.
 export const isPositiveIntegerArg = (value) => /^[1-9]\d*$/.test(value);
@@ -95,10 +106,37 @@ export function readTasks(workDir) {
     .sort(byFileNumber);
 }
 
+const workEdges = (workDir) => planEdges(readTasks(workDir).map(({ text }) => text.trimEnd()).join("\n\n"));
+
+// The edge checker's batches for a work directory, as `edges --batch` prints them.
+export function edgeBatches(workDir, perBatch) {
+  return batchEdges(workEdges(workDir), perBatch);
+}
+
+// Checks the state file before the plan is written, so a run that cannot be logged writes nothing,
+// and returns the step that logs the assembly against the state file's run.
+function assemblyLogger(statePath) {
+  if (!existsSync(statePath)) fail(`no state file at ${statePath}`);
+  const stateText = readFileSync(statePath, "utf8");
+  const devcycleDir = dirname(resolve(statePath));
+  const run = field(stateText, "run");
+  try {
+    readStage(devcycleDir, { run, stage: "planning" });
+  } catch (e) {
+    if (e instanceof UsageError) fail(`${statePath} names no run, so the assembly cannot be logged`);
+    throw e;
+  }
+  return (planPath, plan) => {
+    const ref = relative(dirname(devcycleDir), resolve(planPath)).split(sep).join("/");
+    logStep(devcycleDir, { run, stage: "planning", key: "plan-assembled", ref, data: { sha256: sha256Hex(plan) } });
+    atomicWrite(statePath, withStateRow(stateText, "plan", ref));
+  };
+}
+
 function main(argv) {
   let parsed;
   try {
-    parsed = parseFlags(argv, { "--out": "value", "--batch": "value" }, { allowPositionals: true, requireValues: "nonEmpty" });
+    parsed = parseFlags(argv, { "--out": "value", "--batch": "value", "--state": "value" }, { allowPositionals: true, requireValues: "nonEmpty" });
   } catch (e) {
     usage(e.message);
   }
@@ -106,17 +144,16 @@ function main(argv) {
   if (flags["--batch"] !== undefined && !isPositiveIntegerArg(flags["--batch"])) usage("--batch takes a positive integer");
   const perBatch = flags["--batch"] === undefined ? undefined : Number(flags["--batch"]);
   if (positionals[0] === "edges") {
-    if (positionals.length !== 2 || flags["--out"] !== undefined) usage();
-    const tasks = readTasks(positionals[1]);
-    const edges = planEdges(tasks.map(({ text }) => text.trimEnd()).join("\n\n"));
-    if (perBatch !== undefined && edges.length) {
-      const lines = batchEdges(edges, perBatch).flatMap((batch, i) => [
+    if (positionals.length !== 2 || flags["--out"] !== undefined || flags["--state"] !== undefined) usage();
+    if (perBatch !== undefined) {
+      const lines = edgeBatches(positionals[1], perBatch).flatMap((batch, i) => [
         `batch ${i + 1} · ${batch.edges.length} edge${batch.edges.length === 1 ? "" : "s"} · ${batch.tasks.map((n) => `tasks/task-${n}.md`).join(" ")}`,
         ...batch.edges.map(({ producer, consumer }) => `Task ${producer} → Task ${consumer}`),
       ]);
-      console.log(lines.join("\n"));
+      console.log(lines.length ? lines.join("\n") : "plan-assemble: no edges");
       return;
     }
+    const edges = workEdges(positionals[1]);
     console.log(edges.length
       ? edges.map(({ producer, consumer }) => `Task ${producer} → Task ${consumer} · tasks/task-${producer}.md · tasks/task-${consumer}.md`).join("\n")
       : "plan-assemble: no edges");
@@ -124,6 +161,7 @@ function main(argv) {
   }
   if (positionals.length !== 1 || !flags["--out"] || perBatch !== undefined) usage(perBatch !== undefined ? "--batch belongs to edges" : undefined);
   const workDir = positionals[0];
+  const logAssembly = flags["--state"] === undefined ? null : assemblyLogger(flags["--state"]);
   const header = readWorkFile(join(workDir, "plan-header.md"));
   const dispatchMap = readWorkFile(join(workDir, "dispatch-map.md"));
   const tasks = readTasks(workDir);
@@ -133,6 +171,7 @@ function main(argv) {
     process.exit(1);
   }
   atomicWrite(flags["--out"], plan);
+  logAssembly?.(flags["--out"], plan);
   console.log(`plan-assemble: wrote ${flags["--out"]} — ${tasks.length} task(s), ${parseDispatchMap(dispatchMap).size} wave(s)`);
 }
 

@@ -103,18 +103,19 @@ that checkpoint logs the tasks written so far as `plan-group-1`, so it is group 
 and emit a handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` whose first field is
 `Session ended mid-planning: group <k> of <m>`, with the context action `Clear + /devcycle:continue`; `stage:`
 stays `planning`. The resumed session drafts from the `missing` and `nextGroup` of the `plan-resume.mjs` call
-`references/resume.md` § Resuming at the recorded stage owns, reading `pack.md` and the task files, never the
-transcript.
+`references/resume.md` § Resuming at the recorded stage owns, then continues at its `next` (`assemble`, `checker`,
+`repair`, `gate` or `present`), reading `pack.md` and the task files, never the transcript.
 
 ## Plan mechanics — the native engine (`lean` / `standard`)
 
 Skip this section at `thorough`, except self-review item 7 (plan gate), which the override list
-names; the sub-skill supplies the rest there. **Where the plan goes:**
+names; the sub-skill supplies the rest there, and `plan:` is written on `.devcycle/state.md` once it writes the
+plan file. **Where the plan goes:**
 `docs/superpowers/plans/YYYY-MM-DD-<topic>.md`, unless the user prefers another location. While planning, on every path, each task is its own work
 file `.devcycle/plan-work/<run id>/tasks/task-<n>.md`, beside `plan-header.md` and `dispatch-map.md`;
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-assemble.mjs" .devcycle/plan-work/<run id> --out <plan path>`
-assembles the plan (it fails on a missing or duplicate task id), and a later change goes into the task
-file and is re-assembled. A spec covering multiple independent subsystems should have been split into sub-project specs during
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-assemble.mjs" .devcycle/plan-work/<run id> --out <plan path> --state .devcycle/state.md`
+assembles the plan (it fails on a missing or duplicate task id), logs `plan-assembled` and writes `plan:`, so `plan:`
+is never `none` while the plan exists; a later change goes into the task file and is re-assembled the same way. A spec covering multiple independent subsystems should have been split into sub-project specs during
 brainstorming; if it wasn't, suggest one plan per subsystem, each producing working, testable
 software on its own.
 
@@ -150,8 +151,9 @@ re-review pass.
    task's failing-test fences being exempt; above either, cut code to the contract or record
    `- Proportion override: <reason>`.
 7. **Plan gate:** run `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-check.mjs" <plan-path> --spec <spec-path>`;
-   `plan-check.mjs --help` lists its legs and the override line forms. A non-zero exit is a stop —
-   fix the plan or record an override, never hand off around it.
+   `plan-check.mjs --help` lists its legs and the override line forms. Once it returns, log `plan-gate`
+   with `--data '{"exit":<code>}'`, at `thorough` too. A non-zero exit is a stop — fix the plan or
+   record an override, never hand off around it.
 
 ## Drafting each task
 
