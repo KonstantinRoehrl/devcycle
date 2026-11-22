@@ -5,6 +5,835 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — Phase 3 closes on partial benchmark data: the rates are refit, the calibration and thresholds stay (#450, #442)
+
+**Decision:** `PLANNING_RATES` in `scripts/plan-cost.mjs` takes the medians that
+`node scripts/cost-model-fit.mjs --rates .devcycle/plan-bench/passes` prints for the arms with two or more scored
+replays: `status-quo` 1.34 (n = 7), `inline` 0.97 (n = 5) and `grouped` 1.11 (n = 2) planning dollars per task.
+`checkpointed` has one replay (0.82) and keeps its assumed 1.4. `CALIBRATION.passes` stays empty, so the projection
+stays advisory and `planningBudgetUSD` is never enforced. The `THRESHOLDS` in `scripts/plan-strategy.mjs`
+(inline up to 12 tasks or 30 weight points, split above 25, coupling 0.5, width 3, k ≤ 3, 4 concurrent, the 150k
+input cap) stay the initial values Decision D7 names. The Phase 3 exit and the ship gate are **not met**, and the
+arms with no usable replay are unmeasured, five replays: the large `grouped` and `checkpointed` and the medium
+`status-quo`, `inline` and `checkpointed` with execution.
+
+**Why:** the paid pass 2 (about $67.50 of the $390) left two usable large replays, `status-quo` and `inline` on
+`instruction-economy`. A DNS outage (`ENOTFOUND`, about 02:00) ended the rest in seconds, and the harness records
+that as a terminal `error` at $0. The user chose to record what the data supports over a harness retry and a third
+pass over the missing replays (priced under **How to apply**). The spec asks for two passes before a threshold
+becomes a gate (§9.9) and for the projection to be within ±35% before it is enforced (§7); neither holds.
+`cost-model-fit.mjs` reports 0 of 2 scored passes within ±35%, and the large projections miss by +428.7% (`inline`:
+est $29.27, actual planning $5.54) and −64.6% (`status-quo`: est $13.54, actual $38.21). Refitting the projection's
+role parameters on those replays and recording the refit's own error as a pass would be circular. The refit rates
+price `plan-bench estimate` only, and they are per-task medians over small, medium and one large entry, so a single
+large cut can sit far from them: the two large replays measured 1.91 (`status-quo`, 20 tasks) and 0.40 (`inline`, 14
+tasks) planning dollars per task, and the two arms planned different cuts of the same spec.
+
+**P1–P12 against the bars**, over the nine replays that produced a plan in the passes `phase3` (small and medium) and
+`phase3-p2-large`:
+
+| Bar | Result | Verdict |
+| --- | --- | --- |
+| P1 ≤ $2.0 per task | 0.40 to 1.91 on large, 0.74 to 1.50 on small and medium | met on every usable replay |
+| P2 ≤ 1.0 | 0.42 (`grouped`), 0.65 (`grouped-fork`), medium only | met where measured; none on large, which did not execute |
+| P3 ≤ 0.5 dispatches per task | 1.35 (large `status-quo`), 0.86 (medium `grouped`); small 0.25 to 1.33 | met only by small `checkpointed` (0.25); large `inline` has no rows |
+| P4 ≤ 150,000 p95 subagent depth | 60,312 (small `checkpointed`) and 74,959 (small `grouped`); 152,746 (small `grouped-fork`), 153,734 (medium `grouped`), 167,378 (large `status-quo`) and 222,209 (medium `grouped-fork`) are over; no depth rows for small `status-quo` and `inline` and for large `inline`. Against the `phase1-baseline` `status-quo` replay of the same entry (small 115,904, medium 149,164): −55,592 (`checkpointed`) and −40,945 (`grouped`) on small, +4,570 (`grouped`) on medium; no earlier-phase value on file for large | not met: 4 of the 6 replays with depth rows fail, 2 on the removed fork arm and 2 on kept arms (medium `grouped` by 3,734, large `status-quo` by 17,378) |
+| P5 ≤ 15% coordinator depth | 15.6% to 38.7% on every replay with a probe | not met |
+| P6 ≤ 20% shared context | 0% to 10.0% on the 6 replays with rows (large `status-quo` 9.4%, medium `grouped` 10.0%). Against the baseline (small 0%, medium 8.9%): +5.0 points (small `grouped`), 0 (`checkpointed`), +1.1 (medium `grouped`); none for large | met where measured; 3 replays have no rows |
+| P7 100% explicit model | 100% on small `checkpointed`, small `grouped`, medium `grouped` and large `status-quo`; 50% (small) and 40% (medium) on `grouped-fork`; no rows for 3. The baseline replays with rows are all 100% | met on every kept arm with rows; missed only by the removed fork arm |
+| P8 ≤ 5× plan/spec, non-test fences ≤ 20% | large 7.6× (`inline`) and 20.5× (`status-quo`); small and medium 3.2× to 4.7× | not met on large, met elsewhere |
+| P9 gate fails ≤ 2, checker rounds ≤ 1 | 2 to 5 gate fails, 0 or 1 checker rounds | met by 2 of 9 replays |
+| P10 no worse than baseline | 0 attributed `plan-defect` on all nine, which the harness reports as not judged because the bar is baseline-relative. Raw blocked/rejected/retried: 1/3/2 (medium `grouped`) and 0/1/2 (medium `grouped-fork`) against 0/0/1 in the baseline medium `status-quo` replay (which itself errored at execution); 0/0/0 elsewhere | not shown to hold: only the two medium replays executed, and both raw counts are above baseline; no earlier-phase value on file for large, which did not execute |
+| P11 ≤ 3 minutes per task | 0.92 and 2.87 on large, 2.56 on small `checkpointed`; 3.5 to 7.5 on the other six | met by 3 of 9 replays |
+| P12 100% cost rows and roles, 0 sensor gaps | 100% and 0 gaps on 6 of 9; no rows for small `status-quo` and `inline` and for large `inline`. The baseline replays with rows are the same | met where measured |
+
+(verified: aggregated from the `results.json` of the passes `phase3` and `phase3-p2-large`, outcomes `planned` and
+`executed`; baselines from `phase1-baseline/results.json`.) Every cell above was checked against those files and no
+earlier cell needed correcting.
+
+The P1/P2/P3/P8 ship gate (spec §10) is therefore **not met**: P8 fails on both large arms and P3 and P2 are
+unmeasured on large `inline`. This entry first said nothing is released from this effort. The user overrode that on
+2026-11-22 and released the whole stack as 0.33.0 with the gate unmet: the projection stays advisory, the unmeasured
+arms stay marked as such, and the planning overhaul's acceptance (#442) stays open.
+
+**How to apply:** a later effort that wants these measured fixes `scripts/plan-bench-pass.mjs` to retry a transient
+API error (`ENOTFOUND`, an unreachable API) with backoff instead of ending the replay, then runs the five missing
+replays with the user's go-ahead (`node scripts/plan-bench.mjs estimate` prices them at $108.59: $30.12 for the
+large `grouped` and `checkpointed` with `--entries instruction-economy --arms grouped,checkpointed`, plus $78.47
+for the medium `status-quo`, `inline` and `checkpointed` with
+`--entries implementer-stop-hold --arms status-quo,inline,checkpointed`; an estimate at the median rates, and
+large cuts have run well above it), and refits the rates, records the passes in `CALIBRATION` and revisits
+the thresholds from two passes. Until then read `auto`'s thresholds as untuned and the estimate as advisory.
+
+## 2026-11-22 — The fork arm is dropped (#450)
+
+**Decision:** the `grouped-fork` arm is removed: from the `planningStrategy` knob's values (`scripts/resolve-knobs.mjs`,
+`.claude-plugin/plugin.json`), from `scripts/plan-strategy.mjs` (`KNOBS` and the `fork` field of a decision), from
+`scripts/plan-cost.mjs` (the `fork` choice, its session-tier drafter pricing and its planning rate), from the
+benchmark's opt-in arms, and from `references/delegated-planning.md`. A stored `planningStrategy=grouped-fork` now
+resolves to `auto` with the resolver's usual not-one-of warning. The value never shipped, so its record in
+`docs/configuration/config-changelog.md` is edited in place. This ends the experiment the 2026-11-20 entry left
+open, with the verdict **drop**.
+
+**Why:** the user's call on the measured pairs (2026-11-22). Two entries ran both arms: the small
+`on-device-browser-selection` (planning $ per task 1.48 grouped, 1.50 grouped-fork, both planned) and the medium
+`implementer-stop-hold` (0.74 against 1.21, both executed). The fork never planned cheaper, and
+`node scripts/cost-model-fit.mjs --rates .devcycle/plan-bench/passes` puts the two arms' medians at 1.11 and 1.36
+(n = 2 each). A fork pays the cache-read price on the coordinator's prefix but cannot drop to the fast tier (spec
+§7), and these pairs show no saving that offsets it. No large entry ran either arm, so the verdict rests on small
+and medium cuts.
+
+**Budgets:** `playbooks/planning-waves.md` loses two clauses and `references/delegated-planning.md` loses its
+fork paragraph. On this branch alone the playbook's closure shrank to 72221; merged with the #454 resume recovery
+(which grew it to 73817 on `dev`), it measures 73421, the figure below.
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 73421
+```
+
+## 2026-11-21 — After an uncontrolled stop, transcripts are a scoped fallback (#454)
+
+**Decision:** after a session ends uncontrolled, `scripts/recovery-inventory.mjs` renders each stage's
+own resume owner and reads session transcripts only as a fallback, and only this run's own sessions:
+a transcript is found by `sha256(sessionId)` against the run record's `session` rows, never any other
+way. A transcript resolves an ambiguous step to re-verify (its call completed) or redo (its call was
+still running, or the transcript is silent), and never to done. A missing or unreadable transcript
+gives the label `unknown` and turns every ambiguous step into redo. `references/resume.md` owns the
+recovery gate that shows the inventory in place of the not-ready question.
+
+**Why:** a transcript line alone cannot prove an artifact is complete, and any other transcript may
+be another cycle's. The gate's paragraph in `references/resume.md` raises every closure that reads it.
+
+```text
+budget: surface-budget.json surfaceTotal 7257
+budget: context-budget.json commands/continue.md 78159
+budget: context-budget.json commands/cycle.md 91900
+budget: context-budget.json playbooks/receiving-review.md 127045
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 97829
+```
+
+## 2026-11-21 — Planning logs its post-draft steps (#454)
+
+**Decision:** planning logs three more stage-log keys: `plan-assembled` (written by `plan-assemble.mjs --state`, with the
+plan's hash, alongside the state's `plan:` row), `plan-repair-<n>` and `plan-gate`, and `checker-round-<n>` carries its
+finding count. `scripts/plan-resume.mjs` reports a `next` step and a per-step status from them, and the planning resume
+continues at that `next`.
+
+**Why:** an uncontrolled stop after the drafts left no record of the assembly, the checker round, the repair or the gate,
+so a resume could not tell a finished post-draft step from one cut off mid-way (#454).
+
+```text
+budget: surface-budget.json surfaceTotal 7246
+budget: context-budget.json commands/continue.md 76988
+budget: context-budget.json commands/cycle.md 90841
+budget: context-budget.json playbooks/planning-waves.md 73817
+budget: context-budget.json playbooks/receiving-review.md 125986
+budget: context-budget.json playbooks/reviewing-the-branch.md 62954
+budget: context-budget.json playbooks/scoping-the-request.md 38190
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 96770
+budget: context-budget.json playbooks/verifying-on-device.md 68258
+```
+
+## 2026-11-21 — The interface lock checks consumers verbatim, and a pass's error is its worst replay's (#450)
+
+**Decision:** `scripts/interface-lock.mjs` accepts a consumed code span only when it equals, whitespace collapsed, a
+whole Produces item of the locked task or one of that item's code spans. The plan gate's `crossTask` leg
+(`scripts/cross-task-check.mjs`) accepts any substring of the producer's joined Produces lines. The lock stays the
+stricter of the two, because a drafter writes against it before the producer exists: a consumer that pins part of a
+signature is drift the lock must catch then. The gate reads a finished plan, whose Produces prose embeds the spans.
+`scripts/cost-model-fit.mjs` judges a pass by its worst replay, never by a median: the signed error of largest
+magnitude, a tie going to the positive one, so misses of opposite sign cannot cancel into a pass that reads calibrated.
+
+**Why:** the PR #474 branch review found the lock tightened in 4128c0b with no entry here, and the worst-replay rule
+(863b99d) stated only in a code comment.
+
+## 2026-11-21 — A re-logged `drafting-plan` row keeps `spent` (#450)
+
+**Decision:** a **Switch strategy** or **Reduce scope** re-log of `drafting-plan` carries every field, `spent` included, so
+`planningEstimate` keeps comparing the whole stage.
+
+**Why:** a branch review found a re-log could drop `spent`, since a re-log replaces the earlier row and `planningEstimate`
+then fell back to `est` alone.
+
+**Budgets:** `playbooks/planning-waves.md` gains one clause.
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 72617
+```
+
+## 2026-11-21 — `plan-strategy.mjs` prices a host-wrapped session model id as its bare id (#450)
+
+**Decision:** `scripts/plan-strategy.mjs` prices `--sessionModel` through `canonicalModelId`, now exported from
+`scripts/depth-bands.mjs`, so a `[1m]`, Bedrock or Vertex id prices like the bare id. An id still unpriced keeps the default
+and warns, naming the id as given and its canonical form. The planning-waves Estimate step prints the output's `warnings`
+with the figure.
+
+**Why:** a branch review found the playbook passes the transcript's model verbatim, so a wrapped id silently priced a
+1-task inline cut at 0.71 instead of 0.35 on the Opus default.
+
+**Budgets:** `playbooks/planning-waves.md` gains one clause.
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 72582
+```
+
+## 2026-11-21 — The handoff's `planning:` line is a true-end line, and the root README names the cost gate (#450)
+
+**Decision:** `references/handoff.md` carries the `planning:` line only at the planning stage's true end, where
+`plan-stats.mjs` prints it, and a mid-planning checkpoint block omits it, because the checkpoint cannot produce the line.
+The line's `est` is the whole-stage estimate. The planning-waves docs page no longer says `estimate` and the task-cut
+projection read one table: the bench's `estimate` reads the per-task rates and the projection reads the fitted role
+parameters, so the two disagree until a benchmark pass fits one from the other.
+
+**Why:** a branch review found the handoff rule unsatisfiable at a checkpoint and the one-table claim false, since on a
+12-task cut of three-file tasks the bench estimate runs about 17 times the projection under `grouped`, about twice under
+`grouped-fork`, and 0.7 to 1.3 times under `inline` and `checkpointed`.
+
+**Budgets:** `references/handoff.md` gains two lines, and every closure citing it carries them.
+
+```text
+budget: surface-budget.json surfaceTotal 7242
+budget: context-budget.json commands/continue.md 76960
+budget: context-budget.json commands/cycle.md 90316
+budget: context-budget.json playbooks/executing-waves.md 122668
+budget: context-budget.json playbooks/finishing-the-cycle.md 53948
+budget: context-budget.json playbooks/planning-waves.md 72481
+budget: context-budget.json playbooks/receiving-review.md 125958
+budget: context-budget.json playbooks/reviewing-the-branch.md 62457
+budget: context-budget.json playbooks/scoping-the-request.md 37693
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 96742
+budget: context-budget.json playbooks/taking-the-fast-path.md 55436
+budget: context-budget.json playbooks/verifying-on-device.md 67761
+budget: context-budget.json playbooks/writing-the-findings-document.md 68536
+budget: context-budget.json references/handoff.md 12313
+```
+
+## 2026-11-21 — The planning estimate covers the whole stage, and the projection prices the session's own model (#450)
+
+**Decision:** the cut logs `spent`, the planning dollars already spent, beside `est` in the `drafting-plan` row, read by
+`plan-stats.mjs spent` through the same `planningActual` the handoff uses. `planningEstimate` returns `est + spent`, so the
+`plan-stats` row's `estUsd` compares like with like with the actual; a row with no `spent` keeps `est` alone. The budget
+question still gates `projection.usd`, the projected cost of the remaining planning. `plan-strategy.mjs` takes
+`--sessionModel <id>`, which the playbook reads from `depth-probe.mjs --json`, and prices the coordinator and fork
+drafters on it; an id `pricing.mjs` does not price keeps the default and adds a `warnings` entry.
+
+**Why:** the projection prices only the draft, merge and check dispatches, while the actual holds the feasibility,
+research and spike spend before the cut, so the error was biased negative by that sunk cost and the calibration bound
+could only pass by fitting constants that absorb it. The session model was fixed at Opus 5.5 whatever the session ran.
+
+**Budgets:** the playbook's cut step gains two lines, and every closure citing it carries them.
+
+```text
+budget: surface-budget.json surfaceTotal 7240
+budget: context-budget.json commands/cycle.md 90144
+budget: context-budget.json playbooks/planning-waves.md 72309
+budget: context-budget.json playbooks/reviewing-the-branch.md 62285
+budget: context-budget.json playbooks/scoping-the-request.md 37521
+budget: context-budget.json playbooks/verifying-on-device.md 67589
+```
+
+## 2026-11-20 — Planning prints its projected cost, asks over a budget and can clear mid-stage (#450)
+
+**Decision:** at the task cut, planning prints `plan-strategy.mjs`'s `projection` and whether it is calibrated.
+Under Decision D2, when `planningBudgetUSD` is above 0 and the projection exceeds it, planning asks proceed,
+switch strategy or reduce scope, and labels the figure uncalibrated until `isCalibrated` holds. Under Decision D10,
+`checkpointed` (and `inline` once) offers a mid-stage clear at the over-budget band, with the
+`Session ended mid-planning: group <k> of <m>` handoff, and resumes from `plan-resume.mjs`. Under Decision D8, the
+planning handoff carries `plan-stats.mjs`'s `planning:` line.
+
+**Why:** spec §9.10 makes the cost of planning visible before it is spent and lets a long planning stage end cleanly
+instead of degrading at the context ceiling. The resume reads only the disk (D9): the stage log, the work files and
+the task files, never the transcript.
+
+**Budgets:** the playbook gains one section, and `references/handoff.md` a fourth first-field label and the
+`planning:` line, which every closure citing `references/handoff.md` carries.
+
+```text
+budget: surface-budget.json surfaceTotal 7238
+budget: context-budget.json commands/continue.md 76788
+budget: context-budget.json commands/cycle.md 90092
+budget: context-budget.json playbooks/executing-waves.md 122496
+budget: context-budget.json playbooks/finishing-the-cycle.md 53776
+budget: context-budget.json playbooks/planning-waves.md 71966
+budget: context-budget.json playbooks/receiving-review.md 125786
+budget: context-budget.json playbooks/reviewing-the-branch.md 62233
+budget: context-budget.json playbooks/scoping-the-request.md 37469
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 96570
+budget: context-budget.json playbooks/taking-the-fast-path.md 55264
+budget: context-budget.json playbooks/verifying-on-device.md 67537
+budget: context-budget.json playbooks/writing-the-findings-document.md 68364
+budget: context-budget.json references/handoff.md 12141
+```
+
+## 2026-11-20 — `references/resume.md` names the planning resume position (#450)
+
+**Decision:** `references/resume.md` § Resuming at the recorded stage gains one sentence that runs
+`scripts/plan-resume.mjs` at `stage: planning`, so a session cleared mid-planning resumes from the printed
+position instead of a transcript.
+
+**Why:** golden-path C3 leg 3 requires every CLI script to be invoked from the surface, and the resume path is where
+the position is read.
+
+**Budgets:** the sentence adds three lines to the runtime surface and bytes to every closure that reads
+`references/resume.md`.
+
+```text
+budget: surface-budget.json surfaceTotal 7209
+budget: context-budget.json commands/continue.md 76444
+budget: context-budget.json commands/cycle.md 89599
+budget: context-budget.json playbooks/receiving-review.md 125475
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 96259
+```
+
+## 2026-11-20 — `planningBudgetUSD` sets a dollar ceiling on planning (#450)
+
+**Decision:** Decision D5 adds a twentieth knob, `planningBudgetUSD`: a `number` userConfig whose default `0`
+means no budget. It resolves through the new `usd` kind in `scripts/resolve-knobs.mjs`, and it is not `live`, so
+`--compare` reports a mid-cycle change as drift, as it does for `planningStrategy`.
+
+**Why:** the projected-cost gate (spec §9.10) asks only when a budget is set, and a plain `number` keeps the
+loader accepting the manifest (the 0.17.0 `integer` rejection).
+
+**Budgets:** each entry command grows by one resolver line and `references/config.md` by one roster row, which every
+closure citing it carries, and `commands/continue.md` passes its 186-line ceiling.
+
+```text
+budget: surface-budget.json surfaceTotal 7206
+budget: surface-budget.json commandMax 187
+budget: context-budget.json commands/continue.md 76251
+budget: context-budget.json commands/cycle.md 89406
+budget: context-budget.json commands/learn.md 17884
+budget: context-budget.json commands/maintain.md 19063
+budget: context-budget.json commands/onboard.md 18172
+budget: context-budget.json commands/reconcile.md 25609
+budget: context-budget.json commands/review.md 26239
+budget: context-budget.json commands/verify.md 25337
+budget: context-budget.json playbooks/executing-waves.md 122152
+budget: context-budget.json playbooks/finishing-the-cycle.md 53465
+budget: context-budget.json playbooks/learning-from-sessions.md 66847
+budget: context-budget.json playbooks/maintaining-the-repo.md 68902
+budget: context-budget.json playbooks/onboarding-a-repo.md 31715
+budget: context-budget.json playbooks/reviewing-the-branch.md 61773
+budget: context-budget.json playbooks/verifying-on-device.md 67077
+budget: context-budget.json references/config.md 15242
+```
+
+## 2026-11-20 — Phase 2b ships without its benchmark pass (#443, #447)
+
+**Decision:** Decision D9: Phase 2b merges with no paid `plan-bench` pass of the `grouped` or `grouped-fork`
+arm. The P3 and P4 bars, the "P10 not worse" check, the P1–P12 deltas and the tuned decision-table thresholds
+are therefore unmeasured. The `grouped-fork` verdict (keep, drop or promote) is not recorded either: the arm
+exists as an experimental `planningStrategy` value and benchmark arm, but no run has judged it. The k ≤ 3 cap,
+the 150k per-drafter input cap, the ceil(N/3) drafter cap and the 4-drafter concurrency limit remain the initial
+values Decision D7 names.
+
+**Why:** the user declined the spend at the finish stage. The cheapest useful pass was about $83 estimated for
+`grouped` alone against the existing status-quo and inline baselines, and Phase 1's real grouped-4 run came in
+at about 2.5× its estimate.
+
+**How to apply:** a later phase or a follow-up run `node scripts/plan-bench.mjs` with `--arms grouped,grouped-fork`
+(budget above the default $150 for all three entries), records the deltas and verdict in a new entry here, and
+adjusts the `scripts/plan-strategy.mjs` thresholds. Until then `planningStrategy=auto` should be read as
+untuned for wide cuts.
+
+## 2026-11-20 — The blast-radius gate matches a changed non-code file by its last two path segments (#443, #447)
+
+**Decision:** Decision D8: `referenceToken` in `scripts/blast-radius-check.mjs` matches a changed non-code file by
+its written-out `<parent>/<basename>` path rather than its bare basename. A same-directory reference
+(`"./a.txt"`) and a path built in pieces (`join(root, "references", "x.json")`) are no longer flagged, an accepted
+miss. `--scan` still matches by basename. The `referencerRepo` fixture in `tests/unit/plan-check.test.mjs` moved
+from `"./a.txt"` to `"../src/a.txt"` to keep passing; no test pins the accepted miss yet.
+
+**Why:** a bare basename such as `README.md` or `index.json` collides across directories, so the gate flagged
+code that named an unrelated file of the same name, and each false positive cost a Files-block edit or an override.
+
+**Budgets:** the `planning-waves.md` figure also carries the branch-review prose fixes to its `plan-stats --strategy`
+list and its `split` wording.
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 69077
+```
+
+## 2026-11-20 — Planning decision table, grouped drafting and the interface lock (#443, #447)
+
+**Decision:** Decision D2: `auto` runs a decision table, `scripts/plan-strategy.mjs`, once the task cut exists.
+A cut of at most 12 tasks, or at most 30 weight points, drafts inline; above 25 tasks planning suggests splitting
+the spec; otherwise a cut with coupling at or above 0.5, or width below 3, drafts `checkpointed`, and a wide,
+loosely coupled one drafts `grouped`, unless grouping would need more than `ceil(N/3)` drafters, which makes it
+`checkpointed`. Decision D3: `checkpointed` drafts inline in one segment per wave group, logs `plan-group-<k>` as
+each segment's tasks are written, and never clears; Phase 3 adds the clear. Decision D7: the token profile, the
+150k per-drafter input cap, k ≤ 3 and at most 4 concurrent drafters are initial values in
+`scripts/plan-strategy.mjs`, which the benchmark pass tunes and records here. `grouped-fork` is an experimental
+`planningStrategy` value and benchmark arm: its result is recorded in this log whichever way it goes, once the
+benchmark pass has run.
+Decision D5: a group packs the tasks of one wave, because a wave's tasks are file-disjoint and
+dependency-free; what a task consumes from an earlier wave reaches its drafter by the interface lock
+(`scripts/interface-lock.mjs`), which also makes a drafter return an `interface-delta` for a pin it cannot hold.
+Decision D6: the edge checker is one fast-tier dispatch per batch of at most 8 producer→consumer pairs
+(`plan-assemble.mjs edges --batch`), never escalated for Files above 5; the scripted legs cover Files.
+
+**Why:** Plan A's medium replay: seven drafters alone made P3 1.0. The decision table keeps small cuts inline and
+groups only wide, loosely coupled ones. Four checker dispatches all escalated to the session tier, $2.12 against $0.06.
+
+**Budgets:**
+
+```text
+budget: surface-budget.json surfaceTotal 7197
+budget: context-budget.json commands/cycle.md 89273
+budget: context-budget.json commands/learn.md 17751
+budget: context-budget.json commands/maintain.md 18930
+budget: context-budget.json commands/onboard.md 18039
+budget: context-budget.json commands/reconcile.md 25476
+budget: context-budget.json commands/review.md 26106
+budget: context-budget.json commands/verify.md 25204
+budget: context-budget.json playbooks/executing-waves.md 122078
+budget: context-budget.json playbooks/finishing-the-cycle.md 53391
+budget: context-budget.json playbooks/maintaining-the-repo.md 68828
+budget: context-budget.json playbooks/onboarding-a-repo.md 31641
+budget: context-budget.json playbooks/planning-waves.md 68816
+budget: context-budget.json playbooks/reviewing-the-branch.md 61699
+budget: context-budget.json playbooks/scoping-the-request.md 37009
+budget: context-budget.json playbooks/taking-the-fast-path.md 54953
+budget: context-budget.json playbooks/verifying-on-device.md 67003
+budget: context-budget.json references/config.md 15168
+budget: context-budget.json references/model-routing.md 10584
+```
+
+## 2026-11-20 — P9 counts rework, not re-runs; plan-stats records the non-test fence share (#443, #447)
+
+**Decision:** Decision D3: `plan-stats` records `nonTestFenceShare` beside `fenceShare`. P8's fence share
+exempts a red-green task's failing-test fences, which the contract mandates. The `proportion` leg warns
+above 20% and fails above 30% on the non-test share; the byte ratio stays at 5× and 8×. The gross share is
+still recorded. P8's bar reads the non-test share at 20%, and a row recorded before this change is judged
+on its gross share at 30%. Decision D4: P9 counts a planning `gate-ran` fail once per plan text. Every
+`gate-ran` event carries `planDigest`, and a fail whose `planDigest` and failing legs equal the previous
+planning `gate-ran` event's is a re-run, not rework.
+
+**Why:** both Phase 2a medium arms' first two gate fails were one identical re-run 8–12 seconds apart, so
+P9's `fails <= 2` bar charged a plan for running the same check twice.
+
+**Budgets:**
+
+```text
+budget: context-budget.json commands/continue.md 76207
+budget: context-budget.json commands/cycle.md 89132
+budget: context-budget.json playbooks/executing-waves.md 122067
+```
+
+## 2026-11-20 — P8 measures non-test code fences (#443, #447)
+
+**Decision:** Decision D3: the `proportion` leg of `scripts/plan-check.mjs` measures the non-test
+code-fence share, which is the gross share less every exempt fence. A fence is exempt when it sits in a
+`red-green` task, its info word names a programming language, and the lines between its fence lines read
+as a test. The leg warns above 20% and fails above 30% on that share; the byte ratio stays at 5× and 8×.
+The gross share is still recorded. P8's bar reads the non-test share at 20%, and a row recorded before
+this change is judged on its gross share at 30%.
+
+**Why:** failing-test fences are 26–29 points of a contract-compliant medium plan's 39% share, so the
+gross 30% and 45% figures cannot be met by a plan that follows the 2a rule. The spike evidence is local
+and cited by name only: `.devcycle/plan-work/0537d39d2097d3b6/spikes/1.md`.
+
+**Supersedes:** the Contract-only plans entry's initial 5× / 30% warn and 8× / 45% fail figures, the
+share part only.
+
+**Budgets:**
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 66184
+```
+
+## 2026-11-19 — Contract-only plans: the 0.32.0 full-code default reversed (#446, #448)
+
+**Decision:** a plan pins the contract, not the implementation. A `red-green` task pins its full
+`**Interfaces:**` block, its complete failing test code in a fenced block and its exact gate commands
+with expected red and green output; its implementation steps are prose. `**Detail:** code-pinned —
+<reason>` opts a task into a full implementation body, and `interface-pinned — <reason>` stays accepted
+as the older form of the default (spec §9.1). A plan no longer has every fenced block prototyped, a run
+marker (`(verified:)` or `(unrun:)`) on each fence, or the `briefFacts` marker check; execution proves
+pinned test code red, then green. The `proportion` leg of `scripts/plan-check.mjs` warns above 5× the
+spec's bytes or 30% code fences and fails above 8× or 45% unless a `- Proportion override: <reason>` line
+says why; those figures are initial, to be tuned in Phase 2b. After assembly a fast-tier edge checker runs
+once per producer→consumer pair, reading only the two task files and `pack.md`. A finding goes back to its
+task's drafter by `SendMessage` and never to a fresh dispatch (patch, not redraft), and one checker round
+plus one repair round is the cap, after which residual findings go to the user. Decision D2: a checker
+dispatch's description is `plan-checker: round <n> — Task <p> → Task <c>`, the dispatch sensor writes
+`round` on its `agent-cost` row, and doctor's P9 counts distinct rounds. Decision D3: the edge checker runs
+on the delegated path only; an inline coordinator relies on the `crossTask` leg.
+
+**Why:** the full-code default made the plan larger than the work it described, and prototyping every
+block cost more than the implementer's own red and green proves (#446, #448).
+
+**Supersedes:** the 0.32.0 rule that every plan step carries its implementation code and every fenced
+block a run marker.
+
+P1–P12 deltas: Phase 2a benchmark pass, 2026-11-20, same corpus and arms as `phase1-baseline`, run on
+this branch's tip (the medium inline replay hit the weekly usage limit and was re-run alone). Baseline →
+Phase 2a:
+
+| Entry · arm | P1 $/task | P3 disp/task | P4 p95 depth | P8 bytes×/fence | P9 gate fails/rounds | P11 min/task |
+| --- | --- | --- | --- | --- | --- | --- |
+| small · status-quo | 1.23 → 0.83 | 0.33 → 0.25 | 115904 → 65377 | 4.06/27% → 3.33/16% | 7/0 → 1/0 | 5.5 → 4.3 |
+| small · inline | 1.25 → 0.84 | 0.25 → 0.25 | 84508 → 49756 | 4.00/29% → 3.74/16% | 4/0 → 3/0 | 3.8 → 4.9 |
+| medium · status-quo | 2.00 → 1.97 | 1.29 → 1.71 | 149164 → 106409 | 7.77/48% → 6.50/39% | 10/1 → 5/1 | 5.2 → 4.1 |
+| medium · inline | no baseline (errored) → 0.97 | n/a | n/a | 3.80/39% | 5/0 | 2.9 |
+
+P2, P5 and P10 are unmeasured: both medium replays stopped at the leg cap before execution finished, and
+P10 read 0 attributed defects with nothing to attribute. **The exit bars are met only on the small entry.**
+The P8 fence-share bar (≤ 30%) and the P9 gate-fail bar (≤ 2) are missed on both medium arms, and P8's
+byte bar (≤ 5×) on the medium status-quo arm. The medium status-quo arm's P3 rose (more dispatches per task,
+consistent with the added edge checkers), and the small inline arm's P9 (3 gate fails) and P11 got worse. These
+misses carry into Phase 2b, whose tuning of the `proportion` leg's figures and of the gate legs is where they
+get addressed.
+
+**Budgets:**
+
+```text
+budget: context-budget.json commands/continue.md 76096
+budget: context-budget.json commands/cycle.md 89021
+budget: context-budget.json playbooks/maintaining-the-repo.md 68826
+budget: context-budget.json playbooks/planning-waves.md 66128
+budget: context-budget.json playbooks/reviewing-the-branch.md 61535
+budget: context-budget.json playbooks/scoping-the-request.md 36873
+budget: context-budget.json playbooks/taking-the-fast-path.md 54943
+budget: context-budget.json playbooks/verifying-on-device.md 66849
+budget: context-budget.json references/model-routing.md 10574
+budget: surface-budget.json surfaceTotal 7163
+```
+
+## 2026-11-19 — Per-task plan work files and the assembler (#448)
+
+**Decision:** while planning, on every path, each task is its own work file,
+`.devcycle/plan-work/<run id>/tasks/task-<n>.md`, beside `plan-header.md` and `dispatch-map.md`.
+`scripts/plan-assemble.mjs` assembles the plan from them and fails on a missing or duplicate task id,
+replacing the shell concatenation of `drafts/task-<n>.md`. The task file is canonical while planning,
+so a later change goes into it and the plan is re-assembled; the assembled plan keeps the shape
+`playbooks/executing-waves.md` reads.
+
+**Why:** a plan cut from per-task files gives a repair pass one file per task and the merge a check on
+ids that concatenation never made (#448).
+
+**Budgets:**
+
+```text
+budget: context-budget.json commands/cycle.md 88838
+budget: context-budget.json playbooks/planning-waves.md 64754
+budget: context-budget.json playbooks/reviewing-the-branch.md 61394
+budget: context-budget.json playbooks/scoping-the-request.md 36811
+budget: context-budget.json playbooks/verifying-on-device.md 66787
+budget: surface-budget.json surfaceTotal 7144
+```
+
+## 2026-11-19 — Phase 1 review fixes, round 2: the drafter's stop and the plan header
+
+**Decision:** a drafter that cannot hold a pinned interface returns a summary line beginning
+`stopped: <what pin cannot hold>` and writes no draft; the coordinator, who owns Interfaces, decides
+the pin and re-dispatches that task or drafts it inline, and the merge splices only drafts that exist
+and does not proceed while a dispatched task has none. This is deliberately not Phase 2b's
+`interface-delta:` protocol (spec §9.4): no lock, no deltas, no keyword beyond `stopped:`. The
+drafter-tier sentence in `references/delegated-planning.md` now defers to
+`references/model-routing.md` § Planning dispatches and § Model tiers instead of restating a narrower
+subset of the table. The plan header gets its own work file, `plan-header.md`, written once by the
+coordinator before it dispatches drafters, so the drafter brief's by-path reference and the
+`## Quality Constraints` section its `**Quality constraints:**` ids cite have a file to point at.
+`agents/plan-drafter.md` also gains the `output.md` report line its sibling agents carry.
+
+**Why:** the round 2 branch review found the drafter's stop had no reader, the tier sentence
+contradicted the routing table, and the brief named a plan header no work-file list contained.
+
+**Budgets:**
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 64088
+budget: surface-budget.json surfaceTotal 7139
+```
+
+## 2026-11-19 — Phase 1 review fixes: planning model line and checker tier
+
+**Decision:** a planning dispatch records no `outcome=model … (planning: <role>)` ledger line, which
+departs from spec §9.5 bullet 1: `.devcycle/ledger.md` is created by `playbooks/executing-waves.md`,
+after planning, a planning dispatch has no task id, and `references/ledger.md`'s event line does not
+define the two strings. Its audit record is its `agent-cost` run-record row (`model`, `explicitModel`),
+which doctor's tier-fit check already reads. The Phase 1 checker stays routed fast: it reviews the whole
+merged plan, where spec §9.5's "unless the edge crosses Files > 5" escape belongs to Phase 2a's
+cross-task edge checker, but §9.5 classifies the checker role as fast and doctor's tier-fit rule keys on
+role. The escape and the per-edge scope arrive with Phase 2a; the benchmark's P7 bar is where a quality
+loss from this choice would show, and a loss reopens it. The Quality-constraints line rule moves into
+`references/plan-task-format.md`, `agents/plan-drafter.md` drops the `interface-delta:` protocol
+until Phase 2b (spec §9.4) has a consumer for it, and the coordinator sets a drafter's tier from the
+task cut it holds.
+
+**Why:** the Phase 1 branch review found the drafter could not read the Quality-constraints rule it was
+told to follow, the model line had no writer or reader, and `interface-delta:` had no coordinator rule.
+
+**Budgets:**
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 63490
+budget: surface-budget.json surfaceTotal 7128
+```
+
+## 2026-11-19 — Planning names its models and runs spikes as capped fast-tier `Explore`
+
+**Decision:** `references/model-routing.md` gains § Planning dispatches: every planning dispatch
+names its model, a session-tier one the orchestrator's own id, at the tier its table assigns (research,
+spike and checker fast; a drafter fast only for an interface-pinned task with Files ≤ 5). Spikes run
+as `Explore` and return at most fifteen lines, which the coordinator persists; an unknown that only
+needs reading rides the research dispatch. Drafters read a context pack of about 8k tokens,
+`.devcycle/plan-work/<run id>/pack.md`, written stable content first. The "fifth of the price"
+figure gives way to `scripts/pricing.mjs`, and `references/ledger.md` documents `agent-cost`'s
+`sourcePrints` and `reads`.
+
+**Why:** planning dispatches inherited the session model, or a configured default subagent model,
+and spikes ran as `general-purpose` at the session tier (#444, #406; spec §9.5, §9.7). The section
+sits in `references/model-routing.md`, which seven closures read, so each of them grows by its bytes;
+`playbooks/planning-waves.md` section-reads it for the repo-research dispatch, and
+`references/delegation.md` § Research dispatches, in eight closures, excepts planning dispatches
+from its omit-the-override rule.
+
+**Budgets:**
+
+```text
+budget: context-budget.json commands/continue.md 75975
+budget: context-budget.json commands/cycle.md 88750
+budget: context-budget.json playbooks/executing-waves.md 122013
+budget: context-budget.json playbooks/learning-from-sessions.md 66781
+budget: context-budget.json playbooks/maintaining-the-repo.md 68749
+budget: context-budget.json playbooks/planning-waves.md 62924
+budget: context-budget.json playbooks/receiving-review.md 125362
+budget: context-budget.json playbooks/reviewing-code.md 103944
+budget: context-budget.json playbooks/reviewing-the-branch.md 61308
+budget: context-budget.json playbooks/scoping-the-request.md 36723
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 96225
+budget: context-budget.json playbooks/taking-the-fast-path.md 54866
+budget: context-budget.json references/delegation.md 12832
+budget: context-budget.json references/model-routing.md 10497
+budget: surface-budget.json surfaceTotal 7121
+```
+
+## 2026-11-19 — Planning drafters run as `devcycle:plan-drafter`
+
+**Decision:** delegated planning dispatches its drafters as the new `devcycle:plan-drafter` agent
+(tools Read, Grep, Glob, Bash, Write; no model pin), which reads the context pack, the plan header and
+`references/plan-task-format.md`, never `playbooks/planning-waves.md`, and writes only its own draft
+files. It is not in `GUARDED_AGENT_TYPES`: the git guard denies `git worktree add`, which prototyping
+needs, so the agent forbids staging, committing and pushing in its own text until Phase 2a drops
+prototyping.
+
+**Why:** a general-purpose drafter loaded the whole playbook and its closure for one task's rules;
+a named agent with a narrow reading list lowers each drafter's startup floor (#445; spec §9.3
+"Drafter agent").
+
+**Budgets:**
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 60784
+budget: surface-budget.json surfaceTotal 7085
+```
+
+## 2026-11-19 — Brainstorm persists the spec reviewer's confirmed claims
+
+**Decision:** after `devcycle:spec-reviewer`'s last pass, `commands/cycle.md` step 4 writes the
+reviewer's Verified list to `.devcycle/spec-verified.md` and stamps it through `spec-claims.mjs write`;
+the reviewer's Verified entries take the one-line shape `parseVerified` reads. The reviewer stays
+read-only: the coordinator writes both files.
+
+**Why:** planning's feasibility gate re-verified every claim the reviewer had just confirmed (#445;
+spec §9.7).
+
+**Budgets:**
+
+```text
+budget: context-budget.json commands/cycle.md 88590
+budget: surface-budget.json surfaceTotal 7057
+```
+
+## 2026-11-19 — Planning splits its drafter rules into `references/plan-task-format.md`
+
+**Decision:** `playbooks/planning-waves.md` keeps the coordinator's work (feasibility gate, Quality
+Constraints, the cut, the strategy choice, the Dispatch Map, the handoff); the task block, the three
+per-task declaration lines, Files derivation, No placeholders and the per-task checks move to the new
+`references/plan-task-format.md`, which whoever drafts reads. Self-review item 8's description of the
+plan-check legs moves into `plan-check.mjs --help`, single-section citations become `read-section.mjs`
+reads, and the feasibility gate starts from `spec-claims.mjs check`.
+
+**Why:** a drafter needs the task rules, never the coordinator's playbook, and the planning closure
+carried whole references for one section each (#445; spec §9.3, budget target ≤ 70 KB).
+
+**Budgets:**
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 60860
+budget: context-budget.json playbooks/maintaining-the-repo.md 67297
+budget: surface-budget.json surfaceTotal 7053
+```
+
+## 2026-11-19 — The planning benchmark replays headless, answers gates by resuming, and clones
+
+**Decision:** `scripts/plan-bench.mjs` replays a gitignored corpus of specs through headless
+`claude -p` planning, once per `planningStrategy` arm, and scores each replay with doctor's own
+P1–P12 rubric. It answers each gate from a per-entry answer file by resuming the session the gate
+ended, cuts a scratch **clone** at the entry's base rather than a worktree, prints its estimate
+first, refuses a pass past `--budget` (default $150), and launches nothing without the go-ahead
+token of the estimate the user approved. Spec §9.9 left the harness's name and docs page to the
+builder; the user chose both, and the clone. The default budget stays at the user's $150 per pass and the
+estimate keeps the upper ends of #442's rates, so a pass of one small, one medium and one large entry at
+default sizes ($172.60) is refused at the default: it takes a smaller corpus or an explicit `--budget`
+above the target, which only the user decides. `run` never starts in a driven session.
+
+**Why:** a 2026-11-19 spike (`docs/platform-notes.md` § (r)) showed `AskUserQuestion` is absent under
+`-p`, that a gate ends the session as result text, that `--resume` continues it, and that a
+`--settings` `pluginConfigs` override reaches a `--plugin-dir` load, so a replay can force its arm
+through the real knob channel. A worktree shares the source repo's refs, so a replay's execution leg
+would cut branches in the user's checkout; a clone cannot. The 0.32.2 external baseline will not be
+imported, so the status-quo arm run here is the baseline.
+
+**Supersedes:** the spec's "cut a scratch worktree at `baseSha`" (§9.9) and its external-baseline
+import (§9.9, §11).
+
+## 2026-11-19 — The planning playbook honours `planningStrategy`
+
+**Decision:** `playbooks/planning-waves.md` § Delegated planning reads `planningStrategy` off the
+`knobs:` line: `inline` never trips the per-task drafter threshold, and `auto` and `status-quo`
+apply both thresholds as written. The spike threshold is untouched, since a spike settles
+feasibility rather than drafting.
+
+**Why:** the knob is only an arm if the stage that drafts reads it; the benchmark's inline arm is
+otherwise indistinguishable from status-quo on any plan of five or more tasks.
+
+**Budgets:** two lines, 201 bytes, in the playbook and its closure.
+
+```text
+budget: surface-budget.json surfaceTotal 7043
+budget: context-budget.json playbooks/planning-waves.md 90741
+```
+
+## 2026-11-19 — `planningStrategy` forces the planning stage's drafting arm
+
+**Decision:** a nineteenth knob, `planningStrategy` (`auto` | `status-quo` | `inline`, default `auto`),
+resolved like every other knob through `scripts/resolve-knobs.mjs` and passed by every entry command.
+`status-quo` keeps the delegation thresholds, `inline` never fans out per-task drafters, and `auto`
+is `status-quo` until the planning decision table (spec §8, Phase 2b) gives it a meaning of its own.
+
+**Why:** the planning benchmark (#449) compares arms like for like, so a replay must be able to force
+one; spec §8 names the knob. Only the two arms that exist as behaviour are accepted, so no value
+promises an arm that is not built; later phases add theirs with a config-changelog record.
+
+**Budgets:** each entry command grows by one resolver line and `references/config.md` by one roster
+row, which every closure citing it carries; `commands/continue.md` passes its 185-line ceiling.
+
+```text
+budget: surface-budget.json surfaceTotal 7041
+budget: surface-budget.json commandMax 186
+budget: context-budget.json commands/continue.md 75815
+budget: context-budget.json commands/cycle.md 88333
+budget: context-budget.json commands/learn.md 17746
+budget: context-budget.json commands/maintain.md 18925
+budget: context-budget.json commands/onboard.md 18034
+budget: context-budget.json commands/reconcile.md 25471
+budget: context-budget.json commands/review.md 26101
+budget: context-budget.json commands/verify.md 25199
+budget: context-budget.json playbooks/executing-waves.md 120401
+budget: context-budget.json playbooks/finishing-the-cycle.md 53386
+budget: context-budget.json playbooks/learning-from-sessions.md 66658
+budget: context-budget.json playbooks/maintaining-the-repo.md 67280
+budget: context-budget.json playbooks/onboarding-a-repo.md 31636
+budget: context-budget.json playbooks/planning-waves.md 90540
+budget: context-budget.json playbooks/receiving-review.md 123910
+budget: context-budget.json playbooks/reviewing-code.md 102492
+budget: context-budget.json playbooks/reviewing-the-branch.md 59979
+budget: context-budget.json playbooks/verifying-on-device.md 66699
+budget: context-budget.json references/config.md 15163
+```
+
+## 2026-11-19 — An inline plan's research dispatch opens with `plan-research: `
+
+**Decision:** `playbooks/planning-waves.md` § Reuse before rebuild says the repo-research dispatch's
+`description` opens with `plan-research: `, so an inline plan, which never reads
+`references/delegated-planning.md`, still gets a role on its `agent-cost` row.
+
+**Why:** the prefix was stated only in the delegated-planning reference, read past a delegation
+threshold; an inline run's only planning dispatch carried no role, so doctor listed a `no-role` gap
+and rubric P12 could never pass on the baseline Phase 0 measures.
+
+**Budgets:** the playbook grows by one sentence, one line and 120 bytes; its closure and the runtime
+surface carry it.
+
+```text
+budget: surface-budget.json surfaceTotal 7032
+budget: context-budget.json playbooks/planning-waves.md 90429
+```
+
+## 2026-11-19 — The agent-cost row says why a cost is unknown
+
+**Decision:** an `agent-cost` row whose `usd` is null carries an optional `measurement` naming the
+reason (`unpriced-model:<id>`, `no-priced-turns`, `missing-transcript`,
+`earlier-row-unpriced`), and doctor's sensor-gap list reports it as `null-usd:<measurement>`.
+
+**Why:** the branch review found a null cost indistinguishable from a model with no price row, while
+the spec asks for sensor gaps with a cause.
+
+**Budgets:** the `agent-cost` row description in `references/ledger.md` grows by the field, which
+every closure that cites the ledger carries.
+
+```text
+budget: context-budget.json commands/continue.md 75758
+budget: context-budget.json commands/cycle.md 88165
+budget: context-budget.json playbooks/executing-waves.md 120290
+```
+
+## 2026-11-18 — Planning dispatches name their role
+
+**Decision:** every planning-stage dispatch opens its `description` with `plan-<role>: `, one of
+spike, research, drafter, checker or repair, and the dispatch sensor copies that role onto the
+agent's `agent-cost` row.
+
+**Why:** doctor's Planning breakdown prices planning by role; a description prefix needs no new
+hook input and costs one sentence in `references/delegated-planning.md`.
+
+**Budgets:** `references/delegated-planning.md` grows by that sentence, which
+`playbooks/planning-waves.md` carries through its citation.
+
+```text
+budget: surface-budget.json surfaceTotal 7031
+budget: context-budget.json playbooks/planning-waves.md 90309
+```
+
+## 2026-11-18 — Planning's handoff records the plan's shape
+
+**Decision:** the planning handoff runs `scripts/plan-stats.mjs`, which appends one `plan-stats`
+run-record row: spec and plan bytes, fenced-code share, task and wave counts, strategy, drafter count,
+subagent dollars and the spec-review result.
+
+**Why:** the planning-stage overhaul (#442) is weighed against these figures, and a CLI that no surface
+invokes is dead code to the golden-path check, so the script and its one caller land together.
+
+**Budgets:** the handoff paragraph of `playbooks/planning-waves.md` grows by its invocation.
+
+```text
+budget: surface-budget.json surfaceTotal 7027
+budget: context-budget.json playbooks/planning-waves.md 89864
+```
+
+## 2026-11-18 — The run record carries planning cost and plan-shape telemetry
+
+**Decision:** the run record gains an `agent-cost` kind (one row per released `SubagentStop`, with
+per-agent token and dollar deltas), a `plan-stats` kind (one row at the planning handoff), a `legs`
+field on the `gate-ran` event naming the failing plan-check legs, and the `plan-defect` culprit for an
+execution task traced to plan content.
+
+**Why:** planning's cost and shape were unmeasured, so a plan that was expensive to draft or that
+later blocked execution could not be told apart from one that was cheap and sound.
+
+**Budgets:** `references/ledger.md` § The run record gains two rows, which every closure that cites it
+carries. The figures below are the new ceilings.
+
+```text
+budget: surface-budget.json surfaceTotal 7024
+budget: context-budget.json commands/continue.md 75618
+budget: context-budget.json commands/cycle.md 88025
+budget: context-budget.json playbooks/executing-waves.md 120150
+```
+
 ## 2026-11-17 — The `single` review engine runs one reviewer per lens (#438)
 
 **Decision:** `reviewDepth=single` dispatches one fresh-context `devcycle:red-team-reviewer` per lens,

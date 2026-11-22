@@ -14,11 +14,14 @@ import { dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { AGENT_ID_CHARS, AGENT_TYPE_CHARS, MODEL_CHARS, clean, runContext, sessionJoined } from "./lib/run-context.mjs";
-import { transcriptStats } from "../scripts/depth-probe.mjs";
+import { transcriptReads, transcriptStats } from "../scripts/depth-probe.mjs";
+import { priceTranscript } from "../scripts/dispatch-cost.mjs";
 import { holdStop, holdTurnEnd, markEnded, markStopped } from "../scripts/dispatch-health.mjs";
 import { holdsDriveToken } from "../scripts/drive-lock.mjs";
 import { isMain } from "../scripts/is-main.mjs";
+import { eachRecord } from "../scripts/jsonl.mjs";
 import { retireProcess } from "../scripts/process-registry.mjs";
+import { gitToplevel, recordPath } from "../scripts/run-record.mjs";
 import { now } from "../scripts/stamp.mjs";
 import { stopPaths, stopWindowOpen } from "../scripts/stop-files.mjs";
 
@@ -28,6 +31,55 @@ export const DEPTH_BREACH = 200_000;
 const TASK_ID = /^[0-9A-Za-z_-]{1,64}$/;
 
 export const depthOf = (tokens) => (tokens > DEPTH_BREACH ? "breach" : tokens > DEPTH_WARN ? "warn" : "ok");
+
+// The planning role a dispatch description names: the `plan-<role>: ` prefix and nothing else.
+const ROLE_PREFIX = /^plan-(spike|research|drafter|checker|repair): /;
+export const roleOf = (description) => (typeof description === "string" ? ROLE_PREFIX.exec(description)?.[1] ?? null : null);
+// A fork records `model: "inherit"` in its sidecar: it took its parent's model rather than being given one.
+export const namesModel = (sidecar) => typeof sidecar.model === "string" && sidecar.model !== "" && sidecar.model !== "inherit";
+// A checker dispatch's "plan-checker: round <n>" tag: the n-th re-check of one plan, so doctor counts rounds, not agents.
+const ROUND_TAG = /^plan-checker: round (\d+)\b/;
+export const roundOf = (description) => (typeof description === "string" ? Number(ROUND_TAG.exec(description)?.[1] ?? NaN) || null : null);
+
+// `unpriced-model:<id>` is the longest measurement; the id is cleaned to MODEL_CHARS and 80 characters first.
+const MEASUREMENT_MAX = 120;
+const COST_COUNTS = ["inputTokens", "cacheWriteTokens", "cacheReadTokens", "outputTokens", "turns", "sourcePrints"];
+
+// What an agent spent since its earlier agent-cost rows of this run: its transcript is cumulative,
+// so a resumed agent's later stop must not count the first stop's turns again. A null usd on either
+// side makes the difference unknowable; a count is clamped because a transcript can only shrink by
+// being rewritten, and a row's schema forbids negatives. A count the totals do not carry is not
+// measured, and an earlier row written before a count existed contributes nothing to it. `reads` is
+// a delta per path: a path whose estimate did not grow is dropped.
+export function costDelta(totals, earlier) {
+  const delta = { continuationOf: earlier.length };
+  for (const key of COST_COUNTS.filter((k) => k in totals))
+    delta[key] = Math.max(0, totals[key] - earlier.reduce((sum, row) => sum + (row[key] ?? 0), 0));
+  if (totals.reads) {
+    delta.reads = {};
+    for (const [path, tokens] of Object.entries(totals.reads)) {
+      const grown = tokens - earlier.reduce((sum, row) => sum + (row.reads?.[path] ?? 0), 0);
+      if (grown > 0) delta.reads[path] = grown;
+    }
+  }
+  delta.usd = totals.usd === null || earlier.some((row) => row.usd === null)
+    ? null
+    : Math.max(0, totals.usd - earlier.reduce((sum, row) => sum + row.usd, 0));
+  return delta;
+}
+
+// The agent's sidecar sits beside its transcript. Missing or unreadable is "unknown", never a fault.
+function readSidecar(transcriptPath) {
+  try { return JSON.parse(readFileSync(transcriptPath.replace(/\.jsonl$/, ".meta.json"), "utf8")) ?? {}; } catch { return {}; }
+}
+
+function earlierCostRows(repoRoot, run, agentId) {
+  const rows = [];
+  eachRecord(recordPath(gitToplevel(repoRoot), run), (r) => {
+    if (r.kind === "agent-cost" && r.agentId === agentId) rows.push(r);
+  });
+  return rows;
+}
 
 function readInput() {
   const o = JSON.parse(readFileSync(0, "utf8") || "{}");
@@ -94,8 +146,35 @@ function main() {
     "--model", clean(stats.model, MODEL_CHARS, 80) || "unknown",
     "--tokens", String(stats.depth), "--toolUses", String(stats.toolUses), "--durationMs", String(stats.durationMs),
     "--depth", depth]);
-  if (w.status !== 0 || depth !== "breach") return;
-  append(["--kind", "event", "--event", "depth-breach", "--stage", stage]);
+  if (w.status === 0 && depth === "breach") append(["--kind", "event", "--event", "depth-breach", "--stage", stage]);
+
+  // The agent's spend, a delta over its earlier rows of this run. Without an agentId there is no key
+  // to take that delta against, so no row is written rather than one that would double-count.
+  try {
+    if (!agentId) return;
+    const sidecar = readSidecar(transcriptPath);
+    const earlier = earlierCostRows(repoRoot, run, agentId);
+    // A SendMessage repair makes no new dispatch, so it carries the drafter's original description: a resumed drafter is repairing.
+    const named = roleOf(sidecar.description);
+    const role = named === "drafter" && earlier.length > 0 ? "repair" : named;
+    const round = role === "checker" ? roundOf(sidecar.description) : null;
+    const priced = priceTranscript(transcriptPath);
+    // A planning dispatch also records what it read; `reads` is written even when empty, so its
+    // presence says the row was measured.
+    const cost = costDelta(role ? { ...priced, ...transcriptReads(transcriptPath) } : priced, earlier);
+    // A null usd says why: the transcript's own measurement, or, when only an earlier row was unpriced, that.
+    const measurement = cost.usd === null ? clean(priced.usd === null ? priced.measurement : "earlier-row-unpriced", MODEL_CHARS, MEASUREMENT_MAX) : "";
+    append(["--kind", "agent-cost", "--stage", stage,
+      "--agentType", clean(input.agent_type, AGENT_TYPE_CHARS, 80) || "unknown",
+      "--agentId", agentId,
+      "--model", clean(stats.model, MODEL_CHARS, 80) || "unknown",
+      ...(round !== null ? ["--round", String(round)] : []),
+      ...(role ? ["--role", role, "--sourcePrints", String(cost.sourcePrints), "--reads", JSON.stringify(cost.reads)] : []),
+      "--explicitModel", String(namesModel(sidecar)),
+      "--inputTokens", String(cost.inputTokens), "--cacheWriteTokens", String(cost.cacheWriteTokens),
+      "--cacheReadTokens", String(cost.cacheReadTokens), "--outputTokens", String(cost.outputTokens),
+      "--usd", String(cost.usd), ...(measurement ? ["--measurement", measurement] : []), "--turns", String(cost.turns), "--continuationOf", String(cost.continuationOf)]);
+  } catch { /* observe-only */ }
 }
 
 if (isMain(import.meta.url, process.argv[1])) {

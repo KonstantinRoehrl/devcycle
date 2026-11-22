@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { roleOf, roundOf, costDelta, namesModel } from "../../hooks/dispatch-sensor.mjs";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
 import { repoSlug, gitToplevel, hashSession } from "../../scripts/run-record.mjs";
@@ -55,7 +56,7 @@ test("a finished subagent leaves one agent-depth row with its final depth", () =
   const r = callHook(fx);
   assert.equal(r.status, 0);
   assert.equal(r.stdout, "");
-  const [row, ...rest] = rows(fx.repo, fx.runsDir);
+  const [row, ...rest] = rows(fx.repo, fx.runsDir).filter((o) => o.kind === "agent-depth");
   assert.equal(rest.length, 0);
   assert.equal(row.kind, "agent-depth");
   assert.equal(row.stage, "planning");
@@ -108,7 +109,7 @@ test("after a /clear resume every session row of the run counts as the cycle's, 
   for (const sessionId of [before, SESSION]) {
     const fx = fixture({ sessions: [before, SESSION] });
     assert.equal(callHook(fx, { session_id: sessionId }).status, 0);
-    assert.deepEqual(rows(fx.repo, fx.runsDir).map((o) => o.kind), ["agent-depth"], sessionId);
+    assert.deepEqual(rows(fx.repo, fx.runsDir).map((o) => o.kind), ["agent-depth", "agent-cost"], sessionId);
   }
 });
 
@@ -346,4 +347,219 @@ test("Stop: a dispatch with its report, or a stop window, releases the driven tu
   const stopping = drivenFixture();
   writeInto(stopping.repo, ".devcycle/stop-request", JSON.stringify({ requestedAt: new Date().toISOString(), sessions: [] }));
   assert.equal(withDriveLock(stopping, () => callStop(stopping, { DEVCYCLE_DRIVE_TOKEN: DRIVE_TOKEN })).stdout, "");
+});
+
+// Per-agent cost rows. The fixture's haiku turn is 16149 in / 38 out at $1 / $5 per million.
+const costRows = (fx) => rows(fx.repo, fx.runsDir).filter((o) => o.kind === "agent-cost");
+const writeSidecar = (fx, meta) => writeFileSync(fx.transcript.replace(/\.jsonl$/, ".meta.json"), JSON.stringify(meta));
+
+test("roleOf: reads the plan-<role>: prefix of a dispatch description, and nothing else", () => {
+  for (const role of ["spike", "research", "drafter", "checker", "repair"]) assert.equal(roleOf(`plan-${role}: map the call sites`), role);
+  assert.equal(roleOf("Re-verify spec repo claims"), null);
+  assert.equal(roleOf("plan-reviewer: map the call sites"), null);
+  assert.equal(roleOf("plan-research map the call sites"), null);
+  assert.equal(roleOf("map the call sites (plan-research: x)"), null);
+  assert.equal(roleOf(undefined), null);
+});
+
+test("costDelta: a first stop is the totals; a continuation is the difference from the earlier rows", () => {
+  const totals = { inputTokens: 1000, cacheWriteTokens: 200, cacheReadTokens: 500, outputTokens: 60, usd: 0.5, turns: 4 };
+  assert.deepEqual(costDelta(totals, []), { ...totals, continuationOf: 0 });
+  const earlier = [{ inputTokens: 400, cacheWriteTokens: 50, cacheReadTokens: 100, outputTokens: 20, usd: 0.125, turns: 1 },
+    { inputTokens: 100, cacheWriteTokens: 0, cacheReadTokens: 100, outputTokens: 10, usd: 0.125, turns: 1 }];
+  assert.deepEqual(costDelta(totals, earlier), { inputTokens: 500, cacheWriteTokens: 150, cacheReadTokens: 300, outputTokens: 30, usd: 0.25, turns: 2, continuationOf: 2 });
+});
+
+test("costDelta: an unmeasurable usd on either side stays null, and no count goes negative", () => {
+  const totals = { inputTokens: 10, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 1, usd: 0.5, turns: 1 };
+  const nullEarlier = { inputTokens: 5, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0, usd: null, turns: 1 };
+  assert.equal(costDelta(totals, [nullEarlier]).usd, null);
+  assert.equal(costDelta({ ...totals, usd: null }, []).usd, null);
+  const shrunk = costDelta({ ...totals, inputTokens: 1, usd: 0.1 }, [{ ...nullEarlier, usd: 0.4, inputTokens: 5, turns: 3 }]);
+  assert.equal(shrunk.inputTokens, 0);
+  assert.equal(shrunk.turns, 0);
+  assert.equal(shrunk.usd, 0);
+});
+
+test("a finished subagent also leaves one agent-cost row: tokens, usd, its role and that its dispatch named a model", () => {
+  const fx = fixture();
+  writeSidecar(fx, { agentType: "devcycle:plan-researcher", description: "plan-research: map the call sites", model: "haiku" });
+  assert.equal(callHook(fx).status, 0);
+  const [row, ...rest] = costRows(fx);
+  assert.equal(rest.length, 0);
+  assert.equal(row.stage, "planning");
+  assert.equal(row.agentType, "devcycle:plan-researcher");
+  assert.equal(row.agentId, "a3382414bf84c15db");
+  assert.equal(row.model, "claude-haiku-4-5-20251001");
+  assert.equal(row.role, "research");
+  assert.equal(row.explicitModel, true);
+  assert.deepEqual([row.inputTokens, row.cacheWriteTokens, row.cacheReadTokens, row.outputTokens, row.turns, row.continuationOf], [16149, 0, 0, 38, 1, 0]);
+  assert.ok(Math.abs(row.usd - (16149 + 38 * 5) / 1e6) < 1e-12, `got ${row.usd}`);
+  assert.equal(rows(fx.repo, fx.runsDir).filter((o) => o.kind === "agent-depth").length, 1, "the depth row is unchanged");
+});
+
+test("a second stop of the same agent writes only what it spent since the first, marked as a continuation", () => {
+  const fx = fixture();
+  writeSidecar(fx, { agentType: "devcycle:plan-researcher", description: "plan-checker: verify the plan", model: "haiku" });
+  callHook(fx);
+  const more = { type: "assistant", timestamp: "2026-10-07T07:19:00.000Z", message: { model: "claude-haiku-4-5-20251001", usage: usage(1000, 200, 500, 20), content: [{ type: "text", text: "more" }] } };
+  writeFileSync(fx.transcript, readFileSync(fx.transcript, "utf8") + JSON.stringify(more) + "\n");
+  callHook(fx);
+  const [first, second, ...rest] = costRows(fx);
+  assert.equal(rest.length, 0);
+  assert.equal(first.continuationOf, 0);
+  assert.equal(second.continuationOf, 1);
+  assert.equal(second.role, "checker");
+  assert.deepEqual([second.inputTokens, second.cacheWriteTokens, second.cacheReadTokens, second.outputTokens, second.turns], [1000, 200, 500, 20, 1]);
+  // 1000 in + 200 cache-write at 1.25x + 500 cache-read at 0.1x + 20 out at $5, per million.
+  assert.ok(Math.abs(second.usd - 1400 / 1e6) < 1e-12, `got ${second.usd}`);
+});
+
+test("a missing sidecar still writes the agent-cost row, with no role and explicitModel false", () => {
+  const fx = fixture();
+  assert.equal(callHook(fx).status, 0);
+  const [row, ...rest] = costRows(fx);
+  assert.equal(rest.length, 0);
+  assert.ok(!("role" in row));
+  assert.equal(row.explicitModel, false);
+  assert.equal(row.inputTokens, 16149);
+});
+
+test("a sidecar with no model key or an unreadable body is explicitModel false, and a stop without an agent id writes no agent-cost row", () => {
+  const noModel = fixture();
+  writeSidecar(noModel, { agentType: "devcycle:plan-researcher", description: "plan-spike: probe the loader" });
+  callHook(noModel);
+  assert.deepEqual(costRows(noModel).map((r) => [r.role, r.explicitModel]), [["spike", false]]);
+  const broken = fixture();
+  writeFileSync(broken.transcript.replace(/\.jsonl$/, ".meta.json"), "{not json");
+  callHook(broken);
+  assert.deepEqual(costRows(broken).map((r) => [r.role ?? null, r.explicitModel]), [[null, false]]);
+  const anonymous = fixture();
+  callHook(anonymous, { agent_id: undefined });
+  assert.equal(costRows(anonymous).length, 0, "per-agent deltas need an agentId to key on");
+  assert.equal(rows(anonymous.repo, anonymous.runsDir).filter((o) => o.kind === "agent-depth").length, 1);
+});
+
+test("an unpriced model leaves a null-usd agent-cost row that names why; a priced row carries no measurement", () => {
+  const unpriced = fixture({ model: "claude-foo-9" });
+  callHook(unpriced);
+  const [row] = costRows(unpriced);
+  assert.equal(row.usd, null);
+  assert.equal(row.measurement, "unpriced-model:claude-foo-9");
+  const priced = fixture();
+  callHook(priced);
+  const [ok] = costRows(priced);
+  assert.equal(typeof ok.usd, "number");
+  assert.ok(!("measurement" in ok));
+});
+
+// Appends one Read or Bash call and its result to a fixture's transcript, run in the fixture repo.
+function appendCall(fx, id, name, input, text) {
+  const call = [
+    { type: "assistant", cwd: fx.repo, timestamp: "2026-10-07T07:19:00.000Z", message: { model: "claude-haiku-4-5-20251001", usage: usage(10, 0, 0, 1), content: [{ type: "tool_use", id, name, input }] } },
+    { type: "user", cwd: fx.repo, timestamp: "2026-10-07T07:19:01.000Z", message: { content: [{ type: "tool_result", tool_use_id: id, content: text }] } },
+  ];
+  writeFileSync(fx.transcript, readFileSync(fx.transcript, "utf8") + call.map((r) => JSON.stringify(r)).join("\n") + "\n");
+}
+
+test("costDelta: sourcePrints and reads are deltas; an earlier row written without them counts as nothing", () => {
+  const totals = { inputTokens: 10, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 1, usd: 0.5, turns: 3,
+    sourcePrints: 3, reads: { "a.mjs": 300, "b.mjs": 40, "c.mjs": 5 } };
+  const legacy = { inputTokens: 4, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0, usd: 0.25, turns: 1 };
+  const measured = { ...legacy, sourcePrints: 1, reads: { "a.mjs": 100, "b.mjs": 40, "c.mjs": 9 } };
+  const delta = costDelta(totals, [legacy, measured]);
+  assert.equal(delta.sourcePrints, 2);
+  assert.deepEqual(delta.reads, { "a.mjs": 200 });
+  assert.equal(costDelta(totals, [legacy]).sourcePrints, 3);
+});
+
+test("a planning role row records its source prints and the tokens each path's reads cost; a continuation records only the growth", () => {
+  const fx = fixture();
+  writeSidecar(fx, { agentType: "devcycle:plan-drafter", description: "plan-drafter: draft task 3", model: "sonnet" });
+  appendCall(fx, "r1", "Read", { file_path: join(fx.repo, "scripts/a.mjs") }, "x".repeat(400));
+  appendCall(fx, "b1", "Bash", { command: "cat scripts/b.mjs" }, "y".repeat(40));
+  assert.equal(callHook(fx).status, 0);
+  appendCall(fx, "r2", "Read", { file_path: join(fx.repo, "scripts/a.mjs") }, "x".repeat(400));
+  callHook(fx);
+  const [first, second, ...rest] = costRows(fx);
+  assert.equal(rest.length, 0);
+  assert.equal(first.role, "drafter");
+  assert.equal(first.sourcePrints, 1);
+  assert.deepEqual(first.reads, { "scripts/a.mjs": 100, "scripts/b.mjs": 10 });
+  assert.equal(second.sourcePrints, 0);
+  assert.deepEqual(second.reads, { "scripts/a.mjs": 100 });
+});
+
+test("a role row that read nothing still records empty reads; a row without a role records neither field", () => {
+  const roleFx = fixture();
+  writeSidecar(roleFx, { agentType: "Explore", description: "plan-spike: time the parser", model: "haiku" });
+  callHook(roleFx);
+  const [spike] = costRows(roleFx);
+  assert.equal(spike.sourcePrints, 0);
+  assert.deepEqual(spike.reads, {});
+  const plain = fixture();
+  writeSidecar(plain, { agentType: "devcycle:implementer", description: "Task 3: implement", model: "sonnet" });
+  appendCall(plain, "b1", "Bash", { command: "cat scripts/b.mjs" }, "y".repeat(40));
+  callHook(plain);
+  const [row] = costRows(plain);
+  assert.equal(row.role, undefined);
+  assert.ok(!("sourcePrints" in row) && !("reads" in row), JSON.stringify(row));
+});
+
+test("roundOf reads the checker round tag and nothing else", () => {
+  assert.equal(roundOf("plan-checker: round 2 — Task 1 → Task 3"), 2);
+  assert.equal(roundOf("plan-checker: Task 1 → Task 3"), null);
+  assert.equal(roundOf("plan-drafter: round 2"), null);
+  assert.equal(roundOf(undefined), null);
+});
+
+test("a checker dispatch's round tag lands on its agent-cost row; a drafter's row has no round", () => {
+  const tagged = fixture();
+  writeSidecar(tagged, { agentType: "Explore", description: "plan-checker: round 2 — Task 1 → Task 3", model: "haiku" });
+  callHook(tagged);
+  const [row] = costRows(tagged);
+  assert.equal(row.role, "checker");
+  assert.equal(row.round, 2);
+  const untagged = fixture();
+  writeSidecar(untagged, { agentType: "devcycle:plan-drafter", description: "plan-drafter: draft task 3", model: "sonnet" });
+  callHook(untagged);
+  assert.equal(Object.hasOwn(costRows(untagged)[0], "round"), false);
+});
+
+const appendTurn = (fx) => {
+  const more = { type: "assistant", timestamp: "2026-10-07T07:19:00.000Z", message: { model: "claude-haiku-4-5-20251001", usage: usage(1000, 200, 500, 20), content: [{ type: "text", text: "more" }] } };
+  writeFileSync(fx.transcript, readFileSync(fx.transcript, "utf8") + JSON.stringify(more) + "\n");
+};
+
+test("a drafter's first stop is role drafter, and its resumed stop (a SendMessage repair) is role repair", () => {
+  const fx = fixture();
+  writeSidecar(fx, { agentType: "devcycle:plan-drafter", description: "plan-drafter: task 3", model: "haiku" });
+  callHook(fx);
+  appendTurn(fx);
+  callHook(fx);
+  assert.deepEqual(costRows(fx).map((r) => [r.role, r.continuationOf]), [["drafter", 0], ["repair", 1]]);
+});
+
+test("a resumed checker stays checker: only a continued drafter is repair work", () => {
+  const fx = fixture();
+  writeSidecar(fx, { agentType: "devcycle:plan-researcher", description: "plan-checker: round 1", model: "haiku" });
+  callHook(fx);
+  appendTurn(fx);
+  callHook(fx);
+  assert.deepEqual(costRows(fx).map((r) => [r.role, r.continuationOf]), [["checker", 0], ["checker", 1]]);
+});
+
+test("namesModel: a named model is explicit; none, empty or inherit is not", () => {
+  assert.equal(namesModel({ model: "haiku" }), true);
+  assert.equal(namesModel({ model: "claude-sonnet-5-5" }), true);
+  for (const sidecar of [{}, { model: "" }, { model: "inherit" }, { model: 3 }]) assert.equal(namesModel(sidecar), false, JSON.stringify(sidecar));
+});
+
+test("a drafter that inherited its parent's model has an agent-cost row saying the model was not named", () => {
+  const fx = fixture();
+  writeSidecar(fx, { agentType: "fork", isFork: true, description: "plan-drafter: Tasks 1-3", model: "inherit" });
+  assert.equal(callHook(fx).status, 0);
+  const [row] = costRows(fx);
+  assert.equal(row.role, "drafter");
+  assert.equal(row.explicitModel, false);
 });

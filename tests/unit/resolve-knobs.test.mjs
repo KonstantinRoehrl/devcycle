@@ -19,16 +19,48 @@ const cli = (args) => spawnSync(process.execPath, [SCRIPT, ...args], { encoding:
 const STANDARD_DEFAULTS =
   "knobs: profile=standard gitPolicy=local-commits-only docTrackingPolicy=standard reviewDepth=auto " +
   "crossModelReview=false onDeviceGate=auto implementerModel=auto taskReviewerModel=auto " +
-  "branchReviewModel=auto walkthroughModel=auto learnStalenessSessions=5 learnStalenessDays=14 learnSessionCap=100 subagentBudget=warn " +
+  "branchReviewModel=auto walkthroughModel=auto planningStrategy=auto planningBudgetUSD=0 learnStalenessSessions=5 learnStalenessDays=14 learnSessionCap=100 subagentBudget=warn " +
   "handoffNotification=off executionMode=ask driveWatch=end drivePlugins=none";
 
-test("the roster carries the 18 shipped knobs in config.md's roster order", () => {
+test("the roster carries the 20 shipped knobs in config.md's roster order", () => {
   assert.deepEqual(ROSTER.map(({ key }) => key), [
     "profile", "gitPolicy", "docTrackingPolicy", "reviewDepth", "crossModelReview", "onDeviceGate",
-    "implementerModel", "taskReviewerModel", "branchReviewModel", "walkthroughModel",
+    "implementerModel", "taskReviewerModel", "branchReviewModel", "walkthroughModel", "planningStrategy", "planningBudgetUSD",
     "learnStalenessSessions", "learnStalenessDays", "learnSessionCap", "subagentBudget", "handoffNotification", "executionMode",
     "driveWatch", "drivePlugins",
   ]);
+});
+
+test("planningStrategy is a non-live enum, auto unless set, and compares like any recorded knob", () => {
+  assert.deepEqual(ROSTER.find((e) => e.key === "planningStrategy"),
+    { key: "planningStrategy", kind: "enum", values: ["auto", "status-quo", "inline", "grouped", "checkpointed"], fallback: "auto" });
+  for (const value of ["status-quo", "inline", "grouped", "checkpointed"]) {
+    const { knobs, explicit } = resolveKnobs(with_({ planningStrategy: value }));
+    assert.deepEqual([knobs.planningStrategy, explicit], [value, ["planningStrategy"]], value);
+  }
+  const { knobs, explicit, warnings } = resolveKnobs(with_({ planningStrategy: "parallel" }));
+  assert.deepEqual([knobs.planningStrategy, explicit], ["auto", []]);
+  assert.deepEqual(warnings, ["planningStrategy=parallel is not one of auto | status-quo | inline | grouped | checkpointed; using auto"]);
+  const dropped = resolveKnobs(with_({ planningStrategy: "grouped-fork" }));
+  assert.deepEqual([dropped.knobs.planningStrategy, dropped.explicit], ["auto", []]);
+  assert.deepEqual(dropped.warnings, ["planningStrategy=grouped-fork is not one of auto | status-quo | inline | grouped | checkpointed; using auto"]);
+  assert.deepEqual(compareKnobs({ planningStrategy: "auto" }, resolveKnobs(with_({ planningStrategy: "inline" })).knobs),
+    [{ key: "planningStrategy", old: "auto", new: "inline" }]);
+});
+
+test("planningBudgetUSD is a non-live usd knob: a non-negative dollar amount of at most two decimals, 0 unless set", () => {
+  assert.deepEqual(ROSTER.find((e) => e.key === "planningBudgetUSD"), { key: "planningBudgetUSD", kind: "usd", fallback: "0" });
+  for (const [value, resolved] of [["0", "0"], ["25", "25"], ["12.5", "12.5"], ["150.00", "150"], ["007.25", "7.25"]]) {
+    const { knobs, explicit, warnings } = resolveKnobs(with_({ planningBudgetUSD: value }));
+    assert.deepEqual([knobs.planningBudgetUSD, explicit, warnings], [resolved, ["planningBudgetUSD"], []], value);
+  }
+  for (const value of ["-5", "1.234", "1e3", "$20", ".5", "5."]) {
+    const { knobs, explicit, warnings } = resolveKnobs(with_({ planningBudgetUSD: value }));
+    assert.deepEqual([knobs.planningBudgetUSD, explicit], ["0", []], value);
+    assert.deepEqual(warnings, [`planningBudgetUSD=${value} is not one of a non-negative dollar amount with at most two decimals; using 0`]);
+  }
+  assert.deepEqual(compareKnobs({ planningBudgetUSD: "0" }, resolveKnobs(with_({ planningBudgetUSD: "40" })).knobs),
+    [{ key: "planningBudgetUSD", old: "0", new: "40" }]);
 });
 
 test("empty, a literal placeholder and auto are the three unset forms", () => {

@@ -768,7 +768,7 @@ test("harvested: executing-waves/green-gate-discipline — the gate is the coord
   assert.match(read("agents/implementer.md"), /NEVER run `git commit`, stage a commit, or push/);
 });
 
-test("harvested: executing-waves/handoff-block-shape — seven fields, and only three sanctioned first-field labels", () => {
+test("harvested: executing-waves/handoff-block-shape — seven fields, and only four sanctioned first-field labels", () => {
   const t = read("references/handoff.md");
   // Derive the template rows rather than hardcoding, so the test tracks its owner.
   const block = t.match(/```markdown\n## Handoff\n([\s\S]*?)```/)?.[1] ?? "";
@@ -783,10 +783,11 @@ test("harvested: executing-waves/handoff-block-shape — seven fields, and only 
   assert.notEqual(dropped, block, "the Context depth row wording changed — this discrimination check tests nothing");
   const droppedLabels = [...dropped.matchAll(/^- ([^:]+):/gm)].map((m) => m[1]);
   assert.equal(droppedLabels.length, 6, "removing a template row must reduce the derived label count");
-  // The three sanctioned first-field labels and the Compaction-hint shape stay pinned.
+  // The four sanctioned first-field labels and the Compaction-hint shape stay pinned.
   assert.match(t, /Wave completed: <n> of\s+<m> \(stage: execution\)/);
   assert.ok(t.includes("`Session ended mid-wave: <k> of <n> tasks done (stage: execution)`"), "the safety valve's mid-wave label changed");
-  assert.match(t, /these are the\s+only three sanctioned first-field labels/);
+  assert.ok(t.includes("`Session ended mid-planning: group <k> of <m>`"), "the planning checkpoint's mid-stage label changed");
+  assert.match(t, /these are the\s+only four sanctioned first-field labels/);
   assert.match(t, /Compaction hint: Keep <X>\. Drop <Y>\./);
 });
 
@@ -919,7 +920,7 @@ test("harvested: onboarding-a-repo/stop-on-existing-scaffold — an existing sca
 
 test("harvested: planning-waves/dependency-declarations — the three declaration forms and the dispatch map are pinned", () => {
   const t = read("playbooks/planning-waves.md");
-  assert.match(t, /line takes exactly one of `none \(completely independent\)`, `Task 2 \(consumes its X interface\)`, or\s+`Tasks 1\+4 committed`/);
+  assert.match(read("references/plan-task-format.md"), /line takes exactly one of `none \(completely independent\)`, `Task 2 \(consumes its X interface\)`, or\s+`Tasks 1\+4 committed`/);
   assert.match(t, /## Dispatch Map — required final section/);
   assert.match(t, /never place two tasks touching the same file in one\s+wave, even if both declare `none`/);
   assert.match(t, /pin exact interfaces — signatures, names, values/);
@@ -1227,7 +1228,7 @@ test("the per-task cycle folds the reviewer brief into intake and the commit int
   assert.match(review, /`task-verdict\.mjs --round <n> --findings <that path> --evidence-class <evidenceClass> --plan <plan> --test-cmd "<gateCmd>" --subject "<subject>"`/,
     "step 5's verdict call must carry the commit's flags");
   assert.ok(!waves.includes("--match --stage execution"), "step 2 still resolves lessons by hand; task-dispatch.mjs fills them");
-  assert.match(read("playbooks/planning-waves.md"), /filled with the task's matched lessons by `task-dispatch\.mjs`/);
+  assert.match(read("references/plan-task-format.md"), /filled with the task's matched lessons by `task-dispatch\.mjs`/);
   assert.match(read("references/commit-convention.md"), /an accepted verdict commits in-process/);
   const scripts = read("references/ledger.md");
   assert.match(scripts, /\[--agent-id <id>\] \[--compose-review\]/);
@@ -2384,6 +2385,10 @@ test("cycle.md's brainstorm step dispatches the spec-claims reviewer at the sess
     step.indexOf("authored-claims-check.mjs") < step.indexOf("devcycle:spec-reviewer"),
     "the spec-claims review must be ordered after the authored-claims lint"
   );
+  assert.match(step, /spec-claims\.mjs" write\s+--spec <spec-path> --verified \.devcycle\/spec-verified\.md/,
+    "step 4 must persist the reviewer's Verified list through spec-claims.mjs write");
+  assert.match(read("agents/spec-reviewer.md"), /- <claim> · paths: <repo path>\[, <repo path>…\] · cmd: `<command that confirmed it>`/,
+    "the reviewer's Verified line must be the shape spec-claims.mjs parseVerified reads");
 });
 
 test("the browser guard is named by DESIGN.md's blueprint and the hub's inventory", () => {
@@ -2823,4 +2828,68 @@ test("continue names action: \"drive\" before its execution-resume gates and wal
   const manual = sectionText(read("references/drive.md"), "drive-actions").split("\n").find((l) => l.startsWith("| `manual`"));
   assert.ok(manual?.includes("re-runs `wave-setup.mjs` and takes only `tasks`, `dispatchable`, `wave` and `entryLines`"),
     "a written manual row no longer re-runs wave-setup for its walk fields");
+});
+
+test("planning-waves runs the decision table and honours planningStrategy", () => {
+  const section = read("playbooks/planning-waves.md").split("## Delegated planning — thresholds")[1]?.split(/\n## /)[0] ?? "";
+  assert.match(section, /`planningStrategy` on the `knobs:` line forces the drafting arm/);
+  assert.match(section, /scripts\/plan-strategy\.mjs/);
+  assert.match(section, /stage-log key `drafting-plan`/);
+  for (const arm of ["inline", "checkpointed", "grouped", "status-quo", "auto"]) assert.ok(section.includes(`\`${arm}\``), `the section names \`${arm}\``);
+  assert.doesNotMatch(section, /grouped-fork/, "the fork arm was dropped (docs/decisions/README.md, 2026-11-22)");
+  assert.doesNotMatch(read("references/delegated-planning.md"), /grouped-fork|\*\*Fork arm\.\*\*/, "the fork arm's reference paragraph went with it");
+  assert.match(section, /`plan-group-<k>`/);
+  assert.match(read("references/stage-log.md"), /`drafting-plan` \(`--data` `strategy`, `groups`, `drafters`, `est`, `spent`, the planning dollars spent before the cut, and `cut`, the task-cut path\)/);
+  assert.match(read("references/stage-log.md"), /`plan-group-<k>`/);
+  assert.match(read("references/config.md"), /\| `planningStrategy` \| `playbooks\/planning-waves\.md` \| `auto` — the decision table, `scripts\/plan-strategy\.mjs` \|/);
+  const flatSection = section.replace(/\s+/g, " ");
+  for (const phrase of [
+    "--planningStrategy <value> --sessionModel <id>",
+    "(omit the flag when the probe fails)",
+    'scripts/plan-stats.mjs" spent --state .devcycle/state.md',
+    "as stage-log key `drafting-plan`",
+  ]) assert.ok(flatSection.includes(phrase), `§ Delegated planning — thresholds no longer says: ${phrase}`);
+  assert.ok(flatSection.indexOf('plan-stats.mjs" spent') < flatSection.indexOf("as stage-log key `drafting-plan`"), "spent is read before the drafting-plan row is logged");
+});
+
+// #450: the projected-cost gate, the mid-planning checkpoint and the handoff's planning: line. Each
+// phrase names a real field or command of plan-strategy, plan-stats, plan-resume or interface-lock.
+test("planning prints the projection, asks over planningBudgetUSD, checkpoints mid-stage and hands off the plan-stats line", () => {
+  const flat = (text) => text.replace(/\s+/g, " ");
+  const playbook = read("playbooks/planning-waves.md");
+  const section = flat(playbook.split("\n## Projected cost, budget and checkpoints\n")[1]?.split("\n## ")[0] ?? "");
+  assert.ok(section, "planning-waves.md lost § Projected cost, budget and checkpoints");
+  for (const phrase of [
+    "print the decision table's `projection`: its `dispatches`, its `tokens`, `$<usd>`, and whether it is calibrated (`projection.calibrated`)",
+    "When `planningBudgetUSD` on the `knobs:` line is above `0` and `projection.usd` exceeds it, ask one AskUserQuestion, **Proceed** · **Switch strategy** · **Reduce scope**",
+    "labelling the figure \"uncalibrated\" while `projection.calibrated` is false",
+    "Print the output's `warnings` with the figure: one means it was priced on the default session model.",
+    "log the answer as stage-log key `budget-answer` with `--data`",
+    "`inline` and `checkpointed` log `plan-draft-<n>` as each task file lands",
+    'scripts/read-section.mjs" references/delegated-planning.md the-context-pack',
+    'scripts/depth-probe.mjs"` under `checkpointed` after each `plan-group-<k>`',
+    "under `inline` after each `plan-draft-<n>` until it has checkpointed once",
+    "log `plan-checkpoint-<k>`",
+    "--state .devcycle/state.md --ready --action clear --completed 'planning group <k> of <m>'",
+    "whose first field is `Session ended mid-planning: group <k> of <m>`, with the context action `Clear + /devcycle:continue`",
+    "drafts from the `missing` and `nextGroup` of the `plan-resume.mjs` call",
+    "either logs `drafting-plan` again with every field, `spent` included",
+  ]) assert.ok(section.includes(phrase), `§ Projected cost, budget and checkpoints no longer says: ${phrase}`);
+  assert.ok(section.indexOf("log `plan-checkpoint-<k>`") < section.indexOf("handoff-mark.mjs"), "the checkpoint must be logged before the handoff is marked ready");
+  assert.ok(!section.includes("node \"${CLAUDE_PLUGIN_ROOT}/scripts/plan-resume.mjs\""), "references/resume.md holds plan-resume's one invocation; the playbook cites it");
+  const handoff = flat(playbook.split("\n## Handoff — required final output\n")[1] ?? "");
+  const stats = handoff.indexOf("scripts/plan-stats.mjs");
+  assert.ok(stats > handoff.indexOf("before the handoff's `handoff-mark.mjs` ready mark"), "plan-stats must run before the ready mark");
+  assert.ok(handoff.indexOf("`stage: execution`") < stats, "plan-stats must run after the stage: rewrite");
+  assert.ok(handoff.includes("prints, as its second line, the `planning:` line the block carries verbatim"), "the handoff no longer carries plan-stats's planning: line");
+  const ref = flat(read("references/handoff.md"));
+  assert.ok(ref.includes("the second line `scripts/plan-stats.mjs` prints, verbatim: `planning: strategy=<s> drafters=<n> est=$X actual=$Y`"),
+    "handoff.md no longer puts the planning: line in the planning block");
+  const log = read("references/stage-log.md");
+  assert.ok(log.includes("`budget-answer` (`--data` the answer)"), "stage-log.md lost budget-answer");
+  assert.ok(log.includes("`plan-checkpoint-<k>`"), "stage-log.md lost plan-checkpoint-<k>");
+  assert.match(read("references/ledger.md"), /\| `plan-stats` \|[^\n]*`specReview`, `estUsd` and `coordinatorDepthPct` \|/,
+    "the plan-stats ledger row no longer names estUsd and coordinatorDepthPct");
+  for (const file of ["references/delegated-planning.md", "agents/plan-drafter.md"])
+    assert.match(flat(read(file)), /scripts\/interface-lock\.mjs" check <work dir> --tasks <(its|your) task numbers>`/, `${file} lost the scoped drafter self-check`);
 });

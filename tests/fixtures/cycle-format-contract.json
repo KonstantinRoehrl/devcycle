@@ -27,6 +27,8 @@
     "taskReviewerModel",
     "branchReviewModel",
     "walkthroughModel",
+    "planningStrategy",
+    "planningBudgetUSD",
     "learnStalenessSessions",
     "learnStalenessDays",
     "learnSessionCap",

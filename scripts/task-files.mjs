@@ -434,3 +434,102 @@ export function parseDispatchMap(planText) {
   }
   return waves;
 }
+
+const integersIn = (text) => [...text.matchAll(/\d+/g)].map((m) => Number(m[0]));
+
+// The tasks a task waits on: the integers on the first line of its **Dependencies:** value, before
+// that line's first `(`, which opens an explanation that may name other tasks. Only the first line
+// counts because the last task's value otherwise runs on into the sections after the plan's tasks.
+export function taskDependencies(block) {
+  const line = (fieldValue(block, "Dependencies") ?? "").split("\n")[0].split("(")[0];
+  return [...new Set(integersIn(line))];
+}
+
+const INTERFACE_ITEM_RE = /^-\s*(Consumes|Produces)\b(\s*\([^)]*\))?\s*:\s*(.*)$/;
+
+// The items of a task's **Interfaces:** value, split by kind. An item runs over the indented lines
+// below it; the producing tasks of a Consumes item are the integers in its `(Task N; ...)` label,
+// ahead of the label's first `;`, which separates them from a note.
+export function interfaceLines(block) {
+  const consumes = [];
+  const produces = [];
+  let open = null;
+  for (const line of (fieldValue(block, "Interfaces") ?? "").split("\n")) {
+    const item = line.match(INTERFACE_ITEM_RE);
+    if (item) {
+      const owners = (item[2] ?? "").split(";")[0];
+      open = { from: /\bTasks?\b/.test(owners) ? integersIn(owners) : [], text: item[3].trim() };
+      (item[1] === "Consumes" ? consumes : produces).push(open);
+    } else if (open && /^\s+\S/.test(line)) open.text = `${open.text} ${line.trim()}`;
+    else open = null;
+  }
+  return { consumes, produces: produces.map(({ text }) => text) };
+}
+
+// One edge per dependency a task names that is itself another task of the plan.
+export function planEdges(planText) {
+  const blocks = taskBlocks(planText);
+  const defined = new Set(blocks.map((b) => b.num));
+  const edges = new Map();
+  for (const { num, text } of blocks)
+    for (const producer of taskDependencies(text))
+      if (producer !== num && defined.has(producer)) edges.set(`${num}<${producer}`, { producer, consumer: num });
+  return [...edges.values()].sort((a, b) => a.consumer - b.consumer || a.producer - b.producer);
+}
+
+// The class is the first word of a task's **Evidence:** value (references/evidence.md § The three
+// evidence classes); a block with no Evidence field is not red-green.
+export const isRedGreen = (block) => (fieldValue(block, "Evidence") ?? "").split(/\s+/)[0] === "red-green";
+
+// Fence info words that name a programming language: a fence of any other kind (markdown, json, a
+// shell session, output, no info word) holds quoted doc text or data, never a test.
+export const TEST_CODE_INFO = new Set([
+  "js", "mjs", "cjs", "javascript", "ts", "mts", "cts", "tsx", "jsx", "typescript", "py", "python", "go", "rs",
+  "rust", "rb", "ruby", "java", "kt", "kotlin", "cs", "csharp", "php", "swift",
+]);
+
+// A line that declares or calls a test in any of the runners above. Each alternative is anchored to
+// the line start so an implementation's `RE.test(x)`, a comment or an import never reads as a test.
+// An `await`, `async`, `export [default]` or `const|let|var name =` prefix may precede the call
+// (`await expect(f()).rejects`, `export const x = test(...)`), but the call itself must stay a bare
+// runner call: `const ok = RE.test(x)` is still not a test. `.test(` counts only on the runner
+// namespaces Deno, QUnit and Bun; a bare `assert expr` is a Python assert statement, and `async def
+// test_` is covered by the `async` prefix.
+export const TEST_IDIOM_RE = /^\s*(?:await\s+|async\s+|export\s+(?:default\s+)?|(?:const|let|var)\s+\w+\s*=\s*(?:await\s+)?)*(?:(?:test|it|describe)(?:\.\w+)*\s*\(|(?:Deno|QUnit|Bun)\.test\s*\(|assert\s*[.(]|assert[ \t]+\S|expect\s*\(|def test_|func Test|#\[test\])/m;
+
+// The 0-based line indexes of the fences a red-green task writes to state its failing test: a closed
+// fence in a language, whose lines between the fence lines read as a test.
+function exemptTestLines(text) {
+  const exempt = new Set();
+  let cursor = 0;
+  for (const block of taskBlocks(text)) {
+    const start = text.indexOf(block.text, cursor);
+    cursor = start + block.text.length;
+    if (!isRedGreen(block.text)) continue;
+    const blockLines = block.text.split("\n");
+    const firstLine = text.slice(0, start).split("\n").length - 1;
+    for (const fence of fencedBlocks(block.text)) {
+      if (fence.close === null || !TEST_CODE_INFO.has(fence.info)) continue;
+      if (!TEST_IDIOM_RE.test(blockLines.slice(fence.open + 1, fence.close).join("\n"))) continue;
+      for (let i = fence.open; i <= fence.close; i++) exempt.add(firstLine + i);
+    }
+  }
+  return exempt;
+}
+
+// Bytes inside code fences (less any `exempt` lines), the fence lines themselves included, as a share
+// of all bytes. Pairing is fencedBlocks': a ``` or ~~~ fence closes only on its own character, at
+// least as long.
+function shareOfFences(text, exempt = new Set()) {
+  const total = Buffer.byteLength(text);
+  if (total === 0) return 0;
+  const owners = lineFences(text);
+  const fenced = text.split(/(?<=\n)/).reduce((bytes, line, i) => bytes + (owners[i] && !exempt.has(i) ? Buffer.byteLength(line) : 0), 0);
+  return Math.round((fenced / total) * 1000) / 1000;
+}
+
+export const fenceShare = (text) => shareOfFences(text);
+
+// fenceShare less the fences a red-green task needs to state its failing test: a plan that follows
+// the contract-only rule still carries those, so they cannot count against its proportion.
+export const nonTestFenceShare = (planText) => shareOfFences(planText, exemptTestLines(planText));

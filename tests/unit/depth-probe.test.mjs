@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { transcriptStats, resolveDepth, windowFor, depthLine, ASSUMED_WINDOW } from "../../scripts/depth-probe.mjs";
+import { transcriptReads, transcriptStats, resolveDepth, windowFor, depthLine, ASSUMED_WINDOW } from "../../scripts/depth-probe.mjs";
 
 const SCRIPT = new URL("../../scripts/depth-probe.mjs", import.meta.url).pathname;
 const usage = (i, cc, cr, o) => ({ input_tokens: i, cache_creation_input_tokens: cc, cache_read_input_tokens: cr, output_tokens: o });
@@ -183,4 +183,97 @@ test("import: an entry path that does not exist does not throw", () => {
     ["--input-type=module", "-e", `await import(${JSON.stringify(pathToFileURL(SCRIPT).href)})`, "no-such-entry"],
     { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
+});
+
+// One tool call and its result, as a subagent transcript records them.
+const toolCall = (id, name, input, content, cwd = "/w/repo") => [
+  { type: "assistant", cwd, timestamp: "2026-11-19T10:00:00.000Z", message: { model: "claude-sonnet-5-5", content: [{ type: "tool_use", id, name, input }] } },
+  { type: "user", cwd, timestamp: "2026-11-19T10:00:01.000Z", message: { content: [{ type: "tool_result", tool_use_id: id, content }] } },
+];
+
+test("transcriptReads: Read results and Bash source prints become per-path token estimates", () => {
+  const dir = makeTempDir("depth-probe");
+  const file = join(dir, "agent-a4.jsonl");
+  writeJsonl(file, [
+    ...toolCall("r1", "Read", { file_path: "/w/repo/scripts/a.mjs" }, "x".repeat(401)),
+    ...toolCall("b1", "Bash", { command: "cat scripts/b.mjs | head -5" }, "y".repeat(8)),
+    ...toolCall("b2", "Bash", { command: "sed -n '1,20p' scripts/c.mjs" }, "abcd"),
+    ...toolCall("b3", "Bash", { command: "git log --oneline | head -5" }, "z".repeat(40)),
+    ...toolCall("b4", "Bash", { command: "cd /w/repo && head -n 20 notes.txt 2>/dev/null" }, "n".repeat(10)),
+    ...toolCall("b5", "Bash", { command: "sed 's/a/b/' scripts/d.mjs" }, "d".repeat(40)),
+    ...toolCall("b6", "Bash", { command: "cat /elsewhere/x.md scripts/a.mjs" }, "w".repeat(16)),
+    ...toolCall("r2", "Read", { file_path: "/w/repo/scripts/e.mjs" }, [{ type: "text", text: "abcd" }, { type: "text", text: "efgh" }]),
+    ...toolCall("g1", "Grep", { pattern: "x" }, "g".repeat(400)),
+  ]);
+  assert.deepEqual(transcriptReads(file), {
+    sourcePrints: 4,
+    reads: { "scripts/a.mjs": 103, "scripts/b.mjs": 2, "scripts/c.mjs": 1, "notes.txt": 3, "/elsewhere/x.md": 2, "scripts/e.mjs": 2 },
+  });
+});
+
+test("transcriptReads: a transcript with no tool calls read nothing", () => {
+  const dir = makeTempDir("depth-probe");
+  const file = join(dir, "agent-a5.jsonl");
+  writeJsonl(file, [{ type: "user", timestamp: "2026-11-19T10:00:00.000Z", message: { content: "go" } }]);
+  assert.deepEqual(transcriptReads(file), { sourcePrints: 0, reads: {} });
+});
+
+// One Bash call per entry, each answered with `result`; returns what transcriptReads made of them.
+function readsOf(commands, result = "abcd") {
+  const file = join(makeTempDir("depth-probe"), "agent-reads.jsonl");
+  writeJsonl(file, commands.flatMap((command, i) => toolCall(`c${i}`, "Bash", { command }, result)));
+  return transcriptReads(file);
+}
+
+test("transcriptReads: a heredoc write is not a print and its body words are not read paths", () => {
+  const r = readsOf(["cat > notes.md <<'EOF'\nthe pack lists constructor and toString\nEOF"]);
+  assert.deepEqual(r, { sourcePrints: 0, reads: {} });
+});
+
+test("transcriptReads: a heredoc body is dropped, the command around it still counts", () => {
+  const r = readsOf(["cat <<-EOF > out.md\nbody words\n\tEOF\ncat scripts/a.mjs"]);
+  assert.deepEqual(r, { sourcePrints: 1, reads: { "scripts/a.mjs": 1 } });
+});
+
+test("transcriptReads: an output redirect with no read operand is not a print", () => {
+  assert.deepEqual(readsOf(["cat >> log.txt", "head -n 3 > out.txt"]), { sourcePrints: 0, reads: {} });
+});
+
+test("transcriptReads: a quoted path keeps its spaces", () => {
+  assert.deepEqual(readsOf(['cat "my file.md"']), { sourcePrints: 1, reads: { "my file.md": 1 } });
+});
+
+test("transcriptReads: a quoted sed script holding a semicolon stays one argument", () => {
+  assert.deepEqual(readsOf(["sed -n '1,20p;40,50p' f.md"]), { sourcePrints: 1, reads: { "f.md": 1 } });
+});
+
+test("transcriptReads: sed with -n inside a short-flag cluster is a print", () => {
+  assert.deepEqual(readsOf(["sed -ne 5p f.md", "sed -En 5p g.md"]), { sourcePrints: 2, reads: { "f.md": 1, "g.md": 1 } });
+});
+
+test("transcriptReads: a path named like an Object.prototype member stays an integer count", () => {
+  const r = readsOf(["cat constructor", "cat toString"], "x".repeat(80));
+  assert.equal(r.reads.constructor, 20);
+  assert.equal(r.reads.toString, 20);
+});
+
+test("transcriptReads: a print under .devcycle/ is read but is not a source print", () => {
+  assert.deepEqual(readsOf(["cat .devcycle/plan-work/r/pack.md"]), { sourcePrints: 0, reads: { ".devcycle/plan-work/r/pack.md": 1 } });
+  assert.equal(readsOf(["cat .devcycle/plan-work/r/pack.md scripts/a.mjs"]).sourcePrints, 1);
+});
+
+test("transcriptReads: the recognised print forms still count", () => {
+  assert.deepEqual(readsOf(["sed -n 5p f", "head -n 20 a", "head -20 b", "tail -n 5 c", "cat a.mjs"]), {
+    sourcePrints: 5, reads: { f: 1, a: 1, b: 1, c: 1, "a.mjs": 1 },
+  });
+});
+
+test("an apostrophe inside a shell comment does not drop the command's prints", () => {
+  assert.deepEqual(readsOf(["cat scripts/a.mjs # don't worry"]), { sourcePrints: 1, reads: { "scripts/a.mjs": 1 } });
+  assert.deepEqual(readsOf(["# it's a note\ncat scripts/b.mjs"]), { sourcePrints: 1, reads: { "scripts/b.mjs": 1 } });
+});
+
+test("an in-place sed edit is not a source print", () => {
+  assert.deepEqual(readsOf(["sed -ni 's/a/b/p' f.md", "sed -i -n 5p g.md", "sed --in-place -n 5p h.md", "sed --in-place=.bak -n 5p k.md"]), { sourcePrints: 0, reads: {} });
+  assert.deepEqual(readsOf(["sed -n 5p f.md"]), { sourcePrints: 1, reads: { "f.md": 1 } });
 });

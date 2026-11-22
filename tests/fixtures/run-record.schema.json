@@ -138,6 +138,8 @@
         "reviewDepth": { "enum": ["single", "panel"] },
         "depthKnob": { "enum": ["auto", "single", "panel"] },
         "consent": { "enum": ["none", "panel", "single"] },
+        "legs": { "type": "string", "pattern": "^[A-Za-z]+(,[A-Za-z]+)*$" },
+        "planDigest": { "type": "string", "pattern": "^[0-9a-f]{12}$" },
         "ts": { "type": "string", "format": "date-time" }
       },
       "required": ["kind", "runId", "event", "stage", "ts"],
@@ -241,6 +243,70 @@
         "ts": { "type": "string", "format": "date-time" }
       },
       "required": ["kind", "runId", "stage", "agentType", "model", "tokens", "depth", "ts"],
+      "additionalProperties": false
+    },
+    {
+      "title": "agent-cost",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "agent-cost" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "stage": {
+          "enum": [
+            "scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
+            "branch-review", "on-device", "fast-path", "sweep", "finish", "maintain"
+          ]
+        },
+        "agentType": { "type": "string", "pattern": "^[A-Za-z0-9:_.-]{1,80}$" },
+        "agentId": { "type": "string", "pattern": "^[0-9a-z]{1,40}$" },
+        "model": { "type": "string", "pattern": "^[A-Za-z0-9:_.\\[\\]-]{1,80}$" },
+        "role": { "enum": ["spike", "research", "drafter", "checker", "repair"] },
+        "round": { "type": "integer", "minimum": 1 },
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "cacheWriteTokens": { "type": "integer", "minimum": 0 },
+        "cacheReadTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 },
+        "usd": { "type": ["number", "null"], "minimum": 0 },
+        "measurement": { "type": "string", "pattern": "^[A-Za-z0-9:_.\\[\\]-]{1,120}$" },
+        "turns": { "type": "integer", "minimum": 0 },
+        "explicitModel": { "type": "boolean" },
+        "continuationOf": { "type": "integer", "minimum": 0 },
+        "sourcePrints": { "type": "integer", "minimum": 0 },
+        "reads": { "type": "object", "additionalProperties": { "type": "integer", "minimum": 0 } },
+        "ts": { "type": "string", "format": "date-time" }
+      },
+      "required": ["kind", "runId", "stage", "agentType", "model", "inputTokens", "cacheWriteTokens",
+        "cacheReadTokens", "outputTokens", "usd", "turns", "explicitModel", "continuationOf", "ts"],
+      "additionalProperties": false
+    },
+    {
+      "title": "plan-stats",
+      "type": "object",
+      "properties": {
+        "kind": { "const": "plan-stats" },
+        "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+        "stage": {
+          "enum": [
+            "scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
+            "branch-review", "on-device", "fast-path", "sweep", "finish", "maintain"
+          ]
+        },
+        "specBytes": { "type": "integer", "minimum": 0 },
+        "planBytes": { "type": "integer", "minimum": 0 },
+        "fenceShare": { "type": "number", "minimum": 0, "maximum": 1 },
+        "nonTestFenceShare": { "type": "number", "minimum": 0, "maximum": 1 },
+        "tasks": { "type": "integer", "minimum": 0 },
+        "waves": { "type": "integer", "minimum": 0 },
+        "strategy": { "enum": ["inline", "delegated", "grouped", "checkpointed"] },
+        "drafters": { "type": "integer", "minimum": 0 },
+        "subagentUsd": { "type": ["number", "null"], "minimum": 0 },
+        "specReview": { "enum": ["pass", "fail", null] },
+        "estUsd": { "type": ["number", "null"], "minimum": 0 },
+        "coordinatorDepthPct": { "type": ["number", "null"], "minimum": 0 },
+        "ts": { "type": "string", "format": "date-time" }
+      },
+      "required": ["kind", "runId", "stage", "specBytes", "planBytes", "fenceShare", "tasks", "waves",
+        "strategy", "drafters", "subagentUsd", "specReview", "ts"],
       "additionalProperties": false
     },
     {

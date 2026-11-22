@@ -41,6 +41,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
   --taskReviewerModel '${user_config.taskReviewerModel}' \
   --branchReviewModel '${user_config.branchReviewModel}' \
   --walkthroughModel '${user_config.walkthroughModel}' \
+  --planningStrategy '${user_config.planningStrategy}' \
+  --planningBudgetUSD '${user_config.planningBudgetUSD}' \
   --learnStalenessSessions '${user_config.learnStalenessSessions}' \
   --learnStalenessDays '${user_config.learnStalenessDays}' \
   --learnSessionCap '${user_config.learnSessionCap}' \
@@ -167,7 +169,9 @@ Diagnosis and brainstorm have no playbook to say so: read `${CLAUDE_PLUGIN_ROOT}
    builder would and takes its repo claims on trust, while this one checks them against
    live code, so neither replaces the other. Fix its findings in the spec and rerun the lint; a finding
    only the user can settle joins the builder check's questions in the one message that ends with
-   the approval question. Record the result on the state file's `spec:` line in the annotation
+   the approval question. After its last pass, write its **Verified** list to
+   `.devcycle/spec-verified.md` and run `node "${CLAUDE_PLUGIN_ROOT}/scripts/spec-claims.mjs" write
+   --spec <spec-path> --verified .devcycle/spec-verified.md`, so planning re-verifies only what changed. Record the result on the state file's `spec:` line in the annotation
    `references/resume.md` defines and, when a run record exists, as the `spec-review` event
    `references/ledger.md` defines (`run-record.mjs append --kind event --stage brainstorm`).
    An approved spec transitions to planning below, never directly to upstream's writing-plans.

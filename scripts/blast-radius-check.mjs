@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 // Pre-flight check for a devcycle plan: for each non-test file a task modifies, find repo code
-// files that reference it (by module basename) but appear in no task's Files block. Any such
+// files that reference it (by module basename, or `<parent>/<basename>` for a file outside CODE_EXT) but appear in no task's Files block. Any such
 // referencer -- test or non-test -- is a hard failure (it almost certainly needs updating), cleared
 // only by adding it to a Files block or recording an override. The gate walks only JS/TS/Python
-// files (CODE_EXT) and matches the changed file's basename with its extension, so a referencer in
-// any other language, or one that imports `./foo` without the extension, is never seen. `--scan`
-// is the planner's wider, advisory pass over the same walk. See playbooks/planning-waves.md.
+// files (CODE_EXT) and matches a changed code file by its basename with its extension, so a referencer
+// in any other language, or one that imports `./foo` without the extension, is never seen. A changed
+// non-code file is matched by its written-out `<parent>/<basename>` path behind a path character, so a
+// script that builds that path in pieces (`join(root, "docs", "guide", "README.md")`) or names it
+// relatively (`"./ledger.md"`) is not flagged: a deliberate trade of false positives for false
+// negatives. `--scan` is the planner's wider, advisory pass over the same walk and still matches by
+// basename. See playbooks/planning-waves.md.
 import { readFileSync, existsSync, readdirSync, statSync, realpathSync } from "node:fs";
 import { join, basename, dirname, extname, relative, resolve, isAbsolute, sep, posix } from "node:path";
 import { taskBlocks, taskFileMap, TEST_FILE_SUFFIXES, normalizeFileToken, isTestPath } from "./task-files.mjs";
@@ -28,15 +32,25 @@ function walk(dir, acc = []) {
   return acc;
 }
 
-// The resolution planning-waves.md documents: a planner acknowledges a referencer (test or
+// The resolution references/plan-task-format.md documents: a planner acknowledges a referencer (test or
 // non-test) that does not need updating, with a reason, and the gate clears rather than being
 // walked around in prose.
-//   - Blast-radius override: <changed-file> [→ <referencer>] — <reason>
-// File-only clears every referencer of that file; "→ <referencer>" clears just that pair. A
-// missing reason is an error — an unexplained override is exactly the silent walk-around this
+//   - Blast-radius override: <changed-file> [→ <referencer>[, <referencer>…]] — <reason>
+// File-only clears every referencer of that file; "→ <referencer>[, <referencer>…]" clears just the
+// pairs it lists. A missing reason is an error — an unexplained override is exactly the silent walk-around this
 // gate prevents.
 const OVERRIDE_START = /^\s*-\s*Blast-radius override:/;
-const OVERRIDE_RE = /^\s*-\s*Blast-radius override:\s*(\S+?)(?:\s*→\s*(\S+))?\s*—\s*(.*\S)\s*$/;
+const OVERRIDE_RE = /^\s*-\s*Blast-radius override:\s*(\S+?)(?:\s*→\s*([^—]+?))?\s*—\s*(.*\S)\s*$/;
+const MALFORMED_OVERRIDE =
+  'malformed override (needs "<changed-file> [→ <referencer>[, <referencer>…]] — <reason>", e.g. "- Blast-radius override: scripts/a.mjs → tests/unit/a.test.mjs — only a comment names it")';
+
+// The text the gate looks for in a referencer. A code file is named by its basename with the
+// extension (`widget.mjs`); any other file -- Markdown, JSON -- by its last two path segments, since
+// a bare `README.md` or `config.json` names a different file in every directory.
+export function referenceToken(changedFile) {
+  if (CODE_EXT.has(extname(changedFile))) return basename(changedFile);
+  return changedFile.split("/").slice(-2).join("/");
+}
 
 const failed = (finding) => ({ findings: [finding], ok: "", notes: [] });
 
@@ -77,26 +91,25 @@ export function blastRadiusLeg(planText, { planPath, repoRoot }) {
     for (const line of blockText.split("\n")) {
       if (!OVERRIDE_START.test(line)) continue;
       const m = line.match(OVERRIDE_RE);
-      // Normalize both captures through the same normalizeFileToken the declaration side ran
+      // Normalize every capture through the same normalizeFileToken the declaration side ran
       // every "**Files:**" token through, so an override written with backticks or trailing
       // punctuation -- exactly how planners write paths elsewhere -- still matches `chg` below.
       const file = m ? normalizeFileToken(m[1]) : null;
-      const test = m && m[2] !== undefined ? normalizeFileToken(m[2]) : null;
-      // A present "→ <referencer>" whose token does not normalize to a path is malformed just as a
-      // bad changed-file token is; otherwise it would silently widen the override from the single
-      // pair to every referencer of the changed file.
-      if (!m || file === null || (m[2] !== undefined && test === null)) {
-        return failed(`malformed override (needs "<changed-file> [→ <referencer>] — <reason>"): ${line.trim()}`);
+      const tests = m && m[2] !== undefined ? m[2].split(",").map((part) => normalizeFileToken(part.trim())) : null;
+      // A listed "→ <referencer>" whose token does not normalize to a path is malformed just as a
+      // bad changed-file token is; otherwise it would silently widen the override from the listed
+      // pairs to every referencer of the changed file.
+      if (!m || file === null || (tests !== null && tests.includes(null))) {
+        return failed(`${MALFORMED_OVERRIDE}: ${line.trim()}`);
       }
-      overrides.push({ file, test, reason: m[3] });
+      overrides.push({ file, tests, reason: m[3] });
     }
   }
 
   const findings = [];
   const notes = [];
   for (const chg of changed) {
-    const base = basename(chg); // keep the extension: `config.md`, not `config`
-    const tokenRe = new RegExp(`[/.'"\`]${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
+    const tokenRe = new RegExp(`[/.'"\`]${referenceToken(chg).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
     for (const cand of codeFiles) {
       if (cand === chg || declared.has(cand)) continue;
       let content;
@@ -106,7 +119,7 @@ export function blastRadiusLeg(planText, { planPath, repoRoot }) {
         continue;
       }
       if (!tokenRe.test(content)) continue;
-      const ov = overrides.find((o) => o.file === chg && (o.test === null || o.test === cand));
+      const ov = overrides.find((o) => o.file === chg && (o.tests === null || o.tests.includes(cand)));
       if (ov) {
         notes.push(`override -- ${cand} references ${chg}, cleared: ${ov.reason}`);
       } else {
@@ -125,8 +138,8 @@ export function blastRadiusLeg(planText, { planPath, repoRoot }) {
   };
 }
 
-// --scan: the planner's pass while deriving a task's Files block (playbooks/planning-waves.md task
-// template). Wider than the gate on purpose -- any text code file, declared symbols as well as the
+// --scan: the planner's pass while deriving a task's Files block (references/plan-task-format.md
+// § The task block). Wider than the gate on purpose -- any text code file, declared symbols as well as the
 // basename -- and advisory: it exits 0 whatever it finds, and the gate stays the authority at merge.
 export const SCAN_CODE_EXT = new Set([
   ...CODE_EXT, ".cjs", ".cs", ".java", ".kt", ".kts", ".go", ".rs", ".rb", ".php", ".swift", ".scala",

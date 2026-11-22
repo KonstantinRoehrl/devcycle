@@ -30,7 +30,9 @@ too: rerun its command and compare what it prints with what the spec says it sho
 
 `Status: clean | findings`. Then each finding as: spec section · the claim · the command you ran
 and what it showed · why it matters to whoever builds from the spec. Then a short **Verified**
-list: each confirmed claim beside the command that confirmed it.
+list, one line per confirmed claim, exactly
+``- <claim> · paths: <repo path>[, <repo path>…] · cmd: `<command that confirmed it>` ``, with
+`paths: none` for a claim no file backs; the coordinator saves this list for planning.
 
 Shape it per `${CLAUDE_PLUGIN_ROOT}/references/output.md`. A claim you call verified names its
 command, as `${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims asks of every

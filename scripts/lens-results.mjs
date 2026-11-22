@@ -148,7 +148,7 @@ function saveLenses(dir, ref, payload) {
   return { saved: store.save(LENS_SET_FILE, set), lenses: set.lenses.map((l) => l.key), notes };
 }
 
-function missing(dir) {
+export function missing(dir) {
   const set = loadLensSet(dir);
   const { jobKey } = roundInputs(set);
   const { store } = storeFor(dir);

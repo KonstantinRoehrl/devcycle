@@ -147,6 +147,9 @@ A band above the prompt shows the run's progress without spending a model turn.
 
 Every handoff records when it is safe to `/clear`; resuming before it warns you, and the
 `handoffNotification` setting can ring your terminal or push a notification when it is.
+If a session ends without reaching its handoff — a usage limit, an API error, a laptop that died —
+`/devcycle:continue` says so, names the cause when it can, and shows what is already done, what it
+re-checks and what it redoes before any stage work, so finished work is neither redone nor overwritten.
 
 **Add `.devcycle/` to the target repo's `.gitignore`** — none of it belongs in git history.
 What devcycle attempts to commit *outside* that directory is `docTrackingPolicy`'s call.
@@ -204,6 +207,23 @@ plugin ships. Start there.
   depth per stage from the per-subagent depth rows `hooks/dispatch-sensor.mjs` writes whenever a
   cycle's own session sees a subagent finish. The hooks module (`hooks/devcycle-mod.mjs`) adds an
   `agent-trace` row per finished subagent turn, which doctor cross-checks against those depth rows.
+  The same sensor prices each finished subagent into an `agent-cost` row, and with the `plan-stats` row
+  the planning handoff writes, doctor prints a per-run Planning breakdown: dollars by planning role,
+  each drafter's turns and model, source-file prints, a tier-fit flag and the P1–P12 planning rubric.
+  Planning picks its drafting strategy from the task cut (a decision table in `scripts/plan-strategy.mjs`):
+  small cuts draft inline, wide loosely coupled ones through grouped `devcycle:plan-drafter` dispatches
+  held to an interface lock, which read a shared context pack and `references/plan-task-format.md` rather
+  than the whole planning playbook. `scripts/plan-bench.mjs` replays past specs through headless planning,
+  once per `planningStrategy` arm, and scores each replay on that rubric
+  ([`docs/playbooks/planning-waves/README.md`](docs/playbooks/planning-waves/README.md) § Benchmarking
+  planning strategies).
+  At the task cut planning also prints a projected dispatch, token and dollar figure
+  (`scripts/plan-cost.mjs`), asks whether to proceed, switch strategy or reduce scope when an optional
+  `planningBudgetUSD` is exceeded, and can clear and resume mid-planning from disk, past the
+  drafting too, since the assembly, the checker and repair rounds and the plan gate are logged as each
+  finishes (`scripts/plan-resume.mjs`); the figure is labelled uncalibrated until a benchmark pass calibrates it
+  ([`docs/playbooks/planning-waves/README.md`](docs/playbooks/planning-waves/README.md) § Projected cost, the
+  budget and resume).
   The depth gate runs `scripts/depth-probe.mjs`, which
   measures one transcript without loading doctor. Every `/devcycle:doctor` cost-analysis reply
   carries a per-version and per-stage overview, rendered by `scripts/doctor-overview.mjs` from
@@ -219,8 +239,8 @@ plugin ships. Start there.
   expected deliverable is absent from the branch or the installed copy was written to during the
   run. It is inert in every other repo.
 - The evidence-and-verification contract's gates: planning runs `scripts/plan-check.mjs` in its
-  self-review — one fail-closed gate over eight legs, including the budget-fixture and
-  authored-claims checks — and `/devcycle:cycle` runs
+  self-review — one fail-closed gate over ten legs, including the budget-fixture and
+  authored-claims checks, which also runs on each drafted task and on the plan assembled from them — and `/devcycle:cycle` runs
   `scripts/contract-staleness-check.mjs` as an advisory preflight that warns when a cached plugin's
   contract predates the target repo's. A host repo can declare its whole-gate checks in the
   required-checks manifest `tests/fixtures/required-gate-checks.json` — a committed JSON array of

@@ -14,11 +14,12 @@ import { UNREADABLE_PLUGIN_VERSION, installedVersion } from "./verification.mjs"
 import { field } from "./md-field.mjs";
 import { describe } from "./find-state-files.mjs";
 import { checkState } from "./resume-check.mjs";
+import { uncontrolledStop } from "./cycle-position.mjs";
 import { settleFormat } from "./cycle-format.mjs";
 import { parseHandoff } from "./handoff-mark.mjs";
 import { compareKnobs, parseRecordedLine, resolveKnobs } from "./resolve-knobs.mjs";
 import { resolveDepth } from "./depth-probe.mjs";
-import { TEST_FILE_SUFFIXES, fieldValue, gateCommand, parseDispatchMap, taskBlocks, taskFileMap } from "./task-files.mjs";
+import { TEST_FILE_SUFFIXES, fieldValue, gateCommand, parseDispatchMap, taskBlocks, taskDependencies, taskFileMap } from "./task-files.mjs";
 import {
   isNoVerdict, ledgerPlan, nextReviewRound, noVerdictReason, parseLedgerLine, retryCount, runTaskScript, taskFlags, workTreeRoot, UsageError,
 } from "./task-ledger.mjs";
@@ -101,7 +102,7 @@ function readLedger(ledgerPath, plan, slot) {
 
 // The declaration forms playbooks/planning-waves.md allows — `none (…)`, `Task 2 (…)`, `Tasks 1+4
 // committed`: the numbers before any parenthesis are the tasks that must be committed first.
-const dependenciesOf = (block) => [...(fieldValue(block, "Dependencies") ?? "").split("(")[0].matchAll(/\d+/g)].map((m) => m[0]);
+const dependenciesOf = (block) => taskDependencies(block).map(String);
 
 // The task's own test run as its steps spell it: the last code span in a step that names one of its
 // Test files and carries arguments. null when no step names one; the coordinator derives it then.
@@ -321,7 +322,7 @@ function readSetup(opts) {
   const result = {
     ok: true, action: "resume", state, knobDrift: [], branch: null, depth, wave: null, tasks: [], dispatchable: [],
     pendingDecision: null, drive: driveStatus(root, abs, stateText, lines, knobsLine), entryLines: [], appended: [], depthBand: depth?.band ?? null,
-    handoff: { ...parseHandoff(field(stateText, "handoff")), ask: false }, formatQuestion: null, formatReport: [],
+    handoff: { ...parseHandoff(field(stateText, "handoff")), ask: false, uncontrolled: null }, formatQuestion: null, formatReport: [],
   };
   // A stop on one task's pending decision names it, so the answer is recorded as that task's.
   const stop = (stopReason, stopDetail, stopTask = null) => ({ ...result, action: "stop", stopReason, stopDetail, stopTask });
@@ -391,7 +392,10 @@ function readSetup(opts) {
     // Only a manual walk reads the wave. Any other action is the drive step's, so the output carries
     // no walk fields a session could act on instead (commands/continue.md § Execution resume).
     const walk = decision.action === "manual" ? {} : { action: "drive", ...NO_WALK };
-    return { ...result, ...walk, handoff: { ...result.handoff, ask }, drive: decided(decision) };
+    // The not-ready question becomes the recovery gate when the session before this one ended uncontrolled.
+    const interrupted = ask ? uncontrolledStop({ statePath: abs, env }) : null;
+    const uncontrolled = interrupted && { since: interrupted.since, label: interrupted.label };
+    return { ...result, ...walk, handoff: { ...result.handoff, ask, uncontrolled }, drive: decided(decision) };
   }
 
   // Drive mode: every gate continue would ask about is a stop (spec 4.B.3).

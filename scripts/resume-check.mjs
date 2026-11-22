@@ -12,6 +12,7 @@ import { isMain } from "./is-main.mjs";
 import { parseHandoff } from "./handoff-mark.mjs";
 import { readStopRecord } from "./stop-files.mjs";
 import { formatStopMessage, formatVerdict, isPendingRename, settleFormat } from "./cycle-format.mjs";
+import { uncontrolledStop } from "./cycle-position.mjs";
 
 // The stage enum's single source of truth is the `- stage: <a|b|c>` line in
 // commands/cycle.md, read the same way scripts/validate.mjs reads it, so this guard never
@@ -212,6 +213,8 @@ function main(argv) {
   console.log(`resume-check: ok — stage ${result.stage}, all recorded artifacts present`);
   for (const line of result.lines) console.log(line);
   for (const line of stoppedLines(result.stopped)) console.log(line);
+  const uncontrolled = result.stage === CLOSED_STAGE ? null : uncontrolledStop({ statePath });
+  if (uncontrolled) console.log(`uncontrolled: ${uncontrolled.stage} since ${uncontrolled.since} (${uncontrolled.label})`);
   console.log(`handoff: ${result.handoff.state} ${result.handoff.stamp ?? "(no row)"}`);
 }
 

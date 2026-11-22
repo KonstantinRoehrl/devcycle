@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Pre-flight check for a devcycle plan: every "### Task N" block must carry the required
 // dispatch fields, the Evidence value must name a valid class, a red-green task that creates a
-// non-test source file must carry a stub step, an interface-pinned task must say why and still pin
-// its failing test code, "## Dispatch Map" must list every task, every
+// non-test source file must carry a stub step, a red-green task must pin its failing test code in a
+// fenced block, a Detail line must say why, "## Dispatch Map" must list every task (outside a draft), every
 // pinned gate command must run the repo's required checks, and a Files block that edits a budgeted file must list the size baselines that edit trips and the decisions log
 // that holds them, and a git command a step prescribes that the dispatch guard denies an
 // implementer is reported as a note, never a failure. Modeled on wave-disjointness-check.mjs; a
@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   taskBlocks, parseDispatchMap, filesFieldValue, fieldValue, verificationGate, verificationGateField, conventionCommand,
-  createdFiles, isTestPath, lineFences, fencedBlocks,
+  createdFiles, isTestPath, lineFences, fencedBlocks, isRedGreen,
 } from "./task-files.mjs";
 import { budgetFixtureGaps, gapRemedy } from "./budget-fixture-check.mjs";
 import { isMain } from "./is-main.mjs";
@@ -170,7 +170,7 @@ const DECLARATION_FILE_RE = /\.d\.[mc]?ts$/i;
 const STUB_RE = /\bstub/i;
 
 function stubErrors(num, block) {
-  if ((fieldValue(block, "Evidence") ?? "").split(/\s+/)[0] !== "red-green") return [];
+  if (!isRedGreen(block)) return [];
   const files = filesFieldValue(block);
   if (!files) return [];
   const created = [...createdFiles(files)].filter((path) => SOURCE_EXTENSIONS.has(extname(path).toLowerCase()) && !DECLARATION_FILE_RE.test(path) && !isTestPath(path));
@@ -182,13 +182,13 @@ function stubErrors(num, block) {
   ];
 }
 
-// #331: `**Detail:** interface-pinned — <reason>` lets a red-green task describe its implementation
-// in prose, provided its interfaces, failing test code and gate commands stay pinned
-// (playbooks/planning-waves.md § No placeholders). This checks the declaration and that some code
-// is still pinned; the task reviewer judges behaviour the tests leave open. Only a line that opens
-// with the label declares it: a brief that quotes the form mid-sentence, as a plan about this very
-// check does, declares nothing.
-export const DETAIL_VALUES = ["interface-pinned"];
+// `**Detail:** code-pinned — <reason>` marks a task whose pinned code leaves behaviour the tests do not
+// fix; the older `interface-pinned — <reason>` (#331) lets a red-green task describe its implementation
+// in prose while its interfaces, failing test code and gate commands stay pinned
+// (references/plan-task-format.md § No placeholders). This checks the declaration; the task reviewer
+// judges behaviour the tests leave open. Only a line that opens with the label declares it: a brief that
+// quotes the form mid-sentence, as a plan about this very check does, declares nothing.
+export const DETAIL_VALUES = ["code-pinned", "interface-pinned"];
 const DETAIL_LINE_RE = /^\*\*Detail:\*\*[ \t]*(.*)$/m;
 const DETAIL_RE = /^(\S+)(?:\s+(?:—|--|-)\s*(.*))?$/;
 
@@ -198,24 +198,85 @@ function detailErrors(num, block) {
   const detail = line[1].trim();
   const m = detail.match(DETAIL_RE);
   if (!m || !DETAIL_VALUES.includes(m[1]))
-    return [`Task ${num}: **Detail:** must be \`interface-pinned — <reason>\`, got: ${detail || "(empty)"}`];
+    return [`Task ${num}: **Detail:** must be \`code-pinned — <reason>\`, got: ${detail || "(empty)"}`];
   const errors = [];
-  if (!m[2]?.trim()) errors.push(`Task ${num}: **Detail:** interface-pinned needs a reason after the dash, e.g. \`interface-pinned — new interception layer, design-heavy\``);
-  if ((fieldValue(block, "Evidence") ?? "").split(/\s+/)[0] !== "red-green")
+  if (!m[2]?.trim()) errors.push(`Task ${num}: **Detail:** ${m[1]} needs a reason after the dash, e.g. \`code-pinned — the recovery order is not fixed by the tests\``);
+  if (m[1] === "interface-pinned" && !isRedGreen(block))
     errors.push(`Task ${num}: **Detail:** interface-pinned is allowed only on a red-green task, whose failing test pins the behaviour`);
-  if (fencedBlocks(block).length === 0)
-    errors.push(`Task ${num}: **Detail:** interface-pinned still pins the complete failing test code in a fenced block, and this brief has none`);
   return errors;
 }
 
-// repoRoot is the work tree whose required-checks manifest applies; plan-check passes its own.
-export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cwd() }, { includeBudgetFixtures = true } = {}) {
+// A red-green task's brief is where its failing test lives: the implementer works test-first from it
+// (references/plan-task-format.md § No placeholders). A fence holding only the gate command does not
+// pin it, so a shell- or output-labelled fence is not test code, and neither is an unlabelled or
+// plain-text one of nothing but command and output lines. Kept apart from SHELL_FENCE_INFO, which
+// also decides what the guard leg scans: an `output` fence quotes output, it does not prescribe a command.
+// `text`, `plaintext` and `txt` are ambiguous (output, or test-table rows to edit), so they are
+// judged by their lines like an unlabelled fence.
+// `diff` stays out on purpose: a plan may pin its failing test as a patch, so a `diff` fence is read as code.
+// Accepted limit: a code-labelled fence (`js`) holding only the command as a string passes, and so does a
+// `diff` fence holding only the command or its output; judging what a language's code asserts, or what a
+// patch adds, is not this check's job.
+const NON_TEST_FENCE_INFO = new Set([
+  ...SHELL_FENCE_INFO, "shell-session", "sh-session", "shellsession", "bash-session", "terminal", "powershell", "pwsh", "ps1",
+  "bat", "cmd", "batch", "ksh", "dash", "fish", "output", "stdout", "stderr", "log", "tap",
+]);
+const JUDGED_BY_LINES_INFO = new Set(["", "text", "plaintext", "txt"]);
+const COMMAND_LINE_RE = /^(?:\$\s+)?(?:[A-Za-z_]\w*=\S*\s+)*(?:node|npm|npx|pnpm|yarn|bun|deno|python3?|pytest|go|cargo|git|make|sh|bash|env|claude|jest|vitest|tsc|php|composer|dotnet|mvn|gradle|ruby|rspec|cd)(?:\s|$)/;
+// What a test runner prints, per runner. node: the ✖ ✔ ℹ ▶ marks, TAP `ok 1`/`not ok 1`, an assertion or Error
+// line, and the `Expected:`/`Actual:` lines of a failure diff. pytest: a `====` banner, `E   ` assertion lines,
+// `FAILED`/`PASSED`/`ERROR`, a `<file>.py F.` progress line and `<n> failed`/`<n> passed`. go: `=== RUN`,
+// `--- FAIL`, FAIL/PASS and `ok  <package>  <duration>s`. cargo: `running <n> tests`, `test <name> ... ` and
+// `test result:`. npm: the `> ` script echo (its `npm ERR!`/`npm error` lines already read as commands). Case-sensitive apart from the first letter
+// of expected/actual/received, so a test line such as `ok(value)` is never read as output. `#` comments are
+// dropped separately.
+const OUTPUT_LINE_RE = new RegExp(
+  "^(?:[✖✔ℹ▶]|(?:not )?ok \\d|AssertionError\\b|\\w*Error:|(?:FAIL|PASS)\\b|(?:FAILED|PASSED|ERROR)\\b" +
+    "|={3,}|---\\s+(?:FAIL|PASS)\\b|E {2,}|(?:[Ee]xpected|[Aa]ctual|[Rr]eceived) *:" +
+    "|running \\d+ tests?\\b|test result:|test \\S+ \\.\\.\\. |ok\\s+\\S+\\s+[\\d.]+s\\b|> " +
+    "|\\S+\\.py [.FEsx]+$|\\d+ (?:passed|failed)\\b)",
+);
+
+// A command wrapped with a trailing `\` is one logical line. A `#` comment ends at its own line break,
+// even when it ends in `\`, so it never carries into the line below.
+function logicalLines(lines) {
+  const joined = [];
+  let carry = "";
+  for (const line of lines) {
+    const text = line.trim();
+    if (text.startsWith("#")) joined.push(text);
+    else if (text.endsWith("\\")) carry += `${text.slice(0, -1)} `;
+    else {
+      joined.push(carry + text);
+      carry = "";
+    }
+  }
+  if (carry) joined.push(carry.trim());
+  return joined;
+}
+
+function holdsTestCode(block, fence) {
+  if (NON_TEST_FENCE_INFO.has(fence.info)) return false;
+  if (!JUDGED_BY_LINES_INFO.has(fence.info)) return true;
+  return logicalLines(block.split("\n").slice(fence.open + 1, fence.close ?? undefined))
+    .filter((line) => line !== "" && !line.startsWith("#"))
+    .some((line) => !COMMAND_LINE_RE.test(line) && !OUTPUT_LINE_RE.test(line));
+}
+
+function fenceErrors(num, block) {
+  if (!isRedGreen(block) || fencedBlocks(block).some((fence) => holdsTestCode(block, fence))) return [];
+  return [`Task ${num}: a red-green task pins the failing test itself in a fenced block, not only the gate command (references/plan-task-format.md § No placeholders)`];
+}
+
+// repoRoot is the work tree whose required-checks manifest applies; plan-check passes its own. A `draft` is
+// one task file: the plan-level header gate, required-checks and Dispatch Map checks wait for the assembled plan.
+export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cwd(), draft = false }, { includeBudgetFixtures = true } = {}) {
   const errors = [];
   const blocks = taskBlocks(planText);
   if (blocks.length === 0) {
     return { findings: [`no "### Task N" blocks found in ${planPath}`], ok: "", notes: [] };
   }
-  errors.push(...gateLineErrors(planText), ...requiredCheckErrors(planText, blocks, repoRoot));
+  if (!draft) errors.push(...gateLineErrors(planText), ...requiredCheckErrors(planText, blocks, repoRoot));
 
   // The stub and guard legs read only a task's own brief; the other legs keep the whole-block read.
   const ownBriefs = taskBlocks(planText, { stopAtPlanSection: true });
@@ -238,7 +299,7 @@ export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cw
         );
       }
     }
-    errors.push(...stubErrors(num, ownBriefs[index].text), ...detailErrors(num, ownBriefs[index].text));
+    errors.push(...stubErrors(num, ownBriefs[index].text), ...fenceErrors(num, ownBriefs[index].text), ...detailErrors(num, ownBriefs[index].text));
   }
 
   // An incomplete Files block is not only a missing field: a brief that mandates doc growth but
@@ -255,10 +316,10 @@ export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cw
     }
   }
 
-  const waves = parseDispatchMap(planText);
+  const waves = draft ? undefined : parseDispatchMap(planText);
   if (waves === null) {
     errors.push('missing "## Dispatch Map" section');
-  } else {
+  } else if (waves) {
     const mapped = new Set([...waves.values()].flat());
     for (const { num } of blocks) {
       if (!mapped.has(num)) errors.push(`Task ${num}: not listed in the ## Dispatch Map`);

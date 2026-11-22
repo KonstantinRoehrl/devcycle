@@ -36,6 +36,9 @@ const COMPLETE = `# Plan
 **Lessons:**
 - [ ] Write a minimal stub for \`a.mjs\`
 - [ ] step
+\`\`\`js
+test("x", () => {});
+\`\`\`
 ## Dispatch Map
 - Wave 1: Task 1 (no deps)
 `;
@@ -468,16 +471,125 @@ test("fails an interface-pinned task whose evidence class is not red-green", () 
   assert.match(r.out, /Task 1: \*\*Detail:\*\* interface-pinned is allowed only on a red-green task/);
 });
 
-test("fails an interface-pinned task whose brief pins no fenced code", () => {
-  const r = run(PINNED.replace("- [ ] Write the failing test:\n```js\ntest(\"x\", () => {});\n```\n", "- [ ] Write the failing test\n"));
+test("fails any red-green task whose brief pins no fenced block", () => {
+  const r = run(COMPLETE.replace('- [ ] step\n```js\ntest("x", () => {});\n```\n', "- [ ] step\n"));
   assert.equal(r.code, 1);
-  assert.match(r.out, /Task 1: \*\*Detail:\*\* interface-pinned still pins the complete failing test code in a fenced block/);
+  assert.match(r.out, /Task 1: a red-green task pins the failing test itself in a fenced block, not only the gate command/);
+});
+
+const GATE_ONLY = COMPLETE.replace(
+  '- [ ] step\n```js\ntest("x", () => {});\n```\n',
+  "- [ ] Write a test that covers the cases\n```bash\nnode --test tests/unit/a.test.mjs\n```\n",
+);
+const NO_TEST_CODE = /Task 1: a red-green task pins the failing test itself in a fenced block, not only the gate command/;
+
+test("fails a red-green task whose only fenced block is its bash gate command", () => {
+  const r = run(GATE_ONLY);
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, NO_TEST_CODE);
+});
+
+test("fails a red-green task whose only fence is an unlabelled block of command lines", () => {
+  const r = run(GATE_ONLY.replace("```bash", "```"));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, NO_TEST_CODE);
+});
+
+test("passes a red-green task that pins a js test fence next to its bash gate fence", () => {
+  const r = run(GATE_ONLY.replace("## Dispatch Map", '```js\ntest("x", () => {});\n```\n## Dispatch Map'));
+  assert.equal(r.code, 0, r.out);
+});
+
+test("passes a red-green task whose test fence is unlabelled or in another language", () => {
+  const body = GATE_ONLY.replace("## Dispatch Map", "```%s\ntest(\"x\", () => {});\n```\n## Dispatch Map");
+  for (const info of ["", "ts", "mjs", "python"])
+    assert.equal(run(body.replace("%s", info)).code, 0, `fence info "${info}"`);
+});
+
+// A fence that holds only the gate command, its output, or a wrapped command line is not test code,
+// whatever it is labelled.
+const onlyFence = (info, body) => GATE_ONLY.replace(/```bash\nnode --test tests\/unit\/a\.test\.mjs\n```\n/, `\`\`\`${info}\n${body}\n\`\`\`\n`);
+
+test("fails a red-green task whose only fence is an unlabelled gate command followed by its output", () => {
+  const r = run(onlyFence("", "$ node --test tests/unit/a.test.mjs\n✖ a fails\nℹ tests 1\nℹ fail 1"));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, NO_TEST_CODE);
+});
+
+test("fails a red-green task whose only fence is unlabelled expected output", () => {
+  const r = run(onlyFence("", "not ok 1 - a\nAssertionError [ERR_ASSERTION]: expected 1 got 2\nFAIL"));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, NO_TEST_CODE);
+});
+
+test("fails a red-green task whose only fence is an unlabelled command wrapped with a trailing backslash", () => {
+  const r = run(onlyFence("", "TMPDIR=/tmp/x \\\n  node --test \\\n  tests/unit/a.test.mjs"));
+  assert.equal(r.code, 1, r.out);
+  assert.match(r.out, NO_TEST_CODE);
+});
+
+test("fails a red-green task whose only fence carries a non-code label", () => {
+  for (const info of ["shell-session", "sh-session", "terminal", "output", "powershell", "fish", "log", "Output"])
+    assert.equal(run(onlyFence(info, "node --test tests/unit/a.test.mjs")).code, 1, `fence info "${info}"`);
+  // Denied outright: even a line that would read as test code does not count.
+  assert.equal(run(onlyFence("output", 'test("x", () => {});')).code, 1);
+});
+
+// text, plaintext and txt are judged by their lines: output and commands fail, test-table rows pass.
+test("a text-labelled fence is judged by its lines, like an unlabelled one", () => {
+  const rows = '    [[entry(2, "review-verdict", "deferred")], "deferred", "commit"],';
+  for (const info of ["text", "plaintext", "txt", "TEXT"]) {
+    assert.equal(run(onlyFence(info, "node --test tests/unit/a.test.mjs")).code, 1, `command, info "${info}"`);
+    assert.equal(run(onlyFence(info, "not ok 1 - a\nAssertionError [ERR_ASSERTION]: boom")).code, 1, `output, info "${info}"`);
+    assert.equal(run(onlyFence(info, rows)).code, 0, `test rows, info "${info}"`);
+  }
+});
+
+test("a wrapped command beside real test lines in one unlabelled fence is still test code", () => {
+  const r = run(onlyFence("", "node --test \\\n  tests/unit/a.test.mjs\ntest(\"x\", () => {});"));
+  assert.equal(r.code, 0, r.out);
+});
+
+test("an unlabelled fence of real test code still passes, with CRLF line endings too", () => {
+  const body = 'assert.equal(f(), 2);';
+  assert.equal(run(onlyFence("", body)).code, 0);
+  assert.equal(run(onlyFence("", body).replaceAll("\n", "\r\n")).code, 0);
+  assert.equal(run(onlyFence("", "node --test x").replaceAll("\n", "\r\n")).code, 1);
+});
+
+test("an unclosed fence runs to the end of the brief and its test code still counts", () => {
+  const unclosed = GATE_ONLY.replace(/```bash\nnode --test tests\/unit\/a\.test\.mjs\n```\n/, "```\nassert.equal(f(), 2);\n");
+  assert.equal(run(unclosed).code, 0);
+});
+
+test("a green-green task with only a bash gate fence still passes", () => {
+  const r = run(GATE_ONLY.replace("**Evidence:** red-green", "**Evidence:** green-green (behavior-preserving)"));
+  assert.equal(r.code, 0, r.out);
+});
+
+test("passes a code-pinned task with a reason, on any evidence class", () => {
+  const pinned = COMPLETE.replace("**Evidence:** red-green\n", "**Evidence:** red-green\n**Detail:** code-pinned — the merge order is not fixed by the tests\n");
+  assert.equal(run(pinned).code, 0, run(pinned).out);
+  const green = pinned.replace("**Evidence:** red-green", "**Evidence:** green-green (behavior-preserving)");
+  assert.equal(run(green).code, 0, run(green).out);
+});
+
+test("fails a code-pinned task with no reason after the dash", () => {
+  const r = run(COMPLETE.replace("**Evidence:** red-green\n", "**Evidence:** red-green\n**Detail:** code-pinned\n"));
+  assert.equal(r.code, 1);
+  assert.match(r.out, /Task 1: \*\*Detail:\*\* code-pinned needs a reason after the dash/);
+});
+
+test("a green-green task needs no fenced block", () => {
+  const r = run(COMPLETE.replace("**Evidence:** red-green", "**Evidence:** green-green (behavior-preserving)")
+    .replace('- [ ] step\n```js\ntest("x", () => {});\n```\n', "- [ ] step\n"));
+  assert.equal(r.code, 0, r.out);
 });
 
 test("fails an unknown Detail value", () => {
   const r = run(PINNED.replace("interface-pinned — new interception layer, design-heavy", "sketch — too big to write"));
   assert.equal(r.code, 1);
-  assert.match(r.out, /Task 1: \*\*Detail:\*\* must be `interface-pinned — <reason>`, got: sketch — too big to write/);
+  assert.match(r.out, /Task 1: \*\*Detail:\*\* must be `code-pinned — <reason>`, got: sketch — too big to write/);
 });
 
 test("a brief that quotes the Detail form mid-line declares nothing", () => {
@@ -490,4 +602,44 @@ test("a task without a Detail line is a full-code task and is not checked for on
   const r = run(COMPLETE);
   assert.equal(r.code, 0);
   assert.doesNotMatch(r.out, /Detail/);
+});
+
+test("fails a red-green task whose only fence is a gate command and real runner output (O1)", () => {
+  const outputs = {
+    pytest: "$ pytest tests/test_a.py\n============ test session starts ============\ntests/test_a.py F\nE       assert 1 == 2\nFAILED tests/test_a.py::test_add - assert 1 == 2\n1 failed in 0.01s",
+    go: "$ go test ./...\n=== RUN   TestAdd\n--- FAIL: TestAdd (0.00s)\nFAIL\nFAIL\texample.com/a\t0.002s",
+    goOk: "$ go test ./...\nok  \texample.com/a\t0.002s\nPASS",
+    cargo: "$ cargo test\nrunning 1 test\ntest tests::adds ... FAILED\ntest result: FAILED. 0 passed; 1 failed",
+    npm: "$ npm test\n> a@1.0.0 test\n> node --test\n✖ adds\nnpm ERR! Test failed.",
+    node: "$ node --test tests/unit/a.test.mjs\n▶ suite\n  ✖ adds (1.2ms)\n    AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n    Expected: 3\n    Actual: 2",
+    // An `npm error`/`npm ERR!` line starts with `npm`, so it already reads as a command, not as output.
+    npmErrorLower: "$ npm test\nnpm error Test failed.",
+    // One fence per alternative below: its line is the only thing that can make the fence read as output.
+    pytestPassedWord: "$ pytest -v\nPASSED tests/test_a.py::test_ok",
+    pytestErrorWord: "$ pytest\nERROR tests/test_a.py",
+    receivedLine: "$ node --test tests/unit/a.test.mjs\nReceived: 2",
+    pytestPassedCount: "$ pytest\n1 passed in 0.01s",
+  };
+  for (const [name, body] of Object.entries(outputs)) {
+    const r = run(onlyFence("", body));
+    assert.equal(r.code, 1, `${name}: ${r.out}`);
+    assert.match(r.out, NO_TEST_CODE, name);
+  }
+});
+
+test("test code beside runner output still counts, and ok(value) is test code, not output", () => {
+  assert.equal(run(onlyFence("", 'test("x", () => {});\n✖ x\nExpected: 1')).code, 0);
+  assert.equal(run(onlyFence("", "ok(value);")).code, 0);
+});
+
+test("fails a red-green task whose only fence carries a shell-session or output label (O2)", () => {
+  for (const info of ["shellsession", "bash-session", "pwsh", "ps1", "bat", "cmd", "batch", "ksh", "dash", "stdout", "stderr", "tap"])
+    assert.equal(run(onlyFence(info, 'test("x", () => {});')).code, 1, `fence info "${info}"`);
+  // A diff fence may pin the failing test as a patch, so it is still read as code.
+  assert.equal(run(onlyFence("diff", '+test("x", () => {});')).code, 0);
+});
+
+test("a # comment ending in a backslash does not swallow the next line (O3)", () => {
+  assert.equal(run(onlyFence("", '# run it with \\\ntest("x", () => {});')).code, 0);
+  assert.equal(run(onlyFence("", "# the gate \\\nnode --test tests/unit/a.test.mjs")).code, 1);
 });

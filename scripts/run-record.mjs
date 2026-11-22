@@ -98,6 +98,16 @@ export function validate(obj, sub) {
       errors.push(`"${key}" must be an integer`);
     if (typesOf(prop).includes("boolean") && typeof value !== "boolean")
       errors.push(`"${key}" must be a boolean`);
+    if (typesOf(prop).includes("object")) {
+      if (typeof value !== "object" || value === null || Array.isArray(value)) errors.push(`"${key}" must be an object`);
+      else if (typeof prop.additionalProperties === "object")
+        for (const [name, each] of Object.entries(value)) {
+          if (typesOf(prop.additionalProperties).includes("integer") && !Number.isInteger(each))
+            errors.push(`"${key}.${name}" must be an integer`);
+          if (prop.additionalProperties.minimum !== undefined && Number(each) < prop.additionalProperties.minimum)
+            errors.push(`"${key}.${name}" must be >= ${prop.additionalProperties.minimum}, got ${each}`);
+        }
+    }
     if (prop.minimum !== undefined && Number(value) < prop.minimum)
       errors.push(`"${key}" must be >= ${prop.minimum}, got ${value}`);
   }
@@ -112,6 +122,15 @@ export function writeLine(toplevel, runId, obj) {
   const p = recordPath(toplevel, runId);
   mkdirSync(dirname(p), { recursive: true });
   appendFileSync(p, JSON.stringify(obj) + "\n");
+}
+
+// A flag whose value is a JSON object, such as --reads; validate() then checks its shape.
+function parseJsonFlag(name, raw) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return die(`--${name} must be JSON, got "${raw}"`);
+  }
 }
 
 function die(msg) {
@@ -235,9 +254,13 @@ function main() {
   const intFields = new Set(["round", "blockingCount", "reviewRound", "retryIndex",
     "filesChanged", "filesCreated", "filesDeleted", "insertions", "deletions",
     "plannedTaskCount", "waveCount", "filed", "degraded", "tokens", "toolUses", "durationMs",
-    "steps", "peakDepth", "window", "toolResultChars", "warned", "refused"]);
-  const floatFields = new Set(["cost"]);
-  const boolFields = new Set(["background", "fork", "windowAssumed", "isAborted"]);
+    "steps", "peakDepth", "window", "toolResultChars", "warned", "refused",
+    "inputTokens", "cacheWriteTokens", "cacheReadTokens", "outputTokens", "turns", "continuationOf",
+    "specBytes", "planBytes", "tasks", "waves", "drafters", "sourcePrints"]);
+  const floatFields = new Set(["cost", "usd", "fenceShare", "nonTestFenceShare", "subagentUsd",
+    "estUsd", "coordinatorDepthPct"]);
+  const boolFields = new Set(["background", "fork", "windowAssumed", "isAborted", "explicitModel"]);
+  const objectFields = new Set(["reads"]);
 
   if (sub === "new") {
     const runId = randomBytes(8).toString("hex");
@@ -263,11 +286,12 @@ function main() {
       if (k === "sessionId") obj.sessionHash = hashSession(v);
       else if (v === "null" && sub?.properties?.[k] && admitsNull(sub.properties[k])) obj[k] = null;
       else if (boolFields.has(k)) obj[k] = v === "true" ? true : v === "false" ? false : v;
+      else if (objectFields.has(k)) obj[k] = parseJsonFlag(k, v);
       else obj[k] = intFields.has(k) || floatFields.has(k) ? Number(v) : v;
     }
     for (const [k, v] of Object.entries(objects)) obj[k] = v;
     if (Object.keys(knobs).length) obj.knobs = knobs;
-    if (["event", "agent-depth", "agent-trace"].includes(obj.kind) && obj.ts === undefined)
+    if (["event", "agent-depth", "agent-trace", "agent-cost", "plan-stats"].includes(obj.kind) && obj.ts === undefined)
       obj.ts = now();
     writeLine(toplevel, runId, obj);
   } else if (sub === "workload") {

@@ -93,6 +93,17 @@ them with the rest.
   that session ended mid-stage." — **Resume anyway** · **Stop**. **Stop** ends the session with
   nothing written. It is never asked in drive mode, beside a running driver, or where a recorded
   driver end or stop asks its own question: `wave-setup.mjs` leaves `handoff.ask` false for each. Nor is it asked over a `stopped:` row.
+  **The recovery gate.** When `resume-check.mjs` also prints `uncontrolled: <stage> since <stamp> (<label>)`,
+  or `wave-setup.mjs` sets `handoff.uncontrolled`, that session ended uncontrolled, and the gate replaces
+  the not-ready question. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/recovery-inventory.mjs" --state <the chosen state file>`
+  and ask ONE AskUserQuestion: "The previous session's <stage> ended uncontrolled (<label>) at <since>.
+  Recovered from disk:" and the inventory's `summary` lines, one per line — **Recover and resume** ·
+  **Stop**. **Stop** ends the session with nothing written. **Recover and resume** runs each `re-verify`
+  item's `check`, counts a passing one as done and a failing one, or a `re-verify` item with no
+  `check`, as redo, then enters the stage
+  playbook, which still resumes from its own owner: the inventory only renders that owner's verdicts.
+  It is never asked in drive mode, where a session never writes `handoff: pending`. An Other answer
+  is journaled as this file's opening says of every ask it names.
 
 `updated:` is the canonical timestamp of `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`
 taken when the field is written — never a narrated or estimated time.
@@ -207,6 +218,9 @@ upstream skill — and its re-entry `note:`. `scripts/stage-entry.mjs <stage>` p
 `scripts/resume-check.mjs` prints them on success and `scripts/find-state-files.mjs` per listed
 state file, so neither command opens this file to find an entry. `commands/cycle.md` walks the
 stages in order and states each one's conditions.
+
+At `stage: planning`, `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-resume.mjs" --state .devcycle/state.md`
+prints the planning position, and the resume drafts from its `missing` and `nextGroup` and continues at its `next`.
 
 `done` has no entry: a closed cycle resumes at nothing, and `/devcycle:cycle` reuses its state file
 rather than resuming it.

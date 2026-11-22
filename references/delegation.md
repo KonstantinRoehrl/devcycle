@@ -15,9 +15,9 @@ The coordinator does exactly these things itself, and delegates everything else 
 - append the ledger;
 - append the run record, always via `${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append`;
 - update `.devcycle/state.md`;
-- write a file under `.devcycle/` that persists a dispatch's returned result, or splice
-  dispatch-written files by shell concatenation, with the coordinator's own header and Dispatch
-  Map, into the plan file the planning stage names, never reading the drafts;
+- write a file under `.devcycle/` that persists a dispatch's returned result, and run the plan
+  assembler and the whole-plan `plan-check` on dispatch-written drafts without reading them
+  (`references/delegated-planning.md` owns the merge);
 - emit handoff blocks.
 
 The list is positive and closed, so "is this micro-work?" is never a judgment call. Anything
@@ -27,7 +27,7 @@ failures — is a dispatch.
 **Exempt from delegation**, read directly however deep the session has run: files whose exact
 path is already known and whose contents the coordinator must reason about itself —
 `.devcycle/state.md`, `.devcycle/ledger.md`, the run record, the plan's dispatch map, a spec or
-plan under approval (a plan merged from dispatch-written drafts is presented by path, its body
+plan under approval (a plan assembled from dispatch-written task files is presented by path, its body
 unread), and the on-device checklist. Small and bounded; a subagent would cost more
 than it saves.
 
@@ -70,7 +70,8 @@ Repo research — locating code, mapping surfaces, tracing usage, discovering do
 subagent dispatch that returns **a map, not file dumps**. Every dispatch resolves its model
 per `references/model-routing.md` — the tier, the ceiling that stops any dispatch resolving above
 the orchestrator's own tier, and the session tier, whose dispatch omits the override and logs
-`outcome=model session`.
+`outcome=model session`, except a planning dispatch, which names its model at either tier per
+`references/model-routing.md` § Planning dispatches.
 It names its agent type explicitly too: read-only search, mapping and tracing go to `Explore`,
 never `general-purpose` — measured at a 13955 startup floor against a 32711 median, ~2.3× per
 dispatch. `general-purpose` is for work that must also write or judge.

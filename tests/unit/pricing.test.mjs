@@ -7,7 +7,10 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { PRICING, priceFor, provisionalPriceFor, cacheReadDollars } from "../../scripts/pricing.mjs";
+import {
+  PRICING, priceFor, provisionalPriceFor, cacheReadDollars, costUSD, provisionalCostUSD, usageTokens,
+  CACHE_WRITE_5M_MULTIPLIER, CACHE_WRITE_1H_MULTIPLIER,
+} from "../../scripts/pricing.mjs";
 import { collectModelIds, formatFixture, readFixture, unpricedIds } from "../../scripts/refresh-observed-models.mjs";
 
 const FIXTURE = fileURLToPath(new URL("../fixtures/observed-model-ids.json", import.meta.url));
@@ -396,4 +399,61 @@ test("provisionalPriceFor: unparseable ids, unpriced families and bad input retu
 
 test("provisionalPriceFor: priceFor stays strict for the same ids", () => {
   assert.equal(priceFor("claude-opus-5-6"), null);
+});
+
+// --- request pricing: the cache-write multipliers, costUSD and provisionalCostUSD live here ---
+
+test("the cache-write multipliers are 1.25x for a 5m write and 2.00x for a 1h write", () => {
+  assert.equal(CACHE_WRITE_5M_MULTIPLIER, 1.25);
+  assert.equal(CACHE_WRITE_1H_MULTIPLIER, 2.0);
+});
+
+test("costUSD: a record with a 1h/5m split, input, cache read and output prices to the hand-computed figure", () => {
+  // opus-5-5: $4/M in, $20/M out, $0.20/M cache read. The flat counter is ignored once a split exists.
+  // 1000*4 + 2000*4*2.00 + 4000*4*1.25 + 100000*0.20 + 500*20
+  //   = 4000 + 16000 + 20000 + 20000 + 10000 = 70000 -> $0.07
+  const u = {
+    input_tokens: 1000,
+    cache_read_input_tokens: 100_000,
+    output_tokens: 500,
+    cache_creation_input_tokens: 6000,
+    cache_creation: { ephemeral_1h_input_tokens: 2000, ephemeral_5m_input_tokens: 4000 },
+  };
+  assert.equal(costUSD(u, "claude-opus-5-5"), 0.07);
+});
+
+test("costUSD: the flat cache_creation_input_tokens fallback bills at the 5m rate", () => {
+  // opus-5-5: $4/M in. 10000*4*1.25 = 50000 -> $0.05
+  assert.equal(costUSD({ cache_creation_input_tokens: 10_000 }, "claude-opus-5-5"), 0.05);
+});
+
+test("costUSD: an unpriced model id returns null rather than a defaulted price", () => {
+  assert.equal(costUSD({ input_tokens: 1_000_000 }, "claude-opus-9"), null);
+});
+
+test("provisionalCostUSD: a model newer than its family's priced rows is priced at the newest row and names it", () => {
+  // opus-5-6 is newer than opus-5-5 ($4/M in): 1,000,000 input tokens -> $4.
+  assert.deepEqual(provisionalCostUSD({ input_tokens: 1_000_000 }, "claude-opus-5-6"), {
+    dollars: 4,
+    basedOn: "claude-opus-5-5",
+  });
+});
+
+test("provisionalCostUSD: a model the table prices exactly returns null", () => {
+  assert.equal(provisionalCostUSD({ input_tokens: 1 }, "claude-opus-5-5"), null);
+});
+
+test("dispatch-cost prices through scripts/pricing.mjs and never imports the 206 KB doctor.mjs", () => {
+  const source = readFileSync(fileURLToPath(new URL("../../scripts/dispatch-cost.mjs", import.meta.url)), "utf8");
+  assert.doesNotMatch(source, /from\s+["']\.\/doctor\.mjs["']/);
+});
+
+test("usageTokens: the TTL breakdown wins over the flat cache-write counter, which stands in when there is none", () => {
+  const flat = { input_tokens: 5, cache_creation_input_tokens: 300, cache_read_input_tokens: 70, output_tokens: 9 };
+  assert.deepEqual(usageTokens(flat), { inputTokens: 5, cacheWriteTokens: 300, cacheReadTokens: 70, outputTokens: 9 });
+  const ttl = { ...flat, cache_creation: { ephemeral_1h_input_tokens: 100, ephemeral_5m_input_tokens: 40 } };
+  assert.equal(usageTokens(ttl).cacheWriteTokens, 140);
+  const emptyTtl = { ...flat, cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 } };
+  assert.equal(usageTokens(emptyTtl).cacheWriteTokens, 300);
+  assert.deepEqual(usageTokens({}), { inputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0, outputTokens: 0 });
 });

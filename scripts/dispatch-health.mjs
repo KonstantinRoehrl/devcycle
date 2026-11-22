@@ -116,37 +116,55 @@ function firstMessage(file) {
 
 const metaFinished = (file) => readJson(file.replace(/\.jsonl$/, ".meta.json"))?.finished === true;
 
-// What the classifier needs from a whole transcript. Its end, as Claude Code writes it (2.1.288–2.1.311):
-// the tool_result of the closing SubagentHandback (`toolEndsTurn`), an interrupt marker (a denied tool
-// call, or the session killed under it), or a final assistant message with no tool call. Hook
-// attachments and a torn trailing line are skipped.
+// How a recovery inventory names a tool call: a Bash command's first line, or an Agent dispatch's description.
+function callSummary(name, input) {
+  if (name === "Bash") return typeof input?.command === "string" ? input.command.split("\n")[0].trim() : "";
+  if (name === "Agent" || name === "Task") return typeof input?.description === "string" ? input.description : "";
+  return "";
+}
+
+// What the classifier and the recovery inventory need from a whole transcript. Its end, as Claude Code
+// writes it (2.1.288–2.1.311): the tool_result of the closing SubagentHandback (`toolEndsTurn`), an
+// interrupt marker (a denied tool call, or the session killed under it), or a final assistant message
+// with no tool call — an API error message (a usage limit) among them. Hook attachments and a torn
+// trailing line are skipped, so a call whose result line was torn reads pending.
 export function readTranscript(file) {
   if (!existsSync(file)) return null;
   let first = null;
   let last = null;
-  let toolUses = 0;
   let lastTool = null;
+  let apiError = null;
+  const uses = [];
+  const returned = new Set();
   eachRecord(file, (r) => {
     if (!isMessage(r)) return true;
     first ??= r;
     last = r;
-    if (r.type === "assistant")
-      for (const b of Array.isArray(r.message?.content) ? r.message.content : [])
-        if (b?.type === "tool_use") {
-          toolUses += 1;
-          if (typeof b.name === "string") lastTool = b.name;
-        }
+    if (r.isApiErrorMessage === true) apiError = textOf(r.message?.content);
+    for (const b of Array.isArray(r.message?.content) ? r.message.content : []) {
+      if (r.type === "assistant" && b?.type === "tool_use") {
+        uses.push(b);
+        if (typeof b.name === "string") lastTool = b.name;
+      }
+      if (r.type === "user" && b?.type === "tool_result") returned.add(b.tool_use_id);
+    }
     return true;
   });
+  const calls = uses.map((b) => {
+    const name = typeof b.name === "string" ? b.name : "";
+    return { id: String(b.id ?? ""), name, summary: callSummary(name, b.input), completed: returned.has(b.id) };
+  });
+  const pending = calls.findLast((c) => !c.completed);
+  const toolCalls = { toolUses: calls.length, lastTool, apiError, calls, pendingCall: pending ? { name: pending.name, summary: pending.summary } : null };
   const mtimeMs = statSync(file).mtimeMs;
-  if (!first) return { firstStamp: null, prompt: "", toolUses: 0, lastTool: null, terminal: false, pendingSince: null, mtimeMs, lastStamp: null };
+  if (!first) return { firstStamp: null, prompt: "", ...toolCalls, terminal: false, pendingSince: null, mtimeMs, lastStamp: null };
   const blocks = Array.isArray(last.message?.content) ? last.message.content : [];
   const callsTool = blocks.some((b) => b?.type === "tool_use");
   const terminal = last.toolEndsTurn === true
     || (last.type === "user" && INTERRUPTED.test(textOf(last.message?.content).trim()))
     || (last.type === "assistant" && FINAL_STOPS.has(last.message?.stop_reason) && !callsTool);
   return {
-    firstStamp: Date.parse(first.timestamp) || null, prompt: textOf(first.message?.content), toolUses, lastTool, terminal,
+    firstStamp: Date.parse(first.timestamp) || null, prompt: textOf(first.message?.content), ...toolCalls, terminal,
     pendingSince: last.type === "assistant" && callsTool ? Date.parse(last.timestamp) || null : null, mtimeMs,
     lastStamp: Date.parse(last.timestamp) || null,
   };
@@ -156,6 +174,23 @@ export function transcriptState(t, { now, ended = false }) {
   if (ended || t.terminal) return "ended";
   if (t.pendingSince !== null && now - t.pendingSince < TOOL_CEILING_MS) return "running";
   return now - t.mtimeMs < QUIET_MS ? "running" : "quiet";
+}
+
+// This module's classification of one open dispatch record of a session that is not this one, for the
+// resume path's uncontrolled-stop detection: an unbound record of an earlier session is an orphan of a
+// cut-off, never live, so only a bound agent transcript that reads running counts. It never throws: an
+// unreadable record or transcript is not running.
+export function recordRunning(record, { env = process.env, now = Date.now() } = {}) {
+  try {
+    if (typeof record?.agentId !== "string" || !/^[0-9a-z]+$/.test(record.agentId) || record.endedAt) return false;
+    const slugDir = sessionSlugDir(record.sessionId, env);
+    if (!slugDir) return false;
+    const file = join(slugDir, record.sessionId, "subagents", `agent-${record.agentId}.jsonl`);
+    const t = readTranscript(file);
+    return t !== null && transcriptState(t, { now, ended: metaFinished(file) }) === "running";
+  } catch {
+    return false;
+  }
 }
 
 const owedPath = (task, role, round) => (role === "implementer" ? `.devcycle/reports/${task}.md` : roundFindingsPath(task, round));

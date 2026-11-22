@@ -24,6 +24,7 @@ one line per entry; the hub (`README.md`) mirrors this roster in its surface tab
 | `model-routing.md` | How a `*Model` knob's value becomes a dispatch model — the session and fast tiers, the ladder, and the ceiling. |
 | `model-tiers.json` | The model-tier table — each model family with its escalation rank and name-match pattern. |
 | `output.md` | How every devcycle agent and playbook reports. |
+| `plan-task-format.md` | How one plan task is written — the task block, the three per-task declaration lines, Files derivation, No placeholders and the per-task checks; read by whoever drafts a task. |
 | `quality-criteria.md` | What any devcycle review or plan measures against — the criteria catalog, sourcing precedence, seed best-practice index, and how the catalog reaches planning and execution. |
 | `reinforcement-policy.md` | The numeric thresholds devcycle's learn loop reads when it decides to escalate a culprit or reinforce a win. |
 | `resume.md` | How any stage re-enters itself after an interruption (`/devcycle:continue`), and the state file's shape. |

@@ -114,6 +114,7 @@ devcycle/                (public GitHub repo)
 │   │                             # review-panel's per-finding verification pass
 │   ├── history-inspector.md      # read-only git-history lens for /devcycle:maintain; bounded traversal
 │   ├── spec-reviewer.md          # read-only spec-claims check against live code, before brainstorm's approval question
+│   ├── plan-drafter.md           # drafts plan tasks from planning's context pack; writes only its own draft files
 │   └── on-device-driver.md       # drives claude-in-chrome for the on-device stage, choosing the
 │                                 # browser on this computer; the only origin the browser guard below permits
 ├── hooks/                        # L4 — the hooks that ship (docs/decisions/README.md, 2026-08-20, 2026-09-02, 2026-09-05, 2026-10-07, 2026-10-30)
@@ -128,7 +129,7 @@ devcycle/                (public GitHub repo)
 │   ├── lib/run-scope.mjs              # which state file names an active run — node-free, shared by the depth-sensor and the hooks module
 │   ├── lib/run-context.mjs            # state file → active run → joined session, for the depth-sensor and the module's sink
 │   ├── workload-sensor.mjs       # PostToolUse(Bash) commit-sensor: re-derives the run's workload record (#139)
-│   ├── dispatch-sensor.mjs       # SubagentStop depth-sensor: one agent-depth record per finished subagent; holds an implementer that stops before its report; on a released stop marks its dispatch record ended and retires it in the process registry; on Stop holds the live driver's turn while a dispatch works
+│   ├── dispatch-sensor.mjs       # SubagentStop depth-sensor: one agent-depth record and one agent-cost record per finished subagent; holds an implementer that stops before its report; on a released stop marks its dispatch record ended and retires it in the process registry; on Stop holds the live driver's turn while a dispatch works
 │   ├── devcycle-mod.mjs          # the hooks module (in-process, no Node): agent-trace observer, subagentBudget limiter, stage meter, handoff notification relay, drive band
 │   └── mod-sink.mjs              # the module's Node side: the joined check and agent-trace writes
 ├── references/                   # L3 — one owner per convention; enumerated in §15.1
@@ -251,6 +252,8 @@ gated by `userConfig.crossModelReview`.
   "taskReviewerModel": "auto | <model id>",
   "branchReviewModel": "auto | <model id>",
   "walkthroughModel": "auto | <model id>",
+  "planningStrategy": "auto | status-quo | inline | grouped | checkpointed",
+  "planningBudgetUSD": 0,
   "learnStalenessSessions": 5,
   "learnStalenessDays": 14,
   "learnSessionCap": 100,
@@ -321,6 +324,14 @@ gated by `userConfig.crossModelReview`.
   manually; `manual` walks them in the session; `unattended` starts the driver with no question,
   recorded `via=knob`, and skips the start confirm on later resumes; a run that stopped for a person
   still asks (decision log, 2026-10-29). A recorded row outranks it for the mode, and it is `live`, so a mid-cycle change is never knob drift. It takes no `auto`.
+- `planningBudgetUSD` (added 2026-11-20) is a dollar ceiling on the planning stage's projected cost.
+  Above it, planning asks whether to proceed, switch strategy or reduce scope. `0`, the default,
+  sets no budget. It is not `live`, so a mid-cycle change shows as knob drift.
+- `planningStrategy` (added 2026-11-19) forces how the planning stage drafts: `status-quo` applies the
+  delegation thresholds, `inline` drafts every task in the planning session, `checkpointed` drafts inline in one segment per
+  wave group, `grouped` drafts in rounds of grouped `devcycle:plan-drafter` dispatches held to an
+  interface lock, and `auto`, the default, runs the planning decision table over the task cut. It exists so the planning benchmark can
+  compare arms like for like (decision log, 2026-11-19).
 - `driveWatch` and `drivePlugins` (added 2026-10-25) shape an unattended run. `driveWatch` is how
   much of it the starting session relays: `end`, the default, only its end, while the hooks
   module's band shows progress; `wave`; or `all`. `drivePlugins` is which plugins its sessions load
@@ -360,7 +371,7 @@ gated by `userConfig.crossModelReview`.
   `devcycle:<name>`, so a playbook name is never a user-typed string.
 - Agents: `devcycle:implementer`, `devcycle:task-reviewer`,
   `devcycle:red-team-reviewer`, `devcycle:on-device-driver`, `devcycle:history-inspector`,
-  `devcycle:spec-reviewer`. The plugin id is not decoration:
+  `devcycle:spec-reviewer`, `devcycle:plan-drafter`. The plugin id is not decoration:
   the harness passes `<plugin>:<name>` as a subagent's `agent_type`, which is the spelling the
   browser guard's allowlist must carry (`docs/platform-notes.md` § (e)).
 - Hooks: seven settings hooks and one hooks module — three guards, `block-main-thread-browser`, `block-destructive-git` and `stop-guard`, named for

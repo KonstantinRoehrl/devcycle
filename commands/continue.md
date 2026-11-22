@@ -63,8 +63,8 @@ without that line, skip this section. In drive mode:
    continuing on the stale record. On success it also prints the stage's `entry:` and `note:`
    lines; when the `note:` names a human-required step, re-walk that step on resume rather than
    assuming a stale `state.md` already cleared it.
-   On its last line, `handoff: pending`, ask the not-ready question
-   `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § The state file holds, unless it printed `stopped:`.
+   On its last line, `handoff: pending`, ask the not-ready question `${CLAUDE_PLUGIN_ROOT}/references/resume.md`
+   § The state file holds — its recovery gate after an `uncontrolled:` line — unless it printed `stopped:`.
    A `format-question:` or `format-report:` line → `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § The format row.
 2b. Resolve knobs per the knob channel
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/config.md knob-channel`
@@ -82,6 +82,8 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
   --taskReviewerModel '${user_config.taskReviewerModel}' \
   --branchReviewModel '${user_config.branchReviewModel}' \
   --walkthroughModel '${user_config.walkthroughModel}' \
+  --planningStrategy '${user_config.planningStrategy}' \
+  --planningBudgetUSD '${user_config.planningBudgetUSD}' \
   --learnStalenessSessions '${user_config.learnStalenessSessions}' \
   --learnStalenessDays '${user_config.learnStalenessDays}' \
   --learnSessionCap '${user_config.learnSessionCap}' \
@@ -137,7 +139,7 @@ walked from it. Every gate stays this command's, answered first; it reads their 
 - `branch.verdict` `switch-needed` or `integration` → step 4's rules.
 - `depth.band` `over-budget` or `hard-stop` → § Resume's depth rule; `unknown` → proceed.
 - `pendingDecision`, unless `drive.gate` has it → that task's `exhausted-unresolved` loop is the user's decision.
-- `handoff.ask` → step 2a's not-ready question, before acting on `drive.action`.
+- `handoff.ask` → step 2a's not-ready question, or its recovery gate when `handoff.uncontrolled` is set, before acting on `drive.action`.
 - `state.stopped` → a recorded stop, announced below; at `manual` or `none` § Resume closes it, and the start path otherwise.
 
 `drive.action` then decides, per `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/drive.md drive-actions`.
