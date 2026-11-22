@@ -1,5 +1,15 @@
 # Changelog
 
+Planning is now observable, routed by tier, cheaper to draft and gated on a projected cost, and a session cut short by a usage limit can be recovered instead of reconstructed by hand. The planning overhaul's benchmark gate (#442) is not met, so treat its cost figures as projections, not promises.
+
+**Planning cost and routing (#449, #444, #445, #446, #448).** The dispatch sensor writes one priced `agent-cost` row per planning subagent stop with its role and model, `plan-stats` rows record spec and plan size, and the doctor gains a per-run "Planning breakdown" against the P1–P12 rubric. Planning dispatches are routed by tier, drafters use the new `devcycle:plan-drafter` agent and a shared context pack instead of re-reading the repo, and plans pin contracts (interfaces, failing tests, gate commands) rather than full implementation code. Drafters write one file per task, `plan-assemble.mjs` merges them, and `plan-check` gains per-draft, `proportion` and `crossTask` legs with a fast-tier edge checker and one repair round.
+
+**Planning strategy and cost gate (#443, #447, #450).** The new `planningStrategy` knob chooses `status-quo`, `inline`, `grouped` or `checkpointed` planning, and `auto` picks one with the decision table in `plan-strategy.mjs` once the task cut exists. Grouped drafting is capped (three tasks per group, at most four concurrent drafters) and an interface lock checks consumers against producers verbatim. At the task-cut checkpoint the stage projects the cost of the rest of planning and asks against the advisory `planningBudgetUSD` knob; checkpointed inline planning can clear and resume from the stage log. The `plan-bench` harness replays a fixed corpus per strategy, and the fork arm (`grouped-fork`) is dropped because it never planned cheaper.
+
+**Resume after an uncontrolled stop (#454).** `/devcycle:continue` now detects a stage that ended on a usage limit, inventories what each stage finished and what is unfinished, and offers recovery with a re-verify or redo step per item, reading transcripts only as a scoped fallback.
+
+**Known issues.** The paid benchmark ran only partly (a DNS outage ended most replays), so the P1/P2/P3/P8 ship gate is not met: P8 fails on both large arms and five arm and size replays are unmeasured. The cost projection missed by +428.7% and −64.6% on the two large replays, so `planningBudgetUSD` is never enforced and `CALIBRATION` stays empty. The thresholds are the initial values. Two low findings from the last branch review were not recorded.
+
 ## 0.32.2 — 2026-11-18
 
 - fix(review): dispatch one fresh-context reviewer per lens at single review depth

@@ -52,7 +52,9 @@ tasks) planning dollars per task, and the two arms planned different cuts of the
 earlier cell needed correcting.
 
 The P1/P2/P3/P8 ship gate (spec §10) is therefore **not met**: P8 fails on both large arms and P3 and P2 are
-unmeasured on large `inline`. Nothing is released from this effort.
+unmeasured on large `inline`. This entry first said nothing is released from this effort. The user overrode that on
+2026-11-22 and released the whole stack as 0.33.0 with the gate unmet: the projection stays advisory, the unmeasured
+arms stay marked as such, and the planning overhaul's acceptance (#442) stays open.
 
 **How to apply:** a later effort that wants these measured fixes `scripts/plan-bench-pass.mjs` to retry a transient
 API error (`ENOTFOUND`, an unreachable API) with backoff instead of ending the replay, then runs the five missing
