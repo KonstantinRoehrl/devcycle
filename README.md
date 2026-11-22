@@ -147,6 +147,9 @@ A band above the prompt shows the run's progress without spending a model turn.
 
 Every handoff records when it is safe to `/clear`; resuming before it warns you, and the
 `handoffNotification` setting can ring your terminal or push a notification when it is.
+If a session ends without reaching its handoff — a usage limit, an API error, a laptop that died —
+`/devcycle:continue` says so, names the cause when it can, and shows what is already done, what it
+re-checks and what it redoes before any stage work, so finished work is neither redone nor overwritten.
 
 **Add `.devcycle/` to the target repo's `.gitignore`** — none of it belongs in git history.
 What devcycle attempts to commit *outside* that directory is `docTrackingPolicy`'s call.
@@ -216,8 +219,9 @@ plugin ships. Start there.
   planning strategies).
   At the task cut planning also prints a projected dispatch, token and dollar figure
   (`scripts/plan-cost.mjs`), asks whether to proceed, switch strategy or reduce scope when an optional
-  `planningBudgetUSD` is exceeded, and can clear and resume mid-planning from disk
-  (`scripts/plan-resume.mjs`); the figure is labelled uncalibrated until a benchmark pass calibrates it
+  `planningBudgetUSD` is exceeded, and can clear and resume mid-planning from disk, past the
+  drafting too, since the assembly, the checker and repair rounds and the plan gate are logged as each
+  finishes (`scripts/plan-resume.mjs`); the figure is labelled uncalibrated until a benchmark pass calibrates it
   ([`docs/playbooks/planning-waves/README.md`](docs/playbooks/planning-waves/README.md) § Projected cost, the
   budget and resume).
   The depth gate runs `scripts/depth-probe.mjs`, which
