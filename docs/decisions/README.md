@@ -5,6 +5,25 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — maintain verifies its hygiene sweep in a ninth dispatch and mints its own run record (#478, #183)
+
+**Decision:** maintain's pass ceiling rises from 8 to 9 total LLM dispatches. The ninth is one
+session-tier verification dispatch, shared by every hygiene sweep, that confirms the sweep's candidate
+clusters in blast-radius order; what its budget does not reach stays `suspected (not verified: budget)`,
+ranked below verified findings and never dropped. A pass mints its own run record at step 1 and records
+its sweep consent there, so `finalize --run` and the lens-cost rows name a real run. The plugin-only
+checks run only when `self-dev-check.mjs --is-source` prints `source`. The lens cap stays 5.
+
+**Why:** the 8 were already spent (5 lenses, history, issue decompose, issue verification). Folding sweep
+verification into issue verification would overrun the per-dispatch delegation budget on a real repo.
+Because the sweeps share one dispatch, this is the only raise the sweep family needs. The step rewrite
+grows the maintain playbook's closure and the runtime surface.
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 76801
+budget: surface-budget.json surfaceTotal 7393
+```
+
 ## 2026-11-22 — The hygiene-sweep contract is an audit-only reference (#478)
 
 **Decision:** `references/hygiene-sweeps.md` owns the sweep contract (flow, classes and consent,
