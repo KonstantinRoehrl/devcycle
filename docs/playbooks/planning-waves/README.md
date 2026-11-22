@@ -148,7 +148,8 @@ sets a dollar ceiling, and its default of `0` sets none. When the projection exc
 planning asks one question with three answers: **proceed**, **switch strategy** or **reduce
 scope**. While the estimate is uncalibrated, the question labels the figure as such. Whether it is
 calibrated is decided by the passes recorded in [`scripts/plan-cost.mjs`](../../../scripts/plan-cost.mjs)
-(`CALIBRATION`, `isCalibrated`), which the benchmark follow-up updates.
+(`CALIBRATION`, `isCalibrated`). It records none yet: the benchmark's large-entry projections missed by
++428.7% and −64.6%, so the estimate stays advisory (decision log, 2026-11-22).
 
 A depth probe runs after each `plan-group-<k>` under `checkpointed`, or once under `inline`. At
 `over-budget` or `hard-stop`, planning logs `plan-checkpoint-<k>`, marks the state file `handoff: ready`
@@ -167,8 +168,8 @@ run as a `projection:` line, and the P5 row, coordinator depth at handoff, whose
 
 `planningStrategy` forces how planning drafts: `status-quo` keeps the old thresholds, `inline` drafts
 every task in the planning session, `checkpointed` drafts inline in segments, `grouped` drafts in rounds
-of grouped drafters, `grouped-fork` is `grouped` with forked drafters (experimental), and `auto` runs the
-decision table. A pass runs `status-quo` and `inline` by default; `--arms` adds the other three. The replay benchmark (#449) runs the same specs
+of grouped drafters, and `auto` runs the decision table. A pass runs `status-quo` and `inline` by default;
+`--arms` adds the other two. The replay benchmark (#449) runs the same specs
 through each arm and scores each run against the P1–P12 planning rubric doctor prints, so a
 planning change is measured before it ships. Everything it reads and writes stays under the
 gitignored `.devcycle/plan-bench/`:
@@ -218,7 +219,8 @@ records how a headless session is driven through its gates.
 [`scripts/plan-cost.mjs`](../../../scripts/plan-cost.mjs) owns every figure a pass prices with, but the
 two readers use different ones: `estimate` reads the per-task rates (`PLANNING_RATES` and
 `EXECUTION_RATE`, which `scripts/plan-bench.mjs` imports) and the projection at the task cut reads the
-fitted role parameters (`PROFILE` and `ROLE_PARAMS`). They stay separate until a benchmark pass fits one
+fitted role parameters (`PROFILE` and `ROLE_PARAMS`). The per-task rates were refit on 2026-11-22 from the
+benchmark's scored replays (decision log, same date). The two stay separate until a benchmark pass fits one
 from the other, and until then the projection is labelled uncalibrated. `node scripts/cost-model-fit.mjs --rates <dir> [--json]`
 searches `<dir>` recursively for `results.json`, one pass per file found, and reports each arm's
 planning dollars per task, each replay's projection error and a calibration verdict. A pass's error is its worst replay's, the signed miss of

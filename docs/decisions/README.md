@@ -5,6 +5,54 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — Phase 3 closes on partial benchmark data: the rates are refit, the calibration and thresholds stay (#450, #442)
+
+**Decision:** `PLANNING_RATES` in `scripts/plan-cost.mjs` takes the medians that
+`node scripts/cost-model-fit.mjs --rates .devcycle/plan-bench/passes` prints for the arms with two or more scored
+replays: `status-quo` 1.34 (n = 7), `inline` 0.97 (n = 5) and `grouped` 1.11 (n = 2) planning dollars per task.
+`checkpointed` has one replay (0.82) and keeps its assumed 1.4. `CALIBRATION.passes` stays empty, so the projection
+stays advisory and `planningBudgetUSD` is never enforced. The `THRESHOLDS` in `scripts/plan-strategy.mjs`
+(inline up to 12 tasks or 30 weight points, split above 25, coupling 0.5, width 3, k ≤ 3, 4 concurrent, the 150k
+input cap) stay the initial values Decision D7 names. The Phase 3 exit and the ship gate are **not met**, and the
+arms with no usable replay are unmeasured: the large `grouped`, `grouped-fork` and `checkpointed` and the medium
+`status-quo`, `inline` and `checkpointed` with execution.
+
+**Why:** the paid pass 2 (about $67.50 of the $390) left two usable large replays, `status-quo` and `inline` on
+`instruction-economy`. A DNS outage (`ENOTFOUND`, about 02:00) ended the rest in seconds, and the harness records
+that as a terminal `error` at $0. The user chose to record what the data supports over a harness retry and a third
+pass (about $192, with about $207 left). The spec asks for two passes before a threshold becomes a gate (§9.9) and
+for the projection to be within ±35% before it is enforced (§7); neither holds.
+`cost-model-fit.mjs` reports 0 of 2 scored passes within ±35%, and the large projections miss by +428.7% (`inline`:
+est $29.27, actual planning $5.54) and −64.6% (`status-quo`: est $13.54, actual $38.21). Refitting the projection's
+role parameters on those replays and recording the refit's own error as a pass would be circular. The refit rates
+price `plan-bench estimate` only, and they are per-task medians over small, medium and one large entry, so a single
+large cut can sit far from them: the two large replays measured 1.91 (`status-quo`, 20 tasks) and 0.40 (`inline`, 14
+tasks) planning dollars per task, and the two arms planned different cuts of the same spec.
+
+**P1–P12 against the bars**, over the nine replays that produced a plan in the passes `phase3` (small and medium) and
+`phase3-p2-large`:
+
+| Bar | Result | Verdict |
+| --- | --- | --- |
+| P1 ≤ $2.0 per task | 0.40 to 1.91 on large, 0.74 to 1.50 on small and medium | met on every usable replay |
+| P2 ≤ 1.0 | 0.42 (`grouped`), 0.65 (`grouped-fork`), medium only | met where measured; none on large, which did not execute |
+| P3 ≤ 0.5 dispatches per task | 1.35 (large `status-quo`), 0.86 (medium `grouped`); small 0.25 to 1.33 | met only by small `checkpointed` (0.25); large `inline` has no rows |
+| P5 ≤ 15% coordinator depth | 15.6% to 38.7% on every replay with a probe | not met |
+| P8 ≤ 5× plan/spec, non-test fences ≤ 20% | large 7.6× (`inline`) and 20.5× (`status-quo`); small and medium 3.2× to 4.7× | not met on large, met elsewhere |
+| P9 gate fails ≤ 2, checker rounds ≤ 1 | 2 to 5 gate fails, 0 or 1 checker rounds | met by 2 of 9 replays |
+| P11 ≤ 3 minutes per task | 0.92 and 2.87 on large, 2.56 on small `checkpointed`; 3.5 to 7.5 on the other six | met by 3 of 9 replays |
+
+(verified: aggregated from the `results.json` of those two passes, outcomes `planned` and `executed`) P4, P6, P7, P10 and
+P12 are in each pass's `results.md` and were not re-judged here.
+
+The P1/P2/P3/P8 ship gate (spec §10) is therefore **not met**: P8 fails on both large arms and P3 and P2 are
+unmeasured on large `inline`. Nothing is released from this effort.
+
+**How to apply:** a later effort that wants these measured fixes `scripts/plan-bench-pass.mjs` to retry a transient
+API error (`ENOTFOUND`, an unreachable API) with backoff instead of ending the replay, then runs the six missing
+replays (about $192) with the user's go-ahead, and refits the rates, records the passes in `CALIBRATION` and revisits
+the thresholds from two passes. Until then read `auto`'s thresholds as untuned and the estimate as advisory.
+
 ## 2026-11-22 — The fork arm is dropped (#450)
 
 **Decision:** the `grouped-fork` arm is removed: from the `planningStrategy` knob's values (`scripts/resolve-knobs.mjs`,
