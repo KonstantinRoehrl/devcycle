@@ -5,13 +5,14 @@
 // coverage rows. The verification dispatch, not this script, decides what is a finding.
 // `references/hygiene-sweeps.json` owns every pin, invocation, kind and severity read here.
 import { spawnSync } from "node:child_process";
-import { accessSync, constants, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, delimiter, dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseFlags } from "./cli-flags.mjs";
 import { loadRegistry } from "./hygiene-registry.mjs";
 import { ADAPTERS } from "./hygiene-adapters.mjs";
 import { SCANNERS } from "./hygiene-scanners.mjs";
+import { gitToplevel, recordPath, runsDirForRepo, writeLine } from "./run-record.mjs";
 
 const SWEEP = "dead-code";
 const READ_CAP_BYTES = 1024 * 1024;
@@ -257,10 +258,200 @@ export function runSweep({ repoRoot, outDir, consent = { executing: false, cover
   return { candidates, clusters, coverage };
 }
 
-const USAGE = "usage: hygiene-sweep.mjs run --out <dir> [--repo <root>] [--consent-executing] [--consent-coverage]";
+const SEVERITY_ORDER = ["low", "medium", "high", "critical"];
+const OUTCOMES = new Set(["verified", "suspected", "cleared"]);
+const higher = (a, b) => (SEVERITY_ORDER.indexOf(b) > SEVERITY_ORDER.indexOf(a) ? b : a);
+
+function readJson(path) {
+  try { return JSON.parse(readFileSync(path, "utf8")); }
+  catch (err) { throw new Error(`cannot read ${path}: ${err.message}`); }
+}
+
+function readRows(path) {
+  if (!existsSync(path)) return [];
+  return readFileSync(path, "utf8").split("\n").filter(Boolean).flatMap((l) => {
+    try { return [JSON.parse(l)]; } catch { return []; }
+  });
+}
+
+// lcov: `SF:<path>` opens a file record, `DA:<line>,<hits>` counts a line, `end_of_record` closes it.
+export function parseLcov(text, repoRoot) {
+  const files = new Map();
+  let current = null;
+  for (const raw of text.split("\n")) {
+    const line = raw.trim();
+    if (line.startsWith("SF:")) {
+      let path = line.slice(3);
+      if (path.startsWith(`${repoRoot}/`)) path = path.slice(repoRoot.length + 1);
+      current = new Map();
+      files.set(path.replace(/^\.\//, ""), current);
+    } else if (line.startsWith("DA:") && current) {
+      const [ln, hits] = line.slice(3).split(",").map(Number);
+      if (Number.isInteger(ln)) current.set(ln, (current.get(ln) ?? 0) + (hits || 0));
+    } else if (line === "end_of_record") current = null;
+  }
+  return files;
+}
+
+function isUncovered(lcovFiles, c) {
+  const lines = lcovFiles.get(c.file);
+  if (!lines || lines.size === 0) return false;
+  return c.line === null ? [...lines.values()].every((h) => h === 0) : lines.get(c.line) === 0;
+}
+
+// The latest earlier counted pass on this machine: the run file, other than `runId`'s, holding
+// sweep-count rows for `sweep`, ordered by its `run` line's startedAt, then file name.
+export function latestEarlierCounts(repoRoot, runId, sweep = SWEEP) {
+  const dir = runsDirForRepo(gitToplevel(repoRoot));
+  let names;
+  try { names = readdirSync(dir).filter((n) => n.endsWith(".jsonl") && n !== `${runId}.jsonl`); }
+  catch { return null; }
+  let best = null;
+  for (const name of names) {
+    const rows = readRows(join(dir, name));
+    const counts = rows.filter((r) => r.kind === "sweep-count" && r.sweep === sweep);
+    if (!counts.length) continue;
+    const key = `${rows.find((r) => r.kind === "run")?.startedAt ?? ""} ${name}`;
+    if (!best || key > best.key) best = { key, counts };
+  }
+  return best && Object.fromEntries(best.counts.map((r) => [r.category, r.verified + r.suspected]));
+}
+
+function appendCounts(repoRoot, runId, counts) {
+  const toplevel = gitToplevel(repoRoot);
+  if (readRows(recordPath(toplevel, runId)).some((r) => r.kind === "sweep-count" && r.sweep === counts.sweep))
+    return "already-recorded";
+  for (const [category, c] of Object.entries(counts.categories))
+    writeLine(toplevel, runId, { kind: "sweep-count", runId, sweep: counts.sweep, category, ...c });
+  return "appended";
+}
+
+function lcovRow(lcovFiles, consent) {
+  const base = { source: "coverage-run", kinds: [], class: "executing", method: "tool", downloaded: false, version: "repo-toolchain" };
+  if (lcovFiles) return { ...base, ...(lcovFiles.size
+    ? { status: "ran", note: `lcov report covers ${lcovFiles.size} files` }
+    : { status: "failed", note: "not an lcov report: no SF records" }) };
+  return consent?.coverage
+    ? { ...base, status: "unavailable", note: "no lcov report was passed" }
+    : { ...base, status: "needs-consent", note: "the coverage run needs this pass's consent" };
+}
+
+function coverageStatement(coverage, kinds) {
+  const ranBy = (kind, methods) => coverage.rows
+    .filter((r) => r.status === "ran" && r.kinds.includes(kind) && methods.includes(r.method)).map((r) => r.source);
+  const lines = Object.keys(kinds).map((k) => {
+    const tools = ranBy(k, ["tool", "tool-raw"]);
+    const heuristics = ranBy(k, ["heuristic"]);
+    const how = [tools.length ? `tool-checked by ${tools.join(", ")}` : null,
+      heuristics.length ? `heuristic by ${heuristics.join(", ")}` : null].filter(Boolean).join("; ") || "not checked";
+    return `- \`${k}\`: ${how}; ${coverage.fullKinds.includes(k) ? "complete" : "incomplete"}`;
+  });
+  for (const r of coverage.rows)
+    if (r.status !== "ran" && r.status !== "not-applicable") lines.push(`- not run: ${r.source} (${r.status}${r.note ? `: ${r.note}` : ""})`);
+  for (const r of coverage.rows) if (r.downloaded) lines.push(`- downloaded: ${r.source} ${r.version}`);
+  for (const s of coverage.noToolStacks) lines.push(`- ${s}: no dead-code tool for this stack; heuristic scan only`);
+  lines.push(`- not covered: ${coverage.notCovered.join("; ")}`);
+  return lines.join("\n");
+}
+
+function outcomeOf(c, v, kindSeverity) {
+  const severity = v?.severity ? higher(kindSeverity, v.severity) : kindSeverity;
+  if (c.cleared) return { outcome: "cleared", note: c.cleared, severity };
+  if (!v) return { outcome: "suspected", note: "not verified: budget", severity };
+  if (v.outcome === "verified" && c.noisy) return { outcome: "suspected", note: `${v.note ?? ""} (known-noisy class)`.trim(), severity };
+  return { outcome: v.outcome, note: v.note ?? "", severity };
+}
+
+export function finalizeSweep({ outDir, verdicts, lcov = null, runId = null, repoRoot, registry = loadRegistry(),
+  previousCounts = latestEarlierCounts(repoRoot, runId) }) {
+  const { candidates, clusters } = readJson(join(outDir, "candidates.json"));
+  const coverage = readJson(join(outDir, "coverage.json"));
+  const kinds = registry.sweeps[SWEEP].kinds;
+  const byId = new Map(candidates.map((c) => [c.id, c]));
+  const verdictById = new Map();
+  for (const v of verdicts) {
+    const id = v?.candidateId;
+    if (!byId.has(id)) throw new Error(`verdict for unknown candidate "${id}"`);
+    if (verdictById.has(id)) throw new Error(`two verdicts for "${id}"`);
+    if (!OUTCOMES.has(v.outcome)) throw new Error(`invalid outcome "${v.outcome}" for "${id}"`);
+    if (v.severity !== undefined && !SEVERITY_ORDER.includes(v.severity)) throw new Error(`invalid severity "${v.severity}" for "${id}"`);
+    if (v.outcome === "cleared" && !String(v.note ?? "").trim()) throw new Error(`cleared "${id}" needs its reason as the note`);
+    verdictById.set(id, v);
+  }
+  const lcovFiles = lcov === null ? null : parseLcov(lcov, repoRoot);
+  const outcomes = new Map();
+  for (const c of candidates) {
+    if (!kinds[c.kind]) throw new Error(`candidate kind "${c.kind}" is not a ${SWEEP} kind`);
+    const o = outcomeOf(c, verdictById.get(c.id), kinds[c.kind].severity);
+    outcomes.set(c.id, { ...o, uncovered: lcovFiles !== null && isUncovered(lcovFiles, c) });
+  }
+
+  const categories = Object.fromEntries(Object.keys(kinds).map((k) => [k, { verified: 0, suspected: 0, cleared: 0 }]));
+  for (const c of candidates) categories[c.kind][outcomes.get(c.id).outcome] += 1;
+  const counts = { sweep: SWEEP, categories };
+
+  const entries = [];
+  const blocks = [];
+  for (const cl of clusters) {
+    const live = cl.candidates.map((id) => byId.get(id)).filter((c) => outcomes.get(c.id).outcome !== "cleared");
+    if (!live.length) continue;
+    const severity = live.map((c) => outcomes.get(c.id).severity).reduce(higher);
+    const confidence = live.some((c) => outcomes.get(c.id).outcome === "verified") ? "verified" : "suspected";
+    const title = `${live.length} ${cl.kind} ${live.length === 1 ? "item" : "items"} in ${cl.anchor}`;
+    entries.push({ culpritKind: cl.kind, canonicalLocation: cl.anchor, title, severity, confidence,
+      affectedFiles: [...new Set(live.map((c) => c.file))].sort() });
+    blocks.push(`### ${title}\n\n${severity}, ${confidence}; blast radius ${cl.blastRadius}\n\n` + live.map((c) => {
+      const o = outcomes.get(c.id);
+      const where = `\`${c.file}${c.line === null ? "" : `:${c.line}`}\`${c.symbol === null ? "" : ` \`${c.symbol}\``}`;
+      return `- ${where}: ${o.outcome}${o.note ? ` (${o.note})` : ""}${o.uncovered ? ", uncovered" : ""}`;
+    }).join("\n"));
+  }
+
+  const reasons = new Map();
+  for (const c of candidates) {
+    const o = outcomes.get(c.id);
+    if (o.outcome === "cleared") reasons.set(o.note, (reasons.get(o.note) ?? 0) + 1);
+  }
+  const cleared = [...reasons].sort(([a], [b]) => (a < b ? -1 : 1)).map(([r, n]) => `${r} ${n}`).join(", ") || "none";
+  coverage.rows = [...coverage.rows.filter((r) => r.source !== "coverage-run"), lcovRow(lcovFiles, coverage.consent)];
+  const trending = previousCounts
+    ? Object.entries(categories).map(([k, c]) => `${k} ${previousCounts[k] ?? 0} → ${c.verified + c.suspected}`)
+    : ["no earlier counted pass on this machine"];
+  const section = ["## Dead code", `Findings: ${entries.length}, in blast-radius order. Cleared: ${cleared}.`, ...blocks,
+    "### Coverage", coverageStatement(coverage, kinds), "### Trending", trending.map((t) => `- ${t}`).join("\n")].join("\n\n") + "\n";
+
+  writeFileSync(join(outDir, "coverage.json"), JSON.stringify(coverage, null, 2) + "\n");
+  writeFileSync(join(outDir, "entries.json"), JSON.stringify(entries, null, 2) + "\n");
+  writeFileSync(join(outDir, "counts.json"), JSON.stringify(counts, null, 2) + "\n");
+  writeFileSync(join(outDir, "section.md"), section);
+  const ratchet = runId === null ? "skipped" : appendCounts(repoRoot, runId, counts);
+  return { entries, counts, section, trending, ratchet };
+}
+
+const USAGE = "usage: hygiene-sweep.mjs run --out <dir> [--repo <root>] [--consent-executing] [--consent-coverage]\n" +
+  "       hygiene-sweep.mjs finalize --dir <dir> --verdicts <file> [--lcov <file>] [--run <runId>] [--repo <root>]";
+
+function mainFinalize(rest) {
+  const { flags } = parseFlags(rest, { "--dir": "value", "--verdicts": "value", "--lcov": "value", "--run": "value", "--repo": "value" },
+    { requireValues: "nonEmpty" });
+  for (const f of ["--dir", "--verdicts"]) if (!flags[f]) throw new Error(`${f} is required; ${USAGE}`);
+  const verdicts = readJson(flags["--verdicts"]);
+  if (!Array.isArray(verdicts)) throw new Error(`${flags["--verdicts"]} must hold a JSON array of verdicts`);
+  let lcov = null;
+  if (flags["--lcov"]) {
+    try { lcov = readFileSync(flags["--lcov"], "utf8"); }
+    catch (err) { throw new Error(`cannot read ${flags["--lcov"]}: ${err.message}`); }
+  }
+  const { entries, counts, ratchet } = finalizeSweep({ outDir: flags["--dir"], verdicts, lcov, runId: flags["--run"] ?? null,
+    repoRoot: resolve(flags["--repo"] ?? process.cwd()) });
+  const total = (o) => Object.values(counts.categories).reduce((n, c) => n + c[o], 0);
+  process.stdout.write(JSON.stringify({ dir: resolve(flags["--dir"]), entries: entries.length,
+    verified: total("verified"), suspected: total("suspected"), cleared: total("cleared"), ratchet }) + "\n");
+}
 
 function main(argv) {
   const [sub, ...rest] = argv;
+  if (sub === "finalize") return mainFinalize(rest);
   if (sub !== "run") throw new Error(USAGE);
   const { flags } = parseFlags(rest, { "--out": "value", "--repo": "value", "--consent-executing": "none", "--consent-coverage": "none" },
     { requireValues: "nonEmpty" });
