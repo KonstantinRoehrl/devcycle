@@ -4,7 +4,7 @@ description: "Review a branch, a repository, or a file set against criteria you 
 
 # /devcycle:review
 
-Review code against criteria, ranked by severity, impact and fix complexity, each finding with
+Review code against criteria, ranked by impact, severity and priority, each finding with
 file-referenced evidence and a concrete fix. Three scopes:
 
 - `/devcycle:review branch:<name> [base:<name>]` — the diff of that branch, against the named

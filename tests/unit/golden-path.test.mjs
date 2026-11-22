@@ -495,14 +495,28 @@ test("harvested: auditing-a-repo/finding-format — every contract field, value 
   for (const field of ["Title", "Severity", "Location(s)", "What's wrong", "Why it's wrong", "Confidence", "Measured against"])
     assert.ok(t.includes(`| ${field} |`), `core field missing: ${field}`);
   // Scoped to the document-fields list itself. A bare `t.includes(field)` passed on prose
-  // elsewhere in the file — "Impact" is satisfied by the sentence at :52 and "Complexity" by
-  // :53 — so deleting the list left the assertion green.
+  // elsewhere in the file, so deleting the list left the assertion green.
   const docFields = t.match(/\*\*Document fields[^*]*\*\*\n\n([\s\S]*?)\n\n/)?.[1];
   assert.ok(docFields, "references/findings.md no longer carries the document-fields list");
-  for (const field of ["Category", "Impact", "Complexity", "Impact if unaddressed", "How to verify/reproduce", "Suggested fix direction", "Effort estimate"])
+  for (const field of ["Category", "Impact", "Priority", "How to verify/reproduce", "Suggested fix direction", "Effort estimate"])
     assert.ok(docFields.includes(field), `document-tier field missing: ${field}`);
+  for (const retired of ["Complexity", "Impact if unaddressed"])
+    assert.ok(!docFields.includes(retired), `retired document field still listed: ${retired}`);
   assert.match(t, /T-shirt size \(S \/ M \/ L \/ XL\)/);
-  assert.match(t, /Severity \(desc\) → Impact \(desc\) →\s+Complexity \(asc\)/);
+  assert.match(t, /Impact is what the project gains once the finding is fixed or built, in three levels: `high`, `medium`, `low`/);
+  assert.match(t, /blast radius/);
+  assert.match(t, /Impact \(desc\) → Severity \(desc\) →\s+Priority/);
+  assert.match(t, /sections grouped by Impact level/);
+  assert.match(t, /Severity alone decides what blocks/);
+  assert.ok(!/Complexity \(asc\)/.test(t), "the old Complexity (asc) tie-break is still in references/findings.md");
+});
+
+test("the old severity-first document order is gone from every reader of findings.md's Ordering", () => {
+  const stale = [/severity-ordered defect list/, /severity\/impact\/complexity ranking/, /fix complexity/, /Severity \(desc\) → Impact \(desc\)/];
+  for (const file of ["references/findings.md", "references/abstraction-and-strengths.md", "playbooks/writing-the-findings-document.md", "commands/review.md"])
+    for (const pattern of stale) assert.ok(!pattern.test(read(file)), `${file} still matches ${pattern}`);
+  assert.match(read("commands/review.md"), /ranked by impact, severity and priority/);
+  assert.match(read("playbooks/profiling-sessions.md"), /carry no severity or Impact level/);
 });
 
 test("harvested: auditing-a-repo/frontier-reporting — the frontier is named file by file in the coverage statement", () => {

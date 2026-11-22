@@ -18,6 +18,8 @@ Exactly four values, lowercase, on every surface:
 | `medium` | a likely defect, or a meaningful deviation worth fixing | no |
 | `low` | a worthwhile improvement | no |
 
+A severity weighs how wrong the current behavior is together with its blast radius — how much of the system or user base the wrong behavior touches.
+
 **Blocking-ness is derived, never carried as a separate field.** `critical` and `high`
 block; `medium` and `low` are carry-overs. Any surface that gates on "blocking findings"
 means exactly those two tiers.
@@ -49,19 +51,16 @@ optional.
 
 **Document fields — added by the audit's ranked document, and only there:**
 
-Category · Impact · Complexity · Impact if unaddressed · How to verify/reproduce ·
-Suggested fix direction · Effort estimate.
+Category · Impact · Priority · How to verify/reproduce · Suggested fix direction ·
+Effort estimate.
 
-Impact is the blast radius of the issue — how much of the system or user base it touches.
-Complexity is the effort to fix, as a T-shirt size (S / M / L / XL); `Effort estimate` is
-that size's concrete grounding, in files or in time. `Impact if unaddressed` is the Impact
-rating's prose justification.
+Impact is what the project gains once the finding is fixed or built, in three levels: `high`, `medium`, `low`. Compounding gains rank higher: a fix that unblocks other work, removes a recurring cost, or hardens many paths. Priority is the tie-break between findings of equal Impact and Severity: effort, as a T-shirt size (S / M / L / XL) that `Effort estimate` grounds in files or in time; dependency order, so a finding another one rests on comes first; and relevance to this user or team. Each finding gives its Impact level and its Priority a one-line reason.
 
 ## Strengths
 
 `references/abstraction-and-strengths.md` § Strengths owns the rule; this file's shape implements it.
 A strength is reported in its own part of the document, ordered by where it was found, never
-interleaved with or ranked against the severity-ordered defect list, never blocking, and never a
+interleaved with or ranked against the ranked defect list, never blocking, and never a
 substitute for a defect the same evidence should have produced instead.
 
 **Fields:** Title (the pattern, plain language) · Location(s) (`file:line`) · Why it matters
@@ -129,9 +128,10 @@ False-positive guards, binding on every reviewing surface, to be read before jud
 
 ## Ordering
 
-- **Document form** (the audit's ranked list): Severity (desc) → Impact (desc) →
-  Complexity (asc), keeping the severity tier grouping, so the reader gets a shortlist
-  rather than a flat dump and the quickest high-value wins surface first inside a tier.
+- **Document form** (the audit's ranked list): Impact (desc) → Severity (desc) →
+  Priority, with the document's sections grouped by Impact level, so the reader gets a
+  shortlist rather than a flat dump and the largest gains surface first.
+  Severity alone decides what blocks (§ Severity); Impact never does.
   Strengths (above) are never mixed into this ordering — they hold their own section,
   unranked against defects.
 - **Machine form** (the panel's report): confirmed first, then severity, then file.

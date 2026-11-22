@@ -5,6 +5,35 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — Findings rank Impact first, and Priority replaces Complexity (no issue)
+
+**Decision:** a finding's ranking has three axes, owned by `references/findings.md`. Impact is what the project
+gains once the finding is fixed or built (`high`, `medium`, `low`), and compounding gains rank higher. Severity
+keeps its four levels and its blocking rule, and now also weighs blast radius. Priority is the tie-break between
+findings of equal Impact and Severity: effort as a T-shirt size grounded by `Effort estimate`, dependency order,
+and relevance. The audit document's field list is `Category · Impact · Priority · How to verify/reproduce ·
+Suggested fix direction · Effort estimate`, and its order is Impact (desc) → Severity (desc) → Priority, with the
+document's sections grouped by Impact level.
+
+**Why:** Impact used to restate Severity's blast radius, so the old document order ranked one quantity twice,
+and a ranked list should lead with what a fix gains. The blocking rule stays on Severity alone, and the machine
+form (the panel's confirmed, then severity, then file order) is unchanged. `/devcycle:maintain`'s committed store
+and `rankByTrending`'s severity-primary trending order are out of reach on purpose: no schema change and no ledger
+migration.
+
+**Supersedes:** the 2026-08-06-era Document fields and Ordering text in `references/findings.md` (Complexity,
+"Impact if unaddressed", Severity-first document order).
+
+**Budgets:** four playbook closures grow by the new wording in `references/findings.md`, `commands/review.md` and
+`playbooks/profiling-sessions.md`.
+
+```text
+budget: context-budget.json playbooks/profiling-sessions.md 43654
+budget: context-budget.json playbooks/receiving-review.md 127477
+budget: context-budget.json playbooks/reviewing-code.md 104286
+budget: context-budget.json playbooks/writing-the-findings-document.md 68966
+```
+
 ## 2026-11-22 — The planning overhaul closes out on the data in hand: the ship gate is accepted as unmet, #443 and #442 stay open (#442)
 
 **Decision:** the P1/P2/P3/P8 ship gate (spec §10) is **accepted as unmet**. There is no third benchmark pass, no
