@@ -183,18 +183,18 @@ marker with the version the change lands in, since only the release computes tha
   key: reviewDepth
   values: [auto, profile, single, panel]
   note: "auto changes meaning, not a new value: it is risk-based at every profile, single unless the change matches a risk signal, and then the user is asked before any panel runs; diff size and profile thorough no longer pick the panel. single is now enforced: the panel launcher refuses without a decision record that allows it"
-- version: "unreleased"
+- version: "0.33.0"
   change: added
   key: planningStrategy
   default: auto
   values: [auto, status-quo, inline]
   note: "forces the planning stage's drafting arm for the planning benchmark: status-quo applies the delegation thresholds, inline never fans out per-task drafters; auto is status-quo until the decision table lands"
-- version: "unreleased"
+- version: "0.33.0"
   change: added
   key: planningStrategy
   values: [auto, status-quo, inline, grouped, checkpointed]
   note: "auto now runs the planning decision table (inline up to 12 tasks, otherwise checkpointed or grouped by the task cut's coupling and width); checkpointed drafts inline in one segment per wave group, grouped drafts in rounds of plan-drafter dispatches held to an interface lock; a grouped-fork value was trialled and dropped before any release"
-- version: "unreleased"
+- version: "0.33.0"
   change: added
   key: planningBudgetUSD
   default: 0

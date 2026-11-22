@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.33.0 — 2026-11-22
+
+- feat(planning): observable, tier-routed and cost-gated planning, plus resume recovery after an uncontrolled stop (#442, #454)
+
 Planning is now observable, routed by tier, cheaper to draft and gated on a projected cost, and a session cut short by a usage limit can be recovered instead of reconstructed by hand. The planning overhaul's benchmark gate (#442) is not met, so treat its cost figures as projections, not promises.
 
 **Planning cost and routing (#449, #444, #445, #446, #448).** The dispatch sensor writes one priced `agent-cost` row per planning subagent stop with its role and model, `plan-stats` rows record spec and plan size, and the doctor gains a per-run "Planning breakdown" against the P1–P12 rubric. Planning dispatches are routed by tier, drafters use the new `devcycle:plan-drafter` agent and a shared context pack instead of re-reading the repo, and plans pin contracts (interfaces, failing tests, gate commands) rather than full implementation code. Drafters write one file per task, `plan-assemble.mjs` merges them, and `plan-check` gains per-draft, `proportion` and `crossTask` legs with a fast-tier edge checker and one repair round.
