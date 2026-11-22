@@ -43,6 +43,7 @@ any consequence.
 | bootstrap devcycle in a repo | `onboard` | side-effectful | no |
 | triage, fix, and reply to a PR's review comments | `reconcile` | confirm-first | yes |
 | write up a problem, idea or finding as a verified issue | `write-issue` | confirm-first | yes |
+| triage the open issue backlog into ordered, clustered work | `triage-issues` | read-only | yes |
 
 **`reconcile`'s justification.** Model-invocable by deliberate exception so a wrapper skill can
 call the reconcile stage programmatically after a review lands. It makes no commit and posts no

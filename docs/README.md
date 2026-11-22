@@ -43,6 +43,7 @@ Standalone helpers a model or you can invoke by asking; each points at one playb
 | Skill | What it does |
 | --- | --- |
 | [`write-issue`](../skills/write-issue/SKILL.md) | Turns a rough problem, idea or finding into a complete, verified, screened issue in whichever repo it belongs to, and files, edits or comments only after you confirm. |
+| [`triage-issues`](../skills/triage-issues/SKILL.md) | Reads a repo's whole open backlog, verifies the claims that matter on your branch, and writes a ranked, clustered report with one task text per cluster and a delta against the last run. Never acts on GitHub. |
 
 ## Playbooks
 
@@ -67,6 +68,7 @@ directly.
 | [`maintaining-the-repo`](playbooks/maintaining-the-repo/README.md) | The longitudinal-health engine behind `/devcycle:maintain`. |
 | [`receiving-review`](playbooks/receiving-review/README.md) | The respond arm of the review write-back path: the standalone reconcile stage that triages a PR's review comments into fixes and consent-gated replies that disclose Claude Code authorship, then resolves the threads it closed from its side. |
 | [`writing-issues`](playbooks/writing-issues/README.md) | The issue writer behind `write-issue`: target, verify, draft, screen, duplicate check, then a confirmed filing. |
+| [`triaging-issues`](playbooks/triaging-issues/README.md) | The backlog triager behind `triage-issues`, on the shared issue-folding pipeline. |
 
 ## Machinery
 
