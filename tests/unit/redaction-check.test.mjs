@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { makeRepo, sh } from "./helpers.mjs";
+import { commitAll, makeRepo, sh } from "./helpers.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/redaction-check.mjs");
 const HASHES = join(process.cwd(), "scripts/redaction-hashes.txt");
@@ -943,4 +943,76 @@ test("--own-repo with --file, with --repo, without --dir, and --allow-found-term
   } finally {
     rmSync(repoDir, { recursive: true, force: true });
   }
+});
+
+// A private source checkout: an origin remote, one distinctive top-level directory, and generic files.
+function makeSourceRepo() {
+  const dir = makeRepo();
+  sh("git", ["remote", "add", "origin", "git@github.com:acme-corp/secret-ledger.git"], { cwd: dir });
+  mkdirSync(join(dir, "payroll-engine"));
+  writeFileSync(join(dir, "payroll-engine", "main.txt"), "x\n");
+  writeFileSync(join(dir, "README.md"), "# r\n");
+  mkdirSync(join(dir, "src"));
+  writeFileSync(join(dir, "src", "a.txt"), "x\n");
+  commitAll(dir, "files");
+  return dir;
+}
+
+function screenDraft(text, extra = []) {
+  const draftDir = makeTempDir("redaction-draft-");
+  const draft = join(draftDir, "draft.md");
+  writeFileSync(draft, text, "utf8");
+  // The allowance store --repo reads is pointed at the draft's own temp dir, never the real home.
+  const env = { ...process.env, DEVCYCLE_REDACTION_ALLOW_FILE: join(draftDir, "allow.json") };
+  return spawnSync("node", [SCRIPT, "--file", draft, ...extra], { encoding: "utf8", env });
+}
+
+test("--source-repo fails a draft naming the source's top-level directory, by line, never echoing the term", () => {
+  const src = makeSourceRepo();
+  const r = screenDraft("# Bug\n\nIt breaks in payroll-engine/main.txt.\n", ["--source-repo", src]);
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /REDACTION CHECK FAILED/);
+  assert.match(r.stderr, /draft\.md:3: contains a source-repo identity term/);
+  assert.doesNotMatch(r.stdout + r.stderr, /payroll-engine/);
+});
+
+test("--source-repo fails a draft naming the source's owner, name, remote or directory basename", () => {
+  const src = makeSourceRepo();
+  const base = src.split("/").pop();
+  for (const leak of ["ACME-CORP", "secret-ledger", "git@github.com:acme-corp/secret-ledger.git", base]) {
+    const r = screenDraft(`Seen in ${leak} today.\n`, ["--source-repo", src]);
+    assert.equal(r.status, 1, `${leak} passed`);
+    assert.match(r.stderr, /source-repo identity/);
+  }
+});
+
+test("--source-repo passes generic and short top-level names and a word that only contains a term", () => {
+  const src = makeSourceRepo();
+  const r = screenDraft("See README.md and src/ for the layout; the payroll-engines are fine.\n", ["--source-repo", src]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /redaction: ok/);
+});
+
+test("--source-repo with --repo drops the destination's own owner from the derived terms", () => {
+  const src = makeSourceRepo();
+  const r = screenDraft("Filed against acme-corp/devcycle.\n", ["--source-repo", src, "--repo", "acme-corp/devcycle"]);
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test("--source-repo is rejected with --dir, and a non-checkout fails closed", () => {
+  const src = makeSourceRepo();
+  const dir = makeFixture({ "a.md": "clean\n" });
+  const withDir = spawnSync("node", [SCRIPT, "--dir", dir, "--source-repo", src], { encoding: "utf8" });
+  assert.equal(withDir.status, 1);
+  assert.match(withDir.stderr, /--source-repo applies only to a single --file draft/);
+  const notRepo = screenDraft("clean\n", ["--source-repo", makeTempDir("not-a-repo-")]);
+  assert.equal(notRepo.status, 1);
+  assert.match(notRepo.stderr, /is not a git checkout with a commit/);
+});
+
+test("a source with no origin remote still screens its basename and top-level entries", () => {
+  const src = makeSourceRepo();
+  sh("git", ["remote", "remove", "origin"], { cwd: src });
+  assert.equal(screenDraft("Mentions acme-corp only.\n", ["--source-repo", src]).status, 0);
+  assert.equal(screenDraft("Mentions payroll-engine.\n", ["--source-repo", src]).status, 1);
 });

@@ -20,11 +20,18 @@
 // is the destination repo's own name, recorded by hash once the user has confirmed it. --own-repo
 // reaches the same store from a --dir corpus, for the checkout's own repo only: the script derives
 // that repo from the origin remote, so no caller can name another one.
+//
+// --source-repo <dir> adds a second, derived kind of deny term. The hashed deny-list cannot know a
+// private repo's own names, so write-issue's screen passes the checkout an issue was found in
+// whenever it differs from the repo the issue is posted to: that checkout's origin remote, owner,
+// name, directory name and distinctive top-level entries are then denied in that one --file draft.
+// Failures name the line and the class, never the term, and an inline `redaction-allow` marker
+// does not exempt them.
 import { createHash } from "node:crypto";
 import { execFileSync, execSync } from "node:child_process";
 import { readFileSync, writeFileSync, readdirSync, existsSync, statSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 
@@ -36,6 +43,7 @@ const args = process.argv.slice(2);
 const KNOWN_FLAGS = {
   "--file": "value", "--dir": "value", "--hashes": "value", "--auto-redact": "none",
   "--advisory-identity": "none", "--repo": "value", "--allow-found-terms": "none", "--own-repo": "none",
+  "--source-repo": "value",
 };
 // Flag parsing lives in cli-flags.mjs, which owns it for every script here. This script keeps its
 // own message prefix and exit code by catching what that module throws: an unknown flag (a typo
@@ -88,6 +96,8 @@ const repo = read("--repo");
 const allowFoundTerms = "--allow-found-terms" in flags;
 // The --dir corpus's own repo, resolved from its origin remote rather than named by the caller.
 const ownRepo = "--own-repo" in flags;
+// The private checkout a --file draft was written from; its identity becomes extra deny terms.
+const sourceRepo = read("--source-repo");
 
 if (ownRepo && (dir === undefined || file !== undefined || repo !== undefined)) {
   console.error("redaction-check: --own-repo applies only to a --dir corpus, never with --file or --repo");
@@ -98,6 +108,11 @@ if (ownRepo && (dir === undefined || file !== undefined || repo !== undefined)) 
 // the tracked tree would exempt a term from every file in it.
 if (repo !== undefined && (!file || dir !== undefined)) {
   console.error("redaction-check: --repo applies only to a single --file draft, never with --dir");
+  process.exit(1);
+}
+// Derived terms are one draft's screen, never a corpus's: a --dir scan would deny them in every file.
+if (sourceRepo !== undefined && (!file || dir !== undefined)) {
+  console.error("redaction-check: --source-repo applies only to a single --file draft, never with --dir");
   process.exit(1);
 }
 if (repo !== undefined && !/^[^/]+\/[^/]+$/.test(repo)) {
@@ -148,17 +163,65 @@ function repoFromRemoteUrl(url) {
   const m = /^(?:[a-z][a-z0-9+.-]*:\/\/[^/]+\/|(?:[^@/:]+@)?[^:/]+:)([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(url.trim());
   return m ? `${m[1]}/${m[2]}`.toLowerCase() : null;
 }
-function ownRepoKey(corpusDir) {
+function originUrl(corpusDir) {
   try {
-    const url = execFileSync("git", ["-C", corpusDir, "remote", "get-url", "origin"], {
+    return execFileSync("git", ["-C", corpusDir, "remote", "get-url", "origin"], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-    });
-    return repoFromRemoteUrl(url);
+    }).trim();
   } catch {
     return null;
   }
 }
+function ownRepoKey(corpusDir) {
+  const url = originUrl(corpusDir);
+  return url === null ? null : repoFromRemoteUrl(url);
+}
+
+// Top-level entries that name no one in particular: a source's `docs` or `LICENSE` says nothing
+// about which repo it is, and denying them would fail nearly every draft. Compared lower-cased.
+const GENERIC_TOP_LEVEL = new Set([
+  ".claude", ".claude-plugin", ".editorconfig", ".gitattributes", ".github", ".gitignore", ".nvmrc",
+  ".prettierrc", ".vscode", "assets", "bench", "build", "changelog.md", "claude.md",
+  "code_of_conduct.md", "config", "contributing.md", "dockerfile", "docs", "examples", "hooks",
+  "license", "license.md", "makefile", "package.json", "package-lock.json", "pnpm-lock.yaml",
+  "public", "readme.md", "scripts", "security.md", "test", "tests", "tools", "tsconfig.json",
+  "vendor", "yarn.lock",
+]);
+
+// The lower-cased, de-duplicated terms that name `sourceDir`'s repo: its origin remote, that
+// remote's owner and name, the directory name, and each distinctive top-level tracked entry.
+// A missing origin only drops the remote terms; a checkout with no commit has no listing to
+// derive from and fails closed, because an empty term list would read as a screen that ran.
+function sourceRepoTerms(sourceDir, destination) {
+  const terms = new Set();
+  const url = originUrl(sourceDir);
+  if (url) {
+    terms.add(url);
+    const key = repoFromRemoteUrl(url);
+    if (key) for (const part of key.split("/")) terms.add(part);
+  }
+  terms.add(basename(resolve(sourceDir)));
+  let listing;
+  try {
+    listing = execFileSync("git", ["-C", sourceDir, "ls-tree", "--name-only", "HEAD"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    console.error("redaction-check: --source-repo <dir> is not a git checkout with a commit");
+    process.exit(1);
+  }
+  for (const entry of listing.split("\n").filter(Boolean))
+    if (entry.length >= 4 && !GENERIC_TOP_LEVEL.has(entry.toLowerCase())) terms.add(entry);
+  const own = new Set((destination ?? "").toLowerCase().split("/").filter(Boolean));
+  return [...new Set([...terms].map((t) => t.toLowerCase()))].filter((t) => !own.has(t));
+}
+// Whole-word: not preceded or followed by a word character or dash, so `payroll-engines` is not
+// `payroll-engine`.
+const sourceTermRes = (sourceRepo === undefined ? [] : sourceRepoTerms(sourceRepo, repo)).map(
+  (t) => new RegExp("(?<![A-Za-z0-9_-])" + t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![A-Za-z0-9_-])", "i")
+);
 let ownKey;
 if (ownRepo) {
   ownKey = ownRepoKey(dir);
@@ -359,6 +422,13 @@ for (const f of files) {
     const msg = `${f}: contains ${cls} (redact it)`;
     (advisoryIdentity ? advisories : errors).push(msg);
   }
+  // Not gated on `redaction-allow`: that marker exempts machine-identity forms, and a source-repo
+  // term is a deny term. One failure per line, naming the line and never the term.
+  if (sourceTermRes.length)
+    text.split("\n").forEach((line, i) => {
+      if (sourceTermRes.some((re) => re.test(line)))
+        errors.push(`${f}:${i + 1}: contains a source-repo identity term (redact it)`);
+    });
   for (const token of tokensOf(text))
     if (denied.has(sha(token))) errors.push(`${f}: contains a deny-listed term ("${token[0]}…", redact it)`);
 }
