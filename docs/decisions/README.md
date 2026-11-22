@@ -5,6 +5,27 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — The issue-folding pipeline gets its own reference (no issue)
+
+**Decision:** `references/issue-folding.md` owns fetch-and-screen, decompose, classify, verify, rank and cluster, with a per-step caller switch; maintain step 7 keeps only its own parts.
+
+**Why:** a second caller, the issue triager, needs the same pipeline, and one owner per concept (`CONTRIBUTING.md`) rules out a copy; no existing reference fits, since `references/findings.md` owns how a finding is said and `references/delegation.md` who runs a dispatch, not this sequence.
+
+**Budgets:** the runtime surface grows by the new reference, and every closure that reaches it or `references/delegation.md`, `references/README.md` or `commands/maintain.md` grows with it, `playbooks/maintaining-the-repo.md` most.
+
+```text
+budget: surface-budget.json surfaceTotal 7277
+budget: context-budget.json commands/maintain.md 19121
+budget: context-budget.json playbooks/executing-waves.md 122677
+budget: context-budget.json playbooks/learning-from-sessions.md 66856
+budget: context-budget.json playbooks/maintaining-the-repo.md 71341
+budget: context-budget.json playbooks/planning-waves.md 73430
+budget: context-budget.json playbooks/receiving-review.md 127486
+budget: context-budget.json playbooks/reviewing-code.md 104295
+budget: context-budget.json playbooks/scoping-the-request.md 38199
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 97838
+```
+
 ## 2026-11-22 — Findings rank Impact first, and Priority replaces Complexity (no issue)
 
 **Decision:** a finding's ranking has three axes, owned by `references/findings.md`. Impact is what the project
