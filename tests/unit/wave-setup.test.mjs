@@ -7,6 +7,7 @@ import { appendFileSync, mkdirSync, readFileSync, realpathSync, utimesSync, writ
 import { delimiter, dirname, join } from "node:path";
 import { hostname } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { once } from "node:events";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, sh, writeInto } from "./helpers.mjs";
@@ -888,7 +889,7 @@ test("handoff.uncontrolled carries the uncontrolled stop's stamp and label only 
     writeFileSync(record, `${JSON.stringify({ kind: "session", sessionHash: hashSession("sess-last") })}\n`);
     const config = makeTempDir("wave-setup-config-");
     mkdirSync(join(config, "projects", "-repo"), { recursive: true });
-    const fixture = new URL("../fixtures/dispatch-health/api-error.jsonl", import.meta.url).pathname;
+    const fixture = fileURLToPath(new URL("../fixtures/dispatch-health/api-error.jsonl", import.meta.url));
     const transcript = join(config, "projects", "-repo", "sess-last.jsonl");
     writeFileSync(transcript, readFileSync(fixture, "utf8"));
     utimesSync(transcript, new Date(Date.now() - 60 * 60_000), new Date(Date.now() - 60 * 60_000));
