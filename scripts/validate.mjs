@@ -159,9 +159,9 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     }
   }
 
-  // --- frontmatter of commands ---
-  // Playbooks are loaded by path and appear in no roster, so they carry no
-  // frontmatter and consume no description budget.
+  // --- frontmatter of commands and skills ---
+  // Commands and skills carry frontmatter and spend the description budget. Playbooks are loaded
+  // by path and appear in no roster, so they carry no frontmatter and consume none.
   function frontmatter(path) {
     const text = readFileSync(path, "utf8");
     const m = text.match(/^---\n([\s\S]*?)\n---/);
@@ -173,6 +173,13 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     }
     return fm;
   }
+  // skills/<id>/SKILL.md: standalone helpers only (docs/decisions/README.md, 2026-11-22). Check 7 owns
+  // their shape; every check that iterates commands iterates these too.
+  const SKILLS_DIR = join(root, "skills");
+  const skillIds = existsSync(SKILLS_DIR)
+    ? readdirSync(SKILLS_DIR).filter((id) => statSync(join(SKILLS_DIR, id)).isDirectory() && existsSync(join(SKILLS_DIR, id, "SKILL.md")))
+    : [];
+  const skillPath = (id) => `skills/${id}/SKILL.md`;
   let budget = 0;
   if (existsSync(join(root, "commands")))
     for (const f of readdirSync(join(root, "commands"))) {
@@ -181,6 +188,11 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       if (!fm?.description) fail(`commands/${f}: frontmatter needs description`);
       else budget += fm.description.length;
     }
+  for (const id of skillIds) {
+    const fm = frontmatter(join(root, skillPath(id)));
+    if (!fm?.description) fail(`${skillPath(id)}: frontmatter needs description`);
+    else budget += fm.description.length;
+  }
   if (budget > DESCRIPTION_BUDGET_TOTAL) fail(`total description budget ${budget} > ${DESCRIPTION_BUDGET_TOTAL}`);
 
   // --- balanced fences in all .md ---
@@ -191,9 +203,10 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     }
 
   // --- cross-references across the plugin surface ---
-  // These are the files Claude loads at runtime; docs/ and DESIGN.md are prose
-  // about the plugin and legitimately carry `<name>`-style placeholders.
-  const SURFACE = ["playbooks", "commands", "agents", "references"];
+  // These are the files Claude loads at runtime (playbooks, commands, agents, references and
+  // skills); docs/ and DESIGN.md are prose about the plugin and legitimately carry
+  // `<name>`-style placeholders.
+  const SURFACE = ["playbooks", "commands", "agents", "references", "skills"];
   const surface = SURFACE.flatMap((d) =>
     existsSync(join(root, d)) ? [...walk(join(root, d))].filter((p) => p.endsWith(".md")) : []
   );
@@ -245,7 +258,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       );
     }
 
-    // 3. Every devcycle:<name> must resolve to an agent or a command. Playbooks are addressed
+    // 3. Every devcycle:<name> must resolve to an agent, a command or a skill. Playbooks are addressed
     //    by path (check 4), never by a devcycle: id — naming one here means someone tried to
     //    invoke stage logic as if it were a user-facing skill. Only from this check, an HTML
     //    comment whose entire body is a bare devcycle:<name> anchor is exempt: it is a splice
@@ -257,8 +270,8 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
     for (const [, , name] of outsideComments.matchAll(/(^|[^A-Za-z0-9_-])devcycle:([a-z0-9][a-z0-9-]*)/g)) {
       if (existsSync(join(root, `playbooks/${name}.md`)))
         once(`ref:${name}`, `${rel(p)}: devcycle:${name} names a playbook — reference it as \${CLAUDE_PLUGIN_ROOT}/playbooks/${name}.md`);
-      else if (![`agents/${name}.md`, `commands/${name}.md`].some((c) => existsSync(join(root, c))))
-        once(`ref:${name}`, `${rel(p)}: unresolved devcycle:${name} (no agents/${name}.md or commands/${name}.md)`);
+      else if (![`agents/${name}.md`, `commands/${name}.md`, `skills/${name}/SKILL.md`].some((c) => existsSync(join(root, c))))
+        once(`ref:${name}`, `${rel(p)}: unresolved devcycle:${name} (no agents/${name}.md, commands/${name}.md or skills/${name}/SKILL.md)`);
     }
 
     // 4. Every ${CLAUDE_PLUGIN_ROOT}/<path> must name a file that ships.
@@ -461,14 +474,68 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
         if (term !== consequence && new RegExp(`\\b${term}\\b`, "i").test(fm?.description ?? ""))
           fail(`commands/${f}: description says "${term}" but docs/routing.md assigns "${consequence}"`);
     }
+    // A skill is a standalone helper: read-only, or confirm-first with its justification. It carries
+    // no disable-model-invocation (check 7 allows name and description only), so neither guarded class fits.
+    const SKILL_CLASSES = new Set([GUARD_FORBIDDEN, JUSTIFICATION_REQUIRED]);
+    for (const id of skillIds) {
+      if (!rows.has(id)) { fail(`${skillPath(id)}: missing from the routing table in docs/routing.md`); continue; }
+      const consequence = rows.get(id);
+      if (!SKILL_CLASSES.has(consequence))
+        fail(`${skillPath(id)}: consequence "${consequence}" — a skill is read-only or confirm-first`);
+      if (consequence === JUSTIFICATION_REQUIRED && !justifies(id))
+        fail(`docs/routing.md: \`${id}\` is confirm-first but names no justification — the exception class requires one inline`);
+      const description = frontmatter(join(root, skillPath(id)))?.description ?? "";
+      for (const term of PARITY_TERMS)
+        if (term !== consequence && new RegExp(`\\b${term}\\b`, "i").test(description))
+          fail(`${skillPath(id)}: description says "${term}" but docs/routing.md assigns "${consequence}"`);
+    }
     for (const name of rows.keys())
-      if (!existsSync(join(root, `commands/${name}.md`)))
-        fail(`docs/routing.md: row "${name}" names no command`);
+      if (!existsSync(join(root, `commands/${name}.md`)) && !skillIds.includes(name))
+        fail(`docs/routing.md: row "${name}" names no command or skill`);
   }
 
-  // 7. skills/ is not part of the surface any more.
-  if (existsSync(join(root, "skills")))
-    fail("skills/: no longer part of the surface — stage logic lives in playbooks/, loaded by path");
+  // 7. A skill is a standalone helper (docs/decisions/README.md, 2026-11-22, superseding 2026-08-06 in
+  //    part): skills/<id>/SKILL.md and nothing else, frontmatter `name` and `description` only, `name`
+  //    equal to the directory id (the loader names a skill by its directory and accepts a mismatch
+  //    silently), a verb id that no command or agent shares, and a body that reads exactly one playbook
+  //    and references/output.md. That playbook has no cycle preconditions: a line naming the state file
+  //    or the stage machinery must deny using it, the denial-versus-use split check 5 draws for handoffs.
+  const STATE_USE = /\.devcycle\/state\.md|handoff-mark\.mjs|stage-log\.mjs|stage-entry\.mjs|resume-check\.mjs|references\/handoff\.md/;
+  const DENIAL = /\b(no|not|never|neither|nor|without)\b/i;
+  if (existsSync(SKILLS_DIR))
+    for (const id of readdirSync(SKILLS_DIR)) {
+      const dir = join(SKILLS_DIR, id);
+      if (!statSync(dir).isDirectory()) { fail(`skills/${id}: a skill is a directory skills/<id>/ holding only SKILL.md`); continue; }
+      const files = readdirSync(dir);
+      if (!files.includes("SKILL.md")) { fail(`skills/${id}/: holds no SKILL.md`); continue; }
+      for (const f of files)
+        if (f !== "SKILL.md") fail(`skills/${id}/${f}: a skill directory holds only SKILL.md — behavior lives in the playbook it points at`);
+      if (/ing$/.test(id)) fail(`skills/${id}: skill ids are verbs, not gerunds ("${id}" ends in -ing)`);
+      for (const other of [`commands/${id}.md`, `agents/${id}.md`])
+        if (existsSync(join(root, other))) fail(`skills/${id}: shares its id with ${other}, so devcycle:${id} would name two things`);
+      const fm = frontmatter(join(dir, "SKILL.md"));
+      const keys = Object.keys(fm ?? {}).sort();
+      if (keys.join(",") !== "description,name")
+        fail(`${skillPath(id)}: frontmatter carries exactly name and description, got ${keys.join(", ") || "none"}`);
+      const name = fm?.name?.replace(/^"(.*)"$/, "$1");
+      if (name !== undefined && name !== id)
+        fail(`${skillPath(id)}: frontmatter name "${name}" must equal the directory id "${id}" — the loader names a skill by its directory`);
+      const body = readFileSync(join(dir, "SKILL.md"), "utf8").replace(/^---\n[\s\S]*?\n---\n?/, "");
+      const cited = [...new Set([...body.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/playbooks\/([a-z0-9-]+\.md)/g)].map((m) => m[1]))];
+      if (cited.length !== 1)
+        fail(`${skillPath(id)}: reads ${cited.length} playbooks — a skill points at exactly one \${CLAUDE_PLUGIN_ROOT}/playbooks/<gerund>.md`);
+      if (!body.includes("Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`."))
+        fail(`${skillPath(id)}: carries no "Report per" read of references/output.md`);
+      if (cited.length === 1 && existsSync(join(root, "playbooks", cited[0]))) {
+        const lines = readFileSync(join(root, "playbooks", cited[0]), "utf8").split("\n");
+        const at = lines.findIndex((l) => STATE_USE.test(l) && !DENIAL.test(l));
+        if (at !== -1)
+          fail(
+            `playbooks/${cited[0]}:${at + 1}: uses the cycle machinery, but ${skillPath(id)} points at it — ` +
+              "a skill's playbook has no cycle preconditions and may only deny using them"
+          );
+      }
+    }
 
   // Flat listing of the .md files directly under a surface directory.
   const namesIn = (dir) =>
@@ -530,11 +597,11 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   for (const p of surface) {
     const n = lines(p), r = rel(p);
     surfaceLines += n;
-    if (budgetsParsed && Number.isInteger(budgets.commandMax) && r.startsWith("commands/") && n > budgets.commandMax)
+    if (budgetsParsed && Number.isInteger(budgets.commandMax) && (r.startsWith("commands/") || r.startsWith("skills/")) && n > budgets.commandMax)
       fail(`${r}: ${n} lines > ${budgets.commandMax} (baseline ${BUDGET_PATH}) — raise the baseline in this same commit if the growth is intended`);
     if (budgetsParsed && Number.isInteger(budgets.playbookMax) && r.startsWith("playbooks/") && n > budgets.playbookMax)
       fail(`${r}: ${n} lines > ${budgets.playbookMax} (baseline ${BUDGET_PATH}) — raise the baseline in this same commit if the growth is intended`);
-    const key = r.startsWith("commands/") ? "commandMax" : r.startsWith("playbooks/") ? "playbookMax" : null;
+    const key = r.startsWith("commands/") || r.startsWith("skills/") ? "commandMax" : r.startsWith("playbooks/") ? "playbookMax" : null;
     const max = key && budgetsParsed ? budgets[key] : undefined;
     if (Number.isInteger(max) && n <= max && max - n < NEAR_CEILING_LINES)
       nearCeilingNotices.push(
@@ -796,7 +863,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   const decisionsText = existsSync(decisionsPath) ? readFileSync(decisionsPath, "utf8") : null;
 
   const contextRows = [];
-  // 15. Per-entry-point context budget: an entry point's (a command's or a playbook's) own bytes
+  // 15. Per-entry-point context budget: an entry point's (a command's, a skill's or a playbook's) own bytes
   //     plus every reference reachable from it through ${CLAUDE_PLUGIN_ROOT} citations, against a
   //     committed baseline; and a high-fan-in reference's own bytes. Bytes, not lines:
   //     a context window is spent in bytes, and a long line costs what it costs. Growth is a
@@ -839,7 +906,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
         );
         ratchetTrips.push({ key, bytes });
       };
-      const entryPoints = ["commands", "playbooks"].flatMap((d) => namesIn(d).map((f) => `${d}/${f}`));
+      const entryPoints = [...["commands", "playbooks"].flatMap((d) => namesIn(d).map((f) => `${d}/${f}`)), ...skillIds.map(skillPath)];
       for (const p of entryPoints) {
         const { bytes } = closure(p, { follow: "refs", root });
         if (!(p in contextBaseline)) {

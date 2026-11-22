@@ -5,6 +5,19 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — Skills return as standalone helpers, enforced by the validator (no issue)
+
+**Decision:** `skills/<id>/SKILL.md` is allowed again, as a frontmatter (`name`, `description`) plus a pointer at one playbook and `references/output.md`; `scripts/validate.mjs` check 7 enforces the shape, and checks 3, 6, 9 and 15 and the description budget count skills alongside commands.
+
+**Why:** it answers the 2026-08-06 entry's two reasons. Stage prose stays unreachable by trigger phrase, because a skill's playbook may not use `.devcycle/state.md` or the stage machinery, and the validator fails one that does. The description budget stays one number, because skill descriptions count toward the same 6000 characters. The skills are on-request helpers that run in any repo (write an issue, triage a backlog), which the command ceiling (`COMMAND_CEILING = 10`, reached) and the user's wish for no new user-facing playbook commands rule out as commands.
+
+**Supersedes:** the 2026-08-06 entry, in part: `skills/` is no longer banned, and its trigger-phrase and budget concerns are now enforced rather than avoided.
+
+**Budgets:** none yet; the skills that land later add their `budget:` lines to the block below.
+
+```text
+```
+
 ## 2026-11-22 — The issue-folding pipeline gets its own reference (no issue)
 
 **Decision:** `references/issue-folding.md` owns fetch-and-screen, decompose, classify, verify, rank and cluster, with a per-step caller switch; maintain step 7 keeps only its own parts.
