@@ -32,4 +32,105 @@ export const raw = {
   },
 };
 
-export const ADAPTERS = { raw };
+const KNIP_MANIFEST = ["dependencies", "devDependencies"];
+const KNIP_MEMBERS = ["enumMembers", "namespaceMembers"];
+const KNIP_EXPORTS = ["exports", "types", "nsExports", "nsTypes"];
+const KNIP_MAPPED = new Set(["files", ...KNIP_MANIFEST, ...KNIP_MEMBERS, ...KNIP_EXPORTS, "file"]);
+const STATIC_NOTE = "static mode: knip plugins off, so unused files and dependencies are noisy";
+const UNUSED_SYMBOL_CODES = new Set(["TS6133", "TS6138", "TS6192", "TS6196", "TS6198", "TS7027"]);
+const TSC_DIAGNOSTIC = /^(.+)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
+
+function parseKnip(run) {
+  try {
+    const parsed = JSON.parse(run.stdout);
+    return Array.isArray(parsed?.issues) ? parsed.issues : null;
+  } catch {
+    return null;
+  }
+}
+
+function occursElsewhere(name, line, source) {
+  if (source == null) return false;
+  const word = new RegExp(`(?<![\\w$])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w$])`);
+  return source.split("\n").some((text, i) => i + 1 !== line && word.test(text));
+}
+
+function knipFindings(issues, ctx, tracked) {
+  const findings = [];
+  const ignored = new Map();
+  for (const issue of issues) {
+    const file = relativize(issue.file ?? "", ctx.repoRoot);
+    const items = (type) => (Array.isArray(issue[type]) ? issue[type] : []);
+    for (const type of Object.keys(issue)) {
+      if (!KNIP_MAPPED.has(type) && items(type).length) ignored.set(type, (ignored.get(type) ?? 0) + items(type).length);
+    }
+    if (!tracked.has(file)) continue;
+    const base = (type, item, rest) => findings.push({ type, file, line: item.line ?? null, ...rest });
+    for (const item of items("files")) base("files", item, { kind: "dead-code", symbol: null, noisy: ctx.mode === "static" });
+    for (const type of KNIP_MANIFEST) {
+      for (const item of items(type)) {
+        base(type, item, { kind: "dead-code", symbol: item.name, noisy: ctx.mode === "static" || !ctx.dependenciesInstalled });
+      }
+    }
+    for (const type of KNIP_MEMBERS) {
+      for (const item of items(type)) base(type, item, { kind: "dead-code", symbol: `${item.namespace}.${item.name}`, noisy: false });
+    }
+    const source = ctx.read(file);
+    for (const type of KNIP_EXPORTS) {
+      for (const item of items(type)) {
+        const kind = occursElsewhere(item.name, item.line, source) ? "over-exported" : "dead-code";
+        base(type, item, { kind, symbol: item.name, noisy: false });
+      }
+    }
+  }
+  return { findings, ignored };
+}
+
+export const knip = {
+  normalize(runs, ctx) {
+    const parsed = new Map();
+    for (const run of runs.filter((r) => r.invocationId === "default" || r.invocationId === "production")) {
+      const issues = parseKnip(run);
+      if (!issues) return { ok: false, candidates: [], note: `${run.invocationId}: unparseable knip JSON` };
+      parsed.set(run.invocationId, issues);
+    }
+    const tracked = new Set(ctx.files);
+    const kindOf = (kind) => {
+      if (!ctx.tool.kinds.includes(kind)) throw new Error(`registry row lacks kind "${kind}"`);
+      return kind;
+    };
+    const key = (f) => `${f.type}|${f.file}|${f.symbol}`;
+    const defaults = knipFindings(parsed.get("default") ?? [], ctx, tracked);
+    const known = new Set(defaults.findings.map(key));
+    const testOnly = knipFindings(parsed.get("production") ?? [], ctx, tracked).findings
+      .filter((f) => !known.has(key(f))).map((f) => ({ ...f, kind: "test-only-code" }));
+    const candidates = [...defaults.findings, ...testOnly].map((f) => (
+      { kind: kindOf(f.kind), file: f.file, line: f.line, symbol: f.symbol, detail: `knip ${f.type}${f.symbol ? `: ${f.symbol}` : ""}`, noisy: f.noisy }));
+    const ignored = [...defaults.ignored].sort(([a], [b]) => (a < b ? -1 : 1)).map(([type, n]) => `${n} ${type}`);
+    const notes = [ignored.length ? `not dead-code issues, ignored: ${ignored.join(", ")}` : null, ctx.mode === "static" ? STATIC_NOTE : null];
+    return { ok: true, candidates, note: notes.filter(Boolean).join("; ") || null };
+  },
+};
+
+export const tsc = {
+  normalize(runs, ctx) {
+    const tracked = new Set(ctx.files);
+    const candidates = [];
+    let others = 0;
+    for (const run of runs) {
+      for (const line of run.stdout.split("\n")) {
+        const m = TSC_DIAGNOSTIC.exec(line.trim());
+        if (!m) continue;
+        const [, path, row, , code, message] = m;
+        if (!UNUSED_SYMBOL_CODES.has(code)) { others += 1; continue; }
+        const file = relativize(path, ctx.repoRoot);
+        if (!tracked.has(file)) continue;
+        candidates.push({ kind: ctx.tool.kinds[0], file, line: Number(row), symbol: /'([^']+)'/.exec(message)?.[1] ?? null,
+          detail: `${code}: ${message}`, noisy: false });
+      }
+    }
+    return { ok: true, candidates, note: others ? `${others} other diagnostics ignored` : null };
+  },
+};
+
+export const ADAPTERS = { raw, knip, tsc };
