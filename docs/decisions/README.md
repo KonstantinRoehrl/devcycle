@@ -14,13 +14,13 @@ replays: `status-quo` 1.34 (n = 7), `inline` 0.97 (n = 5) and `grouped` 1.11 (n 
 stays advisory and `planningBudgetUSD` is never enforced. The `THRESHOLDS` in `scripts/plan-strategy.mjs`
 (inline up to 12 tasks or 30 weight points, split above 25, coupling 0.5, width 3, k ≤ 3, 4 concurrent, the 150k
 input cap) stay the initial values Decision D7 names. The Phase 3 exit and the ship gate are **not met**, and the
-arms with no usable replay are unmeasured: the large `grouped`, `grouped-fork` and `checkpointed` and the medium
+arms with no usable replay are unmeasured, five replays: the large `grouped` and `checkpointed` and the medium
 `status-quo`, `inline` and `checkpointed` with execution.
 
 **Why:** the paid pass 2 (about $67.50 of the $390) left two usable large replays, `status-quo` and `inline` on
 `instruction-economy`. A DNS outage (`ENOTFOUND`, about 02:00) ended the rest in seconds, and the harness records
 that as a terminal `error` at $0. The user chose to record what the data supports over a harness retry and a third
-pass (about $192, with about $207 left). The spec asks for two passes before a threshold becomes a gate (§9.9) and
+pass over the missing replays (priced under **How to apply**). The spec asks for two passes before a threshold becomes a gate (§9.9) and
 for the projection to be within ±35% before it is enforced (§7); neither holds.
 `cost-model-fit.mjs` reports 0 of 2 scored passes within ±35%, and the large projections miss by +428.7% (`inline`:
 est $29.27, actual planning $5.54) and −64.6% (`status-quo`: est $13.54, actual $38.21). Refitting the projection's
@@ -37,20 +37,29 @@ tasks) planning dollars per task, and the two arms planned different cuts of the
 | P1 ≤ $2.0 per task | 0.40 to 1.91 on large, 0.74 to 1.50 on small and medium | met on every usable replay |
 | P2 ≤ 1.0 | 0.42 (`grouped`), 0.65 (`grouped-fork`), medium only | met where measured; none on large, which did not execute |
 | P3 ≤ 0.5 dispatches per task | 1.35 (large `status-quo`), 0.86 (medium `grouped`); small 0.25 to 1.33 | met only by small `checkpointed` (0.25); large `inline` has no rows |
+| P4 ≤ 150,000 p95 subagent depth | 60,312 (small `checkpointed`) and 74,959 (small `grouped`); 152,746 (small `grouped-fork`), 153,734 (medium `grouped`), 167,378 (large `status-quo`) and 222,209 (medium `grouped-fork`) are over; no depth rows for small `status-quo` and `inline` and for large `inline`. Against the `phase1-baseline` `status-quo` replay of the same entry (small 115,904, medium 149,164): −55,592 (`checkpointed`) and −40,945 (`grouped`) on small, +4,570 (`grouped`) on medium; no earlier-phase value on file for large | not met: 4 of the 6 replays with depth rows fail, 2 on the removed fork arm and 2 on kept arms (medium `grouped` by 3,734, large `status-quo` by 17,378) |
 | P5 ≤ 15% coordinator depth | 15.6% to 38.7% on every replay with a probe | not met |
+| P6 ≤ 20% shared context | 0% to 10.0% on the 6 replays with rows (large `status-quo` 9.4%, medium `grouped` 10.0%). Against the baseline (small 0%, medium 8.9%): +5.0 points (small `grouped`), 0 (`checkpointed`), +1.1 (medium `grouped`); none for large | met where measured; 3 replays have no rows |
+| P7 100% explicit model | 100% on small `checkpointed`, small `grouped`, medium `grouped` and large `status-quo`; 50% (small) and 40% (medium) on `grouped-fork`; no rows for 3. The baseline replays with rows are all 100% | met on every kept arm with rows; missed only by the removed fork arm |
 | P8 ≤ 5× plan/spec, non-test fences ≤ 20% | large 7.6× (`inline`) and 20.5× (`status-quo`); small and medium 3.2× to 4.7× | not met on large, met elsewhere |
 | P9 gate fails ≤ 2, checker rounds ≤ 1 | 2 to 5 gate fails, 0 or 1 checker rounds | met by 2 of 9 replays |
+| P10 no worse than baseline | 0 attributed `plan-defect` on all nine, which the harness reports as not judged because the bar is baseline-relative. Raw blocked/rejected/retried: 1/3/2 (medium `grouped`) and 0/1/2 (medium `grouped-fork`) against 0/0/1 in the baseline medium `status-quo` replay (which itself errored at execution); 0/0/0 elsewhere | not shown to hold: only the two medium replays executed, and both raw counts are above baseline; no earlier-phase value on file for large, which did not execute |
 | P11 ≤ 3 minutes per task | 0.92 and 2.87 on large, 2.56 on small `checkpointed`; 3.5 to 7.5 on the other six | met by 3 of 9 replays |
+| P12 100% cost rows and roles, 0 sensor gaps | 100% and 0 gaps on 6 of 9; no rows for small `status-quo` and `inline` and for large `inline`. The baseline replays with rows are the same | met where measured |
 
-(verified: aggregated from the `results.json` of those two passes, outcomes `planned` and `executed`) P4, P6, P7, P10 and
-P12 are in each pass's `results.md` and were not re-judged here.
+(verified: aggregated from the `results.json` of the passes `phase3` and `phase3-p2-large`, outcomes `planned` and
+`executed`; baselines from `phase1-baseline/results.json`.) Every cell above was checked against those files and no
+earlier cell needed correcting.
 
 The P1/P2/P3/P8 ship gate (spec §10) is therefore **not met**: P8 fails on both large arms and P3 and P2 are
 unmeasured on large `inline`. Nothing is released from this effort.
 
 **How to apply:** a later effort that wants these measured fixes `scripts/plan-bench-pass.mjs` to retry a transient
-API error (`ENOTFOUND`, an unreachable API) with backoff instead of ending the replay, then runs the six missing
-replays (about $192) with the user's go-ahead, and refits the rates, records the passes in `CALIBRATION` and revisits
+API error (`ENOTFOUND`, an unreachable API) with backoff instead of ending the replay, then runs the five missing
+replays with the user's go-ahead (`node scripts/plan-bench.mjs estimate` prices them at $108.59: $30.12 for the large
+`grouped` and `checkpointed`, `--entries instruction-economy --arms grouped,checkpointed`, plus $78.47 for the
+medium `status-quo`, `inline` and `checkpointed`, `--entries implementer-stop-hold --arms
+status-quo,inline,checkpointed`; an estimate at the median rates, and large cuts have run well above it), and refits the rates, records the passes in `CALIBRATION` and revisits
 the thresholds from two passes. Until then read `auto`'s thresholds as untuned and the estimate as advisory.
 
 ## 2026-11-22 — The fork arm is dropped (#450)
