@@ -25,6 +25,7 @@ import { sectionText } from "./md-sections.mjs";
 import { loadStages } from "./stage-entry.mjs";
 import { budgetDecisionErrors, recordedBudgets, newestRecorded } from "./budget-decisions.mjs";
 import { DECISIONS_DOC } from "./doc-paths.mjs";
+import { validateRegistry } from "./hygiene-registry.mjs";
 
 
 // devcycle's own record stores must stay tracked: README/DECISIONS say lessons + promotion
@@ -1381,6 +1382,19 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       if (!new RegExp(`^- format: ${CURRENT_FORMAT}$`, "m").test(stateTemplate))
         fail(`references/resume.md: the state template's format row must read "- format: ${CURRENT_FORMAT}", the current format new cycles are written at`);
     }
+  }
+
+  // 30. references/hygiene-sweeps.json, the hygiene sweeps' single owner of tool pins, invocations and
+  //     culprit kinds, is well-formed. A tree without it, a fixture plugin, has nothing to hold.
+  const hygieneFile = join(root, "references/hygiene-sweeps.json");
+  if (existsSync(hygieneFile)) {
+    let registry = null;
+    try {
+      registry = JSON.parse(readFileSync(hygieneFile, "utf8"));
+    } catch (err) {
+      fail(`references/hygiene-sweeps.json: not valid JSON — ${err.message}`);
+    }
+    if (registry !== null) for (const message of validateRegistry(registry)) fail(`references/hygiene-sweeps.json: ${message}`);
   }
 
   // L17: the all-hops closure follows the playbook and command hops check 15 deliberately does not gate.
