@@ -5,6 +5,20 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — The hygiene-sweep contract is an audit-only reference (#478)
+
+**Decision:** `references/hygiene-sweeps.md` owns the sweep contract (flow, classes and consent,
+verification, ratchet, coverage statement, safety) and the dead-code method. Only the maintain
+playbook cites it, so planning's closure does not grow.
+
+**Why:** #478 A asks for one contract every sweep reuses. Its readers are maintain's entry points,
+whose playbook closure and the runtime surface grow by its size.
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 73958
+budget: surface-budget.json surfaceTotal 7363
+```
+
 ## 2026-11-22 — maintain runs the hygiene-sweep spine as a step 4 fact source (#478)
 
 **Decision:** step 4 of the maintain playbook runs `scripts/hygiene-sweep.mjs run`, the deterministic
