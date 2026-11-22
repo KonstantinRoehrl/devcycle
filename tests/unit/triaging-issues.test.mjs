@@ -65,3 +65,15 @@ test("the routing table and the docs hub carry triage-issues", () => {
   assert.ok(hub.includes("(../skills/triage-issues/SKILL.md)"));
   assert.ok(hub.includes("(playbooks/triaging-issues/README.md)"));
 });
+
+test("the report is written to the path next prints, so a same-day rerun keeps the earlier report", () => {
+  assert.match(section("## Report"), /issue-triage\.mjs" next --dir <reportDir>/);
+  const d = section("## Delta");
+  assert.match(d, /previous` first, then `next/);
+  assert.match(d, /same-day rerun/);
+});
+
+test("the data block's issue entries carry the optional tracked flag", () => {
+  assert.match(section("## Report"), /issues:\[\{number,title,impact,severity,cluster,fixedBy,tracked\?\}/);
+  assert.match(section("## Report"), /`tracked` is `true` for an issue devcycle's own intake tracks/);
+});

@@ -90,3 +90,12 @@ test("the routing table, the docs hub and the docs page carry write-issue", () =
   assert.ok(hub.includes("(playbooks/writing-issues/README.md)"));
   assert.match(read("docs/playbooks/writing-issues/README.md"), /\n## How it fits\n/);
 });
+
+test("the title rides in the screened draft file, so a private name in it is caught before the user sees it", () => {
+  const s = section("## Screen");
+  assert.match(s, /`title:` line, a blank line, then the body/);
+  assert.match(s, /whole file, title included, is screened/);
+  const c = section("## Confirm, then file");
+  assert.match(c, /title from the `title:` line/);
+  assert.match(c, /below the blank line/);
+});

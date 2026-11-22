@@ -5,11 +5,26 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — Branch-review fixes for the issue-skills branch (no issue)
+
+**Decision:** the redaction screen's `--source-repo` match treats only letters and digits as word characters, so a private name inside a hyphen- or underscore-joined compound is caught; `issue-triage.mjs` gains `next`, which names each report so a same-day rerun keeps the earlier one for the delta; `write-issue` screens its title by carrying it on a `title:` line of the screened draft; and the docs that still described skills as absent or the findings order as severity-first are corrected.
+
+**Why:** a draft naming `secret-ledger-api` passed the screen, a second triage run on one day overwrote the first and compared the file with itself, and the title was filed without ever being screened.
+
+**Budgets:** the runtime surface and the `playbooks/maintaining-the-repo.md`, `playbooks/triaging-issues.md` and `playbooks/writing-issues.md` context entries grow by the reworded steps.
+
+```text
+budget: surface-budget.json surfaceTotal 7429
+budget: context-budget.json playbooks/maintaining-the-repo.md 71479
+budget: context-budget.json playbooks/triaging-issues.md 21401
+budget: context-budget.json playbooks/writing-issues.md 5404
+```
+
 ## 2026-11-22 — Skills return as standalone helpers, enforced by the validator (no issue)
 
 **Decision:** `skills/<id>/SKILL.md` is allowed again, as a frontmatter (`name`, `description`) plus a pointer at one playbook and `references/output.md`; `scripts/validate.mjs` check 7 enforces the shape, and checks 3, 6, 9 and 15 and the description budget count skills alongside commands.
 
-**Why:** it answers the 2026-08-06 entry's two reasons. Stage prose stays unreachable by trigger phrase, because a skill's playbook may not use `.devcycle/state.md` or the stage machinery, and the validator fails one that does. The description budget stays one number, because skill descriptions count toward the same 6000 characters. The skills are on-request helpers that run in any repo (write an issue, triage a backlog), which the command ceiling (`COMMAND_CEILING = 10`, reached) and the user's wish for no new user-facing playbook commands rule out as commands.
+**Why:** it answers the 2026-08-06 entry's two reasons. Stage prose stays unreachable by trigger phrase, because a skill's playbook may not use `.devcycle/state.md` or the stage machinery, and the validator fails one that does. The description budget stays one number, because skill descriptions count toward the same 6000 characters. The skills are on-request helpers that run in any repo (write an issue, triage a backlog), which the command ceiling (`COMMAND_CEILING = 10`, reached) rules out as commands.
 
 **Supersedes:** the 2026-08-06 entry, in part: `skills/` is no longer banned, and its trigger-phrase and budget concerns are now enforced rather than avoided.
 

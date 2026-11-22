@@ -6,6 +6,7 @@
 // `issue-triage-data` block each report ends in, never from the report's prose.
 //
 //   previous [--config <path>]                       -> JSON { reportDir, roadmap, previous }
+//   next --dir <report dir> [--date <YYYY-MM-DD>]    -> the path to write, never one already taken
 //   remember --report-dir <d> --roadmap <path|none> [--config <path>]
 //   delta --previous <file> --current <file>         -> Markdown delta sections
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
@@ -15,9 +16,10 @@ import { isMain } from "./is-main.mjs";
 
 const DEFAULT_CONFIG = ".devcycle/issue-triage.json";
 const FALLBACK_REPORT_DIR = "docs/audits";
-const REPORT_NAME = /^\d{4}-\d{2}-\d{2}-issue-triage\.md$/;
+// A second report on one day is `-2`, a third `-3`: no suffix reads as the first.
+const REPORT_NAME = /^(\d{4}-\d{2}-\d{2})-issue-triage(?:-(\d+))?\.md$/;
 const DATA_BLOCK = /```issue-triage-data\n([\s\S]*?)\n```/g;
-const SUBCOMMANDS = "previous | remember | delta";
+const SUBCOMMANDS = "previous | next | remember | delta";
 
 // The block's parsed JSON, or null when the text has no block, the block is not JSON, or its
 // version is not one this script reads. A report carries one block, last, so the last wins.
@@ -76,18 +78,37 @@ function readConfig(path) {
   }
 }
 
+// The report files in a directory, oldest first: by date, then by suffix as a number.
+function reportsIn(dir) {
+  const reports = [];
+  for (const file of isDir(dir) ? readdirSync(dir) : []) {
+    const match = REPORT_NAME.exec(file);
+    if (match) reports.push({ file, date: match[1], n: Number(match[2] ?? 1) });
+  }
+  return reports.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.n - b.n));
+}
+
 const isDir = (path) => existsSync(path) && statSync(path).isDirectory();
 
 function previous(argv) {
   const { flags } = parseFlags(argv, { "--config": "value" });
   const config = readConfig(requireValue(flags, "--config") ?? DEFAULT_CONFIG);
   const reportDir = config.reportDir ?? (isDir(FALLBACK_REPORT_DIR) ? FALLBACK_REPORT_DIR : null);
-  let newest = null;
-  if (reportDir && isDir(reportDir)) {
-    const name = readdirSync(reportDir).filter((f) => REPORT_NAME.test(f)).sort().pop();
-    if (name) newest = join(reportDir, name);
-  }
-  return JSON.stringify({ reportDir, roadmap: config.roadmap ?? null, previous: newest }) + "\n";
+  const newest = reportDir ? reportsIn(reportDir).pop() : undefined;
+  return JSON.stringify({ reportDir, roadmap: config.roadmap ?? null, previous: newest ? join(reportDir, newest.file) : null }) + "\n";
+}
+
+// One past the newest report already written for the day, so the name never collides with what
+// `previous` returns and a same-day rerun keeps the earlier report for the delta.
+function next(argv) {
+  const { flags } = parseFlags(argv, { "--dir": "value", "--date": "value" });
+  const dir = requireValue(flags, "--dir", "a directory");
+  if (dir === undefined) throw new Error("next needs --dir");
+  const date = requireValue(flags, "--date") ?? new Date().toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("--date must be YYYY-MM-DD");
+  const today = reportsIn(dir).filter((r) => r.date === date);
+  const n = today.length === 0 ? 1 : today[today.length - 1].n + 1;
+  return join(dir, `${date}-issue-triage${n === 1 ? "" : `-${n}`}.md`) + "\n";
 }
 
 function remember(argv) {
@@ -124,7 +145,7 @@ function delta(argv) {
 
 function main(argv) {
   const [verb, ...rest] = argv;
-  const verbs = { previous, remember, delta };
+  const verbs = { previous, next, remember, delta };
   try {
     if (!Object.hasOwn(verbs, verb ?? "")) throw new Error(`unknown subcommand ${verb ?? ""} (${SUBCOMMANDS})`);
     process.stdout.write(verbs[verb](rest));

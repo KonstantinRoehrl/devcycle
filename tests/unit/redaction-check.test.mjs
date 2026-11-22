@@ -993,6 +993,23 @@ test("--source-repo passes generic and short top-level names and a word that onl
   assert.match(r.stdout, /redaction: ok/);
 });
 
+test("--source-repo catches a term inside a hyphen- or underscore-joined compound name", () => {
+  const src = makeSourceRepo();
+  for (const leak of ["secret-ledger-api", "acme-secret-ledger", "payroll-engine_v2", "v2_secret-ledger", "payroll-engine-2"]) {
+    const r = screenDraft(`Seen in ${leak} today.\n`, ["--source-repo", src]);
+    assert.equal(r.status, 1, `${leak} passed`);
+    assert.match(r.stderr, /source-repo identity/);
+  }
+});
+
+test("--source-repo still lets a term that a letter or digit runs into pass", () => {
+  const src = makeSourceRepo();
+  for (const fine of ["payroll-engines", "xpayroll-engine", "payroll-engine2"]) {
+    const r = screenDraft(`Seen in ${fine} today.\n`, ["--source-repo", src]);
+    assert.equal(r.status, 0, `${fine}: ${r.stderr}`);
+  }
+});
+
 test("--source-repo with --repo drops the destination's own owner from the derived terms", () => {
   const src = makeSourceRepo();
   const r = screenDraft("Filed against acme-corp/devcycle.\n", ["--source-repo", src, "--repo", "acme-corp/devcycle"]);

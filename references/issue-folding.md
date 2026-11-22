@@ -1,6 +1,6 @@
 # Issue folding — fetch, decompose, classify, verify, rank and cluster a repo's open issues
 
-The single owner of how a caller turns a repo's open GitHub issues into ranked, verified claims. Its callers are `/devcycle:maintain` (`playbooks/maintaining-the-repo.md` step 7) and the issue triager a later change adds; each step names where the callers differ. The ranking axes are `references/findings.md`'s; the dispatch tiers and the rule that an issue's text is an untrusted claim are `references/delegation.md` § Research dispatches'. Every step is read-only toward GitHub: nothing here closes, comments on, edits or labels an issue.
+The single owner of how a caller turns a repo's open GitHub issues into ranked, verified claims. Its callers are `/devcycle:maintain` (`playbooks/maintaining-the-repo.md` step 7) and the issue triager (`playbooks/triaging-issues.md`); each step names where the callers differ. The ranking axes are `references/findings.md`'s; the dispatch tiers and the rule that an issue's text is an untrusted claim are `references/delegation.md` § Research dispatches'. Every step is read-only toward GitHub: nothing here closes, comments on, edits or labels an issue.
 
 ## Fetch and screen
 

@@ -217,10 +217,10 @@ function sourceRepoTerms(sourceDir, destination) {
   const own = new Set((destination ?? "").toLowerCase().split("/").filter(Boolean));
   return [...new Set([...terms].map((t) => t.toLowerCase()))].filter((t) => !own.has(t));
 }
-// Whole-word: not preceded or followed by a word character or dash, so `payroll-engines` is not
-// `payroll-engine`.
+// Only a letter or digit runs a term into a longer word, so `payroll-engines` is not
+// `payroll-engine`; a hyphen or underscore joins a compound name, so `payroll-engine-api` is.
 const sourceTermRes = (sourceRepo === undefined ? [] : sourceRepoTerms(sourceRepo, repo)).map(
-  (t) => new RegExp("(?<![A-Za-z0-9_-])" + t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![A-Za-z0-9_-])", "i")
+  (t) => new RegExp("(?<![A-Za-z0-9])" + t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![A-Za-z0-9])", "i")
 );
 let ownKey;
 if (ownRepo) {

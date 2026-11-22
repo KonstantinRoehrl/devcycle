@@ -40,17 +40,17 @@ Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/issue-triage.mjs" previous`. A recorded
 
 ## Report
 
-The report directory is `previous`'s `reportDir`. When it is `null`, ask once where reports go and record it with `node "${CLAUDE_PLUGIN_ROOT}/scripts/issue-triage.mjs" remember --report-dir <dir> --roadmap <path|none>`. The file is `<reportDir>/YYYY-MM-DD-issue-triage.md` and is never committed. Its contents, in order:
+The report directory is `previous`'s `reportDir`. When it is `null`, ask once where reports go and record it with `node "${CLAUDE_PLUGIN_ROOT}/scripts/issue-triage.mjs" remember --report-dir <dir> --roadmap <path|none>`. The file is the path `node "${CLAUDE_PLUGIN_ROOT}/scripts/issue-triage.mjs" next --dir <reportDir>` prints, `<reportDir>/YYYY-MM-DD-issue-triage.md` or `-2`, `-3` for a same-day rerun, and is never committed. Its contents, in order:
 
 1. A header: repo, branch and commit, issues fetched against GitHub's open-issue count, roadmap source, report directory.
 2. `## Delta`.
 3. The ordered clusters, each with its issues and fragments, ranking rationale, verified anchors and a **self-contained task text** complete enough for a fresh session. The text is prefixed with `/devcycle:cycle ` (devcycle is installed, since this playbook is running) and reads the same without the prefix.
 4. The unclustered and excluded counts.
-5. Last, a fenced block with info string `issue-triage-data`, holding JSON `{version:1, repo, branch, commit, total, fetched, roadmap, issues:[{number,title,impact,severity,cluster,fixedBy}], clusters:[{id,title,issues:[n]}]}`. `fixedBy` is the cited commit or PR, else `null`.
+5. Last, a fenced block with info string `issue-triage-data`, holding JSON `{version:1, repo, branch, commit, total, fetched, roadmap, issues:[{number,title,impact,severity,cluster,fixedBy,tracked?}], clusters:[{id,title,issues:[n]}]}`. `fixedBy` is the cited commit or PR, else `null`. `tracked` is `true` for an issue devcycle's own intake tracks, and is left out otherwise.
 
 ## Delta
 
-Run `previous` before writing the new report. With a previous report, write the new report's data block first, then run `node "${CLAUDE_PLUGIN_ROOT}/scripts/issue-triage.mjs" delta --previous <previous> --current <new report>` and put its output under `## Delta`; never re-read the previous report's prose. With none, `## Delta` says `First run: no previous report.`
+Run `previous` first, then `next`, and write the new report to the path `next` prints, so a same-day rerun keeps the earlier report and the delta compares the two. With a previous report, write the new report's data block first, then run `node "${CLAUDE_PLUGIN_ROOT}/scripts/issue-triage.mjs" delta --previous <previous> --current <new report>` and put its output under `## Delta`; never re-read the previous report's prose. With none, `## Delta` says `First run: no previous report.`
 
 ## Cost
 

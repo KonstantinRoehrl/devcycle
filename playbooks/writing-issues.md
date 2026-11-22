@@ -38,7 +38,7 @@ A `.github/ISSUE_TEMPLATE/` in the target is honoured. The title follows the sty
 
 ## Screen
 
-Write the draft to a file under the session's scratch directory and run `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft> --repo <target>`. When the source repo differs from the target, add `--source-repo <source checkout>`. A failing draft is not shown: name the failing class and stop.
+Write the draft to a file under the session's scratch directory, a `title:` line, a blank line, then the body, the shape `doctor.mjs --issue-body` prints, and run `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft> --repo <target>`. When the source repo differs from the target, add `--source-repo <source checkout>`. The whole file, title included, is screened. A failing draft is not shown: name the failing class and stop.
 
 When the target is public (`gh api repos/<target> --jq .private` prints `false`) and the source differs, the confirmation in § Confirm, then file carries the line `This goes public: <target> is a public repository.`
 
@@ -48,7 +48,7 @@ Run `gh issue list --repo <target> --state all --search "<key terms>" --json num
 
 ## Confirm, then file
 
-Show the screened draft and the target, and ask whether the draft is right. Then ask separately whether to file it, never inferring the second answer from the first. Only then run one of:
+Show the screened draft and the target, and ask whether the draft is right. Then ask separately whether to file it, never inferring the second answer from the first. Only then take the title from the `title:` line, write the body below the blank line to `<body-file>`, and run one of:
 
 - `gh issue create --repo <target> --title "<title>" --body-file <body-file>`
 - `gh issue edit <N> --repo <target> --body-file <body-file>`

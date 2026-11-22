@@ -515,6 +515,7 @@ test("the old severity-first document order is gone from every reader of finding
   const stale = [/severity-ordered defect list/, /severity\/impact\/complexity ranking/, /fix complexity/, /Severity \(desc\) → Impact \(desc\)/];
   for (const file of ["references/findings.md", "references/abstraction-and-strengths.md", "playbooks/writing-the-findings-document.md", "commands/review.md"])
     for (const pattern of stale) assert.ok(!pattern.test(read(file)), `${file} still matches ${pattern}`);
+  assert.doesNotMatch(read("playbooks/maintaining-the-repo.md"), /severity-first/, "maintain's rank step still names the retired severity-first document order");
   assert.match(read("commands/review.md"), /ranked by impact, severity and priority/);
   assert.match(read("playbooks/profiling-sessions.md"), /carry no severity or Impact level/);
 });

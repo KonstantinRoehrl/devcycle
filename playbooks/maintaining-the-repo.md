@@ -131,10 +131,12 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
      dismissal. A dismissed finding is excluded from the next pass's ranked list and is
      **never auto-re-evaluated**; it stays dismissed until a human asks to reconsider it
      (`dismiss --id <id> --revoke`).
-   - **Rank + report.** Keep the engine's severity-first order as primary (never lowered); within a
-     severity tier sort by the trending signal, tie-broken confidence → passes → first-seen — the
-     rule `scripts/maintenance-findings.mjs`'s `rankByTrending` implements and singly owns, named
-     here rather than silently re-specified. Add three longitudinal sections to the findings
+   - **Rank + report.** The findings document is ordered Impact → Severity → Priority, which
+     `references/findings.md` § Ordering owns. The committed findings store's own order is
+     unchanged: severity tier first (never lowered), then the trending signal, tie-broken
+     confidence → passes → first-seen — the rule `scripts/maintenance-findings.mjs`'s
+     `rankByTrending` implements and singly owns, named here rather than silently re-specified.
+     Add three longitudinal sections to the findings
      document: **Previously known (persisting)**, **Resolved since last pass**, **Trending**. Every
      lifecycle transition rendered is backed by this pass's live re-detection (verify-before-stating,
      `references/evidence.md` § Authored claims), never a prior pass's wording.

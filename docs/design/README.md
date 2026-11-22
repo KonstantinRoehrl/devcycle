@@ -82,7 +82,7 @@ devcycle/                (public GitHub repo)
 │   ├── plugin.json               # name, version (bump per release), dependency on superpowers
 │   │                             # userConfig (see §7)
 │   └── marketplace.json          # source "./", allowCrossMarketplaceDependenciesOn: ["claude-plugins-official"]
-├── commands/                     # L0 — the whole user-facing surface; intents mapped in docs/routing.md
+├── commands/                     # L0 — the ten slash commands; intents mapped in docs/routing.md
 │   ├── cycle.md                  # entry: input-maturity triage → stage walk; model-invocable (wrappers can call it)
 │   ├── continue.md               # resume from .devcycle/state.md after /clear (see §5)
 │   ├── review.md                 # a branch, this repo, or a file set, scoped by argument; starts no cycle (see §15.3)

@@ -28,6 +28,61 @@ test("previous falls back to docs/audits and picks the newest triage report by n
   assert.deepEqual(JSON.parse(r.stdout), { reportDir: "docs/audits", roadmap: null, previous: "docs/audits/2026-11-20-issue-triage.md" });
 });
 
+test("previous orders same-day reports by their numeric suffix, not by file name", () => {
+  const dir = makeTempDir("triage-");
+  mkdirSync(join(dir, "docs/audits"), { recursive: true });
+  for (const f of ["2026-11-22-issue-triage.md", "2026-11-22-issue-triage-2.md", "2026-11-22-issue-triage-10.md", "2026-11-21-issue-triage-3.md"])
+    writeFileSync(join(dir, "docs/audits", f), "x\n");
+  assert.equal(JSON.parse(run(dir, "previous").stdout).previous, "docs/audits/2026-11-22-issue-triage-10.md");
+});
+
+test("next hands out the date-named file, then -2, -3 once a same-day report exists", () => {
+  const dir = makeTempDir("triage-");
+  const reports = join(dir, "reports");
+  const next = () => run(dir, "next", "--dir", "reports", "--date", "2026-11-22");
+  assert.equal(next().stdout, join("reports", "2026-11-22-issue-triage.md") + "\n", "a missing directory still names the first file");
+  mkdirSync(reports);
+  assert.equal(next().stdout, join("reports", "2026-11-22-issue-triage.md") + "\n");
+  writeFileSync(join(reports, "2026-11-22-issue-triage.md"), "x\n");
+  assert.equal(next().stdout, join("reports", "2026-11-22-issue-triage-2.md") + "\n");
+  writeFileSync(join(reports, "2026-11-22-issue-triage-2.md"), "x\n");
+  assert.equal(next().stdout, join("reports", "2026-11-22-issue-triage-3.md") + "\n");
+  writeFileSync(join(reports, "2026-11-23-issue-triage.md"), "x\n");
+  assert.equal(next().stdout, join("reports", "2026-11-22-issue-triage-3.md") + "\n", "another day's report does not move today's name");
+});
+
+test("next without --date uses today's UTC date, and a malformed --date is refused", () => {
+  const dir = makeTempDir("triage-");
+  const today = new Date().toISOString().slice(0, 10);
+  assert.equal(run(dir, "next", "--dir", "r").stdout, join("r", `${today}-issue-triage.md`) + "\n");
+  const bad = run(dir, "next", "--dir", "r", "--date", "yesterday");
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /issue-triage: --date must be YYYY-MM-DD/);
+});
+
+test("previous never returns the path next hands out, and a same-day pair shows a real delta", () => {
+  const dir = makeTempDir("triage-");
+  const reports = join(dir, "reports");
+  mkdirSync(reports);
+  writeFileSync(join(reports, "2026-11-22-issue-triage.md"), block(data([issue(1, "high", "low")])));
+  assert.equal(run(dir, "remember", "--report-dir", "reports", "--roadmap", "none").status, 0);
+  const earlier = JSON.parse(run(dir, "previous").stdout).previous;
+  const fresh = run(dir, "next", "--dir", "reports", "--date", "2026-11-22").stdout.trim();
+  assert.equal(earlier, join("reports", "2026-11-22-issue-triage.md"));
+  assert.notEqual(fresh, earlier);
+  writeFileSync(join(dir, fresh), block(data([issue(1, "high", "low"), issue(2, "low", "low")])));
+  assert.equal(JSON.parse(run(dir, "previous").stdout).previous, fresh, "once written, the second run is the newest");
+  const out = run(dir, "delta", "--previous", earlier, "--current", fresh).stdout;
+  assert.match(out, /### New \(1\)\n- #2 t2\n/);
+});
+
+test("an issue entry's optional tracked flag is tolerated and never changes the delta", () => {
+  const prev = data([issue(1, "high", "low", { tracked: true })]);
+  const curr = data([issue(1, "high", "low", { tracked: false, extra: "ignored" })]);
+  assert.equal(readTriageData(block(prev)).issues[0].tracked, true);
+  assert.match(renderDelta("p.md", prev, curr), /### Re-ranked \(0\)\n- none\n/);
+});
+
 test("remember records the report dir and roadmap, and previous reads them back", () => {
   const dir = makeTempDir("triage-");
   mkdirSync(join(dir, "notes"));
@@ -85,6 +140,6 @@ test("delta reads both files, and a report with no block fails loudly", () => {
 test("an unknown subcommand is an error, and the script never calls gh", () => {
   const r = run(makeTempDir("triage-"), "close");
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /unknown subcommand close \(previous \| remember \| delta\)/);
+  assert.match(r.stderr, /unknown subcommand close \(previous \| next \| remember \| delta\)/);
   assert.doesNotMatch(readFileSync(SCRIPT, "utf8"), /node:child_process/, "the script spawns nothing, gh least of all");
 });
