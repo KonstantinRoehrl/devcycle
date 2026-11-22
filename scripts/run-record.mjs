@@ -256,10 +256,12 @@ function main() {
     "plannedTaskCount", "waveCount", "filed", "degraded", "tokens", "toolUses", "durationMs",
     "steps", "peakDepth", "window", "toolResultChars", "warned", "refused",
     "inputTokens", "cacheWriteTokens", "cacheReadTokens", "outputTokens", "turns", "continuationOf",
-    "specBytes", "planBytes", "tasks", "waves", "drafters", "sourcePrints"]);
+    "specBytes", "planBytes", "tasks", "waves", "drafters", "sourcePrints",
+    "verified", "suspected", "cleared"]);
   const floatFields = new Set(["cost", "usd", "fenceShare", "nonTestFenceShare", "subagentUsd",
     "estUsd", "coordinatorDepthPct"]);
-  const boolFields = new Set(["background", "fork", "windowAssumed", "isAborted", "explicitModel"]);
+  const boolFields = new Set(["background", "fork", "windowAssumed", "isAborted", "explicitModel",
+    "consentExecuting", "consentCoverage", "complete"]);
   const objectFields = new Set(["reads"]);
 
   if (sub === "new") {

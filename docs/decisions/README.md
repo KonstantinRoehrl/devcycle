@@ -5,6 +5,104 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — The sweep's resolution refusal and the documentation criteria name their sources (#478, #485)
+
+**Decision:** the maintain playbook states that a pass with no finalized sweep passes no
+`--sweep-coverage` and that the resolution flags travel together, only on a confirmed run; the
+Documentation standard and the undocumented-code criterion name the doc-comment conventions and
+Fowler's Comments smell as their measuring sources. The playbook's closure, the two other closures
+that read `references/quality-criteria.md`, and the runtime surface grow by that text.
+
+**Why:** a decline could still delete records through `--sweep-coverage` alone, and a criterion with
+no named source is an unsupported opinion by the catalog's own Precedence rule.
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 80075
+budget: context-budget.json playbooks/planning-waves.md 75704
+budget: context-budget.json playbooks/reviewing-code.md 106569
+budget: surface-budget.json surfaceTotal 7583
+```
+
+## 2026-11-22 — The hygiene sweep's coverage rules grow the reference (#478)
+
+**Decision:** a sweep kind is complete only if every source behind it ran in full and could have found
+something; a capped, size-skipped or project-skipping scan is a `partial` row, and a failed git source
+is a named degraded source. The reference states these rules, the `complete` field on each `sweep-count`
+row and the `sourcedKinds` rule for kinds no source produces; its closure and the runtime surface grow.
+
+**Why:** a branch review found paths that read as "ran, nothing found" without the check running, which
+let stored findings resolve wrongly. The coverage statement has to say what each such path means.
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 77218
+budget: surface-budget.json surfaceTotal 7397
+```
+
+## 2026-11-22 — maintain verifies its hygiene sweep in a ninth dispatch and mints its own run record (#478, #183)
+
+**Decision:** maintain's pass ceiling rises from 8 to 9 total LLM dispatches. The ninth is one
+session-tier verification dispatch, shared by every hygiene sweep, that confirms the sweep's candidate
+clusters in blast-radius order; what its budget does not reach stays `suspected (not verified: budget)`,
+ranked below verified findings and never dropped. A pass mints its own run record at step 1 and records
+its sweep consent there, so `finalize --run` and the lens-cost rows name a real run. The plugin-only
+checks run only when `self-dev-check.mjs --is-source` prints `source`. The lens cap stays 5.
+
+**Why:** the 8 were already spent (5 lenses, history, issue decompose, issue verification). Folding sweep
+verification into issue verification would overrun the per-dispatch delegation budget on a real repo.
+Because the sweeps share one dispatch, this is the only raise the sweep family needs. The step rewrite
+grows the maintain playbook's closure and the runtime surface.
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 76801
+budget: surface-budget.json surfaceTotal 7393
+```
+
+## 2026-11-22 — The hygiene-sweep contract is an audit-only reference (#478)
+
+**Decision:** `references/hygiene-sweeps.md` owns the sweep contract (flow, classes and consent,
+verification, ratchet, coverage statement, safety) and the dead-code method. Only the maintain
+playbook cites it, so planning's closure does not grow.
+
+**Why:** #478 A asks for one contract every sweep reuses. Its readers are maintain's entry points,
+whose playbook closure and the runtime surface grow by its size.
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 73958
+budget: surface-budget.json surfaceTotal 7363
+```
+
+## 2026-11-22 — maintain runs the hygiene-sweep spine as a step 4 fact source (#478)
+
+**Decision:** step 4 of the maintain playbook runs `scripts/hygiene-sweep.mjs run`, the deterministic
+spine that detects stacks, runs `references/hygiene-sweeps.json`'s tools by this pass's consent, and
+writes candidate clusters and coverage rows.
+
+**Why:** #478 A makes the sweep a tooling fact source, so the LLM only verifies. The sentence that
+runs it grows the maintain playbook's closure and the runtime surface.
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 69118
+budget: surface-budget.json surfaceTotal 7285
+```
+
+## 2026-11-22 — The quality catalog splits dead, bloat and undocumented code and adds single source of truth and a documentation standard (#485)
+
+**Decision:** `references/quality-criteria.md` replaces the bundled "dead, unreachable, bloated, or
+undocumented code" bullet with three criteria, sharpens "duplication vs. reuse" into duplicated
+logic, and adds § Single source of truth and § Documentation standard, each naming its measuring
+source. Sweep-only method stays out of the catalog.
+
+**Why:** the bundled bullets were too thin to hold an implementer to, and the catalog reaches every
+implementer brief through planning's per-task excerpt (#485). The catalog is in the refs-only
+closure of `playbooks/planning-waves.md` and `playbooks/reviewing-code.md`, so both grow by its
+delta, as does the runtime surface's line total.
+
+```text
+budget: surface-budget.json surfaceTotal 7283
+budget: context-budget.json playbooks/planning-waves.md 75539
+budget: context-budget.json playbooks/reviewing-code.md 105982
+```
+
 ## 2026-11-22 — Doctor's issue drafts carry write-issue's context section (no issue)
 
 **Decision:** doctor appends `playbooks/writing-issues.md` § The context section below the script's draft and re-screens the whole draft, through the cross-repo screen when this checkout is not the draft's target; `--issue-body`, the `Drafted:` marker, `outer_loop` counting and both gates are unchanged.

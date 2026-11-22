@@ -103,3 +103,76 @@ test("the staleness warning fires whenever the base is not a freshly fetched rem
     /fetch fails[^.]*or `origin\/<name>` [^.]*does not resolve[^.]*may miss store records/,
   );
 });
+
+const step1 = between(playbook, "1. **Resolve maintenance depth", "2. **Scoping gate");
+const step2 = between(playbook, "2. **Scoping gate", "3. **Orientation");
+const step4 = between(playbook, "4. **Deterministic-facts pre-pass", "5. **History");
+const step6 = between(playbook, "6. **Depth-gated criteria", "7. **GitHub issues");
+
+test("a pass mints its own run record before any dispatch, so every --run <runId> names a real run", () => {
+  assert.match(step1, /scripts\/run-record\.mjs" new --plugin-version/);
+  assert.match(step1, /--kind session --sessionId "\$CLAUDE_CODE_SESSION_ID"/);
+  assert.match(step1, /its own Bash call/);
+});
+
+test("the scoping gate asks this pass's sweep consent and records it on the run", () => {
+  assert.match(step2, /references\/hygiene-sweeps\.md` § Classes and consent/);
+  assert.match(step2, /--kind sweep-consent --consentExecuting true\|false --consentCoverage true\|false/);
+});
+
+test("step 4 runs the sweep at every depth, by consent, and verifies it in one dispatch", () => {
+  assert.match(step4, /hygiene-sweep\.mjs" run --out \.devcycle\/maintain\/sweep-<date>/);
+  assert.match(step4, /--consent-executing/);
+  assert.match(step4, /--consent-coverage/);
+  assert.match(step4, /references\/hygiene-sweeps\.md` § Verification/);
+  assert.match(step4, /<dir>\/verdicts\.json/);
+  assert.match(step4, /every depth/);
+});
+
+test("the plugin-only checks run only in devcycle's own source", () => {
+  const gate = step4.indexOf('self-dev-check.mjs" --is-source');
+  assert.notEqual(gate, -1);
+  for (const check of ["duplication-check.mjs", "dead-export-check.mjs", "xref-check.mjs"]) {
+    const at = step4.indexOf(check);
+    assert.ok(at > gate, `${check} must come after the --is-source gate`);
+  }
+  assert.match(step4, /not covered:/);
+});
+
+test("lenses get the verified clusters instead of the dead-code criterion", () => {
+  assert.match(step6, /\*\*dead or unreachable code\*\*/);
+  assert.match(step6, /verified clusters/);
+});
+
+test("step 8 folds the sweep in and resolves a sweep kind only when its sources all ran", () => {
+  assert.match(step8, /hygiene-sweep\.mjs" finalize --dir <dir> --verdicts <dir>\/verdicts\.json --run <runId>/);
+  assert.match(step8, /<dir>\/section\.md/);
+  assert.match(step8, /<dir>\/entries\.json/);
+  assert.match(step8, /--sweep-coverage <dir>\/coverage\.json/);
+  assert.match(step8, /fullKinds/);
+  assert.match(step8, /a sweep gap is not one of these/);
+});
+
+const resolutionBullet = between(step8, "**Resolution", "   - **Offer dismissal");
+
+test("every apply-pass instruction carries the resolution flags together, tied to the confirmed dry run", () => {
+  assert.doesNotMatch(playbook, /apply-pass \[--resolve\]/, "the bracketed form lets --sweep-coverage alone delete records");
+  assert.match(resolutionBullet, /only on a confirmed run/);
+  assert.match(resolutionBullet, /a decline passes neither/);
+  assert.match(step8, /Run `apply-pass --root <worktree>`[^.]*confirmed dry run's resolution flags/);
+});
+
+test("sweep resolution is refused when the pass has no finalized sweep, and the statement says why", () => {
+  assert.match(resolutionBullet, /no finalized sweep/);
+  assert.match(resolutionBullet, /pass no `--sweep-coverage`/);
+  assert.match(resolutionBullet, /and no sweep kind resolves/);
+});
+
+const criteria = read("../../references/quality-criteria.md");
+
+test("the documentation criteria name a measuring source beyond the repo's convention", () => {
+  const section = between(criteria, "## Documentation standard", "## Multi-file feature chains");
+  assert.match(section, /Measured against the repo's/);
+  for (const source of ["PEP 257", "Go doc comments", "TSDoc"]) assert.match(section, new RegExp(source));
+  assert.match(between(criteria, "- **undocumented code**", "- docs-vs-reality"), /measured against:/);
+});

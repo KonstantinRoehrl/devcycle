@@ -265,12 +265,14 @@ test("apply-pass: without --resolve an undetected record is untouched, in no buc
 
 test("apply-pass: with --resolve an undetected record is deleted and listed in gaps", () => {
   const r = root();
-  apply(r, [entry()], "2026-09-01");
+  const lens = entry({ culpritKind: "dead-machinery" });
+  const lensId = findingId("dead-machinery", lens.canonicalLocation);
+  apply(r, [lens], "2026-09-01");
   const out = apply(r, [entry({ canonicalLocation: "scripts/y.mjs#other" })], "2026-09-08", ["--resolve"]);
-  assert.deepEqual(out.resolved.map((x) => x.id), [ID]);
-  assert.deepEqual(out.gaps.map((g) => g.id), [ID]);
-  assert.deepEqual(out.deleted, [`docs/devcycle/maintenance-findings/${ID.replace(":", "-")}.md`]);
-  assert.equal(existsSync(join(maintDir(r), `${ID.replace(":", "-")}.md`)), false);
+  assert.deepEqual(out.resolved.map((x) => x.id), [lensId]);
+  assert.deepEqual(out.gaps.map((g) => g.id), [lensId]);
+  assert.deepEqual(out.deleted, [`docs/devcycle/maintenance-findings/${lensId.replace(":", "-")}.md`]);
+  assert.equal(existsSync(join(maintDir(r), `${lensId.replace(":", "-")}.md`)), false);
 });
 
 test("apply-pass: --resolve retires a legacy github-issue shell, which is otherwise left alone", () => {
@@ -464,4 +466,82 @@ test("stranded: a bad or unresolvable --base exits non-zero", () => {
     assert.notEqual(res.status, 0, bad);
     assert.match(res.stderr, pattern);
   }
+});
+
+const coverageFile = (obj) => {
+  const p = join(makeTempDir("cov-"), "coverage.json");
+  writeFileSync(p, JSON.stringify(obj));
+  return p;
+};
+const SWEEP_ID = findingId("over-exported", "scripts/a.mjs");
+const LENS_ID = findingId("dead-machinery", "scripts/b.mjs#old");
+const seedTwo = (r) => apply(r, [
+  entry({ culpritKind: "over-exported", canonicalLocation: "scripts/a.mjs", affectedFiles: ["scripts/a.mjs"] }),
+  entry({ culpritKind: "dead-machinery", canonicalLocation: "scripts/b.mjs#old", affectedFiles: ["scripts/b.mjs"] }),
+], "2026-09-01");
+const unrelated = [entry({ culpritKind: "dead-code", canonicalLocation: "scripts/z.mjs" })];
+
+test("apply-pass --sweep-coverage: a fully swept kind resolves without --resolve; a lens kind stays open", () => {
+  const r = root();
+  seedTwo(r);
+  const cov = coverageFile({ sweep: "dead-code", sweepKinds: ["over-exported", "dead-code"], fullKinds: ["over-exported"], rows: [] });
+  const out = apply(r, unrelated, "2026-09-08", ["--sweep-coverage", cov]);
+  assert.deepEqual(out.resolved.map((x) => x.id), [SWEEP_ID]);
+  assert.deepEqual(out.gaps.map((g) => g.id), [SWEEP_ID]);
+  assert.ok(readMaintenanceFindings(r).some((x) => x.findingId === LENS_ID), "the lens record is kept");
+});
+
+test("apply-pass --sweep-coverage: a sweep kind not fully covered stays open even with --resolve", () => {
+  const r = root();
+  seedTwo(r);
+  const cov = coverageFile({ sweepKinds: ["over-exported"], fullKinds: [] });
+  const out = apply(r, unrelated, "2026-09-08", ["--resolve", "--sweep-coverage", cov]);
+  assert.deepEqual(out.resolved.map((x) => x.id), [LENS_ID]);
+  assert.deepEqual(out.gaps.map((g) => g.id), [LENS_ID]);
+  assert.ok(readMaintenanceFindings(r).some((x) => x.findingId === SWEEP_ID), "the partly swept record is kept");
+});
+
+test("apply-pass without --sweep-coverage keeps a sweep kind's record under --resolve and still resolves a lens kind", () => {
+  const r = root();
+  seedTwo(r);
+  const out = apply(r, unrelated, "2026-09-08", ["--resolve"]);
+  assert.deepEqual(out.resolved.map((x) => x.id), [LENS_ID]);
+  assert.ok(readMaintenanceFindings(r).some((x) => x.findingId === SWEEP_ID), "no finalized sweep: the sweep kind's record is kept");
+});
+
+test("apply-pass without --sweep-coverage resolves a kind the registry lists but no source produces", () => {
+  const r = root();
+  const GAP_ID = findingId("test-coverage-gap", "scripts/c.mjs");
+  apply(r, [entry({ culpritKind: "test-coverage-gap", canonicalLocation: "scripts/c.mjs", affectedFiles: ["scripts/c.mjs"] })], "2026-09-01");
+  const out = apply(r, unrelated, "2026-09-08", ["--resolve"]);
+  assert.deepEqual(out.resolved.map((x) => x.id), [GAP_ID]);
+});
+
+test("apply-pass --sweep-coverage: a malformed coverage file rejects the pass", () => {
+  const r = root();
+  const pass = passFile([entry()]);
+  rejects(r, ["--pass", pass, "--date", "2026-09-01", "--sweep-coverage", coverageFile({ sweepKinds: "dead-code", fullKinds: [] })],
+    /sweepKinds and fullKinds must be arrays of strings/);
+  rejects(r, ["--pass", pass, "--date", "2026-09-01", "--sweep-coverage", coverageFile({ sweepKinds: [] })],
+    /sweepKinds and fullKinds must be arrays of strings/);
+});
+
+test("apply-pass --sweep-coverage: a sweep kind that no source produces keeps the lens kind's resolution rules", () => {
+  const r = root();
+  const GAP_ID = findingId("test-coverage-gap", "scripts/c.mjs");
+  apply(r, [
+    entry({ culpritKind: "over-exported", canonicalLocation: "scripts/a.mjs", affectedFiles: ["scripts/a.mjs"] }),
+    entry({ culpritKind: "test-coverage-gap", canonicalLocation: "scripts/c.mjs", affectedFiles: ["scripts/c.mjs"] }),
+  ], "2026-09-01");
+  const cov = coverageFile({ sweepKinds: ["over-exported", "test-coverage-gap"], sourcedKinds: ["over-exported"], fullKinds: [] });
+  const withoutResolve = apply(r, unrelated, "2026-09-08", ["--sweep-coverage", cov]);
+  assert.deepEqual(withoutResolve.resolved, [], "a lens-rule kind still needs --resolve");
+  const out = apply(r, unrelated, "2026-09-09", ["--resolve", "--sweep-coverage", cov]);
+  assert.deepEqual(out.resolved.map((x) => x.id), [GAP_ID], "the unsourced kind resolves under --resolve; the partly swept one stays");
+  assert.ok(readMaintenanceFindings(r).some((x) => x.findingId === SWEEP_ID));
+});
+
+test("apply-pass --sweep-coverage: a malformed sourcedKinds rejects the pass", () => {
+  rejects(root(), ["--pass", passFile([entry()]), "--date", "2026-09-01", "--sweep-coverage",
+    coverageFile({ sweepKinds: [], fullKinds: [], sourcedKinds: "dead-code" })], /sourcedKinds must be an array of strings/);
 });

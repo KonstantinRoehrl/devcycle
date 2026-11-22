@@ -42,6 +42,10 @@ executables placed first on `PATH`, so a full pipeline is exercised without a mo
 you change `review-panel.js`, `mechanical-sweep.js`, or any `scripts/*.mjs`, extend that
 script's suite with the behavior you changed.
 
+Fixtures recorded from a real tool carry their provenance next to them:
+`tests/fixtures/maintain/README.md` names the tool, pin and command behind each recorded sweep
+output, and `tests/unit/hygiene-sweep-fixture.test.mjs` fails when a pin moves without a re-recording.
+
 **Enforcement scripts deny on ambiguity.** A script or hook whose job is to block or gate — a
 `PreToolUse` hook, a plan or evidence check, an intake's read-only guard — treats every input it
 cannot classify as the blocking outcome, never as a pass, and its suite names each ambiguity class
@@ -64,12 +68,13 @@ a CLI from a module" names the actual fix: add the shebang.
 A rule lives in exactly one file, and every other file that needs it names that file by path
 rather than restating it. For anything cross-cutting that owner is a `references/*.md` file;
 `references/quality-criteria.md` § Universal criteria states the criterion reviews measure
-against, as "duplication vs. reuse". Adding a pointer next to a retained copy is worse than
-either alone — the reader now has to work out which copy is authoritative — so a change that
-moves a rule deletes the prose it moved. `scripts/duplication-check.mjs` is the mechanized
-floor here, not the whole rule: it catches near-identical prose, and a second pass over content
-words catches a fair share of the same rule restated in different words, but neither pass
-judges whether the surviving copy is the right owner.
+against, as "duplicated logic" and § Single source of truth. Adding a pointer next to a
+retained copy is worse than either alone — the reader now has to work out which copy is
+authoritative — so a change that moves a rule deletes the prose it moved.
+`scripts/duplication-check.mjs` is the mechanized floor here, not the whole rule: it catches
+near-identical prose, and a second pass over content words catches a fair share of the same
+rule restated in different words, but neither pass judges whether the surviving copy is the
+right owner.
 
 ## Citations
 
