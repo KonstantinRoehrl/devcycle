@@ -21,7 +21,8 @@ script's unranked candidate lines using the shared findings vocabulary. It also 
 `unmeasurable`/`broken`) straight from the run-record journal via the verification engine, never
 by re-running the mining loop, and every run with at least one finding persists to
 "YYYY-MM-DD-report.md" in the fixed doctor directory — resolved via "node -e \"import('${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs').then(m=>console.log(m.doctorDir()))\"" (DEVCYCLE_DOCTOR_DIR if set, else "~/.claude/devcycle/doctor"). An optional, fully skippable actionability step can draft
-a GitHub issue (screened, checked against the open issues of the same title upstream — a hit is
+a GitHub issue (with write-issue's agent-context section appended below the script's draft,
+screened, checked against the open issues of the same title upstream — a hit is
 offered a comment instead — and gated by two separate confirmations before anything is posted) or
 hand back a `/devcycle:cycle` entry-point string — the playbook itself never starts one.
 

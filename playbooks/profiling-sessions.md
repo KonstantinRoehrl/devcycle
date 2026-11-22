@@ -165,7 +165,7 @@ never a forced gate on finishing the command.
 **Drafting an issue: two gates before anything is posted.** The selection above only chooses what
 to draft. For each finding it chose:
 
-1. Take the draft from the script, never hand-composed:
+1. Take the draft from the script; its block is never hand-composed:
    `node "${CLAUDE_PLUGIN_ROOT}/scripts/doctor.mjs" --issue-body <slug>`. The slug may name a culprit
    (drafting a `[culprit:<slug>]` issue) OR a Compliance candidate — `inherited-model`,
    `missing-workload`, `main-thread-browser`, `general-purpose-search`, `sensor-inactive`,
@@ -173,9 +173,15 @@ to draft. For each finding it chose:
    OR `unpriced-model` — drafting a `[doctor:unpriced-model]` issue for the models the report names
    as unpriced or provisionally priced. Its `repo:` line names the
    repo every command below targets — read the slug from there, never from this file.
-2. Screen it before anyone sees it: write it to a file, then run
-   `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft>`. A draft that fails
-   the screen is not shown at all — name the class that failed and stop there.
+2. Add the context section, then screen the whole draft before anyone sees it. Write the script's
+   draft to a file, read `${CLAUDE_PLUGIN_ROOT}/playbooks/writing-issues.md` § The context section and
+   append that section below the script's body, its content drawn from this doctor report and the
+   current conversation. The section is model-written, so it sits under its marked `## Agent context`
+   heading, apart from the script's block. Then run
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/redaction-check.mjs" --file <draft>` on the whole draft, adding
+   `--repo <repo> --source-repo <this checkout's root>` when this checkout is not the repo the draft's
+   `repo:` line names. A draft that fails the screen is not shown at all — name the class that failed
+   and stop there.
 3. Look for the finding already filed, before recording anything: list the open issues in the repo
    the draft's `repo:` line named,
    `gh issue list --repo <repo> --state open --search "<title> in:title" --json number,title`, the
@@ -183,9 +189,9 @@ to draft. For each finding it chose:
    keep only rows whose `title` equals the draft's `title:` line character for character, since the
    search is fuzzy. No row: go on to step 4. A row `#N`: skip steps 4–7 for this draft, write no
    `Drafted:` line — nothing new was drafted, and `doctor --json`'s `outer_loop` counts those lines —
-   and show the user `#N`, offering a comment on it in place of a new issue. The comment carries the
-   draft's body, everything below the blank line under `labels:`, already screened above, written to
-   a file of its own. Ask whether its content is right, then separately whether to post it, never
+   and show the user `#N`, offering a comment on it in place of a new issue. The comment carries
+   the script's body, then the appended section — everything below the blank line under `labels:` —
+   already screened above, written to a file of its own. Ask whether its content is right, then separately whether to post it, never
    inferring the second answer from the first;
    only after both, run `gh issue comment <N> --repo <repo> --body-file <comment-file>`. A closed issue
    never counts: the same title reappearing after one closed is new evidence.
@@ -216,9 +222,10 @@ to draft. For each finding it chose:
 6. Ask separately whether to post it — the second gate, never inferred from the first. Nothing is
    ever auto-posted, and the script itself still posts nothing.
 7. Only after that second confirmation, file it against the repo the draft's `repo:` line named —
-   never the repo the run happened in, which is what a bare `gh issue create` resolves to. Carry
-   the title and body exactly as `--issue-body` printed them: the title is its `title:` line, the
-   body everything below the blank line under `labels:`, written to its own file.
+   never the repo the run happened in, which is what a bare `gh issue create` resolves to.
+   The title still comes only from the script, exactly its `title:` line. The body is
+   the script's body, then the appended section: everything below the blank line under `labels:`,
+   the `## Agent context` section included, written to its own file.
 
    ```
    gh issue create --repo <repo> --title "<title>" --body-file <body-file>

@@ -5,6 +5,19 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — Doctor's issue drafts carry write-issue's context section (no issue)
+
+**Decision:** doctor appends `playbooks/writing-issues.md` § The context section below the script's draft and re-screens the whole draft, through the cross-repo screen when this checkout is not the draft's target; `--issue-body`, the `Drafted:` marker, `outer_loop` counting and both gates are unchanged.
+
+**Why:** a doctor issue is picked up cold by an agent session, and the script's block carries the evidence but not why it matters, what the user was doing or how to prove it fixed; the section is model-written, so the "never hand-composed" rule narrows to the script's block rather than going away.
+
+**Budgets:** the runtime surface and the `playbooks/profiling-sessions.md` context entry grow by the new step 2 and the reworded steps 1, 3 and 7.
+
+```text
+budget: surface-budget.json surfaceTotal 7436
+budget: context-budget.json playbooks/profiling-sessions.md 44309
+```
+
 ## 2026-11-22 — Branch-review fixes for the issue-skills branch (no issue)
 
 **Decision:** the redaction screen's `--source-repo` match treats only letters and digits as word characters, so a private name inside a hyphen- or underscore-joined compound is caught; `issue-triage.mjs` gains `next`, which names each report so a same-day rerun keeps the earlier one for the delta; `write-issue` screens its title by carrying it on a `title:` line of the screened draft; and the docs that still described skills as absent or the findings order as severity-first are corrected.
