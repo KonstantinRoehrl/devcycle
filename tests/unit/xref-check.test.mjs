@@ -90,3 +90,16 @@ test("a --dir with no value fails instead of scanning the cwd", () => {
     assert.match(res.stderr, /--dir requires a path argument/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("default mode scans skills/<id>/SKILL.md", () => {
+  const dir = makeFixture({
+    "references/target.md": "# Target\n",
+    "skills/do-things/SKILL.md": "---\nname: do-things\n---\n\nSee `${CLAUDE_PLUGIN_ROOT}/references/gone.md`.\n",
+  });
+  try {
+    const res = run([], dir);
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /1 broken reference/);
+    assert.match(res.stdout, /skills\/do-things\/SKILL\.md/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

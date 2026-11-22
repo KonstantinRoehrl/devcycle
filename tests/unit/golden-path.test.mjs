@@ -1309,13 +1309,26 @@ const TOKEN = "user-correction-at-gate";
 // so a surface not yet demoted still matches.
 const OWNER_REF = OWNER;
 
-// Every runtime surface file, the same four directories `scripts/validate.mjs` counts.
-const surfaceFiles = () =>
-  ["commands", "playbooks", "references", "agents"].flatMap((dir) =>
+// Every runtime surface file, the same four directories `scripts/validate.mjs` counts, plus every
+// shipped `skills/<id>/SKILL.md`.
+const surfaceFiles = () => [
+  ...["commands", "playbooks", "references", "agents"].flatMap((dir) =>
     readdirSync(join(root, dir))
       .filter((f) => f.endsWith(".md"))
       .map((f) => `${dir}/${f}`)
-  );
+  ),
+  ...(existsSync(join(root, "skills"))
+    ? readdirSync(join(root, "skills"))
+        .map((id) => `skills/${id}/SKILL.md`)
+        .filter((p) => existsSync(join(root, p)))
+    : []),
+];
+
+test("surfaceFiles reaches every shipped skills/<id>/SKILL.md", () => {
+  const skills = existsSync(join(root, "skills")) ? readdirSync(join(root, "skills")).map((id) => `skills/${id}/SKILL.md`) : [];
+  for (const p of skills) assert.ok(surfaceFiles().includes(p), `surfaceFiles() misses ${p}`);
+  assert.ok(surfaceFiles().every((p) => existsSync(join(root, p))), "surfaceFiles() lists a path that does not exist");
+});
 
 // `references/stages.json` is the single owner of the stage → playbook mapping; a command that
 // follows it reaches every playbook it routes to, exactly as if it named the path inline.
