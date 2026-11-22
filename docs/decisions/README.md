@@ -5,6 +5,44 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — The planning overhaul closes out on the data in hand: the ship gate is accepted as unmet, #443 and #442 stay open (#442)
+
+**Decision:** the P1/P2/P3/P8 ship gate (spec §10) is **accepted as unmet**. There is no third benchmark pass, no
+`scripts/plan-bench-pass.mjs` retry fix and no paid spend, so the five unmeasured replays stay unmeasured.
+`CALIBRATION`, `PLANNING_RATES` and the `scripts/plan-strategy.mjs` `THRESHOLDS` stay as they are. The rule: a child
+issue closes when its code and doc criteria hold on live code, and each unmet or unmeasured benchmark bar is declined
+by name, with its figure. By that rule #444, #445, #446, #447, #448, #449 and #450 close. #443 stays open on one unmet
+code criterion. #442 stays open, because its literal line needs every child closed or declined. Every check below ran on
+2026-11-22 against `dev` at `79a0c63`.
+
+**Why:** the user chose the data in hand over a retry fix and a third pass (2026-11-22). Closing from the release or
+from the earlier entry's table alone was ruled out: that table covers the rubric, not each child's own guards, docs and
+tests, so each child was re-checked against live code. A failed code criterion is not a benchmark bar, so #443 cannot be
+declined by the rule, and the user kept it open. The re-review of PR #477's merged diff (`0baf4a4..48786ac`) also
+recovered its two unrecorded round-2 lows: a dead `grouped-fork` entry in `scripts/plan-resume.mjs` and a $38.60 total
+quoted as planning spend in `docs/playbooks/planning-waves/README.md`. Both are filed as #480 and are not fixed here.
+
+| Issue | Verdict | Verified on live code | Declined, with figure |
+| --- | --- | --- | --- |
+| #443 | **stays open** | Small cuts never delegate: `scripts/plan-strategy.mjs` `chooseStrategy` runs inline at 12 tasks or fewer or 30 weight points or fewer, and `status-quo` delegates only from 5 tasks (`THRESHOLDS` `inlineMaxTasks: 12`, `inlineMaxWeight: 30`, `delegatedFromTasks: 5`; `tests/unit/plan-strategy.test.mjs`). `references/delegated-planning.md` states groups of at most 3 and 4 concurrent drafters. **Gap:** the ceil(N/3) drafter cap lives only in `scripts/plan-strategy.mjs`, and no `plan-check.mjs` leg and no stage-log validation fails a delegated plan whose drafter count exceeds it without a recorded reason. `capWarnings` only warns, and only when the grouped arm is forced | P3 on a 12-task run: no 12-task replay, and large `status-quo` ran 1.35 dispatches per task against a bar of 0.5. P10: not shown to hold |
+| #444 | **closes** | `references/model-routing.md` drops the "fifth of the price" figure and cites `scripts/pricing.mjs`; doctor's `drafters:` line reports turns per drafter (`scripts/doctor-planning.mjs`) | P7 at 100% explicit model: 100% on every kept arm with rows, 50% and 40% only on the removed fork arm, 3 replays without rows. P10 and the redraft rate: not measured |
+| #445 | **closes** | `agents/plan-drafter.md` forbids printing source files through Bash (`tests/unit/plan-drafter.test.mjs`); `hooks/dispatch-sensor.mjs` records `sourcePrints` per planning dispatch and doctor prints `source prints:` (`scripts/doctor-planning.mjs`); doctor's "Startup floor by agent type" covers `plan-drafter`; the fork verdict is recorded in "The fork arm is dropped (#450)". P6 is met where measured (0% to 10.0%) | The drafter startup floor below 51k and a zero source-print count: neither is in any pass's `results.json` |
+| #446 | **closes** | `scripts/brief-completeness-check.mjs` still fails a contract-only `red-green` task that lacks its failing test or gate output (`tests/unit/brief-completeness-check.test.mjs`); `playbooks/planning-waves.md` self-review item 6 sets 5× and 20% non-test fences; `references/evidence.md` and the entry "Contract-only plans: the 0.32.0 full-code default reversed" are updated | P8 on large (7.6× `inline`, 20.5× `status-quo`) and on medium `status-quo` (5.94×). The median drafter tool calls per task. P10: not measured |
+| #447 | **closes** | Rounds run in wave order and the interface lock checks consumers verbatim (`references/delegated-planning.md`, `scripts/interface-lock.mjs`, `tests/unit/interface-lock.test.mjs`). No guard matches the literal `(unrun: depends on Task N)` marker; the round order and the lock prevent it | Checker findings per run (results record only `checkerRounds`). P11's +20% relative bar: no same-entry pair |
+| #448 | **closes** | A finding fix is a `SendMessage` continuation recorded as role `repair` (`references/delegated-planning.md`, `tests/unit/dispatch-sensor.test.mjs`). No replay in any pass reports "context budget reached" (verified: `grep -rli 'context budget reached' .devcycle/plan-bench/passes` prints nothing) | P9: 2 to 5 gate failures, met by 2 of 9 replays. The cost ceiling of one short continuation is unenforced |
+| #449 | **closes** | Doctor prints the P1–P12 planning breakdown for every run with a planning stage, deduplicates continuations and reports sensor gaps with a cause (`scripts/doctor-planning.mjs`, `scripts/doctor.mjs`, `tests/unit/doctor-planning*.test.mjs`); the benchmark is documented in `docs/playbooks/planning-waves/README.md` § Benchmarking planning strategies | The 0.32.2 baseline figures, which "The planning benchmark replays headless, answers gates by resuming, and clones" already declined: the status-quo arm run here is the baseline |
+| #450 | **closes** | Planning prints its projected cost and asks Proceed, Switch strategy or Reduce scope above `planningBudgetUSD` (`playbooks/planning-waves.md` § Projected cost, budget and checkpoints); a mid-stage clear resumes to the same plan state (`tests/unit/plan-resume.test.mjs`); doctor reports the projection error (`scripts/doctor-planning.mjs`) | The 6-task inline run with at most one checkpoint: unmeasured. ±35% after calibration: 0 of 2 passes (+428.7% `inline`, −64.6% `status-quo`) |
+| #442 | **stays open** | Box one: every child except #443 is closed. Box three, the doctor planning breakdown, holds (`scripts/doctor.mjs`, `scripts/doctor-planning.mjs`, `tests/unit/doctor-planning-report.test.mjs`) | Box two, the benchmark, is consciously declined; the P1–P12 table is in "Phase 3 closes on partial benchmark data". P1 met; P2 met where measured, none on large; P3 not met; P8 not met on large; P10 not shown to hold. #442 words P8's fence bar as 30% code fences, while the code measures 20% non-test fences ("P8 measures non-test code fences (#443, #447)") |
+
+**Supersedes:** the sentence "and the planning overhaul's acceptance (#442) stays open" in "Phase 3 closes on partial
+benchmark data", now replaced by the dispositions above, and that entry's **How to apply** follow-up, which is no
+longer planned. Its recipe and replay pricing stay there as the way back. `auto`'s thresholds stay untuned and the
+projection stays advisory.
+
+**How to apply:** #443 closes once a `plan-check.mjs` leg or a stage-log validation fails a delegated plan over the
+ceil(N/3) drafter cap without a recorded reason, and #442 closes with it. A later effort that wants the declined bars
+measured starts from the **How to apply** of "Phase 3 closes on partial benchmark data".
+
 ## 2026-11-22 — Phase 3 closes on partial benchmark data: the rates are refit, the calibration and thresholds stay (#450, #442)
 
 **Decision:** `PLANNING_RATES` in `scripts/plan-cost.mjs` takes the medians that
