@@ -9,7 +9,7 @@ import { accessSync, constants, existsSync, mkdirSync, readdirSync, readFileSync
 import { basename, delimiter, dirname, extname, join, normalize, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseFlags } from "./cli-flags.mjs";
-import { loadRegistry } from "./hygiene-registry.mjs";
+import { loadRegistry, sourcedKinds } from "./hygiene-registry.mjs";
 import { ADAPTERS } from "./hygiene-adapters.mjs";
 import { SCANNERS } from "./hygiene-scanners.mjs";
 import { gitToplevel, recordPath, runsDirForRepo, writeLine } from "./run-record.mjs";
@@ -361,13 +361,10 @@ export function runSweep({ repoRoot, outDir, consent = { executing: false, cover
   const clusters = clusterCandidates(candidates, churn);
   const sweepKinds = Object.keys(registry.sweeps[SWEEP].kinds);
   const toolStacks = new Set(registry.tools.filter((t) => t.sweep === SWEEP).flatMap((t) => t.stacks));
-  const sourcedKinds = sweepKinds.filter((k) =>
-    registry.tools.some((t) => t.sweep === SWEEP && t.kinds.includes(k)) ||
-    Object.values(registry.scanners).some((sc) => sc.sweep === SWEEP && sc.kinds.includes(k)));
   const coverage = {
     sweep: SWEEP, stacks, dependenciesInstalled, consent, config, rows,
     noToolStacks: stacks.filter((s) => !toolStacks.has(s)),
-    notCovered: registry.sweeps[SWEEP].notCovered, sweepKinds, sourcedKinds, degraded,
+    notCovered: registry.sweeps[SWEEP].notCovered, sweepKinds, sourcedKinds: sourcedKinds(registry, SWEEP), degraded,
     fullKinds: fullKinds(sweepKinds, rows, registry, dependenciesInstalled),
   };
   writeFileSync(join(outDir, "candidates.json"), JSON.stringify({ sweep: SWEEP, candidates, clusters }, null, 2) + "\n");

@@ -165,6 +165,7 @@ test("every apply-pass instruction carries the resolution flags together, tied t
 test("sweep resolution is refused when the pass has no finalized sweep, and the statement says why", () => {
   assert.match(resolutionBullet, /no finalized sweep/);
   assert.match(resolutionBullet, /pass no `--sweep-coverage`/);
+  assert.match(resolutionBullet, /and no sweep kind resolves/);
 });
 
 const criteria = read("../../references/quality-criteria.md");

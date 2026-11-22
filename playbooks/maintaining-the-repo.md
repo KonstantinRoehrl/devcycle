@@ -150,9 +150,9 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
      resolution is refused and **Resolved since last pass** renders "not assessed: partial pass" for
      those kinds; a sweep gap is not one of these conditions. A sweep kind can resolve only when
      `<dir>/coverage.json` lists it in `fullKinds` (every source behind it ran in full). With no finalized sweep
-     (a failed or skipped verification, no `finalize`, or an earlier hard stop), pass no `--sweep-coverage`
-     and say why in the coverage statement. Re-run the dry run with the resolution flags (`--resolve` unless
-     lens-kind resolution was refused, plus `--sweep-coverage <dir>/coverage.json`), show its `resolved`
+     (failed or skipped verification, no `finalize`, earlier hard stop), pass no `--sweep-coverage`, say why
+     in the coverage statement, and no sweep kind resolves. Re-run the dry run with the resolution flags
+     (`--resolve` unless lens-kind resolution was refused, plus `--sweep-coverage <dir>/coverage.json`), show its `resolved`
      rows, and ask the user to confirm: the real `apply-pass` takes them only on a confirmed run, and
      a decline passes neither and renders "not assessed: declined". A resolved record is deleted, not written
      — a closed loop is not a longitudinal artifact, so the store never accumulates settled history, and a

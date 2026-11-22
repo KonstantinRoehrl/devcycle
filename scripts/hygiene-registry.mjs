@@ -209,6 +209,14 @@ export function validateRegistry(registry) {
   return errors;
 }
 
+// The kinds of one sweep that some tool or scanner produces: only those can be swept in full, so
+// only those a stored record's resolution waits on a finalized sweep for.
+export function sourcedKinds(registry, sweep) {
+  return Object.keys(registry.sweeps[sweep].kinds).filter((kind) =>
+    registry.tools.some((t) => t.sweep === sweep && t.kinds.includes(kind)) ||
+    Object.values(registry.scanners).some((sc) => sc.sweep === sweep && sc.kinds.includes(kind)));
+}
+
 export function loadRegistry(path = REGISTRY_PATH) {
   let registry;
   try {

@@ -15,6 +15,7 @@ import { readRecordDir, recordTitle } from "./md-field.mjs";
 import { fileMatchesGlob } from "./lessons.mjs";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { verifyMaintenance } from "./verification.mjs";
+import { loadRegistry, sourcedKinds } from "./hygiene-registry.mjs";
 
 const STORE_PATH = "docs/devcycle/maintenance-findings";
 export const maintDir = (root) => join(root, STORE_PATH);
@@ -211,12 +212,18 @@ const passRow = (r) => ({
   passes: r.passes, firstSeen: r.firstSeen, lastSeen: r.lastSeen,
 });
 
+function registrySourcedKinds() {
+  const registry = loadRegistry();
+  return new Set(Object.keys(registry.sweeps).flatMap((sweep) => sourcedKinds(registry, sweep)));
+}
+
 // One pass's store update, computed and validated whole before anything is written, so a bad
 // entry anywhere leaves the store exactly as it was.
 // sweepCoverage is { sweepKinds, fullKinds, sourcedKinds? } or null: a sweep kind some source produces
 // resolves only when every source behind it ran in full this pass; a kind no source produces (the
 // sweep's registry lists it, nothing emits it), a lens kind, or a legacy record with no kind resolves
-// under resolve. Without sourcedKinds every sweep kind counts as sourced.
+// under resolve. Without sourcedKinds every sweep kind counts as sourced. With no sweepCoverage the
+// pass finalized no sweep, so no sourced sweep kind resolves; the other kinds still resolve under resolve.
 export function applyPass({ root, ref = null, entries, date, resolve = false, dryRun = false, sweepCoverage = null }) {
   if (!isValidCalendarDate(date ?? "")) throw new Error(`--date must be a real YYYY-MM-DD date, got "${date}"`);
   const isKindList = (v) => Array.isArray(v) && v.every((k) => typeof k === "string");
@@ -276,9 +283,11 @@ export function applyPass({ root, ref = null, entries, date, resolve = false, dr
     const { sections, gaps } = verifyMaintenance(stored, { detectedIds: new Set(incoming.keys()) });
     const verified = new Set(sections.resolved.map((row) => row.id));
     const gated = (kind) => sweepCoverage?.sweepKinds.includes(kind) && (sweepCoverage.sourcedKinds ?? sweepCoverage.sweepKinds).includes(kind);
-    const keeps = (r) => (gated(r.culpritKind)
-      ? sweepCoverage.fullKinds.includes(r.culpritKind)
-      : resolve);
+    const unsweptKinds = sweepCoverage ? new Set() : registrySourcedKinds();
+    const keeps = (r) => {
+      if (unsweptKinds.has(r.culpritKind)) return false;
+      return gated(r.culpritKind) ? sweepCoverage.fullKinds.includes(r.culpritKind) : resolve;
+    };
     const ids = new Set(stored.filter((r) => verified.has(r.findingId) && keeps(r)).map((r) => r.findingId));
     resolved.push(...stored.filter((r) => ids.has(r.findingId)));
     summary.resolved = resolved.map(passRow);

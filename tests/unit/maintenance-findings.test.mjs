@@ -265,12 +265,14 @@ test("apply-pass: without --resolve an undetected record is untouched, in no buc
 
 test("apply-pass: with --resolve an undetected record is deleted and listed in gaps", () => {
   const r = root();
-  apply(r, [entry()], "2026-09-01");
+  const lens = entry({ culpritKind: "dead-machinery" });
+  const lensId = findingId("dead-machinery", lens.canonicalLocation);
+  apply(r, [lens], "2026-09-01");
   const out = apply(r, [entry({ canonicalLocation: "scripts/y.mjs#other" })], "2026-09-08", ["--resolve"]);
-  assert.deepEqual(out.resolved.map((x) => x.id), [ID]);
-  assert.deepEqual(out.gaps.map((g) => g.id), [ID]);
-  assert.deepEqual(out.deleted, [`docs/devcycle/maintenance-findings/${ID.replace(":", "-")}.md`]);
-  assert.equal(existsSync(join(maintDir(r), `${ID.replace(":", "-")}.md`)), false);
+  assert.deepEqual(out.resolved.map((x) => x.id), [lensId]);
+  assert.deepEqual(out.gaps.map((g) => g.id), [lensId]);
+  assert.deepEqual(out.deleted, [`docs/devcycle/maintenance-findings/${lensId.replace(":", "-")}.md`]);
+  assert.equal(existsSync(join(maintDir(r), `${lensId.replace(":", "-")}.md`)), false);
 });
 
 test("apply-pass: --resolve retires a legacy github-issue shell, which is otherwise left alone", () => {
@@ -499,11 +501,20 @@ test("apply-pass --sweep-coverage: a sweep kind not fully covered stays open eve
   assert.ok(readMaintenanceFindings(r).some((x) => x.findingId === SWEEP_ID), "the partly swept record is kept");
 });
 
-test("apply-pass without --sweep-coverage keeps today's --resolve behavior for sweep kinds", () => {
+test("apply-pass without --sweep-coverage keeps a sweep kind's record under --resolve and still resolves a lens kind", () => {
   const r = root();
   seedTwo(r);
   const out = apply(r, unrelated, "2026-09-08", ["--resolve"]);
-  assert.deepEqual(out.resolved.map((x) => x.id).sort(), [LENS_ID, SWEEP_ID].sort());
+  assert.deepEqual(out.resolved.map((x) => x.id), [LENS_ID]);
+  assert.ok(readMaintenanceFindings(r).some((x) => x.findingId === SWEEP_ID), "no finalized sweep: the sweep kind's record is kept");
+});
+
+test("apply-pass without --sweep-coverage resolves a kind the registry lists but no source produces", () => {
+  const r = root();
+  const GAP_ID = findingId("test-coverage-gap", "scripts/c.mjs");
+  apply(r, [entry({ culpritKind: "test-coverage-gap", canonicalLocation: "scripts/c.mjs", affectedFiles: ["scripts/c.mjs"] })], "2026-09-01");
+  const out = apply(r, unrelated, "2026-09-08", ["--resolve"]);
+  assert.deepEqual(out.resolved.map((x) => x.id), [GAP_ID]);
 });
 
 test("apply-pass --sweep-coverage: a malformed coverage file rejects the pass", () => {
