@@ -2835,7 +2835,9 @@ test("planning-waves runs the decision table and honours planningStrategy", () =
   assert.match(section, /`planningStrategy` on the `knobs:` line forces the drafting arm/);
   assert.match(section, /scripts\/plan-strategy\.mjs/);
   assert.match(section, /stage-log key `drafting-plan`/);
-  for (const arm of ["inline", "checkpointed", "grouped", "grouped-fork", "status-quo", "auto"]) assert.ok(section.includes(`\`${arm}\``), `the section names \`${arm}\``);
+  for (const arm of ["inline", "checkpointed", "grouped", "status-quo", "auto"]) assert.ok(section.includes(`\`${arm}\``), `the section names \`${arm}\``);
+  assert.doesNotMatch(section, /grouped-fork/, "the fork arm was dropped (docs/decisions/README.md, 2026-11-22)");
+  assert.doesNotMatch(read("references/delegated-planning.md"), /grouped-fork|\*\*Fork arm\.\*\*/, "the fork arm's reference paragraph went with it");
   assert.match(section, /`plan-group-<k>`/);
   assert.match(read("references/stage-log.md"), /`drafting-plan` \(`--data` `strategy`, `groups`, `drafters`, `est`, `spent`, the planning dollars spent before the cut, and `cut`, the task-cut path\)/);
   assert.match(read("references/stage-log.md"), /`plan-group-<k>`/);

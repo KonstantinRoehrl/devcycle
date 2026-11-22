@@ -5,6 +5,31 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — The fork arm is dropped (#450)
+
+**Decision:** the `grouped-fork` arm is removed: from the `planningStrategy` knob's values (`scripts/resolve-knobs.mjs`,
+`.claude-plugin/plugin.json`), from `scripts/plan-strategy.mjs` (`KNOBS` and the `fork` field of a decision), from
+`scripts/plan-cost.mjs` (the `fork` choice, its session-tier drafter pricing and its planning rate), from the
+benchmark's opt-in arms, and from `references/delegated-planning.md`. A stored `planningStrategy=grouped-fork` now
+resolves to `auto` with the resolver's usual not-one-of warning. The value never shipped, so its record in
+`docs/configuration/config-changelog.md` is edited in place. This ends the experiment the 2026-11-20 entry left
+open, with the verdict **drop**.
+
+**Why:** the user's call on the measured pairs (2026-11-22). Two entries ran both arms: the small
+`on-device-browser-selection` (planning $ per task 1.48 grouped, 1.50 grouped-fork, both planned) and the medium
+`implementer-stop-hold` (0.74 against 1.21, both executed). The fork never planned cheaper, and
+`node scripts/cost-model-fit.mjs --rates .devcycle/plan-bench/passes` puts the two arms' medians at 1.11 and 1.36
+(n = 2 each). A fork pays the cache-read price on the coordinator's prefix but cannot drop to the fast tier (spec
+§7), and these pairs show no saving that offsets it. No large entry ran either arm, so the verdict rests on small
+and medium cuts.
+
+**Budgets:** `playbooks/planning-waves.md` loses two clauses and `references/delegated-planning.md` loses its
+fork paragraph, so the playbook's closure shrinks to 72221.
+
+```text
+budget: context-budget.json playbooks/planning-waves.md 72221
+```
+
 ## 2026-11-21 — The interface lock checks consumers verbatim, and a pass's error is its worst replay's (#450)
 
 **Decision:** `scripts/interface-lock.mjs` accepts a consumed code span only when it equals, whitespace collapsed, a

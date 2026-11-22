@@ -79,7 +79,7 @@ this session; `checkpointed`, inline in one segment per wave group, logging `pla
 tasks are written; `grouped`, rounds of group drafters; `delegated`, one drafter per task; `split`, the spec is too large for one plan:
 report the suggestion to split it, and the user decides, either splitting or forcing an arm with `planningStrategy`. Read
 `${CLAUDE_PLUGIN_ROOT}/references/delegated-planning.md` for a spike, `grouped` or `delegated` run.
-`planningStrategy` on the `knobs:` line forces the drafting arm: `inline`, `checkpointed`, `grouped` and `grouped-fork`
+`planningStrategy` on the `knobs:` line forces the drafting arm: `inline`, `checkpointed` and `grouped`
 force theirs, `status-quo` keeps the old threshold (`delegated` from 5 tasks), and `auto` runs the table.
 
 ## Projected cost, budget and checkpoints
@@ -193,7 +193,7 @@ the stage to resume at — and the `plan:` path; after a NO-GO, keep `stage: pla
 the sensor can carry the plan totals into each progressive workload write (`planned=0 waves=0` after
 a NO-GO, where no Dispatch Map exists). Then, before the handoff's `handoff-mark.mjs` ready mark, record the plan's shape with
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-stats.mjs" --state .devcycle/state.md --plan <plan path> --spec <spec path> --strategy inline|delegated|grouped|checkpointed`
-(the `drafting-plan` row's `strategy`: `grouped-fork` records as `grouped`, `status-quo`'s per-task drafters as `delegated`), which appends one `plan-stats` row and prints, as its second line, the `planning:` line the block carries verbatim; skip it after
+(the `drafting-plan` row's `strategy`: `status-quo`'s per-task drafters record as `delegated`), which appends one `plan-stats` row and prints, as its second line, the `planning:` line the block carries verbatim; skip it after
 a NO-GO or with `spec: none`, and report a non-zero exit without stopping on it. Then emit this
 stage's handoff block per `${CLAUDE_PLUGIN_ROOT}/references/handoff.md`, with
 `Stage completed: planning` and the plan path (or the NO-GO report) as its artifact. The plan carries
