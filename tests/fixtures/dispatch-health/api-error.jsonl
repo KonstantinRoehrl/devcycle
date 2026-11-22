@@ -1,0 +1,4 @@
+{"type":"user","timestamp":"2026-11-21T16:00:01.000Z","message":{"role":"user","content":"Assemble the plan from its task drafts."}}
+{"type":"assistant","timestamp":"2026-11-21T16:00:05.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"node scripts/plan-assemble.mjs w --out p\nsecond line"}}],"stop_reason":"tool_use"}}
+{"type":"user","timestamp":"2026-11-21T16:00:09.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"assembled"}]}}
+{"type":"assistant","isApiErrorMessage":true,"error":"rate_limit","timestamp":"2026-11-21T16:00:10.000Z","message":{"role":"assistant","model":"<synthetic>","stop_reason":"stop_sequence","content":[{"type":"text","text":"You've hit your session limit · resets 5:40pm (Europe/Vienna)"}]}}

@@ -5,8 +5,11 @@
 // narrating an estimated time (issue #103).
 import { pathToFileURL } from "node:url";
 
+// The canonical ISO-8601 UTC seconds form of an epoch-milliseconds instant; `now()` stamps the clock with it.
+export const isoSeconds = (ms) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+
 export function now() {
-  return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+  return isoSeconds(Date.now());
 }
 
 function main(argv) {

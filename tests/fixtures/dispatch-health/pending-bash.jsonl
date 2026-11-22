@@ -1,0 +1,4 @@
+{"type":"user","timestamp":"2026-11-21T16:00:01.000Z","message":{"role":"user","content":"Check the assembled plan."}}
+{"type":"assistant","timestamp":"2026-11-21T16:00:05.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_a","name":"Agent","input":{"description":"plan-checker: round 1 — batch 1","prompt":"Check batch 1 of the plan."}}],"stop_reason":"tool_use"}}
+{"type":"user","timestamp":"2026-11-21T16:03:00.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_a","content":[{"type":"text","text":"status: complete"}]}]}}
+{"type":"assistant","timestamp":"2026-11-21T16:03:05.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_b","name":"Bash","input":{"command":"node scripts/plan-check.mjs plan.md"}}],"stop_reason":"tool_use"}}

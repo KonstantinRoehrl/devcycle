@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { writeFileSync, mkdirSync, rmSync, readFileSync, realpathSync } from "node:fs";
+import { appendFileSync, copyFileSync, writeFileSync, mkdirSync, rmSync, readFileSync, realpathSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { gitToplevel, hashSession, repoSlug } from "../../scripts/run-record.mjs";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo, sh } from "./helpers.mjs";
 
@@ -660,4 +661,58 @@ test("a newer-format file whose plan or branch is gone is still reported stale f
   assert.match(branchGone.stderr, /stale/);
   assert.match(branchGone.stderr, /feat\/never-existed/);
   assert.doesNotMatch(branchGone.stderr, /claude plugin update/);
+});
+
+// A cycle under <repo>/.devcycle whose run record names an earlier session, then this one, and a fixture
+// Claude config dir holding the earlier session's main transcript: a copy of a dispatch-health fixture
+// last written at `mtime`, or none. The child gets both fixture dirs, so it never reads the real ~/.claude.
+const UNCONTROLLED_RUN = "0123456789abcdef";
+const FIXTURE = (name) => new URL(`../fixtures/dispatch-health/${name}.jsonl`, import.meta.url).pathname;
+function interrupted({ stage = "planning", handoff = "pending 2026-10-30T08:00:00Z", transcript = "api-error", mtime = Date.now() - 60 * 60_000 } = {}) {
+  const repo = realpathSync.native(makeRepo());
+  mkdirSync(join(repo, ".devcycle"));
+  const state = join(repo, ".devcycle", "state.md");
+  writeFileSync(state, ["# devcycle state", `- stage: ${stage}`, `- root: ${repo}`, `- run: ${UNCONTROLLED_RUN}`,
+    "- updated: 2026-10-30T09:00:00Z", `- handoff: ${handoff}`, ""].join("\n"));
+  const runs = makeTempDir("resume-check-runs-");
+  mkdirSync(join(runs, repoSlug(gitToplevel(repo))), { recursive: true });
+  for (const id of ["sess-last", "sess-me"])
+    appendFileSync(join(runs, repoSlug(gitToplevel(repo)), `${UNCONTROLLED_RUN}.jsonl`), `${JSON.stringify({ kind: "session", sessionHash: hashSession(id) })}\n`);
+  const config = makeTempDir("resume-check-config-");
+  mkdirSync(join(config, "projects", "-repo"), { recursive: true });
+  if (transcript) {
+    const file = join(config, "projects", "-repo", "sess-last.jsonl");
+    copyFileSync(FIXTURE(transcript), file);
+    utimesSync(file, new Date(mtime), new Date(mtime));
+  }
+  return runWithEnv(state, { DEVCYCLE_RUNS_DIR: runs, CLAUDE_CONFIG_DIR: config, CLAUDE_CODE_SESSION_ID: "sess-me" });
+}
+const linesOf = (r) => {
+  assert.equal(r.status, 0, r.stderr + r.stdout);
+  return r.stdout.trim().split("\n");
+};
+// The fixture's last record's stamp, to the second: what the uncontrolled: line reports for it.
+const lastStampOf = (name) =>
+  new Date(JSON.parse(readFileSync(FIXTURE(name), "utf8").trim().split("\n").at(-1)).timestamp).toISOString().replace(/\.\d{3}Z$/, "Z");
+
+test("an uncontrolled stop prints its stage, the last transcript's stamp and the label just before the handoff line", () => {
+  const lines = linesOf(interrupted());
+  assert.equal(lines.at(-2), `uncontrolled: planning since ${lastStampOf("api-error")} (usage-limit)`);
+  assert.equal(lines.at(-1), "handoff: pending 2026-10-30T08:00:00Z");
+});
+
+test("with no transcript found the uncontrolled: line is labelled unknown and dated by the updated: row", () => {
+  assert.equal(linesOf(interrupted({ transcript: null })).at(-2), "uncontrolled: planning since 2026-10-30T09:00:00Z (unknown)");
+});
+
+test("no uncontrolled: line for a running last session, a ready handoff or a done cycle", () => {
+  for (const [what, opts] of [
+    ["a running last session", { transcript: "pending-bash", mtime: Date.now() }],
+    ["a ready handoff", { handoff: "ready 2026-10-30T08:00:00Z" }],
+    ["a done cycle", { stage: "done" }],
+  ]) {
+    const lines = linesOf(interrupted(opts));
+    assert.ok(!lines.some((line) => line.startsWith("uncontrolled:")), `${what}: ${lines.join("\n")}`);
+    assert.match(lines.at(-1), /^handoff: /, what);
+  }
 });

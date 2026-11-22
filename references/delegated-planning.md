@@ -96,8 +96,8 @@ explicitly routed. The arm is an experiment: the benchmark pass settles it, in a
 ## The merge
 
 The coordinator writes its own Dispatch Map to `dispatch-map.md`, then assembles the plan with
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-assemble.mjs" .devcycle/plan-work/<run id> --out <plan path>`,
-never by reading a task file: the plan header, then `tasks/task-<n>.md` in task order, then the map.
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/plan-assemble.mjs" .devcycle/plan-work/<run id> --out <plan path> --state .devcycle/state.md`,
+which logs `plan-assembled`, never by reading a task file: the plan header, then `tasks/task-<n>.md` in task order, then the map.
 It assembles only once every dispatched task has its file, and the script fails on a missing or
 duplicate task id. The cross-task self-review checks are the plan gate's `crossTask` leg, which covers every
 `Consumes (Task N)` code span and the placeholder and back-reference scan, and the edge checker below;
@@ -108,7 +108,8 @@ lists the producer→consumer pairs in batches of at most eight, and each batch 
 described `plan-checker: round <n> — batch <b>`. It reads that batch's task files, `pack.md` and, after grouped
 drafting, `interfaces.lock.md`, keeps to a budget of about 40k tokens of context, and writes its findings to
 `.devcycle/plan-work/<run id>/checker/round-<n>/batch-<b>.md`; its summary is the finding
-count, and the coordinator logs `checker-round-<n>` when the round's dispatches are done. No dispatch
+count, and the coordinator logs `checker-round-<n>` with `--data '{"findings":<total>}'`, the round's summed counts,
+when the round's dispatches are done. No dispatch
 holds the whole plan. The coordinator reads a findings file only when its count is above zero, runs
 the plan gate once, and presents the plan to the user by path with `plan-check`'s result and the
 findings count; it does not read the plan body on this path.
@@ -117,9 +118,10 @@ findings count; it does not read the plan body on this path.
 `SendMessage`, its agent id read from its group's `plan-group-<k>` row under `grouped`, or its dispatch's own id under
 `delegated`. A one-line fix is the coordinator's own `Edit` of the task file. A finding never goes to a fresh dispatch; after
 a resume, when the drafter can no longer be reached, the coordinator edits the task file itself. Any
-other finding is the coordinator's to fix.
+other finding is the coordinator's to fix. Once the round's edits are done, and before the re-assembly, log
+`plan-repair-<n>` with `--data '{"tasks":[<task numbers patched>],"findings":<count fixed>}'`.
 
-**Round cap.** One checker round, one repair round, then the task files are re-assembled and the plan
-gate re-run. A finding the repair left open, or a gate failure that would need a second repair round,
+**Round cap.** One checker round, one repair round, then the task files are re-assembled by the merge's
+command, `--state` included, and the plan gate re-run. A finding the repair left open, or a gate failure that would need a second repair round,
 stops and goes to the user in one AskUserQuestion with the residual findings; an Other answer
 appends `user-correction-at-gate` (`references/ledger.md` owns the condition).
