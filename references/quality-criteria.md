@@ -28,11 +28,19 @@ source. **A finding measured against neither is an unsupported opinion and is no
 Apply regardless of stack:
 
 - correctness and logic errors, edge cases, off-by-ones, null/undefined handling;
-- dead, unreachable, bloated, or undocumented code;
+- **dead or unreachable code** — code with no production caller; code reachable only from its own
+  tests counts as dead (measured against: the repo's convention, else the stack's unused-code
+  diagnostics, e.g. TypeScript `noUnusedLocals`, ESLint `no-unused-vars`);
+- **bloat** — code larger than its job: needless layers, options or generality (Fowler's
+  *Refactoring*: Speculative Generality);
+- **undocumented code** — code that fails the Documentation standard below;
 - docs-vs-reality drift — documentation that exists and is wrong: a README flag, endpoint,
   or setup step the code no longer honours (distinct from undocumented code above, which is
   documentation that is missing);
-- duplication vs. reuse;
+- **duplicated logic** — identical or near-identical functions, a helper re-implemented under
+  another name, copy-pasted blocks that have drifted apart; a deliberate exemption (generated
+  code, test fixtures, divergent by design) states its reason where it lives (Fowler's
+  *Refactoring*: Duplicated Code);
 - architecture and separation of concerns — layering violations, leaked responsibilities,
   and boundaries crossed by code that should not know what is on the other side;
 - error handling and failure modes — swallowed exceptions, missing retries or timeouts
@@ -80,6 +88,25 @@ reason, and new code reuses the repo's existing reusable components — a file-a
 an image-upload flow, an existing client wrapper — rather than re-implementing similar logic
 beside them. **Failure to reuse is a forbidden pattern: every instance is flagged**, with the
 existing component the new code should have used named by path.
+
+## Single source of truth
+
+Files that declare or use constants, config defaults and environment reads, enums, routes,
+storage keys, validation rules, error messages, or types and DTOs mirrored across a boundary.
+Each such value has one owner, and every other use imports it. **A restated owned value is a
+forbidden pattern: every instance is flagged**, naming by path the owner it should use, or "no
+owner yet" when the value has no home. Measured against the repo's convention first, then
+Fowler's *Refactoring* (Duplicated Code; Replace Magic Literal) and the duplicate-literal and
+magic-number lint rules (ESLint `no-magic-numbers`, SonarJS `no-duplicate-string`).
+
+## Documentation standard
+
+Exported surface, module headers and comments in any file in scope. A reader understands the code
+by reading it: exported surface with a non-obvious contract has a one-line purpose; a non-obvious
+decision states its why where it lives (a magic number's unit and source, a workaround's issue
+link, an ordering or invariant); a module states what it owns. Flagged: comments that restate the
+code, stale comments, commented-out code, a TODO with no issue, documentation longer than what it
+explains. Shorter wins. The repo's own documentation convention outranks this standard.
 
 ## Multi-file feature chains
 
@@ -140,6 +167,8 @@ afterwards.
 - **Name the source.** Every constraint derived from this file names what it is measured
   against, per Precedence above. A constraint with no named source is an unsupported opinion
   in a plan exactly as it is in a finding.
+- **Severity is never lowered for scale.** Every instance is a finding; impact decides the order,
+  never whether one is reported.
 - **The cost rule.** This catalog is long, and "token and context cost" is one of its own
   universal criteria. Splicing it wholesale into a brief, a plan, or a skill load is the
   anti-pattern it names.

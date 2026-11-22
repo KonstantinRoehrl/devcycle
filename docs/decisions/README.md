@@ -5,6 +5,24 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-22 — The quality catalog splits dead, bloat and undocumented code and adds single source of truth and a documentation standard (#485)
+
+**Decision:** `references/quality-criteria.md` replaces the bundled "dead, unreachable, bloated, or
+undocumented code" bullet with three criteria, sharpens "duplication vs. reuse" into duplicated
+logic, and adds § Single source of truth and § Documentation standard, each naming its measuring
+source. Sweep-only method stays out of the catalog.
+
+**Why:** the bundled bullets were too thin to hold an implementer to, and the catalog reaches every
+implementer brief through planning's per-task excerpt (#485). The catalog is in the refs-only
+closure of `playbooks/planning-waves.md` and `playbooks/reviewing-code.md`, so both grow by its
+delta, as does the runtime surface's line total.
+
+```text
+budget: surface-budget.json surfaceTotal 7283
+budget: context-budget.json playbooks/planning-waves.md 75539
+budget: context-budget.json playbooks/reviewing-code.md 105982
+```
+
 ## 2026-11-22 — Doctor's issue drafts carry write-issue's context section (no issue)
 
 **Decision:** doctor appends `playbooks/writing-issues.md` § The context section below the script's draft and re-screens the whole draft, through the cross-repo screen when this checkout is not the draft's target; `--issue-body`, the `Drafted:` marker, `outer_loop` counting and both gates are unchanged.
