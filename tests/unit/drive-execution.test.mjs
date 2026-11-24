@@ -133,6 +133,19 @@ const lockPath = (root) => join(root, DRIVE_LOCK_REL);
 const writeLock = (root, fields) =>
   writeFileSync(lockPath(root), JSON.stringify({ hostname: hostname(), state: ".devcycle/state.md", log: ".devcycle/drive.log", ...fields }));
 
+test("the relayed ledger line carries a keyed line's review round, and an unkeyed line none", async () => {
+  const root = makeCycle();
+  const keyed = "task=1 event=review-round outcome=model fast (auto: lines=2, files=1) ref=.devcycle/briefs/1-reviewer-round-2.md key=1/review-round/2/0";
+  const r = await drive(root, [
+    { ledger: [keyed, line(1, "dispatched"), DONE[0]] },
+    { ledger: [line(2, "dispatched"), DONE[1]], stage: "branch-review" },
+  ]);
+  assert.equal(r.code, 0, r.out);
+  const log = readFileSync(join(root, ".devcycle", "drive.log"), "utf8");
+  assert.match(log, /session 1 · \d+ tool calls · task=1 event=review-round round=2 outcome=model fast \(auto: lines=2, files=1\)$/m);
+  assert.match(log, /session 1 · \d+ tool calls · task=1 event=dispatched outcome=ok$/m);
+});
+
 test("drives one fresh session per wave until the state reaches branch-review, writing one drive record per session", async () => {
   const root = makeCycle();
   const r = await drive(root, [

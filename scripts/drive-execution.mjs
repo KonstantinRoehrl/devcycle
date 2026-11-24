@@ -587,7 +587,10 @@ function runSession(ctx, bin, args, log, n) {
       onEvent(event);
       const entries = ledgerEntries(ctx.root, ctx.plan);
       for (const entry of entries.slice(seen)) {
-        log(`session ${n} · ${s.tools} tool calls · task=${entry.task} event=${entry.event} outcome=${entry.outcome}`);
+        // A reviewer's outcome is its routing decision, so a keyed line's review round rides in the
+        // relayed line: scripts/drive-watch.mjs counts review rounds from it.
+        const round = entry.key ? ` round=${entry.key.split("/")[2]}` : "";
+        log(`session ${n} · ${s.tools} tool calls · task=${entry.task} event=${entry.event}${round} outcome=${entry.outcome}`);
         if (!NO_PROGRESS_EVENTS.has(entry.event)) markProgressed(ctx);
       }
       seen = Math.max(seen, entries.length);

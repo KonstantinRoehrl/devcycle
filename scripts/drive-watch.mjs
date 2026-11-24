@@ -14,9 +14,10 @@ export const WATCH_LEVELS = ["end", "wave", "all"];
 const TAIL_BYTES = 64 * 1024;
 const DRIVER_PREFIX = /^\[drive [^\]]*\] /;
 const ERROR_PREFIX = "drive-execution: ";
-const LEDGER_LINE = /^session \d+ · \d+ tool calls · task=(\S+) event=(\S+) outcome=(.*)$/;
+const LEDGER_LINE = /^session \d+ · \d+ tool calls · task=(\S+) event=(\S+)(?: round=(\d+))? outcome=(.*)$/;
 const REPORTED_EVENTS = new Set(["committed", "review-verdict", "user-decision"]);
-const REVIEW_ROUND = /^round (\d+)$/;
+// An unkeyed line carries no round=, so its review round is its `round N` outcome.
+const REVIEW_ROUND =/^round (\d+)$/;
 const USAGE =
   "drive-watch: usage: drive-watch.mjs (--status | --follow [--since <bytes>] [--level <end|wave|all>] | --wait) --state <path>";
 
@@ -63,7 +64,7 @@ export function reportedLine(rawLine, level = "all") {
   if (message === null) return null;
   if (isMilestone(message)) return message;
   const entry = level === "all" && message.match(LEDGER_LINE);
-  return entry && (REPORTED_EVENTS.has(entry[2]) || entry[3].startsWith("rejected (intake bounce)")) ? message : null;
+  return entry && (REPORTED_EVENTS.has(entry[2]) || entry[4].startsWith("rejected (intake bounce)")) ? message : null;
 }
 
 // One follow's memory: a repeated `wait:` line is printed once, and at `all` a task's accepted
@@ -77,7 +78,7 @@ export function createRelay(level = "all") {
   const batched = (message) => {
     const entry = message.match(LEDGER_LINE);
     if (!entry) return message;
-    const [, task, event, outcome] = entry;
+    const [, task, event, , outcome] = entry;
     if (event === "review-verdict" && outcome.startsWith("accepted")) return null;
     if (event !== "committed") return message;
     const seen = rounds.get(task);
@@ -87,7 +88,7 @@ export function createRelay(level = "all") {
   };
   const countRound = (rawLine) => {
     const entry = driverMessage(rawLine)?.match(LEDGER_LINE);
-    const round = entry?.[2] === "review-round" && Number(entry[3].match(REVIEW_ROUND)?.[1]);
+    const round = entry?.[2] === "review-round" && Number(entry[3] ?? entry[4].match(REVIEW_ROUND)?.[1]);
     if (!round) return;
     const seen = rounds.get(entry[1]) ?? { fromFirst: false, highest: 0 };
     rounds.set(entry[1], { fromFirst: seen.fromFirst || round === 1, highest: Math.max(seen.highest, round) });
