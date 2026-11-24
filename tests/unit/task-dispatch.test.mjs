@@ -6,7 +6,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo } from "./helpers.mjs";
 import { briefPathFor } from "../../scripts/task-dispatch.mjs";
-import { retryCount, taskEntries } from "../../scripts/task-ledger.mjs";
+import { isNoVerdict, retryCount, taskEntries, unparseableFindings, MISSING_FINDINGS } from "../../scripts/task-ledger.mjs";
 import { deathsOf } from "../../scripts/dispatch-health.mjs";
 import { acquireDriveLock, driveTokenHash, releaseDriveLock } from "../../scripts/drive-lock.mjs";
 
@@ -439,6 +439,17 @@ test("--reattempt re-sends a reviewer at its open round", () => {
   assert.equal(briefAt(repo, ".devcycle/briefs/5-reviewer-round-1.md"), "# Review brief\n");
 });
 
+test("--reattempt re-sends a reviewer at the open round after an earlier round's verdict, not at round 1", () => {
+  const repo = repoWithLedger();
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"], "# Round 1 brief\n");
+  appendFileSync(join(repo, ".devcycle/ledger.md"), "- [2026-11-24T10:00:00Z] task=5 event=review-verdict outcome=rejected (1 blocking) ref=none key=5/review-verdict/1/0\n");
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "2"], "# Round 2 brief\n");
+  const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--reattempt"], "");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.out.round, r.out.retry, r.out.appended, r.out.briefPath], [2, 2, ["5/review-round/2/2"], ".devcycle/briefs/5-reviewer-round-2.md"]);
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-reviewer-round-2.md"), "# Round 2 brief\n");
+});
+
 test("--reattempt with nothing to re-attempt, or with --round or --capture-cmd, is a usage error that writes nothing", () => {
   const repo = repoWithLedger();
   for (const [args, message] of [
@@ -454,19 +465,26 @@ test("--reattempt with nothing to re-attempt, or with --round or --capture-cmd, 
   assert.deepEqual(ledgerLines(repo), []);
 });
 
-test("an extra attempt line moves neither the prefix retry caps nor the death cap", () => {
+test("an extra attempt line moves neither the prefix retry caps, the no-verdict cap nor either role's death cap", () => {
   const repo = repoWithLedger();
   const ledger = join(repo, ".devcycle/ledger.md");
   dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer"]);
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"]);
   appendFileSync(ledger, "- [2026-11-24T10:00:00Z] task=5 event=report-received outcome=rejected (missing report file) ref=.devcycle/reports/5.md key=5/report-received/0/0\n");
   appendFileSync(ledger, "- [2026-11-24T10:01:00Z] task=5 event=dispatch-ended outcome=without output (implementer) ref=.devcycle/dispatch/5-implementer-0-0.json key=5/dispatch-ended/0/0\n");
+  appendFileSync(ledger, `- [2026-11-24T10:02:00Z] task=5 event=review-verdict outcome=${MISSING_FINDINGS} ref=none key=5/review-verdict/1/0\n`);
+  appendFileSync(ledger, `- [2026-11-24T10:03:00Z] task=5 event=review-verdict outcome=${unparseableFindings("no verdict line")} ref=none key=5/review-verdict/1/1\n`);
+  appendFileSync(ledger, "- [2026-11-24T10:04:00Z] task=5 event=dispatch-ended outcome=without output (reviewer) ref=.devcycle/dispatch/5-reviewer-1-0.json key=5/dispatch-ended/1/1\n");
   const caps = () => [
     retryCount(ledger, "5", "rejected (missing report file)"),
     retryCount(ledger, "5", "rejected (intake bounce)"),
+    retryCount(ledger, "5", isNoVerdict),
     deathsOf(taskEntries(ledger, "5"), "implementer"),
+    deathsOf(taskEntries(ledger, "5"), "reviewer"),
   ];
   const before = caps();
-  assert.equal(dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer", "--reattempt", "--model-decision", "model session (inherited)"], "").status, 0);
+  for (const role of ["implementer", "reviewer"])
+    assert.equal(dispatch(repo, ["--run", RUN, "--task", "5", "--role", role, "--reattempt", "--model-decision", "model session (inherited)"], "").status, 0, role);
   assert.deepEqual(caps(), before);
-  assert.deepEqual(before, [1, 0, 1]);
+  assert.deepEqual(before, [1, 0, 2, 1, 1]);
 });

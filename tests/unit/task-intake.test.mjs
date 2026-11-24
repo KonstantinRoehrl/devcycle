@@ -431,6 +431,30 @@ test("a pinned or pooled taskReviewerModel resolves through model-pool, one sign
     [null, "claude-sonnet-5-5", "model claude-sonnet-5-5 (pooled: rung 2/2)"]);
 });
 
+test("a pooled reviewer that crosses both the line and the file limit climbs two rungs", () => {
+  const six = ["1", "2", "3", "4", "5", "6"].map((n) => `src/${n}.mjs`);
+  const both = plannedWith(six, 70);
+  writeInto(both.repo, ".devcycle/state.md",
+    "# devcycle state\n- stage: execution\n- knobs: profile=standard taskReviewerModel=claude-haiku-4-5,claude-sonnet-5-5,claude-opus-5-5\n");
+  assert.deepEqual(routed(intake(both, ["--compose-review"], "complete", orchestratedBy("claude-opus-5-5"))),
+    [null, "claude-opus-5-5", "model claude-opus-5-5 (pooled: rung 3/3)"]);
+});
+
+test("the reviewer's diff measure counts a binary file as a changed file with no lines, and a last line with no newline as a line", () => {
+  const binary = (last) => Buffer.from([0, 1, 2, 3, last]);
+  const withBinaryEdit = () => {
+    const f = planned();
+    writeInto(f.repo, "src/a.mjs", binary(4));
+    commitAll(f.repo, "chore: seed");
+    writeInto(f.repo, "src/a.mjs", binary(5));
+    return f;
+  };
+  assert.equal(intake(withBinaryEdit(), ["--compose-review"]).out.reviewDecision, "model fast (auto: lines=0, files=1)", "a binary-only diff");
+  const beside = withBinaryEdit();
+  writeInto(beside.repo, "tests/a.test.mjs", "t1\nt2");
+  assert.equal(intake(beside, ["--compose-review"]).out.reviewDecision, "model fast (auto: lines=2, files=2)", "a binary file beside a new file with no trailing newline");
+});
+
 test("a tier or family word as --model is a usage error that names the fix and writes nothing", () => {
   for (const word of ["sonnet", "opus", "haiku", "session", "fast", "inherited"]) {
     const f = fixture();

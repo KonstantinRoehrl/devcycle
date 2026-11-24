@@ -360,11 +360,12 @@ export const PER_LENS_SINGLE_SINCE = "0.32.2";
 export const REDISPATCH_CAUSE_SINCE = "0.34.1";
 
 // Only task-intake.mjs writes dispatch rows, so a previous attempt with a row reached intake: this
-// attempt is a fix pass. One without was killed, interrupted or ended without output: a redo.
+// attempt is a fix pass. One without was killed, interrupted or ended without output: a redo. The
+// previous attempt may sit in an earlier session window of the same run, so the search ranges over the run.
 export function redispatchCause(record, d) {
   const v = record.pluginVersion;
   if (!v || v === "unknown" || compareVersions(v, REDISPATCH_CAUSE_SINCE) < 0) return "unknown";
-  const reached = (record.dispatches ?? []).some((p) => p.taskId === d.taskId && p.agentType === d.agentType && p.retryIndex === d.retryIndex - 1);
+  const reached = (record.runDispatches ?? record.dispatches ?? []).some((p) => p.taskId === d.taskId && p.agentType === d.agentType && p.retryIndex === d.retryIndex - 1);
   return reached ? "fix-pass" : "redo";
 }
 
@@ -376,7 +377,7 @@ export function redispatchCauses(record) {
 
 export const redispatchNote = (c) =>
   `_re-dispatch by cause: fix-pass ${c["fix-pass"]}, redo ${c.redo}, unknown ${c.unknown}. Runs before ${REDISPATCH_CAUSE_SINCE} ` +
-  `recorded no killed attempt, so re-dispatch counts jump from that release on for the same behaviour (vintage break); the redo count is that jump._`;
+  `recorded no killed attempt and no missing-report retry, so re-dispatch counts rise from that release on because more retries are now recorded, shared between both causes (vintage break)._`;
 export const SINGLE_ONE_REVIEWER = "single (one reviewer)";
 // Why a forward-filled session has no run record: a standalone command mints none by design, a
 // session from before 0.13.0 predates the record, and anything else expected one and is missing it.
@@ -1112,6 +1113,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         // The run's workload is the last workload line written for the session (a rerun overwrites
         // an earlier estimate); null when the run wrote none (GC3 — workload-unknown, not zero).
         const rec = { runId, pluginVersion, profile, knobs, resolvedReviewDepth, resolvedDepthKnob, resolvedConsent, schemaMismatch, triage, ...w,
+          runDispatches: runWindows.flatMap((x) => x.dispatches),
           workload: w.workloads.at(-1) ?? null, planningRuns: h === planningWindow ? [planningRun] : [],
           traceRuns: h === firstWindow ? [traceRun] : [],
           drive: drives.length ? "auto" : "manual", driveRuns: h === firstWindow ? [{ runId, rows: drives }] : [] };
@@ -1120,6 +1122,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
           ? { ...rec,
               stages: [...prior.stages, ...rec.stages],
               dispatches: [...prior.dispatches, ...rec.dispatches],
+              runDispatches: [...prior.runDispatches, ...rec.runDispatches],
               verdicts: [...prior.verdicts, ...rec.verdicts],
               events: [...prior.events, ...rec.events],
               workloads: [...prior.workloads, ...rec.workloads],

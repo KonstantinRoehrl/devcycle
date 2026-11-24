@@ -17,7 +17,7 @@ const ERROR_PREFIX = "drive-execution: ";
 const LEDGER_LINE = /^session \d+ · \d+ tool calls · task=(\S+) event=(\S+)(?: round=(\d+))? outcome=(.*)$/;
 const REPORTED_EVENTS = new Set(["committed", "review-verdict", "user-decision"]);
 // An unkeyed line carries no round=, so its review round is its `round N` outcome.
-const REVIEW_ROUND =/^round (\d+)$/;
+const REVIEW_ROUND = /^round (\d+)$/;
 const USAGE =
   "drive-watch: usage: drive-watch.mjs (--status | --follow [--since <bytes>] [--level <end|wave|all>] | --wait) --state <path>";
 

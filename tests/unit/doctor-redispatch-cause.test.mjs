@@ -29,6 +29,25 @@ test("a re-dispatch is a fix-pass when its previous attempt reached intake, a re
   assert.deepEqual(redispatchCauses(recordAt("0.34.1")), { "fix-pass": 1, redo: 2, unknown: 0 });
 });
 
+test("a fix pass whose previous attempt sits in an earlier session window of the run is a fix-pass, not a redo", () => {
+  const sha256 = (s) => createHash("sha256").update(s).digest("hex");
+  const dir = makeTempDir("doctor-redispatch-cross-session");
+  mkdirSync(join(dir, "repo-00000000"), { recursive: true });
+  const lines = [
+    { kind: "run", runId: "1111111111111111", schemaVersion: 1, pluginVersion: "0.34.1", repoSlug: "repo-00000000", startedAt: "2026-11-25T07:00:00Z" },
+    { kind: "session", runId: "1111111111111111", sessionHash: sha256("sess-A") },
+    row("1", IMPL, 0, 0),
+    { kind: "session", runId: "1111111111111111", sessionHash: sha256("sess-B") },
+    row("1", IMPL, 1, 5),
+  ];
+  writeFileSync(join(dir, "repo-00000000", "1111111111111111.jsonl"), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const records = readRunRecords(dir);
+  const second = records.get(sha256("sess-B"));
+  assert.deepEqual(second.dispatches.map((d) => d.retryIndex), [1], "the second session's window holds only its own attempt");
+  assert.deepEqual(causesOf(second), [["1", "fix-pass"]]);
+  assert.deepEqual(redispatchCauses(second), { "fix-pass": 1, redo: 0, unknown: 0 });
+});
+
 test("a run from before the cause release, or of unknown version, has only unknown causes", () => {
   for (const version of ["0.34.0", "unknown", undefined])
     assert.deepEqual(causesOf(recordAt(version)), [["1", "unknown"], ["2", "unknown"], ["3", "unknown"]], String(version));
@@ -55,5 +74,5 @@ test("the report prints the corpus's re-dispatch split by cause and names the vi
   assert.deepEqual(summary.redispatchCauses, { "fix-pass": 1, redo: 2, unknown: 0 });
   const report = renderReport([summary], { repo: "devcycle", today: "2026-11-25", scope: "every devcycle-tagged session" });
   assert.ok(report.includes(redispatchNote({ "fix-pass": 1, redo: 2, unknown: 0 })), "the split is missing from the report");
-  assert.match(redispatchNote({ "fix-pass": 1, redo: 2, unknown: 0 }), /^_re-dispatch by cause: fix-pass 1, redo 2, unknown 0\. .*0\.34\.1.*vintage break/);
+  assert.match(redispatchNote({ "fix-pass": 1, redo: 2, unknown: 0 }), /^_re-dispatch by cause: fix-pass 1, redo 2, unknown 0\. .*0\.34\.1.*more retries are now recorded, shared between both causes \(vintage break\)/);
 });

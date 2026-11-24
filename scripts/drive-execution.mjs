@@ -966,10 +966,14 @@ async function walk(ctx, opts, log, trap, runState) {
   let waited = 0;
   let attempts = 0;
   for (let n = 1; ; n++) {
-    if (trap.interrupted) return ended(130, "interrupted");
-    if (stopRequested(ctx.root)) {
-      log("a --stop request is on disk; stopping before the next session");
-      recordStopRequest(ctx);
+    // A --stop signals as well as writing its request, so the signal can end a wait before the request
+    // is read: either way the request on disk is recorded, once.
+    const requested = stopRequested(ctx.root);
+    if (requested || trap.interrupted) {
+      if (requested) {
+        log("a --stop request is on disk; stopping before the next session");
+        recordStopRequest(ctx);
+      }
       return ended(130, "interrupted");
     }
     const stage = readState(ctx.statePath).stage;

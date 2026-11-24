@@ -1615,3 +1615,25 @@ test("a stop request found before the next session appends a stop-request event 
   assert.equal(stops[0].stage, "execution");
   assert.match(stops[0].ts, STAMP);
 });
+
+test("a --stop delivered by signal while the driver waits between sessions appends one stop-request event row and no drive row for it", async () => {
+  const root = makeCycle();
+  const h = harness([{ rateLimitInSec: 3600 }], { DEVCYCLE_DRIVE_SLICE_MS: "50" });
+  const d = startDriver(root, h);
+  try {
+    await waitFor(() => driveLogOf(root).includes("] wait: "));
+    const stop = spawnSync(process.execPath, [DRIVER, "--stop", "--state", statePathOf(root)], { cwd: root, env: h.env, encoding: "utf8" });
+    assert.equal(stop.status, 0, stop.stdout + stop.stderr);
+    const r = await Promise.race([d.result(), new Promise((res) => setTimeout(() => res(null), 10000))]);
+    assert.ok(r, "the driver waited on past a stop");
+    assert.equal(r.code, 130, r.out);
+    assert.equal(resultOf(root).outcome, "stopped");
+    assert.equal(records(h).length, 1, "the stop wrote a drive row for a session that never ran");
+    const stops = rowsOf(h, "event").filter((e) => e.event === "stop-request");
+    assert.equal(stops.length, 1, "a stop that arrived by signal between sessions left no single stop-request row");
+    assert.equal(stops[0].stage, "execution");
+    assert.match(stops[0].ts, STAMP);
+  } finally {
+    if (d.child.exitCode === null) d.child.kill("SIGKILL");
+  }
+});
