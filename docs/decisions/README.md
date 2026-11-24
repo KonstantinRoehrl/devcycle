@@ -9,9 +9,12 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 
 **Decision:** a re-dispatch of a saved brief goes through `task-dispatch.mjs --reattempt`, so each
 attempt has its own retry index and routing decision; `task-intake.mjs` applies the task-reviewer
-predicate and returns the tier the reviewer is dispatched on; the run-record rows for `drive` and the
-`stop-request` event name their new fields. The executing-waves, resume, ledger and model-routing
-text that points at these grows every closure that reads it, and the runtime surface.
+predicate and returns the tier the reviewer is dispatched on; the run record's `drive` row names
+`effort` and `costUsdEstimated`, and a new `stop-request` event records a stop between sessions;
+doctor splits `re-dispatch` by cause and marks the vintage break at `REDISPATCH_CAUSE_SINCE`
+(assumed `0.34.1`, re-checked against the version actually released). The executing-waves, resume,
+ledger and model-routing text that points at these is longer, so every closure that reads it and the
+runtime surface grew; the budget lines below record the new figures.
 
 **Why:** the ledger recorded neither a killed attempt nor a reviewer's model, so re-dispatch and
 routing figures could not be trusted by the economy cycles that measure against them.

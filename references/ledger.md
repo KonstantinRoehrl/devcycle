@@ -50,7 +50,7 @@ two logs never merge. One row per write site, not a restatement of `tests/fixtur
 | `run` | once, after config resolution, before the first confirmation | `commands/cycle.md` |
 | `session` | once per real Claude Code session — cycle start, and the top of every `/devcycle:continue` | `commands/cycle.md`, `commands/continue.md` |
 | `stage` | at every stage boundary | `references/handoff.md` |
-| `dispatch` | once per implementer dispatch, at step 4 (report received), a missing report's included as `outcome: rejected` — never at step 3 (dispatch), since `endedAt`/`outcome`/round/retry are unknown until the envelope returns | `scripts/task-intake.mjs` |
+| `dispatch` | once per implementer dispatch, at step 4 (report received), a missing report included (`outcome: rejected`) — never at step 3 (dispatch), since `endedAt`/`outcome`/round/retry are unknown until the envelope returns | `scripts/task-intake.mjs` |
 | `verdict` | once per review round, at step 5 (after `event=review-verdict`) — never at step 4, since `round`/`blockingCount`/`conformance` are unknown until review runs | `scripts/task-verdict.mjs`, `scripts/task-commit.mjs` |
 | `commit` | once per task commit, at step 7 | `scripts/task-commit.mjs`, run in-process by `scripts/task-verdict.mjs` on an accepted verdict |
 | `drive` | once per driven session, at its end, carrying the session's resolved `effort` and its `costUsd` as reported, or `costUsdEstimated` when the session reported none; read by `scripts/doctor.mjs` | `scripts/drive-execution.mjs` |
@@ -104,8 +104,7 @@ flag at once; `--help` answers `action: "usage"` with the script's `required` an
   or one with no `- Evidence:` line, appends `outcome=rejected (missing report file)` (`missing-report`);
   a report failing `authored-claims-check.mjs` or `evidence-completeness-check.mjs --task <id>` (its
   `cmd:` held to the task's gate through this ledger's plan) appends `outcome=rejected (intake bounce)` with its findings file as `ref=` (`bounce`); a clean one appends
-  `outcome=complete` (`review`), whose result carries the reviewer's `reviewTier`, `reviewModel` and `reviewDecision`. Each writes the
-  `dispatch` row. With
+  `outcome=complete` (`review`), whose result carries the reviewer's `reviewTier`, `reviewModel` and `reviewDecision`. Each writes the `dispatch` row. With
   `--compose-review`, `review` also composes the reviewer brief and runs the reviewer dispatch above
   in-process, adding `reviewBriefPath`, `findingsPath` and `reviewRound`; a `review-round` for that
   round already after the latest `report-received` makes it write nothing and print those paths.
