@@ -20,7 +20,8 @@
 // after the step's file writes, before its next event), `hangMs` (wait before the result event),
 // `hangAfterResultMs` (stay alive and silent after it), `noResult` (exit without a result event, as a
 // crashed session does), `noInit` (exit before even the init event, as a `claude` that fails at
-// startup does; exit code 1 unless `exitCode` says otherwise), `exitCode`.
+// startup does; exit code 1 unless `exitCode` says otherwise), `exitCode`, `synthetic` (after the tool
+// use, one `<synthetic>` assistant event with an all-zero usage block, as an API-error turn writes).
 //
 // A step plays in this order: the init event; its `tool_use` event(s) when it sets `toolUseId`, since
 // in a real session the main-thread tool call is already pending while it writes the ledger; the file
@@ -96,6 +97,12 @@ if (step.rateLimitInSec !== undefined)
   emit({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: Math.floor(clockNow() / 1000) + step.rateLimitInSec } });
 if (step.rateLimitNoReset) emit({ type: "rate_limit_event", rate_limit_info: { status: "rejected" } });
 if (!step.toolUseId) emitToolUse();
+if (step.synthetic)
+  emit({
+    type: "assistant",
+    parent_tool_use_id: null,
+    message: { model: "<synthetic>", content: [{ type: "text", text: "API Error" }], usage: { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 } },
+  });
 if (step.toolUseId && step.toolResult)
   emit({ type: "user", parent_tool_use_id: null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: step.toolUseId }] } });
 
