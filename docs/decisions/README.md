@@ -5,6 +5,31 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-24 — Re-dispatches re-attempt through task-dispatch, and intake routes the reviewer (#407, #456)
+
+**Decision:** a re-dispatch of a saved brief goes through `task-dispatch.mjs --reattempt`, so each
+attempt has its own retry index and routing decision; `task-intake.mjs` applies the task-reviewer
+predicate and returns the tier the reviewer is dispatched on; the run-record rows for `drive` and the
+`stop-request` event name their new fields. The executing-waves, resume, ledger and model-routing
+text that points at these grows every closure that reads it, and the runtime surface.
+
+**Why:** the ledger recorded neither a killed attempt nor a reviewer's model, so re-dispatch and
+routing figures could not be trusted by the economy cycles that measure against them.
+
+```text
+budget: context-budget.json commands/continue.md 78678
+budget: context-budget.json commands/cycle.md 92829
+budget: context-budget.json playbooks/executing-waves.md 124179
+budget: context-budget.json playbooks/maintaining-the-repo.md 80257
+budget: context-budget.json playbooks/receiving-review.md 127829
+budget: context-budget.json playbooks/reviewing-code.md 106751
+budget: context-budget.json playbooks/reviewing-the-branch.md 63136
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 98181
+budget: context-budget.json playbooks/taking-the-fast-path.md 55618
+budget: context-budget.json references/model-routing.md 10766
+budget: surface-budget.json surfaceTotal 7593
+```
+
 ## 2026-11-22 — The sweep's resolution refusal and the documentation criteria name their sources (#478, #485)
 
 **Decision:** the maintain playbook states that a pass with no finalized sweep passes no

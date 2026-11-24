@@ -92,7 +92,7 @@ round is one event, not two (the same collapse `qualitySignals` documents and bo
 | --- | --- | --- |
 | `review-reject` | a `verdict` line with `blockingCount > 0` or `conformance = "fail"` | `"execution"` |
 | `first-round-accept` | a `verdict` line with `round = 1`, `blockingCount = 0`, `conformance = "pass"` | `"execution"` |
-| `re-dispatch` | a `dispatch` line with `retryIndex > 0` | the stage active at `startedAt`, else `"unattributed"` |
+| `re-dispatch` | a `dispatch` line with `retryIndex > 0`; each event carries `cause` — `fix-pass` (the previous attempt of the same task and agent type has a `dispatch` row), `redo` (it has none) or `unknown` (a run older than `REDISPATCH_CAUSE_SINCE` in `scripts/doctor.mjs`); both causes score, and the report prints the split with the vintage break | the stage active at `startedAt`, else `"unattributed"` |
 | `escalation` | `dispatch.model` differing across any two dispatches of one `taskId` | the first dispatch's stage, else `"unattributed"` |
 
 `"unattributed"` is a sentinel, not a member of the schema's stage enum or a `costByStage` key —
