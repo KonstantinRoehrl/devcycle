@@ -43,11 +43,11 @@ without that line, skip this section. In drive mode:
 1. Enumerate every resumable cycle by running
    `node ${CLAUDE_PLUGIN_ROOT}/scripts/find-state-files.mjs`, never a `find` or `rg` search: `.devcycle/`
    is gitignored and a gitignore-aware tool silently drops it. Use its output as the candidate list.
-   **Ask which one** — never pick. With exactly one candidate, still name it before resuming. If the
-   script reports none, say so plainly ("no devcycle state file found in this repo — there is no
-   in-flight cycle to resume") and offer `/devcycle:cycle <description>` to start one. Stop there.
-   A chosen file at `stage: execution` resumes through § Execution resume below, in place of
-   steps 2–4 and § Resume's depth check.
+   **Ask which one** — never pick; a `checkout:` label names another worktree's cycle. With exactly one
+   candidate, still name it before resuming. If the script reports none, say so plainly ("no devcycle
+   state file found in this repo — there is no in-flight cycle to resume") and offer `/devcycle:cycle
+   <description>` to start one. Stop there. A chosen file at `stage: execution` resumes through
+   § Execution resume below, in place of steps 2–4 and § Resume's depth check.
 2. Run the ownership check on the chosen file before trusting anything in it, per
    `${CLAUDE_PLUGIN_ROOT}/references/resume.md`. A `root:` mismatch stops the
    resume and goes to the user; it is never resolved silently. Once it passes, append this
@@ -59,10 +59,11 @@ without that line, skip this section. In drive mode:
    ${CLAUDE_PLUGIN_ROOT}/scripts/resume-check.mjs --state <the chosen state file>`. A non-zero exit
    means `state.md` is stale or its format can't be settled (a recorded spec/plan/checklist artifact is gone, the recorded branch no
    longer exists — a leftover from a completed or abandoned cycle — or the stage is not a real enum
-   value): surface the specific finding and ask the user how to proceed rather than
-   continuing on the stale record. On success it also prints the stage's `entry:` and `note:`
-   lines; when the `note:` names a human-required step, re-walk that step on resume rather than
-   assuming a stale `state.md` already cleared it.
+   value), or the cycle's branch already landed, or it belongs to another checkout (those two are gates, per
+   `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § When git disagrees with the state file): surface the
+   specific finding and ask the user how to proceed rather than continuing on the stale record. On success it
+   also prints the stage's `entry:` and `note:` lines; when the `note:` names a human-required step, re-walk
+   that step on resume rather than assuming a stale `state.md` already cleared it.
    On its last line, `handoff: pending`, ask the not-ready question `${CLAUDE_PLUGIN_ROOT}/references/resume.md`
    § The state file holds — its recovery gate after an `uncontrolled:` line — unless it printed `stopped:`.
    A `format-question:` or `format-report:` line → `${CLAUDE_PLUGIN_ROOT}/references/resume.md` § The format row.
@@ -113,11 +114,10 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-knobs.mjs" \
    Each is on `references/delegation.md`'s exempt list, which is why it is read directly. The
    entered stage's playbook still reads whatever its own steps require.
 4. Settle the branch and derive position from git evidence per
-   `${CLAUDE_PLUGIN_ROOT}/references/resume.md` — falling back to
-   `${CLAUDE_PLUGIN_ROOT}/references/branch.md` only when no topic branch was
-   ever recorded. **The mismatch rule that file defers to is this command's
-   own:** when the current branch differs from the recorded one, tell the user
-   and ask before switching; never switch branches silently.
+   `${CLAUDE_PLUGIN_ROOT}/references/resume.md` — falling back to `${CLAUDE_PLUGIN_ROOT}/references/branch.md`
+   only when no topic branch was ever recorded. **The mismatch rule that file defers to is this command's
+   own:** when the current branch differs from the recorded one, tell the user and ask before switching;
+   never switch branches silently. A branch another worktree holds is that section's gate, never a switch.
 
 ## Execution resume
 
@@ -136,7 +136,7 @@ walked from it. Every gate stays this command's, answered first; it reads their 
   `node ${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs append --run <state.run> --kind session --sessionId "$CLAUDE_CODE_SESSION_ID"`.
 - `knobDrift` lines with `state.knobsDeclined` false → step 2b's knob-change question;
   `state.knobsLine` null → write `- knobs:` from the fresh line, as step 2b says.
-- `branch.verdict` `switch-needed` or `integration` → step 4's rules.
+- `branch.verdict` `switch-needed`, `integration` or `elsewhere` → step 4's rules.
 - `depth.band` `over-budget` or `hard-stop` → § Resume's depth rule; `unknown` → proceed.
 - `pendingDecision`, unless `drive.gate` has it → that task's `exhausted-unresolved` loop is the user's decision.
 - `handoff.ask` → step 2a's not-ready question, or its recovery gate when `handoff.uncontrolled` is set, before acting on `drive.action`.

@@ -5,6 +5,23 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-25 — resume refuses a state file that doesn't match the live checkout (#429)
+
+**Decision:** `/devcycle:continue` stops and asks when a cycle's branch already landed or when the cycle belongs to another checkout (its state file sits in a different worktree, or another worktree holds its branch). The answers are close the cycle, resume anyway (recorded as `- merged-ack: <tip sha>`), move the cycle into the worktree that holds the branch, resume in its own checkout, or leave it. No check closes a cycle, moves a file, rewrites `root:` or switches a branch by itself. Driven runs map the cases onto existing stop reasons: `merged` stops `resume-check`, `branch-held` stops `branch` and `other-checkout` stops `foreign-state`, so the run record schema is unchanged.
+
+**Why:** a state file resumed from the wrong worktree, or for a branch already merged, sent the session into work that was done or that the checkout refuses to switch to. The gate wording lives in `references/resume.md` § When git disagrees with the state file, and `commands/continue.md` keeps pointers, because continue sits at the 187-line `commandMax` ceiling.
+
+**Budgets:** the context closures that read `references/resume.md` and `playbooks/finishing-the-cycle.md` grow by the new section, and the runtime surface grows by the section, the pointers and the hub rows.
+
+```text
+budget: context-budget.json commands/continue.md 81557
+budget: context-budget.json commands/cycle.md 95382
+budget: context-budget.json playbooks/finishing-the-cycle.md 54169
+budget: context-budget.json playbooks/receiving-review.md 130387
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 100739
+budget: surface-budget.json surfaceTotal 7632
+```
+
 ## 2026-11-25 — The move-cycle invocation lands with the script
 
 **Decision:** `references/resume.md` § Settle the branch first names

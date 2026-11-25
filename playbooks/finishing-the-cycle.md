@@ -144,7 +144,9 @@ As this stage's final state-file write, set `stage: done` and a fresh `updated:`
 
 `.devcycle/ledger.md` is a single slot the next cycle overwrites, and the cleanup below removes
 the ephemeral set — so without this step a finished cycle leaves no durable record for a later
-consolidation pass to read.
+consolidation pass to read. `/devcycle:continue`'s close-merged answer runs this section and
+§ Clean up this cycle's ephemeral artifacts on their own, with nothing before them, and writes
+`stage: done` after them, so both must stay runnable alone.
 
 Before copying the audit trail below, move every status file in `.devcycle/findings/` whose
 verdict the run superseded into `.devcycle/archive-<YYYY-MM-DD>-<branch-slug>/`, per

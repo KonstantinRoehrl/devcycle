@@ -138,7 +138,7 @@ confirm, then the items only your eyes can judge).
 
 The pipeline saves its position to files under `.devcycle/` at every stage boundary, so it
 survives `/clear`, compaction, and new sessions — resume any time with `/devcycle:continue`.
-How the stages hand off and how the state file is verified is covered in
+How the stages hand off and how the state file is verified against the live checkout is covered in
 [`docs/pipeline/`](docs/pipeline/README.md).
 
 The pipeline pauses between stages by design: it stops at most stage boundaries and asks you to
