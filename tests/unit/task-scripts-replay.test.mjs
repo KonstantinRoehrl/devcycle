@@ -366,7 +366,9 @@ test("SC4 replay: intake --compose-review writes what intake and the reviewer di
   const unfolded = fixture();
   const folded = fixture();
   try {
-    const expected = acceptedTask(unfolded, "1", "src/a.txt");
+    // The folded call also routes the reviewer, which the unfolded path left to the coordinator.
+    const expected = acceptedTask(unfolded, "1", "src/a.txt")
+      .map((l) => l.replace(" event=review-round outcome=round 1 ", " event=review-round outcome=model fast (auto: lines=2, files=1) "));
     dispatchImplementer(folded, "1");
     const report = implement(folded, "1", "src/a.txt");
     const composeReview = () => call(folded, "task-intake", ["--task", "1", "--report", report, "--status", "complete",

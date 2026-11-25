@@ -136,6 +136,30 @@ test("createRelay at all folds a task's accepted verdict into its commit line, c
   assert.throws(() => createRelay("loud"), /unknown watch level "loud": expected one of end, wave, all/);
 });
 
+test("createRelay counts review rounds from a keyed line's round=, whatever its outcome says", () => {
+  const relay = createRelay("all");
+  const lines = [
+    "session 1 · 4 tool calls · task=1 event=review-round round=1 outcome=model fast (auto: lines=40, files=2)",
+    "session 1 · 6 tool calls · task=1 event=review-verdict round=1 outcome=rejected",
+    "session 1 · 8 tool calls · task=1 event=review-round round=2 outcome=model session (auto: escalated on lines=401)",
+    "session 1 · 9 tool calls · task=1 event=review-verdict round=2 outcome=accepted",
+    "session 1 · 11 tool calls · task=1 event=committed round=2 outcome=green gate passed",
+    "session 1 · 12 tool calls · task=2 event=review-round outcome=round 1",
+    "session 1 · 13 tool calls · task=2 event=committed outcome=green gate passed",
+  ];
+  assert.deepEqual(lines.map((message) => relay.push(STAMP + message)), [
+    null,
+    "session 1 · 6 tool calls · task=1 event=review-verdict round=1 outcome=rejected",
+    null,
+    null,
+    "task 1 committed (2 review rounds)",
+    null,
+    "task 2 committed (1 review round)",
+  ]);
+  const bounce = "session 1 · 6 tool calls · task=3 event=report-received round=0 outcome=rejected (intake bounce)";
+  assert.equal(reportedLine(STAMP + bounce), bounce);
+});
+
 test("createRelay prints a wait: line only when it differs from the last one it printed", () => {
   const usage = "wait: usage limit until its reset — resuming at 2026-10-13T05:01:00.000Z";
   const transient = "wait: transient failure (api-error), attempt 2 — resuming at 2026-10-13T05:03:00.000Z";

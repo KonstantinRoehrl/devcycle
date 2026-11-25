@@ -88,13 +88,14 @@ function harness(scenario = [], env = {}, { prelude = "" } = {}) {
 
 const calls = (h) => (existsSync(h.callsPath) ? readFileSync(h.callsPath, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
 
-function records(h) {
+function rowsOf(h, kind) {
   if (!existsSync(h.runsDir)) return [];
   return readdirSync(h.runsDir).flatMap((slug) => {
     const p = join(h.runsDir, slug, `${RUN}.jsonl`);
-    return existsSync(p) ? readFileSync(p, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.kind === "drive") : [];
+    return existsSync(p) ? readFileSync(p, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.kind === kind) : [];
   });
 }
+const records = (h) => rowsOf(h, "drive");
 
 function startDriver(root, h, flags = []) {
   const child = spawn(process.execPath, [DRIVER, "--state", join(root, ".devcycle", "state.md"), "--claude", h.bin, ...flags], { cwd: root, env: h.env });
@@ -131,6 +132,19 @@ async function waitFor(predicate, ms = 15000) {
 const lockPath = (root) => join(root, DRIVE_LOCK_REL);
 const writeLock = (root, fields) =>
   writeFileSync(lockPath(root), JSON.stringify({ hostname: hostname(), state: ".devcycle/state.md", log: ".devcycle/drive.log", ...fields }));
+
+test("the relayed ledger line carries a keyed line's review round, and an unkeyed line none", async () => {
+  const root = makeCycle();
+  const keyed = "task=1 event=review-round outcome=model fast (auto: lines=2, files=1) ref=.devcycle/briefs/1-reviewer-round-2.md key=1/review-round/2/0";
+  const r = await drive(root, [
+    { ledger: [keyed, line(1, "dispatched"), DONE[0]] },
+    { ledger: [line(2, "dispatched"), DONE[1]], stage: "branch-review" },
+  ]);
+  assert.equal(r.code, 0, r.out);
+  const log = readFileSync(join(root, ".devcycle", "drive.log"), "utf8");
+  assert.match(log, /session 1 · \d+ tool calls · task=1 event=review-round round=2 outcome=model fast \(auto: lines=2, files=1\)$/m);
+  assert.match(log, /session 1 · \d+ tool calls · task=1 event=dispatched outcome=ok$/m);
+});
 
 test("drives one fresh session per wave until the state reaches branch-review, writing one drive record per session", async () => {
   const root = makeCycle();
@@ -1563,4 +1577,63 @@ test("the watchdog never acts while a sibling dispatch is running", async () => 
       readFileSync(HEALTH_FIX("pending-tool"), "utf8").replaceAll("5-implementer.md", "2-implementer.md"));
   } });
   assert.notEqual(r.records[0].exitReason, "dead-dispatch");
+});
+
+test("a <synthetic> assistant turn leaves the drive row's depth at the session's last real turn", async () => {
+  const r = await drive(makeCycle(), [{ ledger: DONE, stage: "branch-review", synthetic: true }]);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.records[0].depthTokens, 60010);
+});
+
+test("every drive row carries the session's resolved effort, default included", async () => {
+  const pinned = await drive(makeCycle({ drive: effortRow("high") }), [{ ledger: DONE, stage: "branch-review" }]);
+  assert.equal(pinned.records[0].effort, "high");
+  const root = makeCycle({ drive: effortRow("default") });
+  const unset = await drive(root, [{ ledger: DONE, stage: "branch-review" }]);
+  assert.equal(unset.records[0].effort, "default");
+  assert.match(startsLine(root), /effort default/);
+});
+
+test("a session with no result event records its priced estimate as costUsdEstimated, never as costUsd", async () => {
+  const crashing = { ledger: [line(1, "report-received")], noResult: true, exitCode: 1, usage: { input_tokens: 300_000 } };
+  const r = await drive(makeCycle(), [crashing], { flags: ["--max-usd", "1"] });
+  assert.equal(r.code, 6, r.out);
+  assert.deepEqual(r.records.map((x) => [x.costUsd, Math.round(x.costUsdEstimated * 100) / 100]), [[undefined, 0.6], [undefined, 0.6]]);
+  const measured = await drive(makeCycle(), [{ ledger: DONE, stage: "branch-review", costUsd: 0.25 }]);
+  assert.deepEqual([measured.records[0].costUsd, measured.records[0].costUsdEstimated], [0.25, undefined]);
+});
+
+test("a stop request found before the next session appends a stop-request event row and no drive row for it", async () => {
+  const request = `require("node:fs").writeFileSync(${JSON.stringify(STOP_REQUEST_REL)}, "2026-10-13T00:00:00Z\\n");\n`;
+  const root = makeCycle();
+  const h = harness([{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }], {}, { prelude: request });
+  const r = await startDriver(root, h).result();
+  assert.equal(r.code, 130, r.out);
+  assert.equal(records(h).length, 1, "the stop wrote a drive row for a session that never ran");
+  const stops = rowsOf(h, "event").filter((e) => e.event === "stop-request");
+  assert.equal(stops.length, 1);
+  assert.equal(stops[0].stage, "execution");
+  assert.match(stops[0].ts, STAMP);
+});
+
+test("a --stop delivered by signal while the driver waits between sessions appends one stop-request event row and no drive row for it", async () => {
+  const root = makeCycle();
+  const h = harness([{ rateLimitInSec: 3600 }], { DEVCYCLE_DRIVE_SLICE_MS: "50" });
+  const d = startDriver(root, h);
+  try {
+    await waitFor(() => driveLogOf(root).includes("] wait: "));
+    const stop = spawnSync(process.execPath, [DRIVER, "--stop", "--state", statePathOf(root)], { cwd: root, env: h.env, encoding: "utf8" });
+    assert.equal(stop.status, 0, stop.stdout + stop.stderr);
+    const r = await Promise.race([d.result(), new Promise((res) => setTimeout(() => res(null), 10000))]);
+    assert.ok(r, "the driver waited on past a stop");
+    assert.equal(r.code, 130, r.out);
+    assert.equal(resultOf(root).outcome, "stopped");
+    assert.equal(records(h).length, 1, "the stop wrote a drive row for a session that never ran");
+    const stops = rowsOf(h, "event").filter((e) => e.event === "stop-request");
+    assert.equal(stops.length, 1, "a stop that arrived by signal between sessions left no single stop-request row");
+    assert.equal(stops[0].stage, "execution");
+    assert.match(stops[0].ts, STAMP);
+  } finally {
+    if (d.child.exitCode === null) d.child.kill("SIGKILL");
+  }
 });

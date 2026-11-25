@@ -38,7 +38,7 @@ model id written here, because ids in playbook prose rot as models change:
   is configured — a dispatch with no override then resolves to that default,
   not to the orchestrator's own model, and **outside planning nothing mitigates that today**:
   with one configured, every dispatch that resolves to this tier runs at that
-  default instead. The escape hatch is implemented, unwired, and **narrower than
+  default instead, while its `dispatch` row records the session's own id. The escape hatch is implemented, unwired, and **narrower than
   this caveat** — `resolveModel` in `scripts/model-pool.mjs` takes a
   `sessionTierUnreachable` parameter (its `--session-tier-unreachable` CLI flag)
   under which an escalation that would land on the session tier names the
@@ -74,7 +74,7 @@ Derivation predicates (dispatch-time-observable inputs only):
   per run) at the lower per-token rates `scripts/pricing.mjs` holds, and a wrong cheap guess
   costs at most one review round.
 - **task-reviewer**: fast tier iff the task diff is ≤400 changed lines
-  and ≤5 files; else session tier.
+  and ≤5 files; else session tier. `scripts/task-intake.mjs` applies it and returns the tier.
 - **research / exploration dispatch** (`references/delegation.md` §
   Research dispatches): fast tier, always — read-only work whose output is a
   map rather than a judgment. Session tier remains for dispatches that must
@@ -120,7 +120,7 @@ decide. Auditability: every dispatch's ledger event records the decision and
 its inputs — `outcome=model fast:<resolved id> (auto: files=3, deps=none,
 steps=specified)` or `outcome=model session (auto: escalated on files=9)` for
 derived choices, `outcome=model session (auto)` for an unset knob passed to the module
-anyway, `outcome=model <id> (pinned)` for explicit config. A pooled
+anyway, `outcome=model fast (auto: lines=40, files=2)` for a task reviewer, `outcome=model <id> (pinned)` for explicit config. A pooled
 pick records `outcome=model <id> (pooled: rung <n>/<len>)`, gaining
 `, clamped from <requested-id>` when the ceiling moved it; a clamped pin records
 `outcome=model <id> (pinned, clamped from <requested-id>)`; a fall-through to no

@@ -6,6 +6,8 @@ import { spawn, spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { makeRepo } from "./helpers.mjs";
 import { briefPathFor } from "../../scripts/task-dispatch.mjs";
+import { isNoVerdict, retryCount, taskEntries, unparseableFindings, MISSING_FINDINGS } from "../../scripts/task-ledger.mjs";
+import { deathsOf } from "../../scripts/dispatch-health.mjs";
 import { acquireDriveLock, driveTokenHash, releaseDriveLock } from "../../scripts/drive-lock.mjs";
 
 const SCRIPT = new URL("../../scripts/task-dispatch.mjs", import.meta.url).pathname;
@@ -386,4 +388,103 @@ test("a dispatch goes through on a manual row, the driver's own session, a walke
     assert.equal(r.status, 0, `${why}: ${r.stderr}`);
     assert.deepEqual(r.out.appended, ["5/dispatched/0/0"], why);
   }
+});
+
+test("a decision that already starts with model is recorded once; a bare one gets the prefix", () => {
+  const repo = repoWithLedger();
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer", "--model-decision", "model fast:claude-haiku-5-5 (auto: files=1)"]);
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer", "--round", "1", "--model-decision", "session (auto: escalated on files=9)"]);
+  const [first, second] = ledgerLines(repo);
+  assert.match(first, / outcome=model fast:claude-haiku-5-5 \(auto: files=1\) ref=/);
+  assert.doesNotMatch(first, /model model/);
+  assert.match(second, / outcome=model session \(auto: escalated on files=9\) ref=/);
+});
+
+test("a reviewer dispatch records its routing decision; without one its outcome stays round N", () => {
+  const repo = repoWithLedger();
+  const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1", "--model-decision", "model fast (auto: lines=40, files=2)"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(ledgerLines(repo)[0], / task=5 event=review-round outcome=model fast \(auto: lines=40, files=2\) ref=\.devcycle\/briefs\/5-reviewer-round-1\.md key=5\/review-round\/1\/0$/);
+  dispatch(repo, ["--run", RUN, "--task", "6", "--role", "reviewer", "--round", "1"]);
+  assert.match(ledgerLines(repo)[1], / task=6 event=review-round outcome=round 1 ref=/);
+});
+
+test("--reattempt re-sends the saved implementer brief at the next retry, with no second lessons block or gate tail", () => {
+  const repo = gatedRepo();
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer"], "# Brief for task 5\n");
+  const saved = briefAt(repo, ".devcycle/briefs/5-implementer.md");
+  const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer", "--reattempt", "--model-decision", "model session (auto: escalated on files=9)"], "");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.out.round, r.out.retry, r.out.briefPath, r.out.appended], [0, 1, ".devcycle/briefs/5-implementer.md", ["5/dispatched/0/1"]]);
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer.md"), saved);
+  assert.equal(existsSync(join(repo, ".devcycle/dispatch/5-implementer-0-1.json")), true);
+  assert.match(ledgerLines(repo)[1], / task=5 event=dispatched outcome=model session \(auto: escalated on files=9\) ref=\.devcycle\/briefs\/5-implementer\.md key=5\/dispatched\/0\/1$/);
+});
+
+test("--reattempt takes the latest implementer dispatch's round, so a fix pass is re-sent as itself", () => {
+  const repo = repoWithLedger();
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer"]);
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer", "--round", "1"], "# Fix pass\n");
+  const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer", "--reattempt"], "");
+  assert.deepEqual([r.out.round, r.out.retry, r.out.briefPath], [1, 2, ".devcycle/briefs/5-implementer-round-1.md"]);
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer-round-1.md"), "# Fix pass\n");
+});
+
+test("--reattempt re-sends a reviewer at its open round", () => {
+  const repo = repoWithLedger();
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"], "# Review brief\n");
+  const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--reattempt"], "");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.out.round, r.out.retry, r.out.appended], [1, 1, ["5/review-round/1/1"]]);
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-reviewer-round-1.md"), "# Review brief\n");
+});
+
+test("--reattempt re-sends a reviewer at the open round after an earlier round's verdict, not at round 1", () => {
+  const repo = repoWithLedger();
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"], "# Round 1 brief\n");
+  appendFileSync(join(repo, ".devcycle/ledger.md"), "- [2026-11-24T10:00:00Z] task=5 event=review-verdict outcome=rejected (1 blocking) ref=none key=5/review-verdict/1/0\n");
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "2"], "# Round 2 brief\n");
+  const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--reattempt"], "");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.out.round, r.out.retry, r.out.appended, r.out.briefPath], [2, 2, ["5/review-round/2/2"], ".devcycle/briefs/5-reviewer-round-2.md"]);
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-reviewer-round-2.md"), "# Round 2 brief\n");
+});
+
+test("--reattempt with nothing to re-attempt, or with --round or --capture-cmd, is a usage error that writes nothing", () => {
+  const repo = repoWithLedger();
+  for (const [args, message] of [
+    [["--role", "implementer", "--reattempt"], /task 5 has no implementer dispatch to re-attempt/],
+    [["--role", "reviewer", "--reattempt"], /no saved brief at \.devcycle\/briefs\/5-reviewer-round-1\.md to re-attempt/],
+    [["--role", "reviewer", "--reattempt", "--round", "1"], /--reattempt reads the round and the brief from the earlier dispatch: drop --round and --capture-cmd/],
+    [["--role", "implementer", "--reattempt", "--capture-cmd", "node --test x"], /drop --round and --capture-cmd/],
+  ]) {
+    const r = dispatch(repo, ["--run", RUN, "--task", "5", ...args], "");
+    assert.equal(r.status, 2, JSON.stringify(r.out));
+    assert.match(r.out.error, message);
+  }
+  assert.deepEqual(ledgerLines(repo), []);
+});
+
+test("an extra attempt line moves neither the prefix retry caps, the no-verdict cap nor either role's death cap", () => {
+  const repo = repoWithLedger();
+  const ledger = join(repo, ".devcycle/ledger.md");
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer"]);
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"]);
+  appendFileSync(ledger, "- [2026-11-24T10:00:00Z] task=5 event=report-received outcome=rejected (missing report file) ref=.devcycle/reports/5.md key=5/report-received/0/0\n");
+  appendFileSync(ledger, "- [2026-11-24T10:01:00Z] task=5 event=dispatch-ended outcome=without output (implementer) ref=.devcycle/dispatch/5-implementer-0-0.json key=5/dispatch-ended/0/0\n");
+  appendFileSync(ledger, `- [2026-11-24T10:02:00Z] task=5 event=review-verdict outcome=${MISSING_FINDINGS} ref=none key=5/review-verdict/1/0\n`);
+  appendFileSync(ledger, `- [2026-11-24T10:03:00Z] task=5 event=review-verdict outcome=${unparseableFindings("no verdict line")} ref=none key=5/review-verdict/1/1\n`);
+  appendFileSync(ledger, "- [2026-11-24T10:04:00Z] task=5 event=dispatch-ended outcome=without output (reviewer) ref=.devcycle/dispatch/5-reviewer-1-0.json key=5/dispatch-ended/1/1\n");
+  const caps = () => [
+    retryCount(ledger, "5", "rejected (missing report file)"),
+    retryCount(ledger, "5", "rejected (intake bounce)"),
+    retryCount(ledger, "5", isNoVerdict),
+    deathsOf(taskEntries(ledger, "5"), "implementer"),
+    deathsOf(taskEntries(ledger, "5"), "reviewer"),
+  ];
+  const before = caps();
+  for (const role of ["implementer", "reviewer"])
+    assert.equal(dispatch(repo, ["--run", RUN, "--task", "5", "--role", role, "--reattempt", "--model-decision", "model session (inherited)"], "").status, 0, role);
+  assert.deepEqual(caps(), before);
+  assert.deepEqual(before, [1, 0, 2, 1, 1]);
 });

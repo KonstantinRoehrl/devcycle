@@ -239,12 +239,12 @@ and takes the generic rows.
 
 | ledger last event for a task | resume action |
 | --- | --- |
-| `dispatched` | re-dispatch the same brief (the run may have died) |
+| `dispatched` | re-attempt the saved brief (the run may have died) |
 | `report-received` | dispatch the reviewer (it produces the diff itself) |
 | `report-received outcome=rejected (missing report file)` or `outcome=rejected (intake bounce)` | re-dispatch the implementer — after a bounce, with the lint findings its `ref=` names |
 | `report-received outcome=blocked` | the implementer reported `status: blocked`: a user decision is pending (drive mode: stop `needs-user`) |
-| `review-round` (no verdict after it) | the reviewer's run may have died: re-dispatch it for that round |
-| `dispatch-ended outcome=without output (implementer)` or `(reviewer)` | the dispatch ended without its report or findings file: re-dispatch that role — a reviewer at the same round — within the cap below |
+| `review-round` (no verdict after it) | the reviewer's run may have died: re-attempt it for that round |
+| `dispatch-ended outcome=without output (implementer)` or `(reviewer)` | the dispatch ended without its report or findings file: re-attempt that role — a reviewer at the same round — within the cap below |
 | `review-verdict outcome=accepted` | run the green gate, commit |
 | `review-verdict outcome=rejected` or `rejected (green gate: …)` | re-dispatch the implementer with the findings or gate evidence — on a sweep-marked task, a fresh dispatch briefed per the rejection bullet, never a sweep re-run; the next review is the next round |
 | `review-verdict outcome=rejected (missing findings file)` or `rejected (unparseable findings file: …)` | re-dispatch the **reviewer** for that round, not the implementer |
@@ -253,6 +253,9 @@ and takes the generic rows.
 | `user-decision` | carry out the decision its `outcome=` records (`next: "follow-decision"`) |
 | `dispatched outcome=sweep …` | no brief to re-dispatch: re-run the sweep bullets from the clean-targets check |
 | any other sweep-token outcome (`applied-none`, `dirty-targets`, `sweep hard stop: …`) | a decision was pending when the run died: re-present the fallback, never an automatic dispatch. Reasons come from the saved report, or for `dirty-targets` from the files the event names; a hard stop also carries its applied-files disclosure |
+
+A re-attempt goes through `task-dispatch.mjs --reattempt` (`references/ledger.md` § Task scripts), so
+each attempt has its own retry index and routing decision.
 
 **Retry caps.** An intake bounce, `rejected (missing report file)` and a findings file with no
 verdict — `rejected (missing findings file)` and `rejected (unparseable findings file: …)` sharing

@@ -17,6 +17,7 @@ import { defaultBranches, isProtectedBranch } from "./branch-names.mjs";
 import { EFFORT_LEVELS, resolveEffort } from "./claude-settings.mjs";
 import { parseFlags, requireCount, requireValue } from "./cli-flags.mjs";
 import { contextDepth, OVER_BUDGET, windowFor } from "./depth-bands.mjs";
+import { SYNTHETIC_MODEL } from "./depth-probe.mjs";
 import { DISPATCH_ENDED, dispatchHealth, recordDeath, sessionSlugDir } from "./dispatch-health.mjs";
 import { acquireDriveLock, DRIVE_LOCK_REL, driveLockUnavailable, driveTokenHash, lockNamesState, readDriveLockHolder, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
 import { buildProgress, removeProgress, writeProgress } from "./drive-progress.mjs";
@@ -563,7 +564,8 @@ function runSession(ctx, bin, args, log, n) {
         tallyRequest(s.requests, e.message);
         if (!e.parent_tool_use_id) {
           s.tools += (e.message?.content ?? []).filter((c) => c?.type === "tool_use").length;
-          s.depthTokens = contextDepth(e.message?.usage) ?? s.depthTokens;
+          // A <synthetic> turn (an API error) carries an all-zero usage block, which is no depth.
+          if (e.message?.model !== SYNTHETIC_MODEL) s.depthTokens = contextDepth(e.message?.usage) ?? s.depthTokens;
           for (const c of e.message?.content ?? []) if (c?.type === "tool_use" && typeof c.id === "string") s.pending.add(c.id);
         }
       } else if (e.type === "user" && !e.parent_tool_use_id) {
@@ -585,7 +587,10 @@ function runSession(ctx, bin, args, log, n) {
       onEvent(event);
       const entries = ledgerEntries(ctx.root, ctx.plan);
       for (const entry of entries.slice(seen)) {
-        log(`session ${n} · ${s.tools} tool calls · task=${entry.task} event=${entry.event} outcome=${entry.outcome}`);
+        // A reviewer's outcome is its routing decision, so a keyed line's review round rides in the
+        // relayed line: scripts/drive-watch.mjs counts review rounds from it.
+        const round = entry.key ? ` round=${entry.key.split("/")[2]}` : "";
+        log(`session ${n} · ${s.tools} tool calls · task=${entry.task} event=${entry.event}${round} outcome=${entry.outcome}`);
         if (!NO_PROGRESS_EVENTS.has(entry.event)) markProgressed(ctx);
       }
       seen = Math.max(seen, entries.length);
@@ -738,6 +743,7 @@ function writeRecord(ctx, s, r, n) {
     startedAt: r.startedAt,
     endedAt: now(),
     model: ctx.model,
+    effort: ctx.effort,
     ledgerLinesBefore: r.before.lines,
     ledgerLinesAfter: r.after.lines,
     committedBefore: r.before.committed,
@@ -747,10 +753,18 @@ function writeRecord(ctx, s, r, n) {
     guardDenials: s.denials,
   };
   if (r.stopReason) fields.stopReason = r.stopReason;
+  // A measured cost and an estimate never share one field (references/ledger.md § The run record).
   if (s.costUsd !== null) fields.costUsd = s.costUsd;
+  else fields.costUsdEstimated = s.spentUsd;
   if (s.depthTokens !== null) fields.depthTokens = s.depthTokens;
   if (r.waveAtStart !== null) fields.waveAtStart = r.waveAtStart;
   appendRunRecordOnce({ toplevel: gitToplevel(ctx.root), run: ctx.run, kind: "drive", fields, matchKeys: ["sessionHash"] });
+}
+
+// A stop found between sessions ended no session, so it leaves an event row, never a drive row.
+function recordStopRequest(ctx) {
+  const fields = { event: "stop-request", stage: "execution", ts: now() };
+  appendRunRecordOnce({ toplevel: gitToplevel(ctx.root), run: ctx.run, kind: "event", fields, matchKeys: ["event", "ts"] });
 }
 
 // Idle: no main-thread tool call awaits its result and no dispatch of the session is running
@@ -952,9 +966,14 @@ async function walk(ctx, opts, log, trap, runState) {
   let waited = 0;
   let attempts = 0;
   for (let n = 1; ; n++) {
-    if (trap.interrupted) return ended(130, "interrupted");
-    if (stopRequested(ctx.root)) {
-      log("a --stop request is on disk; stopping before the next session");
+    // A --stop signals as well as writing its request, so the signal can end a wait before the request
+    // is read: either way the request on disk is recorded, once.
+    const requested = stopRequested(ctx.root);
+    if (requested || trap.interrupted) {
+      if (requested) {
+        log("a --stop request is on disk; stopping before the next session");
+        recordStopRequest(ctx);
+      }
       return ended(130, "interrupted");
     }
     const stage = readState(ctx.statePath).stage;

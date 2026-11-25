@@ -6,7 +6,8 @@
 // agent to it. A session that dies mid-dispatch therefore still leaves the line that tells the
 // resume table where the task stood. A reviewer dispatch takes the task's next review round only,
 // and moves aside any findings file already at that round's path, so the verdict task-verdict
-// reads back is this dispatch's reviewer's or none.
+// reads back is this dispatch's reviewer's or none. A `--reattempt` dispatch re-sends the brief an
+// earlier dispatch saved, at the next retry, so every attempt has its own ledger line and start record.
 // Contract: references/ledger.md § Task scripts.
 import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -19,13 +20,13 @@ import { parseRecordedLine } from "./resolve-knobs.mjs";
 import { CLOSED_STAGE, loadStages } from "./stage-entry.mjs";
 import { now } from "./stamp.mjs";
 import {
-  UsageError, appendLedgerLine, checkIds, countFlag, ledgerKey, nextReviewRound, nextRetry, runTaskScript, taskEntries, taskFiles,
-  taskFlags, taskGate, workTreeRoot,
+  UsageError, appendLedgerLine, checkIds, countFlag, latestKeyed, ledgerKey, nextReviewRound, nextRetry, runTaskScript, taskEntries,
+  taskFiles, taskFlags, taskGate, workTreeRoot,
 } from "./task-ledger.mjs";
 
 const FLAGS = {
   "--run": "value", "--task": "value", "--role": "value", "--round": "value", "--ledger": "value", "--model-decision": "value",
-  "--capture-cmd": "value",
+  "--capture-cmd": "value", "--reattempt": "none",
 };
 const ROLES = new Set(["implementer", "reviewer"]);
 const LESSONS_LINE_RE = /^\*\*Lessons:\*\*.*$/m;
@@ -116,42 +117,62 @@ function refuseDriverOwnedWaves(ledger, cwd) {
   );
 }
 
+// The routing decision is the audit shape references/model-routing.md records, which already starts
+// with `model` when the router's outcome is passed verbatim; a bare tier decision gets the prefix.
+const modelOutcome = (decision) => (decision.startsWith("model ") ? decision : `model ${decision}`);
+
+// A re-attempt re-sends the round an earlier dispatch of this task and role was sent at: a reviewer's
+// open round, an implementer's latest dispatched round (0, or the fix pass's).
+function reattemptRound(ledger, task, role) {
+  if (role === "reviewer") return nextReviewRound(taskEntries(ledger, task));
+  const last = latestKeyed(ledger, task, "dispatched");
+  if (!last) throw new UsageError(`task ${task} has no implementer dispatch to re-attempt`);
+  return last.round;
+}
+
 export function dispatch(argv, brief, cwd = process.cwd()) {
   const flags = taskFlags(argv, FLAGS, ["--run", "--task", "--role"]);
   const { "--run": run, "--task": task, "--role": role } = flags;
   checkIds({ run, task });
   if (!ROLES.has(role)) throw new UsageError(`--role must be implementer or reviewer, got "${role}"`);
-  const roundFlag = countFlag(flags, "--round", role === "reviewer" ? 1 : 0);
-  if (role === "reviewer" && roundFlag === undefined) throw new UsageError("--round is required for a reviewer dispatch");
-  const round = roundFlag ?? 0;
+  const reattempt = flags["--reattempt"] === true;
   const captureCmd = flags["--capture-cmd"];
+  if (reattempt && (flags["--round"] !== undefined || captureCmd !== undefined))
+    throw new UsageError("--reattempt reads the round and the brief from the earlier dispatch: drop --round and --capture-cmd");
+  const roundFlag = reattempt ? undefined : countFlag(flags, "--round", role === "reviewer" ? 1 : 0);
+  if (!reattempt && role === "reviewer" && roundFlag === undefined) throw new UsageError("--round is required for a reviewer dispatch");
   if (captureCmd !== undefined && (role !== "implementer" || /\n/.test(captureCmd) || !captureCmd.trim()))
     throw new UsageError("--capture-cmd takes one line, on an implementer dispatch only");
-  if (!brief.trim()) throw new UsageError("the brief text on stdin is empty");
+  if (!reattempt && !brief.trim()) throw new UsageError("the brief text on stdin is empty");
 
   const root = workTreeRoot(cwd);
   const ledger = flags["--ledger"] ?? join(root, ".devcycle/ledger.md");
   refuseDriverOwnedWaves(ledger, cwd);
   const event = role === "implementer" ? "dispatched" : "review-round";
+  const round = reattempt ? reattemptRound(ledger, task, role) : roundFlag ?? 0;
   if (role === "reviewer") {
     const expected = nextReviewRound(taskEntries(ledger, task));
     if (round !== expected) throw new UsageError(`task ${task}'s next review is round ${expected}, not ${round}`);
   }
   const retry = nextRetry(ledger, task, event);
   const briefPath = briefPathFor(task, role, round);
+  if (reattempt && !existsSync(join(root, briefPath))) throw new UsageError(`no saved brief at ${briefPath} to re-attempt`);
   mkdirSync(join(root, ".devcycle/briefs"), { recursive: true });
   mkdirSync(join(root, ".devcycle/dispatch"), { recursive: true });
-  // An implementer brief ends with the task's resolved gate, so the brief, the capture helper's cmd:
-  // and the evidence check agree with no hand slicing (references/evidence.md § File-backed evidence).
-  const gate = role === "implementer" ? taskGate(ledger, task) : null;
-  const filled = role === "implementer" ? withLessons(brief, root, ledger, task) : { text: brief };
-  const tail = briefTail(gate, captureCmd);
-  atomicWrite(join(root, briefPath), tail ? `${filled.text.replace(/\n*$/, "\n")}${tail}` : filled.text);
+  // The saved brief of a re-attempt already carries its lessons block and gate tail.
+  let filled = {};
+  if (!reattempt) {
+    // An implementer brief ends with the task's resolved gate, so the brief, the capture helper's cmd:
+    // and the evidence check agree with no hand slicing (references/evidence.md § File-backed evidence).
+    const gate = role === "implementer" ? taskGate(ledger, task) : null;
+    filled = role === "implementer" ? withLessons(brief, root, ledger, task) : { text: brief };
+    const tail = briefTail(gate, captureCmd);
+    atomicWrite(join(root, briefPath), tail ? `${filled.text.replace(/\n*$/, "\n")}${tail}` : filled.text);
+  }
   if (role === "reviewer") setAsideFindings(root, task, round, retry);
   atomicWrite(join(root, `.devcycle/dispatch/${task}-${role}-${round}-${retry}.json`), JSON.stringify({ startedAt: now(), sessionId: process.env.CLAUDE_CODE_SESSION_ID || null }) + "\n");
-  // The routing decision is the audit shape references/model-routing.md records on `dispatched`.
   const decision = flags["--model-decision"];
-  const outcome = role === "implementer" ? (decision ? `model ${decision}` : `implementer retry ${retry}`) : `round ${round}`;
+  const outcome = decision ? modelOutcome(decision) : role === "implementer" ? `implementer retry ${retry}` : `round ${round}`;
   const { appended } = appendLedgerLine(ledger, { task, event, outcome, ref: briefPath, round, retry });
   return {
     action: "dispatch", task, role, round, retry, briefPath, ...("lessons" in filled ? { lessons: filled.lessons } : {}),
@@ -159,9 +180,9 @@ export function dispatch(argv, brief, cwd = process.cwd()) {
   };
 }
 
-// --help is answered before stdin is read, so an interactive call never waits on a brief.
+// --help and --reattempt are answered before stdin is read, so neither waits on a brief.
 function dispatchMain(argv) {
-  runTaskScript("task-dispatch", () => dispatch(argv, argv.includes("--help") ? "" : readFileSync(0, "utf8")));
+  runTaskScript("task-dispatch", () => dispatch(argv, argv.includes("--help") || argv.includes("--reattempt") ? "" : readFileSync(0, "utf8")));
 }
 
 if (isMain(import.meta.url, process.argv[1])) dispatchMain(process.argv.slice(2));
