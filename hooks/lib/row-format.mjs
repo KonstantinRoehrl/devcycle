@@ -77,7 +77,7 @@ function cutSegments(segments, room) {
 // dropped with its separator. Over `columns` (0 = no limit) the first `keep` segments of `what` (a task's
 // step, round and rejection warning) must survive: while they would not, the tail goes, then the lead's
 // parts after its first. Then `what` is cut from its end with "…"; when that leaves it under two cells,
-// the plain row is sliced. cc-statusline's buildRow rule, plus the prefix and the kept head.
+// the row is sliced to the columns, each surviving segment keeping its color. cc-statusline's buildRow rule, plus the prefix and the kept head.
 export function fitRow({ prefix = [], lead = [], what = [], keep = 0, tail = [] }, columns) {
   const row = (l, t, w) => [...prefix, ...joinDot([...l, w, ...t])];
   const full = row(lead, tail, what);
@@ -97,5 +97,5 @@ export function fitRow({ prefix = [], lead = [], what = [], keep = 0, tail = [] 
   const avail = room(l, t);
   if (avail >= width(what)) return row(l, t, what);
   if (what.length > 0 && avail > 1) return row(l, t, [...cutSegments(what, avail - 1), { text: "…" }]);
-  return [{ text: [...full.map((s) => s.text).join("")].slice(0, columns).join("") }];
+  return cutSegments(full, columns);
 }

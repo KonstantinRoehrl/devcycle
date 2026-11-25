@@ -324,6 +324,15 @@ test('v2 silent past 120 s: the header says the drive went silent, in warning, n
   await ui.unmount();
 });
 
+test('v2 silent past 120 s on a narrow terminal: the sliced header keeps its warning color', async ($, on) => {
+  const { ui } = await drawn($, on, { progress: progressV2() }, AT('2026-10-25T09:14:01Z'), { columns: 30 });
+  const header = (await lines(ui))[0];
+  expect(header.length).toBeLessThanOrEqual(30);
+  expect(header.startsWith('? drive silent since')).toBe(true);
+  expect(await colorOf(ui, header)).toBe('warning');
+  await ui.unmount();
+});
+
 test('v2 ended: elapsed frozen at the last write, no session row, and the v1 end line', async ($, on) => {
   const ended = progressV2({ state: 'ended', outcome: 'complete', session: null, currentWave: null });
   const { ui } = await drawn($, on, { progress: ended }, AT('2026-10-25T11:00:00Z'), { columns: 140 });

@@ -64,3 +64,13 @@ test("fitRow: with no head to keep, what is cut first and the plain row is slice
   assert.equal(session(80), "  session 3  Sonnet-5.5 (high) · ctx 1% · 12m · 18.1k tok");
   assert.equal(session(30), "  session 3  Sonnet-5.5 (high)");
 });
+
+test("fitRow: the last-resort slice keeps each surviving segment's color and cuts only the one at the limit", () => {
+  const warned = fitRow({ prefix: [{ text: "? drive silent since 09:12 · devcycle drive", color: "warning" }] }, 30);
+  assert.deepEqual(warned, [{ text: "? drive silent since 09:12 · d", color: "warning" }]);
+  const sliced = fitRow({ prefix: [{ text: "⠙ task 5  " }, { text: "Sonnet-5.5 (high)", color: MODEL_COLOR }], what: [{ text: "x" }, { text: " (1 rejection)", color: "warning" }], keep: 2 }, 14);
+  assert.deepEqual(sliced, [{ text: "⠙ task 5  " }, { text: "Sonn", color: MODEL_COLOR }]);
+  const reaching = fitRow({ prefix: [{ text: "⠙ task 5  " }, { text: "Sonnet-5.5 (high)", color: MODEL_COLOR }], what: [{ text: "x" }, { text: " (1 rejection)", color: "warning" }], keep: 2 }, 40);
+  assert.ok(width(reaching) <= 40);
+  assert.ok(reaching.every((s) => s.color === undefined || ["warning", MODEL_COLOR].includes(s.color)));
+});
