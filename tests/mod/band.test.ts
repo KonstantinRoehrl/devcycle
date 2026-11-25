@@ -287,6 +287,26 @@ test('v2: a missing value drops its segment, and only a running or quiet dispatc
   await ui.unmount();
 });
 
+test('v2: a dispatch that outlived its step draws as a plain row, never with the dispatch\'s model, effort or ctx', async ($, on) => {
+  const stale = health('running', 3 * 60_000, 9, 4000);
+  const tasks = [
+    { ...task('4', 'committed'), health: stale, dispatch: D4.dispatch },
+    { ...task('5', 'committing'), health: stale, dispatch: D4.dispatch },
+    { ...task('6', 'reviewing', 1), health: stale, dispatch: D4.dispatch },
+    { ...task('7', 'needs-user'), health: stale, dispatch: D5.dispatch },
+    { ...task('8', 'implementing'), health: stale, dispatch: D4.dispatch },
+  ];
+  const { ui } = await drawn($, on, { progress: progressV2({ waves: wave2(tasks) }) }, AT('2026-10-25T09:12:10Z'), { columns: 140 });
+  expect((await lines(ui)).slice(3)).toEqual([
+    '  wave 2  ✓ task 4  committed',
+    '          ⠙ task 5  committing · 3m · 9 tool calls',
+    '          ⠙ task 6  reviewing · round 1 · 3m · 9 tool calls',
+    '          ⠙ task 7  needs-user · 3m · 9 tool calls',
+    '          ⠙ task 8  Sonnet-5.5 (high) · ctx 3% · implementing · fast · 3m · 9 tool calls · 36.0k tok',
+  ]);
+  await ui.unmount();
+});
+
 test('v2 with no live watcher: the driver row is the drive row\'s model and effort, marked no watcher, and no session row', async ($, on) => {
   const none = progressV2({ driver: { model: 'claude-opus-5-5', effort: 'high', watcher: false }, session: null });
   const { ui } = await drawn($, on, { progress: none }, AT('2026-10-25T09:12:10Z'), { columns: 140 });

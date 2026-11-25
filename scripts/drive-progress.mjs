@@ -65,6 +65,10 @@ export function routingLabel(outcome) {
 // The ledger event that records each role's routing decision.
 const ROUTING_EVENT = { implementer: "dispatched", reviewer: "review-round" };
 const LIVE_DISPATCH = new Set(["running", "quiet"]);
+// The role whose dispatch a step is: the beat's health lags the ledger by up to one heartbeat, so a task
+// that moved on keeps the last beat's role until the step, not the health, says the dispatch has ended.
+// hooks/devcycle-mod.mjs repeats this map, as it may import nothing that imports a node: module.
+const STEP_ROLE = { implementing: "implementer", fixing: "implementer", reviewing: "reviewer" };
 
 // One tier's fields with every empty one dropped, an effort of "default" counted as empty, and the
 // model's window added once `tokens` says how deep it is: the one home of the window rule for all tiers.
@@ -99,7 +103,7 @@ export function buildProgress({ run, plan, health = null, tiers = null }) {
     const rejections = rejectionsOf(entries);
     const step = rejections > 0 && IMPLEMENTER_POSITIONS.has(position) ? STEPS.rejected : STEPS[position] ?? "needs-user";
     const live = health?.get(task);
-    const dispatch = live && LIVE_DISPATCH.has(live.state) ? dispatchOf(live, entries) : null;
+    const dispatch = live && LIVE_DISPATCH.has(live.state) && STEP_ROLE[step] === live.role ? dispatchOf(live, entries) : null;
     return {
       task, step, round: roundOf(entries), rejections,
       ...(live ? { health: { state: live.state, elapsedMs: live.elapsedMs, toolUses: live.toolUses, sinceActivityMs: live.sinceActivityMs } } : {}),

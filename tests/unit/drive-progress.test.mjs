@@ -235,8 +235,8 @@ test("a running or quiet dispatch carries its model, effort, depth and the routi
   assert.deepEqual(one.health, { state: "running", elapsedMs: 180_000, toolUses: 9, sinceActivityMs: 4000 });
   assert.deepEqual(one.dispatch, { role: "implementer", model: "claude-sonnet-5-5", effort: "high", tokens: 36_000, window: windowOf("claude-sonnet-5-5"), routing: "fast" });
   assert.equal(two.dispatch.routing, "esc lines=520, files=7");
-  const unrouted = buildProgress({ run: RUN, plan, health: new Map([["2", live("running", "implementer", { model: null, effort: null, tokens: null })]]) }).waves[0].tasks[1];
-  assert.deepEqual(unrouted.dispatch, { role: "implementer", routing: "session" });
+  const unrouted = buildProgress({ run: RUN, plan, health: new Map([["2", live("running", "reviewer", { model: null, effort: null, tokens: null })]]) }).waves[0].tasks[1];
+  assert.deepEqual(unrouted.dispatch, { role: "reviewer", routing: "esc lines=520, files=7" });
   for (const state of ["ended-with-output", "ended-without-output", "unbound"]) {
     const t = buildProgress({ run: RUN, plan, health: new Map([["1", live(state, "implementer")]]) }).waves[0].tasks[0];
     assert.equal("dispatch" in t, false, state);
@@ -256,4 +256,42 @@ test("a reviewer whose latest review-round line carries no routing decision draw
   const health = new Map([["1", { state: "running", elapsedMs: 1000, toolUses: 1, sinceActivityMs: 0, role: "reviewer", model: "claude-sonnet-5-5" }]]);
   const [one] = buildProgress({ run: RUN, plan, health }).waves[0].tasks;
   assert.deepEqual(one.dispatch, { role: "reviewer", model: "claude-sonnet-5-5" });
+});
+
+// A task that has left its dispatch still has the last beat's health, so the step decides whether that health's dispatch is drawn.
+test("a dispatch is carried only while the task's step is its role's: implementing or fixing for an implementer, reviewing for a reviewer", () => {
+  const dispatched = entry(1, "dispatched", "model sonnet"), received = entry(1, "report-received", "complete");
+  const round = entry(1, "review-round", "round 1", "1/review-round/1/0");
+  const rejected = entry(1, "review-verdict", "rejected", "1/review-verdict/1/0");
+  const accepted = entry(1, "review-verdict", "accepted", "1/review-verdict/1/0");
+  const committed = entry(1, "committed", "green gate passed");
+  const stale = (role) => new Map([["1", { state: "running", elapsedMs: 1000, toolUses: 1, sinceActivityMs: 0, role, model: "claude-sonnet-5-5", effort: "high", tokens: 9000 }]]);
+  const taskOf = (entries, role, position = taskPosition(entries)) => {
+    const plan = {
+      overview: { waves: 1, tasks: 1, committed: 0, nextWave: 1, perWave: [{ wave: 1, tasks: ["1"], committed: 0 }] },
+      positions: new Map([["1", position]]), entries: new Map([["1", entries]]),
+    };
+    return buildProgress({ run: RUN, plan, health: stale(role) }).waves[0].tasks[0];
+  };
+  const cases = [
+    ["report-received", [dispatched, received], "reviewing", "implementer", false],
+    ["accepted", [dispatched, received, round, accepted], "committing", "reviewer", false],
+    ["committed", [dispatched, received, round, accepted, committed], "committed", "reviewer", false],
+    ["committed", [dispatched, received, round, accepted, committed], "committed", "implementer", false],
+    ["not-dispatched", [], "pending", "implementer", false],
+    ["rejected", [dispatched, received, round, rejected], "fixing", "reviewer", false],
+    ["dispatched", [dispatched], "implementing", "reviewer", false],
+    ["review-round", [dispatched, received, round], "reviewing", "reviewer", true],
+    ["dispatched", [dispatched], "implementing", "implementer", true],
+  ];
+  for (const [position, entries, step, role, carries] of cases) {
+    const t = taskOf(entries, role);
+    assert.equal(t.step, step, position);
+    assert.equal("dispatch" in t, carries, `${position} with a ${role}`);
+    assert.equal(t.health.state, "running", position);
+  }
+  const fix = taskOf([dispatched, received, round, rejected, entry(1, "dispatched", "model sonnet", "1/dispatched/2/0")], "implementer");
+  assert.deepEqual([fix.step, "dispatch" in fix], ["fixing", true]);
+  const waiting = taskOf([dispatched, received, round], "reviewer", { position: "exhausted-unresolved", next: "ask-user" });
+  assert.deepEqual([waiting.step, "dispatch" in waiting], ["needs-user", false]);
 });

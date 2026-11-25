@@ -441,7 +441,9 @@ function dispatchRow(t, spin, columns) {
   return fitRow({ prefix: [{ text: `${quiet ? "?" : spin} task ${t.task}  ` }], lead: [parts.model, parts.ctx], what, keep, tail: [parts.tokens] }, columns);
 }
 
-const hasDispatch = (t) => Boolean(t.dispatch) && (t.health?.state === "running" || t.health?.state === "quiet");
+// The step names the dispatch's role, as scripts/drive-progress.mjs's STEP_ROLE does: a stale dispatch on a task that has moved on draws as a plain row.
+const STEP_ROLE = { implementing: "implementer", fixing: "implementer", reviewing: "reviewer" };
+const hasDispatch = (t) => Boolean(t.dispatch) && (t.health?.state === "running" || t.health?.state === "quiet") && STEP_ROLE[t.step] === t.dispatch.role;
 
 const settled = (t) => t.step === "committed" || t.step === "pending";
 const keptToTheLast = (t) => t.step === "needs-user" || t.rejections > 0;
