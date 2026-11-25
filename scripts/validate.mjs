@@ -25,6 +25,8 @@ import { sectionText } from "./md-sections.mjs";
 import { loadStages } from "./stage-entry.mjs";
 import { budgetDecisionErrors, recordedBudgets, newestRecorded } from "./budget-decisions.mjs";
 import { DECISIONS_DOC } from "./doc-paths.mjs";
+import { floorErrors } from "./claude-code-floor.mjs";
+import { OWNER_FILE, readVersions } from "./claude-code-versions.mjs";
 import { validateRegistry } from "./hygiene-registry.mjs";
 
 
@@ -1395,6 +1397,27 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       fail(`references/hygiene-sweeps.json: not valid JSON — ${err.message}`);
     }
     if (registry !== null) for (const message of validateRegistry(registry)) fail(`references/hygiene-sweeps.json: ${message}`);
+  }
+
+  // 31. The Claude Code floor is declared once, in .github/claude-code/package.json; every restatement of
+  //     it, every workflow and the decisions log are held to that declaration. A tree without the owner
+  //     file, a fixture plugin, has nothing to hold.
+  if (existsSync(join(root, OWNER_FILE))) {
+    let versions = null;
+    try {
+      versions = readVersions(root);
+    } catch (err) {
+      fail(`${OWNER_FILE}: ${err.message}`);
+    }
+    if (versions !== null) {
+      const readUnderRoot = (path) => (existsSync(join(root, path)) ? readFileSync(join(root, path), "utf8") : null);
+      const workflows = existsSync(workflowsDir)
+        ? readdirSync(workflowsDir)
+            .filter((f) => /\.ya?ml$/.test(f))
+            .map((f) => ({ path: `.github/workflows/${f}`, text: readFileSync(join(workflowsDir, f), "utf8") }))
+        : [];
+      for (const message of floorErrors({ floor: versions.floor, read: readUnderRoot, workflows, decisionsText: decisionsText ?? "" })) fail(message);
+    }
   }
 
   // L17: the all-hops closure follows the playbook and command hops check 15 deliberately does not gate.

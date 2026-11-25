@@ -2866,3 +2866,42 @@ test("check 29: engages only where the format module ships, and fails with no co
   assert.equal(r.status, 1);
   assert.match(r.stderr, /tests\/fixtures\/cycle-format-contract\.json/);
 });
+
+// --- check 31: the Claude Code floor ---
+
+// A tree with the versions owner file is held to it, so the green tree ships every floor mirror at
+// the owner's floor and a decisions line recording it. hooks/ needs a registration (check 22).
+const withFloor = (dir) => {
+  const owner = { private: true, description: "x", claudeCodeFloor: "2.1.287", devDependencies: { "@anthropic-ai/claude-code": "2.1.332" } };
+  writeInto(dir, ".github/claude-code/package.json", JSON.stringify(owner, null, 2) + "\n");
+  writeInto(dir, "hooks/devcycle-mod.mjs", "const MIN_CLAUDE_CODE = [2, 1, 287];\n");
+  writeInto(dir, "hooks/hooks.json", JSON.stringify({ modules: ["devcycle-mod.mjs"], hooks: {} }, null, 2) + "\n");
+  writeInto(dir, "README.md", "# Fixture\n\nRequires Claude Code 2.1.287 or later.\n");
+  writeInto(dir, "docs/README.md", "# Docs\n\nThe hooks module (Claude Code 2.1.287 or later) does nothing below 2.1.287.\n");
+  writeInto(dir, "scripts/doctor.mjs", "// Claude Code below 2.1.287 runs no hooks module.\n");
+  writeInto(dir, DECISIONS_DOC, readFileSync(join(dir, DECISIONS_DOC), "utf8") + "\n```text\nclaude-code-floor: 2.1.287\n```\n");
+  return dir;
+};
+const LITERAL_WORKFLOW = "name: CI\non: push\npermissions:\n  contents: read\njobs:\n  a:\n    env:\n      CLI: 2.1.300\n";
+
+test("floor check: a tree that agrees with its owner file passes, and a drifted mirror fails naming the file", () => {
+  const dir = withFloor(makePluginFixture());
+  ok(runValidate(dir));
+  writeInto(dir, "README.md", "# Fixture\n\nRequires Claude Code 2.1.286 or later.\n");
+  failsWith(runValidate(dir), /README\.md: the README's requirement line says 2\.1\.286/);
+});
+
+test("floor check: a Claude Code version literal in a workflow fails, and a tree without the owner file is not checked", () => {
+  const dir = withFloor(makePluginFixture());
+  writeInto(dir, ".github/workflows/ci.yml", LITERAL_WORKFLOW);
+  failsWith(runValidate(dir), /\.github\/workflows\/ci\.yml:8: Claude Code version literal 2\.1\.300/);
+  const plain = makePluginFixture();
+  writeInto(plain, ".github/workflows/ci.yml", LITERAL_WORKFLOW);
+  ok(runValidate(plain));
+});
+
+test("floor check: an owner file that does not parse fails, naming it", () => {
+  const dir = withFloor(makePluginFixture());
+  writeInto(dir, ".github/claude-code/package.json", "{");
+  failsWith(runValidate(dir), /\.github\/claude-code\/package\.json/);
+});
