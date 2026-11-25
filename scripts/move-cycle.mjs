@@ -101,7 +101,10 @@ export function moveCycle({ statePath, to, confirm = false }) {
   const sameRepository = realpathSync(gitToplevel(fromRoot)) === realpathSync(gitToplevel(toRoot));
   if (!sameRepository) return refusal(`${to} is not a worktree of this cycle's repository`, fromRoot, toRoot);
   if (toRoot === fromRoot) return refusal(`the cycle is already in ${to}`, fromRoot, toRoot);
-  const targetState = join(toRoot, ".devcycle", "state.md");
+  const targetDevcycle = join(toRoot, ".devcycle");
+  if (existsSync(targetDevcycle) && !statSync(targetDevcycle).isDirectory())
+    return refusal(`${targetDevcycle} is not a directory — move or remove it first`, fromRoot, toRoot);
+  const targetState = join(targetDevcycle, "state.md");
   if (existsSync(targetState)) return refusal(`${targetState} already holds a cycle's state file — move or close that cycle first`, fromRoot, toRoot);
 
   const state = readFileSync(statePath, "utf8");

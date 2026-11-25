@@ -103,6 +103,23 @@ test("refuses when the target already holds a file the move would write, dry run
   }
 });
 
+test("refuses when the target's .devcycle is a regular file, dry run or not, and names it", () => {
+  const c = twoCheckouts();
+  try {
+    const blocker = writeInto(c.wt, ".devcycle", "not a directory\n");
+    for (const args of [[], ["--confirm"]]) {
+      const r = move("--state", c.statePath, "--to", c.wt, ...args);
+      assert.equal(r.status, 1, JSON.stringify(r.out));
+      assert.equal(r.out.ok, false);
+      assert.ok(r.out.refused.includes(blocker) && !r.out.refused.includes("copy failed"), r.out.refused);
+    }
+    assert.equal(readFileSync(blocker, "utf8"), "not a directory\n");
+    assert.equal(existsSync(c.statePath), true);
+  } finally {
+    cleanup(c.repo, c.parent);
+  }
+});
+
 test("a copy that fails midway leaves no state file and none of its files, and a retry succeeds", () => {
   const c = twoCheckouts();
   try {

@@ -137,7 +137,11 @@ function elsewhereOf(statePath, text, cwd, allowBranchHeld) {
 }
 
 // Reflog subjects that bring a branch to a commit it did not author: its creation, a fast-forward and a
-// reset onto an existing commit.
+// reset onto an existing commit. Known gap: a catch-up to a newer base tip and a pull or reset onto a
+// remote ref both write these subjects, and no signal in the repository tells them apart (the entry's
+// target sha and `origin/<branch>` match in both). A topic updated only that way is read as having no
+// commits of its own, so offline it can miss `merged` once fast-forward merged and kept; gh still
+// catches the online case. A false `merged` is the worse error, so the gap stays.
 const CREATED = /^branch: Created from/;
 const ADOPTED = /^(branch: Reset to|reset: moving to|.*: Fast-forward$)/;
 

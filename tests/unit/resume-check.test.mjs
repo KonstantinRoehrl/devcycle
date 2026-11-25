@@ -940,6 +940,92 @@ test("merged: ancestry still fires when the topic's reflog is gone", () => {
   }
 });
 
+// A bare repository to push to and pull from, and a topic branch deleted and recreated at the cut.
+const bareRemote = () => {
+  const remote = makeTempDir("resume-check-remote-");
+  sh("git", ["init", "-q", "--bare"], { cwd: remote });
+  return remote;
+};
+const recreateTopicAtCut = (c) => {
+  c.g("branch", "-D", "feat/t");
+  c.g("branch", "feat/t", c.cut);
+  c.g("checkout", "-q", "feat/t");
+};
+
+// Known gap, pinned so a change is deliberate: nothing in a repository separates a topic caught up to
+// a newer base tip from one that pulled in commits authored elsewhere (both leave `pull: Fast-forward`
+// or `reset: moving to`), so both read as having no commits of their own. Offline, such a topic that
+// is fast-forward merged and kept resumes silently; gh still catches it online.
+test("not merged (known gap): a topic updated only by pull reads as having no commits of its own", () => {
+  const c = landedRepo();
+  const remote = bareRemote();
+  try {
+    c.g("push", "-q", remote, "feat/t");
+    c.g("remote", "add", "origin", remote);
+    recreateTopicAtCut(c);
+    c.g("pull", "-q", "--ff-only", "origin", "feat/t");
+    c.g("checkout", "-q", "main");
+    c.g("merge", "-q", "--ff-only", "feat/t");
+    assert.equal(c.g("rev-parse", "feat/t").trim(), c.tip);
+    assert.equal(runIn(c.state, c.repo, ghPrAt("0".repeat(40))).status, 0);
+  } finally {
+    c.done();
+    rmSync(remote, { recursive: true, force: true });
+  }
+});
+
+test("not merged (known gap): a topic updated only by reset --hard reads as having no commits of its own", () => {
+  const c = landedRepo();
+  try {
+    recreateTopicAtCut(c);
+    c.g("reset", "-q", "--hard", c.tip);
+    c.g("checkout", "-q", "main");
+    c.g("merge", "-q", "--ff-only", "feat/t");
+    assert.equal(checkState(c.state, { cwd: c.repo }).ok, true);
+  } finally {
+    c.done();
+  }
+});
+
+test("merged: ancestry fires when the oldest reflog entries have expired", () => {
+  const c = landedRepo();
+  try {
+    c.g("branch", "-D", "feat/t");
+    c.g("branch", "feat/t", c.cut);
+    writeInto(c.repo, "base.txt", "newer base\n");
+    commitAll(c.repo, "base moves on");
+    c.g("checkout", "-q", "feat/t");
+    c.g("merge", "-q", "--ff-only", "main");
+    c.g("checkout", "-q", "main");
+    assert.equal(checkState(c.state, { cwd: c.repo }).ok, true);
+    const reflog = join(c.repo, ".git", "logs", "refs", "heads", "feat", "t");
+    writeFileSync(reflog, readFileSync(reflog, "utf8").split("\n").slice(1).join("\n"));
+    assert.equal(checkState(c.state, { cwd: c.repo }).signal, "ancestry");
+  } finally {
+    c.done();
+  }
+});
+
+test("merged: a topic created from a remote-tracking ref with its own commit is caught by ancestry", () => {
+  const c = landedRepo();
+  const remote = bareRemote();
+  try {
+    c.g("remote", "add", "origin", remote);
+    c.g("push", "-q", "origin", "main");
+    c.g("fetch", "-q", "origin");
+    c.g("branch", "-D", "feat/t");
+    c.g("branch", "feat/t", "origin/main");
+    c.g("checkout", "-q", "feat/t");
+    writeInto(c.repo, "t.txt", "t\n");
+    commitAll(c.repo, "topic work");
+    c.g("checkout", "-q", "main");
+    c.g("merge", "-q", "--ff-only", "feat/t");
+    assert.equal(checkState(c.state, { cwd: c.repo }).signal, "ancestry");
+  } finally {
+    c.done();
+    rmSync(remote, { recursive: true, force: true });
+  }
+});
 
 test("merged: a local squash merge is caught offline by content (R1s)", () => {
   const c = landedRepo();
