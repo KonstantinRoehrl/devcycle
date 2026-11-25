@@ -3,7 +3,8 @@
 // every named artifact path (spec/plan/checklist) exists, stage: is a real enum value, and the
 // recorded branch still exists as a ref (#138). It also refuses a cycle that belongs to another
 // checkout: a state file whose root: is not its own checkout, or one that sits in a different
-// worktree of the caller's repository, or whose topic branch another live worktree holds.
+// worktree of the caller's repository, or whose topic branch another live worktree holds. Last of
+// the refusals, it stops a cycle whose topic branch has already landed in its base.
 import { readFileSync, existsSync, realpathSync } from "node:fs";
 import { isAbsolute, join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -14,9 +15,11 @@ import { isMain } from "./is-main.mjs";
 import { parseHandoff } from "./handoff-mark.mjs";
 import { readStopRecord } from "./stop-files.mjs";
 import { formatStopMessage, formatVerdict, isPendingRename, settleFormat } from "./cycle-format.mjs";
-import { uncontrolledStop } from "./cycle-position.mjs";
+import { planOf, recordedValue, uncontrolledStop } from "./cycle-position.mjs";
 import { gitToplevel, worktrees } from "./git-identity.mjs";
 import { isProtectedBranch } from "./branch-names.mjs";
+import { contentLanded, mergedPrAt, parseCut } from "./branch-landed.mjs";
+import { ledgerSlotState } from "./ledger-slot.mjs";
 
 // The stage enum's single source of truth is the `- stage: <a|b|c>` line in
 // commands/cycle.md, read the same way scripts/validate.mjs reads it, so this guard never
@@ -133,8 +136,51 @@ function elsewhereOf(statePath, text, cwd, allowBranchHeld) {
   };
 }
 
+// Which signal shows the recorded topic branch already landed in its base, as { branch, base, signal },
+// or null when it has not or when that cannot be confirmed: a missing repo, base, cut sha or gh never
+// blocks a resume. Cheapest signal first, and at most one gh call.
+function landedSignal(statePath, text, branch) {
+  const at = dirname(statePath);
+  const stateCheckout = toplevelOf(at);
+  if (branch === null || stateCheckout === null || isProtectedBranch(stateCheckout, branch)) return null;
+  const git = (...args) => spawnSync("git", ["-C", stateCheckout, ...args], { encoding: "utf8" });
+  const resolved = (rev) => {
+    const r = git("rev-parse", "--verify", "--quiet", `${rev}^{commit}`);
+    return r.status === 0 ? r.stdout.trim() : null;
+  };
+  const tip = resolved(`refs/heads/${branch}`);
+  if (tip === null || field(text, "merged-ack") === tip) return null;
+
+  let cut = parseCut(field(text, "branch") ?? "");
+  if (!cut && ledgerSlotState({ root: dirname(at), plan: planOf(text), run: recordedValue(text, "run") }) === "fresh") {
+    try {
+      const header = readFileSync(join(at, "ledger.md"), "utf8").match(/^Branch:.*$/m)?.[0];
+      cut = header ? parseCut(header) : null;
+    } catch {
+      return null;
+    }
+  }
+  if (!cut || resolved(cut.base) === null) return null;
+  const cutSha = resolved(cut.sha);
+  if (cutSha === tip) return null;
+  const landed = (signal) => ({ branch, base: cut.base, signal });
+
+  if (cutSha !== null && git("merge-base", "--is-ancestor", tip, cut.base).status === 0) return landed("ancestry");
+  if (git("remote").stdout.trim()) {
+    const pr = mergedPrAt(stateCheckout, branch);
+    if (pr?.merged && pr.headOid === tip) return landed("pr");
+  }
+  try {
+    const mergeBase = git("merge-base", cut.base, tip);
+    if (mergeBase.status === 0 && contentLanded({ root: stateCheckout, mergeBase: mergeBase.stdout.trim(), base: cut.base, ref: tip }) === true) return landed("content");
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 // The ownership checks, the stale checks and the stage's entry lines, as data: `kind` names the
-// failing class (`unreadable`, `foreign`, `elsewhere`, `stale`, `format`), and a passing check's
+// failing class (`unreadable`, `foreign`, `elsewhere`, `stale`, `merged`, `format`), and a passing check's
 // `lines` are what the CLI prints after its ok line. scripts/wave-setup.mjs runs it in-process;
 // main() prints it.
 export function checkState(statePath, { cwd = process.cwd(), allowBranchHeld = false } = {}) {
@@ -205,6 +251,10 @@ export function checkState(statePath, { cwd = process.cwd(), allowBranchHeld = f
   }
 
   if (errors.length) return { ok: false, kind: "stale", errors };
+  if (stage !== CLOSED_STAGE) {
+    const landed = landedSignal(statePath, text, branch);
+    if (landed) return { ok: false, kind: "merged", ...landed, errors: [`branch ${landed.branch} has already landed in ${landed.base} (signal: ${landed.signal})`] };
+  }
   if (format.verdict === "newer" || format.verdict === "unparseable") return { ok: false, kind: "format", format, errors: [formatStopMessage(format)] };
   const handoff = parseHandoff(field(text, "handoff"));
   const stopped = stoppedOf(statePath, text);
@@ -259,6 +309,14 @@ function main(argv) {
   if (result.kind === "stale") {
     console.error("resume-check: state file is stale — resolve before continuing:");
     for (const e of result.errors) console.error(`  - ${e}`);
+    process.exit(1);
+  }
+  if (result.kind === "merged") {
+    console.error("resume-check: this cycle's branch has already landed — do not resume it:");
+    console.error(`  - branch: ${result.branch}`);
+    console.error(`  - base: ${result.base}`);
+    console.error(`  - signal: ${result.signal}`);
+    console.error("  Close the cycle, resume anyway (records merged-ack), or leave it — the user decides.");
     process.exit(1);
   }
   if (result.kind === "format") {

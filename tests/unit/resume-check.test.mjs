@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { gitToplevel, hashSession, repoSlug } from "../../scripts/run-record.mjs";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { checkState, ownershipOf } from "../../scripts/resume-check.mjs";
-import { makeRepo, sh, writeInto } from "./helpers.mjs";
+import { commitAll, makeFakeBin, makeRepo, sh, writeInto } from "./helpers.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/resume-check.mjs");
 const run = (statePath) => spawnSync("node", [SCRIPT, "--state", statePath], { encoding: "utf8" });
@@ -827,5 +827,148 @@ test("a cycle in the worktree that holds its own branch passes", () => {
     assert.equal(r.status, 0, r.stdout + r.stderr);
   } finally {
     s.done();
+  }
+});
+
+// main with .devcycle/ ignored; feat/t cut from main's tip with one commit; the state file records the cut.
+function landedRepo({ annotate = true, extra = [] } = {}) {
+  const repo = realpathSync(makeRepo());
+  writeInto(repo, ".gitignore", ".devcycle/\n");
+  commitAll(repo, "ignore the cycle dir");
+  const cut = sh("git", ["rev-parse", "HEAD"], { cwd: repo }).trim();
+  sh("git", ["checkout", "-qb", "feat/t"], { cwd: repo });
+  writeInto(repo, "t.txt", "t\n");
+  commitAll(repo, "topic work");
+  const tip = sh("git", ["rev-parse", "HEAD"], { cwd: repo }).trim();
+  sh("git", ["checkout", "-q", "main"], { cwd: repo });
+  const state = writeInto(repo, ".devcycle/state.md", [
+    "# devcycle state", "- stage: execution", `- root: ${repo}`,
+    `- branch: feat/t${annotate ? ` (cut from main at ${cut})` : ""}`, "- spec: none", "- plan: none", "- checklist: none", ...extra, "",
+  ].join("\n"));
+  const g = (...args) => sh("git", args, { cwd: repo });
+  return { repo, cut, tip, state, g, done: () => rmSync(repo, { recursive: true, force: true }) };
+}
+const ghPrAt = (headRefOid) => {
+  const bin = makeFakeBin("gh", `process.stdout.write(${JSON.stringify(JSON.stringify([{ number: 7, headRefOid }]))});`);
+  return { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+};
+
+test("merged: a fast-forward merge into the base is caught by ancestry (R1)", () => {
+  const c = landedRepo();
+  try {
+    c.g("merge", "-q", "--ff-only", "feat/t");
+    const r = runIn(c.state, c.repo);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /this cycle's branch has already landed/);
+    for (const want of [/feat\/t/, /base: main/, /signal: ancestry/]) assert.match(r.stderr, want);
+    const checked = checkState(c.state, { cwd: c.repo });
+    assert.deepEqual([checked.kind, checked.branch, checked.base, checked.signal], ["merged", "feat/t", "main", "ancestry"]);
+  } finally {
+    c.done();
+  }
+});
+
+test("merged: a local squash merge is caught offline by content (R1s)", () => {
+  const c = landedRepo();
+  try {
+    c.g("merge", "--squash", "-q", "feat/t");
+    commitAll(c.repo, "squash");
+    assert.equal(checkState(c.state, { cwd: c.repo }).signal, "content");
+  } finally {
+    c.done();
+  }
+});
+
+test("merged: a merged PR whose head is the tip is caught by gh (R1s)", () => {
+  const c = landedRepo();
+  try {
+    c.g("remote", "add", "origin", "https://example.invalid/r.git");
+    const r = runIn(c.state, c.repo, ghPrAt(c.tip));
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /signal: pr/);
+  } finally {
+    c.done();
+  }
+});
+
+test("not merged: a commit after the merged PR keeps the cycle live", () => {
+  const c = landedRepo();
+  try {
+    c.g("remote", "add", "origin", "https://example.invalid/r.git");
+    const r = runIn(c.state, c.repo, ghPrAt("0".repeat(40)));
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  } finally {
+    c.done();
+  }
+});
+
+test("not merged: a branch still at its resolved cut sha", () => {
+  const c = landedRepo();
+  try {
+    c.g("branch", "-f", "feat/t", c.cut);
+    assert.equal(runIn(c.state, c.repo).status, 0);
+  } finally {
+    c.done();
+  }
+});
+
+test("not merged: a branch whose commits net to an empty diff", () => {
+  const c = landedRepo();
+  try {
+    c.g("checkout", "-q", "feat/t");
+    c.g("rm", "-q", "t.txt");
+    commitAll(c.repo, "revert the topic work");
+    c.g("checkout", "-q", "main");
+    assert.equal(runIn(c.state, c.repo).status, 0);
+  } finally {
+    c.done();
+  }
+});
+
+test("not merged: no recorded base, and stage done, stay silent", () => {
+  const bare = landedRepo({ annotate: false });
+  const done = landedRepo();
+  try {
+    bare.g("merge", "-q", "--ff-only", "feat/t");
+    assert.equal(runIn(bare.state, bare.repo).status, 0);
+    done.g("merge", "-q", "--ff-only", "feat/t");
+    writeFileSync(done.state, readFileSync(done.state, "utf8").replace("- stage: execution", "- stage: done"));
+    assert.equal(runIn(done.state, done.repo).status, 0);
+  } finally {
+    bare.done();
+    done.done();
+  }
+});
+
+test("merged-ack at the tip is silent, and a new landed commit fires again", () => {
+  const c = landedRepo();
+  try {
+    c.g("merge", "-q", "--ff-only", "feat/t");
+    writeFileSync(c.state, readFileSync(c.state, "utf8") + `- merged-ack: ${c.tip}\n`);
+    assert.equal(runIn(c.state, c.repo).status, 0);
+    c.g("checkout", "-q", "feat/t");
+    writeInto(c.repo, "u.txt", "u\n");
+    commitAll(c.repo, "more topic work");
+    c.g("checkout", "-q", "main");
+    c.g("merge", "-q", "--ff-only", "feat/t");
+    assert.equal(runIn(c.state, c.repo).status, 1);
+  } finally {
+    c.done();
+  }
+});
+
+test("the base comes from a ledger of this cycle, never from a previous cycle's", () => {
+  const fresh = landedRepo({ annotate: false, extra: ["- run: 00000000000000d4"] });
+  const stale = landedRepo({ annotate: false, extra: ["- run: 00000000000000d4"] });
+  try {
+    for (const [c, run] of [[fresh, "00000000000000d4"], [stale, "00000000000000a1"]]) {
+      c.g("merge", "-q", "--ff-only", "feat/t");
+      writeInto(c.repo, ".devcycle/ledger.md", `Run: \`${run}\`\nBranch: \`feat/t\` (cut from \`main\` at \`${c.cut}\`)\n`);
+    }
+    assert.equal(checkState(fresh.state, { cwd: fresh.repo }).kind, "merged");
+    assert.equal(runIn(stale.state, stale.repo).status, 0);
+  } finally {
+    fresh.done();
+    stale.done();
   }
 });
