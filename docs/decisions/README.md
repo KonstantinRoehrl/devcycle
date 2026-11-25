@@ -16,10 +16,10 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 ```text
 budget: context-budget.json commands/continue.md 81557
 budget: context-budget.json commands/cycle.md 95382
-budget: context-budget.json playbooks/finishing-the-cycle.md 54169
+budget: context-budget.json playbooks/finishing-the-cycle.md 54431
 budget: context-budget.json playbooks/receiving-review.md 130387
 budget: context-budget.json playbooks/sweeping-mechanical-changes.md 100739
-budget: surface-budget.json surfaceTotal 7632
+budget: surface-budget.json surfaceTotal 7634
 ```
 
 ## 2026-11-25 — The move-cycle invocation lands with the script
