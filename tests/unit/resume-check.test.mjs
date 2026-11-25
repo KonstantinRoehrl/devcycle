@@ -913,6 +913,33 @@ test("not merged: a topic reset onto a newer base tip with no commits of its own
   }
 });
 
+// A topic with no commits of its own, cut at the cut sha and caught up to a newer base tip, must never
+// read as merged, whichever way the catch-up was done.
+const caughtUpTopic = (c, catchUp) => {
+  c.g("branch", "-D", "feat/t");
+  c.g("branch", "feat/t", c.cut);
+  writeInto(c.repo, "base.txt", "newer base\n");
+  commitAll(c.repo, "base moves on");
+  catchUp(c);
+  c.g("checkout", "-q", "main");
+  return checkState(c.state, { cwd: c.repo });
+};
+for (const [how, catchUp] of [
+  ["git rebase main", (c) => { c.g("checkout", "-q", "feat/t"); c.g("rebase", "-q", "main"); }],
+  ["git rebase --onto main <cut>", (c) => { c.g("checkout", "-q", "feat/t"); c.g("rebase", "-q", "--onto", "main", c.cut); }],
+  ["git fetch . main:feat/t", (c) => { c.g("fetch", "-q", ".", "main:feat/t"); }],
+]) {
+  test(`not merged: a topic with no commits of its own, caught up with ${how}`, () => {
+    const c = landedRepo();
+    try {
+      const checked = caughtUpTopic(c, catchUp);
+      assert.equal(checked.ok, true, JSON.stringify(checked));
+    } finally {
+      c.done();
+    }
+  });
+}
+
 test("merged: a topic with its own commits stays caught by ancestry after it was caught up and merged", () => {
   const c = landedRepo();
   try {

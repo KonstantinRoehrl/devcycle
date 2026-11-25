@@ -5,7 +5,7 @@
 // file: the source ledger and per-task files stay behind. Without --confirm it prints what it
 // would copy and writes nothing. The run record keeps its id and needs no move, because its slug
 // is per repository.
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
@@ -68,6 +68,33 @@ function missingDirs(dir) {
   return missing;
 }
 
+// The outermost existing ancestor of `target` below `root` that is not a directory, or null when every
+// ancestor is one or does not exist yet. lstat sees a dangling symlink, which a plain existence check misses;
+// a symlink to a directory is a directory.
+function nonDirectoryAncestor(root, target) {
+  const chain = [];
+  for (let at = dirname(target); at !== root && dirname(at) !== at; at = dirname(at)) chain.unshift(at);
+  for (const at of chain) {
+    let stat;
+    try {
+      stat = lstatSync(at);
+    } catch (err) {
+      if (err.code === "ENOENT") return null;
+      return at;
+    }
+    if (!stat.isSymbolicLink()) {
+      if (!stat.isDirectory()) return at;
+      continue;
+    }
+    try {
+      if (!statSync(at).isDirectory()) return at;
+    } catch {
+      return at;
+    }
+  }
+  return null;
+}
+
 // Writes each copy and reads it back, returning the first target whose bytes differ. `created` receives
 // every file and directory this call brings into being, so a failure can remove exactly those.
 function copyVerified(copies, created) {
@@ -102,14 +129,15 @@ export function moveCycle({ statePath, to, confirm = false }) {
   if (!sameRepository) return refusal(`${to} is not a worktree of this cycle's repository`, fromRoot, toRoot);
   if (toRoot === fromRoot) return refusal(`the cycle is already in ${to}`, fromRoot, toRoot);
   const targetDevcycle = join(toRoot, ".devcycle");
-  if (existsSync(targetDevcycle) && !statSync(targetDevcycle).isDirectory())
-    return refusal(`${targetDevcycle} is not a directory — move or remove it first`, fromRoot, toRoot);
   const targetState = join(targetDevcycle, "state.md");
   if (existsSync(targetState)) return refusal(`${targetState} already holds a cycle's state file — move or close that cycle first`, fromRoot, toRoot);
 
   const state = readFileSync(statePath, "utf8");
   const moved = runScopedFiles({ state, devcycleDir, from: fromRoot });
   const copiedArtifacts = artifactsToCopy({ state, from: fromRoot, to: toRoot });
+  const blocker = [...moved.map((rel) => join(targetDevcycle, rel)), ...copiedArtifacts.map((rel) => join(toRoot, rel))]
+    .map((target) => nonDirectoryAncestor(toRoot, target)).find((at) => at !== null);
+  if (blocker) return refusal(`${blocker} is not a directory — move or remove it first`, fromRoot, toRoot);
   const collisions = moved.filter((rel) => rel !== "state.md" && existsSync(join(toRoot, ".devcycle", rel))).map((rel) => join(toRoot, ".devcycle", rel));
   if (collisions.length)
     return refusal(`${to} already holds files this move would overwrite: ${collisions.join(", ")} — move or remove them first`, fromRoot, toRoot);

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -103,39 +103,69 @@ test("refuses when the target already holds a file the move would write, dry run
   }
 });
 
-test("refuses when the target's .devcycle is a regular file, dry run or not, and names it", () => {
+// Each of these puts something other than a directory on a path the move has to write through.
+const BLOCKERS = [
+  ["the target's .devcycle is a regular file", (wt) => writeInto(wt, ".devcycle", "not a directory\n"), ".devcycle"],
+  ["a nested target path is a regular file", (wt) => writeInto(wt, ".devcycle/briefs", "not a directory\n"), ".devcycle/briefs"],
+  ["the target's .devcycle is a dangling symlink", (wt) => {
+    symlinkSync(join(wt, "nowhere"), join(wt, ".devcycle"));
+    return join(wt, ".devcycle");
+  }, ".devcycle"],
+];
+for (const [what, block, rel] of BLOCKERS) {
+  test(`refuses when ${what}, dry run or not, and names it`, () => {
+    const c = twoCheckouts();
+    try {
+      const blocker = block(c.wt);
+      for (const args of [[], ["--confirm"]]) {
+        const r = move("--state", c.statePath, "--to", c.wt, ...args);
+        assert.equal(r.status, 1, JSON.stringify(r.out));
+        assert.equal(r.out.ok, false);
+        assert.ok(r.out.refused.includes(join(c.wt, rel)) && !r.out.refused.includes("copy failed"), r.out.refused);
+      }
+      assert.equal(lstatSync(blocker).isDirectory(), false, "what was there before is untouched");
+      assert.equal(existsSync(join(c.wt, ".devcycle/state.md")), false);
+      assert.equal(existsSync(join(c.wt, ".devcycle/ledger.md")), false);
+      assert.equal(existsSync(c.statePath), true, "the source state file is intact");
+    } finally {
+      cleanup(c.repo, c.parent);
+    }
+  });
+}
+
+test("a symlink to a directory is a valid target ancestor", () => {
   const c = twoCheckouts();
   try {
-    const blocker = writeInto(c.wt, ".devcycle", "not a directory\n");
-    for (const args of [[], ["--confirm"]]) {
-      const r = move("--state", c.statePath, "--to", c.wt, ...args);
-      assert.equal(r.status, 1, JSON.stringify(r.out));
-      assert.equal(r.out.ok, false);
-      assert.ok(r.out.refused.includes(blocker) && !r.out.refused.includes("copy failed"), r.out.refused);
-    }
-    assert.equal(readFileSync(blocker, "utf8"), "not a directory\n");
-    assert.equal(existsSync(c.statePath), true);
+    const real = makeTempDir("move-cycle-real-");
+    symlinkSync(real, join(c.wt, ".devcycle"));
+    const r = move("--state", c.statePath, "--to", c.wt);
+    assert.equal(r.status, 0, JSON.stringify(r.out));
+    cleanup(real);
   } finally {
     cleanup(c.repo, c.parent);
   }
 });
 
-test("a copy that fails midway leaves no state file and none of its files, and a retry succeeds", () => {
+// A read-only directory passes the preview and then makes the briefs write throw after the others succeeded.
+const writable = process.platform !== "win32" && process.getuid?.() !== 0;
+test("a copy that fails midway leaves no state file and none of its files, and a retry succeeds", { skip: !writable }, () => {
   const c = twoCheckouts();
   try {
-    // A regular file where the briefs directory has to go makes that write throw after the others succeeded.
-    const blocker = writeInto(c.wt, ".devcycle/briefs", "not a directory\n");
+    const briefs = join(c.wt, ".devcycle/briefs");
+    mkdirSync(briefs, { recursive: true });
+    chmodSync(briefs, 0o500);
     const failed = move("--state", c.statePath, "--to", c.wt, "--confirm");
     assert.equal(failed.status, 1);
     assert.equal(failed.out.ok, false);
+    assert.match(failed.out.refused, /copy failed/);
     assert.equal(existsSync(join(c.wt, ".devcycle/state.md")), false, "state.md is written last");
     assert.equal(existsSync(join(c.wt, ".devcycle/ledger.md")), false);
     assert.equal(existsSync(join(c.wt, ".devcycle/stage-log")), false);
     assert.equal(existsSync(join(c.wt, "docs/superpowers")), false, "directories this call made are removed too");
-    assert.equal(readFileSync(blocker, "utf8"), "not a directory\n", "what was there before is untouched");
+    assert.equal(existsSync(briefs), true, "what was there before is untouched");
     assert.equal(existsSync(c.statePath), true, "the source state file is intact");
 
-    rmSync(blocker);
+    chmodSync(briefs, 0o700);
     const retried = move("--state", c.statePath, "--to", c.wt, "--confirm");
     assert.equal(retried.status, 0, retried.stderr + JSON.stringify(retried.out));
     assert.equal(existsSync(join(c.wt, ".devcycle/state.md")), true);

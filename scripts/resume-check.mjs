@@ -136,14 +136,17 @@ function elsewhereOf(statePath, text, cwd, allowBranchHeld) {
   };
 }
 
-// Reflog subjects that bring a branch to a commit it did not author: its creation, a fast-forward and a
-// reset onto an existing commit. Known gap: a catch-up to a newer base tip and a pull or reset onto a
-// remote ref both write these subjects, and no signal in the repository tells them apart (the entry's
-// target sha and `origin/<branch>` match in both). A topic updated only that way is read as having no
-// commits of its own, so offline it can miss `merged` once fast-forward merged and kept; gh still
-// catches the online case. A false `merged` is the worse error, so the gap stays.
+// Reflog subjects that bring a branch to a commit it did not author: its creation, a catch-up to a newer
+// base tip (a fast-forward from merge, pull --rebase or fetch, or a finished rebase) and a reset onto an
+// existing commit. A fresh topic caught up this way must never read as merged, which is what this
+// recognition prevents. Known gap, the other direction: a pull or reset onto a remote ref writes the same
+// subjects, and no signal in the repository tells it apart from a catch-up (the entry's target sha and
+// `origin/<branch>` match in both). A topic whose own commits arrived only that way is read as having none,
+// so offline it can miss `merged` once fast-forward merged and kept; gh still catches the online case. A
+// false `merged` is the worse error, so the gap stays. A rebase of a topic with commits of its own leaves a
+// `commit:` entry before its finish, which keeps the ancestry signal.
 const CREATED = /^branch: Created from/;
-const ADOPTED = /^(branch: Reset to|reset: moving to|.*: Fast-forward$)/;
+const ADOPTED = /^(branch: Reset to|reset: moving to|rebase \(finish\): refs\/heads\/.+ onto |.*: [Ff]ast-forward$)/;
 
 // Whether the topic branch may carry commits of its own. Graph ancestry cannot tell a topic that was
 // fast-forward merged into its base from a topic with no work that was fast-forwarded to a newer base
