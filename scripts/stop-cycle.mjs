@@ -19,7 +19,7 @@ import { isMain } from "./is-main.mjs";
 import { field } from "./md-field.mjs";
 import { stopAll } from "./on-device-launch.mjs";
 import { openProcesses, readProcesses } from "./process-registry.mjs";
-import { checkState } from "./resume-check.mjs";
+import { ownershipOf } from "./resume-check.mjs";
 import { hashSession } from "./run-record.mjs";
 import { CLOSED_STAGE } from "./stage-entry.mjs";
 import { now as stamp } from "./stamp.mjs";
@@ -39,7 +39,7 @@ const placeOf = (state) => {
   return { statePath, devcycleDir, root: dirname(devcycleDir) };
 };
 const callerHash = (env) => (env.CLAUDE_CODE_SESSION_ID ? hashSession(env.CLAUDE_CODE_SESSION_ID) : null);
-const isForeign = (statePath) => checkState(statePath).kind === "foreign";
+const isForeign = (statePath) => ownershipOf(statePath).kind === "foreign";
 const uniqueBy = (entries) => [...new Map(entries.map((e) => [`${e.kind}:${e.id}`, e])).values()];
 
 export function listCandidates({ state = null, cwd = process.cwd() } = {}) {

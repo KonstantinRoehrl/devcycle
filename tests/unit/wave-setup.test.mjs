@@ -1147,3 +1147,54 @@ test("drive.action: lockUnavailable returning null leaves start, auto, ask, gate
 test("references/drive.md's Drive actions table has an unavailable row", () => {
   assert.match(readFileSync(join(ROOT, "references/drive.md"), "utf8"), /^\| `unavailable` \| /m);
 });
+
+// The cycle's main checkout back on main, with feat/x checked out in a sibling worktree (R2).
+function heldElsewhere(opts) {
+  const c = cycle(opts);
+  sh("git", ["checkout", "-q", "main"], { cwd: c.repo });
+  const parent = makeTempDir("wave-setup-wt-");
+  const wt = join(parent, "wt");
+  sh("git", ["worktree", "add", "-q", wt, "feat/x"], { cwd: c.repo });
+  return { ...c, wt: realpathSync.native(wt) };
+}
+
+test("a branch checked out in another worktree is verdict elsewhere, never switch-needed (R2)", () => {
+  const c = heldElsewhere();
+  const r = setup(c);
+  assert.notEqual(r.stopReason, "resume-check", r.stopDetail);
+  assert.deepEqual([r.branch.verdict, r.branch.worktree, r.branch.recorded], ["elsewhere", c.wt, "feat/x"]);
+});
+
+test("a driven run stops branch on a branch checked out elsewhere (R2)", () => {
+  const c = heldElsewhere({ state: [DRIVE_ROW] });
+  withLock(c, () => {
+    const r = driven(c);
+    assert.equal(r.stopReason, "branch", r.stopDetail);
+    assert.ok(r.stopDetail.includes(c.wt), r.stopDetail);
+  });
+});
+
+test("a nested worktree's cycle read from the main checkout stops foreign-state (R3)", () => {
+  const c = cycle();
+  const nested = join(c.repo, ".worktrees", "n");
+  sh("git", ["worktree", "add", "-q", "-b", "feat/n", nested], { cwd: c.repo });
+  const statePath = writeInto(nested, ".devcycle/state.md", [
+    "# devcycle state", "- stage: execution", `- root: ${realpathSync.native(nested)}`, "- branch: feat/n (cut from main at 0000000)",
+    "- request: nested cycle", "- plan: docs/plan.md", "- run: 00000000000000a1", "",
+  ].join("\n"));
+  const r = setup({ ...c, statePath });
+  assert.equal(r.stopReason, "foreign-state", r.stopDetail);
+  assert.ok(r.stopDetail.includes(realpathSync.native(nested)), r.stopDetail);
+  assert.match(r.stopDetail, /your checkout does not hold the recorded branch/);
+  assert.match(r.stopDetail, /^[^;&|`\n]+$/, "one line a drive-mode stop can print");
+  assert.ok(!r.stopDetail.includes("$("), r.stopDetail);
+});
+
+test("a cycle read from the worktree that holds its branch stops foreign-state and says so", () => {
+  const c = heldElsewhere();
+  const r = setup(c, { cwd: c.wt });
+  assert.equal(r.stopReason, "foreign-state", r.stopDetail);
+  assert.match(r.stopDetail, /your checkout holds the recorded branch/);
+  assert.doesNotMatch(r.stopDetail, /does not hold/);
+  assert.match(r.stopDetail, /^[^;&|`\n]+$/, "one line a drive-mode stop can print");
+});

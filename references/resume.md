@@ -80,6 +80,8 @@ them with the rest.
   it: `resume` drops the row and moves the record to `.devcycle/stop-history/`. The record is a
   pointer and a report, never an authority: position is still derived as this file says. It adds a
   row and not a third `handoff:` value because `parseHandoff` reads an unknown value as `ready`.
+- `- merged-ack: <tip sha>` — the user chose "resume anyway" on a branch that had already landed;
+  `resume-check` stays silent while the branch tip equals it.
 - `- handoff: pending <stamp>` or `- handoff: ready <stamp>` — whether it is safe to clear.
   `pending`: a session is working this stage and has not reached its boundary. `/devcycle:cycle`
   writes it after its first state write, `/devcycle:continue` once its gates pass, and a session
@@ -127,7 +129,9 @@ report what its `root:` and `request:` say versus where you are,
 and let the user choose between adopting it (the repo genuinely moved: rewrite `root:`,
 keep everything else) and leaving it alone. The adopt-or-leave answer is the user's to
 give. A file with no `root:` line predates this format and is not foreign: adopt it by writing
-`root:` and `request:` at the next rewrite.
+`root:` and `request:` at the next rewrite. A file whose checkout is not the caller's, or whose
+branch is checked out in another worktree, is the next question, answered in § When git
+disagrees with the state file.
 
 ## The format row
 
@@ -190,10 +194,44 @@ checkout and may have switched it back to the integration branch):
   covers asking the user before switching; never switch silently. Never
   create a fresh topic branch when one is recorded: the recorded branch is where
   any committed work lives.
+- A recorded topic branch that another worktree holds is never switched to here: that is the
+  `elsewhere` gate (§ When git disagrees with the state file), which moves the cycle there.
 - Only if the recorded branch is still the default or an integration branch does
   branch discipline (`references/branch.md`) apply — an interrupted run may have
   stopped before the topic branch was ever created. Create it and record it on the
   `branch:` line as branch discipline requires.
+
+## When git disagrees with the state file
+
+Three disagreements stop a resume and hand the user a choice. No check closes a cycle, moves a
+file, rewrites `root:` or switches a branch by itself.
+
+- **Discovery labels.** A `checkout:` line under a candidate names the worktree that file belongs
+  to. `last event: none for this cycle` means the ledger beside it holds a previous cycle's rows.
+- **`merged`.** `resume-check` names the branch, its base and the signal. Ask one question with
+  three answers:
+  - **Close the cycle:** do only `playbooks/finishing-the-cycle.md` § Archive
+    this cycle's audit trail and § Clean up this cycle's ephemeral artifacts, then write
+    `stage: done`. Push, PR, the deliverable check, the redaction screen and the workload refresh
+    are skipped, because the work already landed.
+  - **Resume anyway:** write `- merged-ack: <tip sha>`.
+  - **Leave it:** stop.
+- **`elsewhere`.** `branch-held` names the worktree that holds the branch. `other-checkout` names
+  the state file's checkout and whether the caller's checkout holds the branch. The answers:
+  - **Move the cycle into the worktree that holds the branch.** Offered only when one holds it.
+    The cycle's state is copied into that worktree and the source `state.md` removed; the old
+    checkout keeps its ledger and per-task files (`docs/README.md`'s `move-cycle.mjs` row lists
+    what is copied). Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/move-cycle.mjs" --state <state path> --to <worktree path>`
+    once without `--confirm` and show its list. Run it with `--confirm` only after the user
+    confirms that list. A refusal is reported as it prints.
+  - **Resume in the state file's checkout.** Free the branch first, then run `/devcycle:continue`
+    there. Continue never `cd`s and never checks out a branch another worktree holds.
+  - **Leave it:** stop.
+
+  For `other-checkout` with no worktree holding the branch, offer only "resume in that checkout
+  (`cd <path>`)" and "leave it".
+- **Driven runs.** `merged` stops `resume-check`, `branch-held` stops `branch` and
+  `other-checkout` stops `foreign-state`.
 
 ## Then derive position from git evidence
 
