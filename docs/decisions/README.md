@@ -16,7 +16,7 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 ```text
 budget: context-budget.json commands/continue.md 81950
 budget: context-budget.json commands/cycle.md 95775
-budget: context-budget.json playbooks/finishing-the-cycle.md 54641
+budget: context-budget.json playbooks/finishing-the-cycle.md 54753
 budget: context-budget.json playbooks/receiving-review.md 130780
 budget: context-budget.json playbooks/sweeping-mechanical-changes.md 101132
 budget: surface-budget.json surfaceTotal 7639
