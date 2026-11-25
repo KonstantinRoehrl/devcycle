@@ -1389,7 +1389,7 @@ test("the driver keeps .devcycle/drive-progress.json on the run: running per ses
     await waitFor(() => driveLogOf(root).includes("] wait: "));
     const waiting = readProgress(root);
     assert.equal(waiting?.state, "waiting", JSON.stringify(waiting));
-    assert.equal(waiting.session, 1);
+    assert.equal(waiting.session, null, "a waiting run has no live driven session");
     assert.equal(waiting.waitWhat, "usage limit until its reset");
     assert.equal(waiting.waitUntil, driveLogOf(root).match(/wait: usage limit until its reset — resuming at (\S+)/)[1]);
     assert.equal(Date.parse(waiting.waitUntil), t0 + 120_000, "the deadline is the limit's reset plus the driver's one-minute margin");
@@ -1413,17 +1413,18 @@ test("the driver keeps .devcycle/drive-progress.json on the run: running per ses
     const effort = log.match(/\] session 1 starts — .*, effort ([^,]+),/)[1];
     const [atSession1, atSession2, ...more] = readFileSync(snaps, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
     assert.deepEqual(more, [], "a fake claude ran more than twice");
-    const pending = { v: 1, state: "running", model: MODEL, effort, waitUntil: null, waitWhat: null, stopDetail: null, outcome: null, total: 2 };
-    assert.deepEqual(timeless(atSession1), { ...pending, session: 1, currentWave: 1, committed: 0, waves: [
+    const driverRow = { model: MODEL, ...(effort === "default" ? {} : { effort }), watcher: false };
+    const pending = { v: 2, state: "running", driver: driverRow, session: null, waitUntil: null, waitWhat: null, stopDetail: null, outcome: null, total: 2 };
+    assert.deepEqual(timeless(atSession1), { ...pending, currentWave: 1, committed: 0, waves: [
       { wave: 1, committed: 0, tasks: [{ task: "1", step: "pending", round: 0, rejections: 0 }] },
       { wave: 2, committed: 0, tasks: [{ task: "2", step: "pending", round: 0, rejections: 0 }] },
     ] });
-    assert.deepEqual(timeless(atSession2), { ...pending, session: 2, currentWave: 1, committed: 0, waves: [
+    assert.deepEqual(timeless(atSession2), { ...pending, currentWave: 1, committed: 0, waves: [
       { wave: 1, committed: 0, tasks: [{ task: "1", step: "implementing", round: 0, rejections: 0 }] },
       { wave: 2, committed: 0, tasks: [{ task: "2", step: "pending", round: 0, rejections: 0 }] },
     ] });
     const final = readProgress(root);
-    assert.deepEqual(timeless(final), { ...pending, state: "ended", outcome: "complete", session: 2, currentWave: null, committed: 2, waves: [
+    assert.deepEqual(timeless(final), { ...pending, state: "ended", outcome: "complete", currentWave: null, committed: 2, waves: [
       { wave: 1, committed: 1, tasks: [{ task: "1", step: "committed", round: 0, rejections: 0 }] },
       { wave: 2, committed: 1, tasks: [{ task: "2", step: "committed", round: 0, rejections: 0 }] },
     ] });
@@ -1494,7 +1495,7 @@ test("a stop for the user leaves the progress file stopped with the stop's reaso
   assert.equal(p.stopDetail, "needs-user: task 1: a decision");
   assert.match(driveLogOf(root), /stopped for you — needs-user: task 1: a decision\n/);
   assert.equal(p.outcome, null);
-  assert.equal(p.session, 1);
+  assert.equal(p.session, null, "a stopped run has no live driven session");
   assert.equal(p.currentWave, 1);
   assert.deepEqual(p.waves[0].tasks, [{ task: "1", step: "reviewing", round: 2, rejections: 2 }]);
 });
