@@ -7,7 +7,8 @@ import { runSweep } from "../../scripts/hygiene-sweep.mjs";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 
 // The fixture repo is a path → content map, written out per test, so devcycle's own tree carries
-// no package.json, angular.json, .css or .html that would make its own sweep detect those stacks.
+// no angular.json, .css or .html that would make its own sweep detect those stacks. Its one
+// package.json, .github/claude-code/package.json, is CI tooling, which detectStacks ignores.
 const FIXTURES = fileURLToPath(new URL("../fixtures/maintain/", import.meta.url));
 const TREE = JSON.parse(readFileSync(join(FIXTURES, "dead-code-repo.json"), "utf8"));
 const recorded = (name) => readFileSync(join(FIXTURES, "sweep-tool-outputs", name), "utf8");
