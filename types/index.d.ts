@@ -11,7 +11,7 @@ export type DriveTier = { model?: string; effort?: string; tokens?: number; wind
 export type DriveTaskV1 = { task: string; step: DriveStep; round: number; rejections: number; health?: DriveHealth };
 export type DriveTaskV2 = DriveTaskV1 & { dispatch?: DriveDispatch };
 export type DriveWave<T = DriveTaskV2> = { wave: number; committed: number; tasks: T[] };
-type DriveRun = {
+export type DriveRun = {
   state: 'running' | 'waiting' | 'stopped' | 'ended';
   startedAt: string;
   updatedAt: string;
