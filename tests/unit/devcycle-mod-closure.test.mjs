@@ -24,7 +24,7 @@ function closureOf(entry) {
 
 test("the hooks module's import closure is the node-free leaves and nothing else", () => {
   assert.deepEqual(closureOf(ENTRY).map((f) => relative(ROOT, f)).sort(), [
-    "hooks/devcycle-mod.mjs", "hooks/lib/run-scope.mjs", "scripts/depth-bands.mjs", "scripts/md-field-core.mjs", "scripts/pricing.mjs",
+    "hooks/devcycle-mod.mjs", "hooks/lib/row-format.mjs", "hooks/lib/run-scope.mjs", "scripts/depth-bands.mjs", "scripts/md-field-core.mjs", "scripts/pricing.mjs",
   ]);
 });
 

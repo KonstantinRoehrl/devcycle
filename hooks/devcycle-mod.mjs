@@ -14,6 +14,7 @@
 // per-load state, `st`, as an argument, and one tool.call hook serves every behaviour.
 import { HARD_STOP, OVER_BUDGET, STAGE_FILES_READ, STAGE_TOOL_CALLS, budgetBand, contextDepth, windowFor } from "../scripts/depth-bands.mjs";
 import { activeRun } from "./lib/run-scope.mjs";
+import { cells, fitRow, joinDot, tierParts, width } from "./lib/row-format.mjs";
 
 // The first Claude Code whose hooks-module API this module is written against; below it the
 // early-access API differs, so the module stays inert (docs/platform-notes.md § (j)).
@@ -257,7 +258,8 @@ function flush($, seen, agentId, a, e) {
 // The drive band: a running execution driver's progress above the prompt, read from the file the
 // driver keeps (PROGRESS_REL), so watching a run costs no model turn. A timer stats the file each tick,
 // reads it only when its size or mtime moved, and writes what the drawing needs into BAND; the
-// drawing reads only BAND. Interactive sessions only: a `claude -p` run has nothing to draw on.
+// drawing reads only BAND. Interactive sessions only: a `claude -p` run has nothing to draw on. The tier
+// segments' colors are cc-statusline's literals; the run-state colors stay theme keys (docs/decisions/README.md).
 const BAND = { plugin: "devcycle", key: "band" };
 const BAND_TICK_MS = 300;
 const SILENT_AFTER_MS = 120_000;
@@ -269,7 +271,6 @@ const LIVE_STATES = new Set(["running", "waiting"]);
 const BODY_COLUMNS_LEAVE_MARK = [2, 1, 292];
 const MARK_COLUMNS = 5;
 
-const cells = (text) => [...text].length;
 const pad2 = (n) => String(n).padStart(2, "0");
 const clockTime = (iso) => {
   const at = new Date(iso);
@@ -284,7 +285,7 @@ function elapsedText(ms) {
 function parseProgress(text) {
   try {
     const p = JSON.parse(text);
-    return p?.v === 1 && RUN_STATES.has(p.state) && Array.isArray(p.waves) ? p : null;
+    return (p?.v === 1 || p?.v === 2) && RUN_STATES.has(p.state) && Array.isArray(p.waves) ? p : null;
   } catch {
     return null;
   }
@@ -333,7 +334,6 @@ function waveMark(wave, currentWave) {
 }
 
 const joined = (marks, separator) => marks.flatMap((m, i) => (i === 0 ? [m] : [{ text: separator }, m]));
-const width = (segments) => segments.reduce((sum, s) => sum + cells(s.text), 0);
 
 // Separators go first, then the strip is windowed around the current wave; it never wraps.
 function fitStrip(marks, at, room) {
@@ -404,10 +404,58 @@ function bodyLines(p, spin) {
   return wave.tasks.map((t, i) => [{ text: i === 0 ? lead : " ".repeat(cells(lead)) }, ...taskRow(t, spin)]);
 }
 
-// Each line a list of { text, color } segments; color a theme key.
+// Schema v 2 draws the driver session, the live driven session and each running dispatch as their own
+// tiers, in cc-statusline's row shape (hooks/lib/row-format.mjs); every other row draws as v 1 does.
+function headerLineV2(p, spin, now, columns) {
+  const driver = p.driver ?? {};
+  const parts = tierParts(driver);
+  if (silent(p, now)) {
+    const model = parts.model.map((s) => s.text).join("");
+    return fitRow({ prefix: [{ text: `? drive silent since ${clockTime(p.updatedAt)} · devcycle drive · driver ${model}`, color: "warning" }] }, columns);
+  }
+  const live = LIVE_STATES.has(p.state);
+  const elapsed = elapsedText((live ? now : Date.parse(p.updatedAt)) - Date.parse(p.startedAt));
+  const what = joinDot([driver.watcher === false ? [{ text: "no watcher", color: "subtle" }] : [], [{ text: elapsed }]]);
+  return fitRow({ prefix: [{ text: `${live ? `${spin} ` : ""}devcycle drive · driver ` }], lead: [parts.model, parts.ctx], what, tail: [parts.tokens] }, columns);
+}
+
+function sessionLine(s, now, columns) {
+  const parts = tierParts(s);
+  return fitRow({ prefix: [{ text: `  session ${s.n}  ` }], lead: [parts.model, parts.ctx], what: [{ text: elapsedText(now - Date.parse(s.startedAt)) }], tail: [parts.tokens] }, columns);
+}
+
+// The step, round and rejection warning are the row's kept head: a narrow terminal drops the tokens,
+// then ctx, before it cuts them (the 2026-11-25 narrow-fit decision, docs/decisions/README.md).
+function dispatchRow(t, spin, columns) {
+  const health = t.health;
+  const quiet = health.state === "quiet";
+  const parts = tierParts(t.dispatch);
+  const round = (t.step === "reviewing" || t.step === "fixing") && t.round > 0 ? ` · round ${t.round}` : "";
+  const what = [{ text: `${t.step}${round}` }];
+  if (t.rejections > 0) what.push({ text: ` (${t.rejections} rejection${t.rejections === 1 ? "" : "s"})`, color: "warning" });
+  const keep = what.length;
+  if (t.dispatch.routing) what.push({ text: ` · ${t.dispatch.routing}` });
+  what.push(quiet
+    ? { text: ` · silent ${minutes(health.sinceActivityMs ?? 0)}`, color: "warning" }
+    : { text: ` · ${minutes(health.elapsedMs)} · ${health.toolUses} tool call${health.toolUses === 1 ? "" : "s"}` });
+  return fitRow({ prefix: [{ text: `${quiet ? "?" : spin} task ${t.task}  ` }], lead: [parts.model, parts.ctx], what, keep, tail: [parts.tokens] }, columns);
+}
+
+const hasDispatch = (t) => Boolean(t.dispatch) && (t.health?.state === "running" || t.health?.state === "quiet");
+
+// Each line a list of { text, color } segments; color a theme key, or a literal for the tier segments.
 function bandLines({ progress: p, frame, now }, columns) {
   const spin = silent(p, now) ? "?" : SPINNER[frame % SPINNER.length];
-  return [headerLine(p, spin, now), stripLine(p, columns), ...bodyLines(p, spin)];
+  if (p.v === 1) return [headerLine(p, spin, now), stripLine(p, columns), ...bodyLines(p, spin)];
+  const header = headerLineV2(p, spin, now, columns);
+  const session = p.session ? sessionLine(p.session, now, columns) : null;
+  const strip = stripLine(p, columns);
+  const wave = p.state === "running" ? p.waves.find((w) => w.wave === p.currentWave) : null;
+  if (!wave) return [header, ...(session ? [session] : []), strip, ...bodyLines(p, spin)];
+  const lead = `  wave ${wave.wave}  `;
+  const tasks = wave.tasks.map((t) => ({ t, count: 1, row: hasDispatch(t) ? dispatchRow(t, spin, columns - cells(lead)) : taskRow(t, spin) }));
+  const body = tasks.map((r, i) => [{ text: i === 0 ? lead : " ".repeat(cells(lead)) }, ...r.row]);
+  return [header, ...(session ? [session] : []), strip, ...body];
 }
 
 async function drawBand(st, $, e, next) {
