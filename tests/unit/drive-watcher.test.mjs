@@ -5,7 +5,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { WATCHER_FILE, driverTier, liveWatcher, pidAlive, registerWatcher, unregisterWatcher, watcherPath } from "../../scripts/drive-watcher.mjs";
+import { processStartTime } from "../../scripts/file-lock.mjs";
+import { WATCHER_FILE, driverTier, liveWatcher, registerWatcher, unregisterWatcher, watcherPath } from "../../scripts/drive-watcher.mjs";
 
 const deadPid = () => Number(spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"], { encoding: "utf8" }).stdout);
 function cycle() {
@@ -16,7 +17,9 @@ function cycle() {
   return statePath;
 }
 const read = (statePath) => JSON.parse(readFileSync(watcherPath(statePath), "utf8"));
-const alive = (pids) => (pid) => pids.includes(pid);
+// Entries as written, minus the start time, which a fake pid may or may not have on this machine.
+const entries = (statePath) => read(statePath).watchers.map(({ startTime, ...w }) => w);
+const alive = (pids) => ({ pid }) => pids.includes(pid);
 const at = (iso) => Date.parse(iso);
 const usage = (model, effort, tokens) => JSON.stringify({ type: "assistant", timestamp: "2026-11-25T10:00:00.000Z", ...(effort ? { effort } : {}),
   message: { role: "assistant", model, content: [], usage: { input_tokens: tokens } } });
@@ -37,14 +40,14 @@ test("a registration replaces the same session's and prunes dead pids; the lates
   const statePath = cycle();
   registerWatcher({ statePath, sessionId: "s-1", pid: 101, now: at("2026-11-25T10:00:00Z"), isAlive: alive([101, 102]) });
   registerWatcher({ statePath, sessionId: "s-2", pid: 102, now: at("2026-11-25T10:01:00Z"), isAlive: alive([101, 102]) });
-  assert.deepEqual(read(statePath), { v: 1, watchers: [
+  assert.deepEqual(entries(statePath), [
     { sessionId: "s-1", pid: 101, startedAt: "2026-11-25T10:00:00.000Z" },
     { sessionId: "s-2", pid: 102, startedAt: "2026-11-25T10:01:00.000Z" },
-  ] });
+  ]);
   assert.deepEqual(liveWatcher({ statePath, isAlive: alive([101, 102]) }).sessionId, "s-2");
   registerWatcher({ statePath, sessionId: "s-1", pid: 103, now: at("2026-11-25T10:02:00Z"), isAlive: alive([103]) });
-  assert.deepEqual(read(statePath).watchers, [{ sessionId: "s-1", pid: 103, startedAt: "2026-11-25T10:02:00.000Z" }], "s-1 replaced, s-2's dead pid pruned");
-  assert.deepEqual(liveWatcher({ statePath, isAlive: alive([103]) }), { sessionId: "s-1", pid: 103, startedAt: "2026-11-25T10:02:00.000Z" });
+  assert.deepEqual(entries(statePath), [{ sessionId: "s-1", pid: 103, startedAt: "2026-11-25T10:02:00.000Z" }], "s-1 replaced, s-2's dead pid pruned");
+  assert.equal(liveWatcher({ statePath, isAlive: alive([103]) }).pid, 103);
   assert.equal(liveWatcher({ statePath, isAlive: alive([]) }), null);
 });
 
@@ -61,9 +64,29 @@ test("unregistering removes only this pid's entry, and the file once it is empty
   assert.equal(liveWatcher({ statePath }), null, "no file is no watcher");
 });
 
-test("pidAlive: this process is alive, an exited child is not", () => {
-  assert.equal(pidAlive(process.pid), true);
-  assert.equal(pidAlive(deadPid()), false);
+test("a registration records the process's start time, and is live while that process runs", () => {
+  const statePath = cycle();
+  registerWatcher({ statePath, sessionId: "s-1" });
+  const [entry] = read(statePath).watchers;
+  assert.equal(entry.pid, process.pid);
+  assert.equal(entry.startTime, processStartTime(process.pid));
+  assert.equal(liveWatcher({ statePath })?.sessionId, "s-1");
+});
+
+test("an entry whose pid now belongs to a different process is not live", () => {
+  const statePath = cycle();
+  writeFileSync(watcherPath(statePath), JSON.stringify({ v: 1, watchers: [
+    { sessionId: "s-1", pid: process.pid, startTime: "Mon Jan  1 00:00:00 2001", startedAt: "2001-01-01T00:00:00.000Z" },
+  ] }));
+  assert.equal(liveWatcher({ statePath }), null, "the pid is live but started long after the entry was written");
+});
+
+test("an entry written without a start time is live while its pid exists, and gone once it exits", () => {
+  const statePath = cycle();
+  writeFileSync(watcherPath(statePath), JSON.stringify({ v: 1, watchers: [{ sessionId: "s-1", pid: process.pid, startedAt: "2026-11-25T10:00:00.000Z" }] }));
+  assert.equal(liveWatcher({ statePath })?.sessionId, "s-1");
+  writeFileSync(watcherPath(statePath), JSON.stringify({ v: 1, watchers: [{ sessionId: "s-2", pid: deadPid(), startedAt: "2026-11-25T10:00:00.000Z" }] }));
+  assert.equal(liveWatcher({ statePath }), null, "an exited child is not live");
 });
 
 test("driverTier reads the live watcher's last usage record, past a synthetic record and a torn tail", () => {

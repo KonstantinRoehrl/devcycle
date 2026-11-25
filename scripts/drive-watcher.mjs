@@ -8,21 +8,16 @@ import { dirname, join } from "node:path";
 import { atomicWrite } from "./atomic-write.mjs";
 import { contextDepth, lastUsageOf } from "./depth-probe.mjs";
 import { sessionSlugDir } from "./dispatch-health.mjs";
+import { isLiveHolder, processStartTime } from "./file-lock.mjs";
 import { lastRecord } from "./jsonl.mjs";
 
 export const WATCHER_FILE = "drive-watcher.json";
 
 export const watcherPath = (statePath) => join(dirname(statePath), WATCHER_FILE);
 
-// EPERM means the pid exists under another user, so it is alive.
-export function pidAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err.code === "EPERM";
-  }
-}
+// The recorded start time is what tells a watcher's pid from a later process the OS gave the same pid;
+// an entry without one (written before it was recorded, or its start unreadable) reads live while its pid exists.
+const isLive = (w) => isLiveHolder({ pid: w.pid, startTime: w.startTime ?? null });
 
 // A missing or unparseable file reads as no watchers; only entries of the written shape are kept.
 function readWatchers(statePath) {
@@ -39,9 +34,10 @@ function writeWatchers(statePath, watchers) {
   else atomicWrite(watcherPath(statePath), `${JSON.stringify({ v: 1, watchers })}\n`);
 }
 
-export function registerWatcher({ statePath, sessionId, pid = process.pid, now = Date.now(), isAlive = pidAlive }) {
-  const kept = readWatchers(statePath).filter((w) => w.sessionId !== sessionId && w.pid !== pid && isAlive(w.pid));
-  writeWatchers(statePath, [...kept, { sessionId, pid, startedAt: new Date(now).toISOString() }]);
+export function registerWatcher({ statePath, sessionId, pid = process.pid, now = Date.now(), isAlive = isLive }) {
+  const kept = readWatchers(statePath).filter((w) => w.sessionId !== sessionId && w.pid !== pid && isAlive(w));
+  const startTime = processStartTime(pid);
+  writeWatchers(statePath, [...kept, { sessionId, pid, ...(startTime && { startTime }), startedAt: new Date(now).toISOString() }]);
 }
 
 export function unregisterWatcher({ statePath, pid = process.pid }) {
@@ -49,12 +45,12 @@ export function unregisterWatcher({ statePath, pid = process.pid }) {
   writeWatchers(statePath, readWatchers(statePath).filter((w) => w.pid !== pid));
 }
 
-export function liveWatcher({ statePath, isAlive = pidAlive }) {
-  const live = readWatchers(statePath).filter((w) => isAlive(w.pid));
+export function liveWatcher({ statePath, isAlive = isLive }) {
+  const live = readWatchers(statePath).filter((w) => isAlive(w));
   return live.length ? live.at(-1) : null;
 }
 
-export function driverTier({ statePath, env = process.env, isAlive = pidAlive }) {
+export function driverTier({ statePath, env = process.env, isAlive = isLive }) {
   const watcher = liveWatcher({ statePath, isAlive });
   const dir = watcher && sessionSlugDir(watcher.sessionId, env);
   if (!dir) return null;
