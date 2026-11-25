@@ -103,6 +103,11 @@ automatically from the official Claude Code plugin directory; afterwards
 Requires Claude Code 2.1.287 or later — earlier releases reject the manifest's `userConfig` pick-lists
 (before 2.1.271) or run an earlier hooks-module API, under which devcycle's hooks module stays off.
 
+CI tests every change on two exact Claude Code versions, the floor above and a current release, both
+declared in `.github/claude-code/package.json`. Dependabot proposes each new release weekly, and the
+daily canary opens a bump PR when one breaks devcycle; see
+[`CONTRIBUTING.md` § Before opening a PR](CONTRIBUTING.md#before-opening-a-pr).
+
 **What the hooks module can see.** Besides its settings hooks, devcycle ships a hooks module
 (`hooks/devcycle-mod.mjs`) that Claude Code runs in-process: it sees your sessions' prompts, tool
 calls and tool results, it is not sandboxed, and `claude plugin validate <plugin directory>` lists
