@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Validates a devcycle state file against on-disk reality before /devcycle:continue trusts it (#79):
 // every named artifact path (spec/plan/checklist) exists, stage: is a real enum value, and the
-// recorded branch still exists as a ref (#138).
+// recorded branch still exists as a ref (#138). It also refuses a cycle that belongs to another
+// checkout: a state file whose root: is not its own checkout, or one that sits in a different
+// worktree of the caller's repository, or whose topic branch another live worktree holds.
 import { readFileSync, existsSync, realpathSync } from "node:fs";
 import { isAbsolute, join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -13,6 +15,8 @@ import { parseHandoff } from "./handoff-mark.mjs";
 import { readStopRecord } from "./stop-files.mjs";
 import { formatStopMessage, formatVerdict, isPendingRename, settleFormat } from "./cycle-format.mjs";
 import { uncontrolledStop } from "./cycle-position.mjs";
+import { gitToplevel, worktrees } from "./git-identity.mjs";
+import { isProtectedBranch } from "./branch-names.mjs";
 
 // The stage enum's single source of truth is the `- stage: <a|b|c>` line in
 // commands/cycle.md, read the same way scripts/validate.mjs reads it, so this guard never
@@ -60,10 +64,80 @@ export function stoppedLines(stopped) {
   ];
 }
 
-// The ownership check, the stale checks and the stage's entry lines, as data: `kind` names the
-// failing class (`unreadable`, `foreign`, `stale`), and a passing check's `lines` are what the CLI
-// prints after its ok line. scripts/wave-setup.mjs runs it in-process; main() prints it.
-export function checkState(statePath) {
+const real = (p) => { try { return realpathSync.native(p); } catch { return p; } };
+
+// The real path of the checkout containing `dir` (a worktree's own toplevel, not the main repo's),
+// or null when `dir` is not in a repo or git is missing: a precondition the guard could not confirm
+// never blocks a legitimate resume — the same posture VALID_STAGES takes toward an unreadable enum.
+function toplevelOf(dir) {
+  const git = spawnSync("git", ["-C", dir, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
+  return git.status === 0 && git.stdout.trim() ? real(git.stdout.trim()) : null;
+}
+
+// The recorded topic branch's name: `branch:` minus its "(cut from <base> at <sha>)" annotation, or
+// null for none/unset.
+function recordedBranch(text) {
+  const raw = field(text, "branch");
+  const name = raw === null ? "" : raw.split(/\s+/)[0];
+  return NONE.has(name) ? null : name;
+}
+
+// references/resume.md § The ownership check: root: pins the file to one checkout, and a
+// differing root: means the file was copied or leaked from another project — never resume it.
+// Derived from the state file's OWN directory, not the cwd: the question is whether this file
+// belongs to the checkout it sits in, which is what makes it correct for nested checkouts and
+// for git worktrees. An unreadable file, a missing root: or a non-repo directory is ok. The check
+// reports; the adopt-or-leave decision is the user's, per that same section.
+export function ownershipOf(statePath) {
+  let text;
+  try {
+    text = readFileSync(statePath, "utf8");
+  } catch {
+    return { ok: true };
+  }
+  const recordedRoot = field(text, "root");
+  if (!recordedRoot || NONE.has(recordedRoot)) return { ok: true };
+  const actualRoot = toplevelOf(dirname(statePath));
+  if (actualRoot === null || real(recordedRoot) === actualRoot) return { ok: true };
+  return {
+    ok: false, kind: "foreign", recordedRoot: real(recordedRoot), actualRoot, request: field(text, "request") ?? "(none recorded)",
+    errors: [`its root: ${recordedRoot} is not this checkout (${actualRoot})`],
+  };
+}
+
+// Whether the state file sits in a different worktree of the caller's own repository than `cwd`, and
+// whether the recorded topic branch is checked out in a live worktree other than the file's. Silent
+// (null) when a toplevel or the worktree list cannot be read, or the caller is in an unrelated repo.
+function elsewhereOf(statePath, text, cwd, allowBranchHeld) {
+  const stateCheckout = toplevelOf(dirname(statePath));
+  const callerCheckout = toplevelOf(cwd);
+  if (stateCheckout === null || callerCheckout === null) return null;
+  if (real(gitToplevel(stateCheckout)) !== real(gitToplevel(callerCheckout))) return null;
+  const live = worktrees(stateCheckout).map((w) => ({ ...w, path: real(w.path) }));
+  if (!live.length) return null;
+  const branch = recordedBranch(text);
+  if (stateCheckout !== callerCheckout) {
+    const holdsBranch = branch !== null && live.some((w) => w.path === callerCheckout && w.branch === branch);
+    return {
+      ok: false, kind: "elsewhere", rule: "other-checkout", stateCheckout, callerCheckout, holdsBranch,
+      errors: [`the state file belongs to the checkout at ${stateCheckout}, not ${callerCheckout}`],
+    };
+  }
+  if (branch === null || isProtectedBranch(stateCheckout, branch)) return null;
+  const holder = live.find((w) => w.branch === branch && w.path !== stateCheckout);
+  if (!holder) return null;
+  if (allowBranchHeld) return { branchHeld: { worktree: holder.path } };
+  return {
+    ok: false, kind: "elsewhere", rule: "branch-held", branch, worktree: holder.path,
+    errors: [`branch ${branch} is checked out in another worktree: ${holder.path}`],
+  };
+}
+
+// The ownership checks, the stale checks and the stage's entry lines, as data: `kind` names the
+// failing class (`unreadable`, `foreign`, `elsewhere`, `stale`, `format`), and a passing check's
+// `lines` are what the CLI prints after its ok line. scripts/wave-setup.mjs runs it in-process;
+// main() prints it.
+export function checkState(statePath, { cwd = process.cwd(), allowBranchHeld = false } = {}) {
   let text;
   try {
     text = readFileSync(statePath, "utf8");
@@ -71,28 +145,13 @@ export function checkState(statePath) {
     return { ok: false, kind: "unreadable", errors: [`cannot read state file: ${statePath}`] };
   }
 
-  // references/resume.md § The ownership check: root: pins the file to one checkout, and a
-  // differing root: means the file was copied or leaked from another project — never resume it.
-  // This runs FIRST and returns on mismatch: every artifact path below is resolved against root:,
-  // so once root: is wrong those verdicts are noise, not findings. The check reports; the
-  // adopt-or-leave decision is the user's, per that same section.
-  const recordedRoot = field(text, "root");
-  if (recordedRoot && !NONE.has(recordedRoot)) {
-    // Derived from the state file's OWN directory, not the cwd: the question is whether this file
-    // belongs to the checkout it sits in, which is what makes it correct for nested checkouts and
-    // for git worktrees, whose toplevel is the worktree rather than the main repo.
-    const git = spawnSync("git", ["-C", dirname(statePath), "rev-parse", "--show-toplevel"], {
-      encoding: "utf8",
-    });
-    // Not a repo, or no git at all: a precondition the guard could not confirm never blocks a
-    // legitimate resume — the same posture VALID_STAGES takes toward an unreadable enum.
-    if (git.status === 0) {
-      const real = (p) => { try { return realpathSync.native(p); } catch { return p; } };
-      const actualRoot = real(git.stdout.trim());
-      if (real(recordedRoot) !== actualRoot)
-        return { ok: false, kind: "foreign", recordedRoot: real(recordedRoot), actualRoot, request: field(text, "request") ?? "(none recorded)" };
-    }
-  }
+  // Ownership runs FIRST and returns on mismatch: every artifact path below is resolved against
+  // root:, so once root: is wrong those verdicts are noise, not findings.
+  const owned = ownershipOf(statePath);
+  if (!owned.ok) return owned;
+  const elsewhere = elsewhereOf(statePath, text, cwd, allowBranchHeld);
+  if (elsewhere?.ok === false) return elsewhere;
+  const branchHeld = elsewhere?.branchHeld;
 
   const errors = [];
   const stage = field(text, "stage");
@@ -126,25 +185,22 @@ export function checkState(statePath) {
   // the branch still exists but the checkout drifted to another branch, is NOT stale: that is
   // the normal resume-switch continue.md step 4 owns, so this stays silent on it and never
   // compares against HEAD.
-  const branchRaw = field(text, "branch");
-  if (branchRaw !== null) {
-    const branch = branchRaw.split(/\s+/)[0]; // strip the "(cut from <base> at <sha>)" annotation
-    if (!NONE.has(branch)) {
-      const at = dirname(statePath);
-      // Confirm a repo first, then existence — same fail-open posture as the root check and
-      // VALID_STAGES: a precondition the guard cannot confirm never blocks a resume.
-      const inRepo = spawnSync("git", ["-C", at, "rev-parse", "--is-inside-work-tree"], { encoding: "utf8" });
-      if (inRepo.status === 0) {
-        const ref = spawnSync(
-          "git",
-          ["-C", at, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
-          { encoding: "utf8" }
+  const branch = recordedBranch(text);
+  if (branch !== null) {
+    const at = dirname(statePath);
+    // Confirm a repo first, then existence — same fail-open posture as the root check and
+    // VALID_STAGES: a precondition the guard cannot confirm never blocks a resume.
+    const inRepo = spawnSync("git", ["-C", at, "rev-parse", "--is-inside-work-tree"], { encoding: "utf8" });
+    if (inRepo.status === 0) {
+      const ref = spawnSync(
+        "git",
+        ["-C", at, "show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
+        { encoding: "utf8" }
+      );
+      if (ref.status !== 0)
+        errors.push(
+          `branch: recorded branch "${branch}" no longer exists — this state file is a leftover from a completed or abandoned cycle`
         );
-        if (ref.status !== 0)
-          errors.push(
-            `branch: recorded branch "${branch}" no longer exists — this state file is a leftover from a completed or abandoned cycle`
-          );
-      }
     }
   }
 
@@ -152,11 +208,12 @@ export function checkState(statePath) {
   if (format.verdict === "newer" || format.verdict === "unparseable") return { ok: false, kind: "format", format, errors: [formatStopMessage(format)] };
   const handoff = parseHandoff(field(text, "handoff"));
   const stopped = stoppedOf(statePath, text);
-  if (stage === CLOSED_STAGE) return { ok: true, stage, format, handoff, stopped, lines: [CLOSED_LINE] };
+  const passed = { ok: true, stage, format, handoff, stopped, ...(branchHeld && { branchHeld }) };
+  if (stage === CLOSED_STAGE) return { ...passed, lines: [CLOSED_LINE] };
   try {
-    return { ok: true, stage, format, handoff, stopped, lines: entryLines(stageEntry(stage)) };
+    return { ...passed, lines: entryLines(stageEntry(stage)) };
   } catch (err) {
-    return { ok: true, stage, format, handoff, stopped, lines: [`resume-check: no entry line — ${err.message}; fall back to ${FALLBACK}`] };
+    return { ...passed, lines: [`resume-check: no entry line — ${err.message}; fall back to ${FALLBACK}`] };
   }
 }
 
@@ -188,6 +245,15 @@ function main(argv) {
     console.error(`  - you are in: ${result.actualRoot}`);
     console.error(`  - its request: ${result.request}`);
     console.error("  Adopt it (rewrite root:, keep everything else) or leave it alone — the user decides.");
+    process.exit(1);
+  }
+  if (result.kind === "elsewhere") {
+    console.error("resume-check: this cycle belongs to another checkout — do not resume it here:");
+    console.error(`  - rule: ${result.rule}`);
+    console.error(`  - state file's checkout: ${result.stateCheckout ?? toplevelOf(dirname(statePath))}`);
+    console.error(`  - your checkout: ${result.callerCheckout ?? toplevelOf(process.cwd())}`);
+    if (result.rule === "branch-held") console.error(`  - ${result.branch} is checked out in: ${result.worktree}`);
+    console.error("  Move the cycle, resume it in its own checkout, or leave it — the user decides.");
     process.exit(1);
   }
   if (result.kind === "stale") {

@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { gitToplevel, hashSession, repoSlug } from "../../scripts/run-record.mjs";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { makeRepo, sh } from "./helpers.mjs";
+import { checkState, ownershipOf } from "../../scripts/resume-check.mjs";
+import { makeRepo, sh, writeInto } from "./helpers.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/resume-check.mjs");
 const run = (statePath) => spawnSync("node", [SCRIPT, "--state", statePath], { encoding: "utf8" });
@@ -714,5 +715,117 @@ test("no uncontrolled: line for a running last session, a ready handoff or a don
     const lines = linesOf(interrupted(opts));
     assert.ok(!lines.some((line) => line.startsWith("uncontrolled:")), `${what}: ${lines.join("\n")}`);
     assert.match(lines.at(-1), /^handoff: /, what);
+  }
+});
+
+const runIn = (statePath, cwd, env = process.env) =>
+  spawnSync("node", [SCRIPT, "--state", statePath], { cwd, env, encoding: "utf8" });
+const writeCycle = (checkout, branch) => writeInto(checkout, ".devcycle/state.md", [
+  "# devcycle state", "- stage: execution", `- root: ${checkout}`, `- branch: ${branch} (cut from main at 0000000)`,
+  "- spec: none", "- plan: none", "- checklist: none", "",
+].join("\n"));
+// The main checkout on main, and a sibling worktree on feat/b.
+function withSibling() {
+  const repo = realpathSync(makeRepo());
+  const parent = makeTempDir("resume-check-wt-");
+  const wt = join(parent, "wt");
+  sh("git", ["worktree", "add", "-q", "-b", "feat/b", wt], { cwd: repo });
+  return { repo, parent, wt: realpathSync(wt), done: () => [repo, parent].forEach((d) => rmSync(d, { recursive: true, force: true })) };
+}
+
+test("ownershipOf reports a foreign root with errors, and passes an own or unreadable file", () => {
+  const repo = realpathSync(makeRepo());
+  try {
+    const own = writeCycle(repo, "feat/b");
+    assert.deepEqual(ownershipOf(own), { ok: true });
+    assert.deepEqual(ownershipOf(join(repo, "missing.md")), { ok: true });
+    writeFileSync(own, readFileSync(own, "utf8").replace(`- root: ${repo}`, "- root: /somewhere/else"));
+    const foreign = ownershipOf(own);
+    assert.deepEqual([foreign.ok, foreign.kind, foreign.actualRoot], [false, "foreign", repo]);
+    assert.ok(foreign.errors.length > 0);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("branch-held: the recorded branch is checked out in a sibling worktree (R2)", () => {
+  const s = withSibling();
+  try {
+    const state = writeCycle(s.repo, "feat/b");
+    const checked = checkState(state, { cwd: s.repo });
+    assert.deepEqual([checked.ok, checked.kind, checked.rule, checked.worktree], [false, "elsewhere", "branch-held", s.wt]);
+    assert.ok(checked.errors.length > 0);
+    const allowed = checkState(state, { cwd: s.repo, allowBranchHeld: true });
+    assert.deepEqual([allowed.ok, allowed.branchHeld], [true, { worktree: s.wt }]);
+    const r = runIn(state, s.repo);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /this cycle belongs to another checkout/);
+    assert.match(r.stderr, /branch-held/);
+    assert.ok(r.stderr.includes(s.wt), r.stderr);
+  } finally {
+    s.done();
+  }
+});
+
+test("other-checkout: run from the sibling worktree that holds the branch (R2')", () => {
+  const s = withSibling();
+  try {
+    const state = writeCycle(s.repo, "feat/b");
+    const checked = checkState(state, { cwd: s.wt });
+    assert.deepEqual([checked.kind, checked.rule, checked.stateCheckout, checked.callerCheckout, checked.holdsBranch],
+      ["elsewhere", "other-checkout", s.repo, s.wt, true]);
+    const r = runIn(state, s.wt);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /other-checkout/);
+    assert.ok(r.stderr.includes(s.repo), r.stderr);
+  } finally {
+    s.done();
+  }
+});
+
+test("other-checkout: a nested worktree's state file read from the main checkout (R3)", () => {
+  const repo = realpathSync(makeRepo());
+  try {
+    const nested = join(repo, ".worktrees", "n");
+    sh("git", ["worktree", "add", "-q", "-b", "feat/n", nested], { cwd: repo });
+    const state = writeCycle(realpathSync(nested), "feat/n");
+    const checked = checkState(state, { cwd: repo });
+    assert.deepEqual([checked.rule, checked.stateCheckout, checked.holdsBranch], ["other-checkout", realpathSync(nested), false]);
+    assert.equal(runIn(state, repo).status, 1);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a state file in an unrelated repository is not elsewhere", () => {
+  const a = realpathSync(makeRepo());
+  const b = realpathSync(makeRepo());
+  try {
+    sh("git", ["branch", "feat/b"], { cwd: a });
+    const r = runIn(writeCycle(a, "feat/b"), b);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  } finally {
+    [a, b].forEach((d) => rmSync(d, { recursive: true, force: true }));
+  }
+});
+
+test("a worktree whose directory is gone does not hold the branch", () => {
+  const s = withSibling();
+  try {
+    rmSync(s.wt, { recursive: true, force: true });
+    const r = runIn(writeCycle(s.repo, "feat/b"), s.repo);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  } finally {
+    s.done();
+  }
+});
+
+test("a cycle in the worktree that holds its own branch passes", () => {
+  const s = withSibling();
+  try {
+    const r = runIn(writeCycle(s.wt, "feat/b"), s.wt);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  } finally {
+    s.done();
   }
 });
