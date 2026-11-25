@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { appendFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DRIVE_LOCK_REL } from "../../scripts/drive-lock.mjs";
 import { RESULT_REL } from "../../scripts/drive-result.mjs";
+import { WATCHER_FILE } from "../../scripts/drive-watcher.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
 import { createRelay, follow, LOG_TAIL_LINES, reportedLine, statusReport, waitForEnd, WATCH_LEVELS } from "../../scripts/drive-watch.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
@@ -396,3 +397,42 @@ test("drive-execution.mjs forwards --level to the follow, and refuses it without
   for (const args of [["--status", "--level", "end", "--state", statePath], ["--follow", "--level", "loud", "--state", statePath], ["--follow", "--level", "--state", statePath]])
     assert.equal(run(args).status, 2, `expected a usage error for ${JSON.stringify(args)}`);
 });
+
+const WITHOUT_SESSION = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "CLAUDE_CODE_SESSION_ID"));
+const watcherFile = (c) => join(c.root, ".devcycle", WATCHER_FILE);
+
+test("waitForEnd registers its caller's session beside the state file while it waits, and removes it when the run ends", async () => {
+  const c = makeCycle();
+  liveLock(c.root);
+  const waiting = waitForEnd({ statePath: c.statePath, pollMs: 20, env: { ...process.env, CLAUDE_CODE_SESSION_ID: "watch-1" } });
+  await pause(100);
+  assert.deepEqual(JSON.parse(readFileSync(watcherFile(c), "utf8")).watchers.map((w) => [w.sessionId, w.pid]), [["watch-1", process.pid]]);
+  writeResult(c.root);
+  releaseLock(c.root);
+  await waiting;
+  assert.equal(existsSync(watcherFile(c)), false);
+});
+
+test("waitForEnd with no session id registers nothing", async () => {
+  const c = makeCycle();
+  liveLock(c.root);
+  const waiting = waitForEnd({ statePath: c.statePath, pollMs: 20, env: WITHOUT_SESSION });
+  await pause(100);
+  assert.equal(existsSync(watcherFile(c)), false);
+  writeResult(c.root);
+  releaseLock(c.root);
+  await waiting;
+});
+
+for (const [name, script] of [["drive-watch.mjs", WATCH], ["drive-execution.mjs", DRIVER]])
+  test(`${name} --wait removes its registration on SIGTERM and exits 143`, async () => {
+    const c = makeCycle();
+    liveLock(c.root);
+    const child = spawn(process.execPath, [script, "--wait", "--state", c.statePath], { env: { ...POLL_ENV, CLAUDE_CODE_SESSION_ID: "watch-1" } });
+    const exited = new Promise((done) => child.on("exit", (code, signal) => done({ code, signal })));
+    await waitFor(() => existsSync(watcherFile(c)));
+    child.kill("SIGTERM");
+    assert.deepEqual(await exited, { code: 143, signal: null });
+    assert.equal(existsSync(watcherFile(c)), false);
+    releaseLock(c.root);
+  });

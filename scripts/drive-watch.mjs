@@ -3,9 +3,11 @@
 // worth relaying, or a wait for the run's end. What a run's state means is classifyDrive's alone
 // (scripts/drive-result.mjs); this file only reads the log beside it.
 import { closeSync, existsSync, fstatSync, openSync, readSync, statSync } from "node:fs";
+import { constants } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseFlags, requireCount, requireValue } from "./cli-flags.mjs";
 import { classifyDrive, LOG_REL } from "./drive-result.mjs";
+import { registerWatcher, unregisterWatcher } from "./drive-watcher.mjs";
 import { isMain } from "./is-main.mjs";
 
 export const LOG_TAIL_LINES = 40;
@@ -150,11 +152,34 @@ export async function follow({ statePath, since = null, pollMs = 2000, level = "
   }
 }
 
-export async function waitForEnd({ statePath, pollMs = 30_000 }) {
+async function pollForEnd(statePath, pollMs) {
   for (;;) {
     const run = classifyDrive({ statePath });
     if (!run.running) return withTail(run, statePath);
     await sleep(pollMs);
+  }
+}
+
+const WAIT_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
+
+// The waiting session is the driver session the band shows.
+export async function waitForEnd({ statePath, pollMs = 30_000, env = process.env }) {
+  const sessionId = env.CLAUDE_CODE_SESSION_ID;
+  if (!sessionId) return pollForEnd(statePath, pollMs);
+  registerWatcher({ statePath, sessionId });
+  const handlers = WAIT_SIGNALS.map((signal) => {
+    const handler = () => {
+      unregisterWatcher({ statePath });
+      process.exit(128 + constants.signals[signal]);
+    };
+    process.once(signal, handler);
+    return [signal, handler];
+  });
+  try {
+    return await pollForEnd(statePath, pollMs);
+  } finally {
+    for (const [signal, handler] of handlers) process.off(signal, handler);
+    unregisterWatcher({ statePath });
   }
 }
 
