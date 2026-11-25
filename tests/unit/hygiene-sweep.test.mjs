@@ -33,6 +33,13 @@ test("detectStacks matches bare names at any depth and *.ext by extension", () =
   assert.deepEqual(detectStacks(["README.md"], reg), []);
 });
 
+test("detectStacks ignores a manifest under .github/, so a CI-only package.json switches on no stack", () => {
+  const reg = registry();
+  assert.deepEqual(detectStacks([".github/claude-code/package.json"], reg), []);
+  assert.deepEqual(detectStacks([".github/claude-code/package.json", "package.json"], reg), ["js-ts"]);
+  assert.deepEqual(detectStacks([".github/site/x.css"], reg), ["web"], "an extension signal still matches under .github/");
+});
+
 test("selectTools runs static modes, and an executing mode only on consent", () => {
   const reg = registry();
   const pick = (consent, files) => Object.fromEntries(selectTools(reg, { stacks: ["js-ts"], files, consent })

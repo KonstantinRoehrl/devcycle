@@ -69,8 +69,8 @@ export function session(on: any, world: World = {}): Seen {
   return seen;
 }
 
-// Starts the turn, which is also where the module loads. A Claude Code without the `ui.notify` event (CI's
-// 2.1.287 and 2.1.292 pins) refuses a handler for it there, at the first call on `$`, not at `on(...)`:
+// Starts the turn, which is also where the module loads. A Claude Code without the `ui.notify` event (the floor,
+// 2.1.287, among them) refuses a handler for it there, at the first call on `$`, not at `on(...)`:
 // `canNotify` is then false and the test logs itself as skipped, the runner having no skip of its own.
 export async function startNotifying($: any, seen: Seen, name: string): Promise<boolean> {
   try {

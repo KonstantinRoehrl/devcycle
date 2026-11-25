@@ -453,7 +453,7 @@ skill for the rest.
 leaves, derives its sink's path from `import.meta.url`, attaches its budget note to `context`, and
 stays inert below 2.1.287, the first release of the API it is written against. devcycle's own
 instructions file lives at `.claude/CLAUDE.md`. CI runs both strict validations and `claude plugin
-test .` on 2.1.287 and 2.1.292. Whether `allowManagedModsOnly` refuses the whole `hooks.json` or
+test .` on 2.1.287 and 2.1.292. [Since 2026-11-25 CI reads the versions it tests from `.github/claude-code/package.json`; see `docs/decisions/README.md`.] Whether `allowManagedModsOnly` refuses the whole `hooks.json` or
 only its `modules` cannot be checked without managed settings; doctor's `mod-inactive` candidate
 reports the effect either way.
 
@@ -462,6 +462,7 @@ prints, through `$.ui.notify`, in any session, joined or not. A Bash-tool child 
 terminal (`/dev/tty` opens with `ENXIO`), and writing the session's tty directly is denied by auto
 mode's classifier, so the module is the one path to the terminal. `$.ui.notify` writes through the
 user's `preferredNotifChannel`. Where a Claude Code build has no `$.ui.notify`, the relay does nothing; CI's two pinned versions lack the event, so `tests/mod/harness.ts` registers the handler only for `tests/mod/notify.test.ts`, which runs only where the CLI knows it.]
+[2026-11-25: "CI's two pinned versions" are those of that date; `.github/claude-code/package.json` names the versions CI tests now.]
 
 ## (k) Headless `claude -p` as a driven session
 
@@ -595,7 +596,7 @@ Measured on Claude Code 2.1.316 under a zsh login shell on macOS, 2026-10-31 (#3
 - Every `SubagentStop` hook fires on a blocked stop too.
 - A blocked stop does not set `.meta.json`'s `finished`; after a block the transcript's last message record is a `user` record with `isMeta: true` carrying the hook's feedback.
 
-**Consequence.** `hooks/dispatch-sensor.mjs` is the one `SubagentStop` handler, so nothing marks ended a stop it held: it holds an implementer whose owed report is missing, counting holds on the dispatch record (cap 3) rather than trusting `stop_hook_active`, and `scripts/dispatch-health.mjs` reads a hold newer than the transcript's last record as in flight for a minute. The CI-pinned versions (2.1.287, 2.1.292) are assumed to honour the block; where one does not, the agent ends, the `heldAt` grace lapses and the transcript classifier records the death as before.
+**Consequence.** `hooks/dispatch-sensor.mjs` is the one `SubagentStop` handler, so nothing marks ended a stop it held: it holds an implementer whose owed report is missing, counting holds on the dispatch record (cap 3) rather than trusting `stop_hook_active`, and `scripts/dispatch-health.mjs` reads a hold newer than the transcript's last record as in flight for a minute. The CI-pinned versions (2.1.287, 2.1.292) [those were CI's versions on that date; `.github/claude-code/package.json` names today's] are assumed to honour the block; where one does not, the agent ends, the `heldAt` grace lapses and the transcript classifier records the death as before.
 
 ## (p) Headless `-p` stops background subagents 10 minutes after the last turn
 

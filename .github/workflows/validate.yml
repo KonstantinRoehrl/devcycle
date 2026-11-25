@@ -111,8 +111,27 @@ jobs:
           tests/unit/drive-watch.test.mjs tests/unit/drive-execution.test.mjs tests/unit/drive-resilience.test.mjs
           tests/unit/drive-surface.test.mjs tests/unit/agent-cli.test.mjs tests/unit/wave-setup.test.mjs
           tests/unit/stop-cycle.test.mjs
+  versions:
+    name: Read the Claude Code versions CI tests against
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.read.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The same ref as every other job, so a workflow_call caller's bumped sha reads its own versions.
+          ref: ${{ inputs.ref || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: ".nvmrc"
+      - name: Read the floor and the current version from .github/claude-code/package.json
+        id: read
+        run: echo "matrix=$(node scripts/claude-code-versions.mjs matrix)" >> "$GITHUB_OUTPUT"
   plugin-load:
     name: Plugin loads under Claude Code ${{ matrix.cli }}'s real validator and its hooks module passes its tests
+    needs: versions
     # scripts/validate.mjs is a HOMEGROWN approximation of the plugin loader — it only rejects
     # the loader-failure classes we thought to encode. A userConfig `"type": "integer"` slipped
     # past it in 0.17.0 and the plugin failed to load on update. This job runs Claude Code's
@@ -123,20 +142,17 @@ jobs:
     # the pre-publish check `Release` calls (bump-version.yml -> validate) — both `uses:` this
     # workflow, and a reusable-workflow call is green only if all its jobs are.
     # None of it needs an ANTHROPIC_API_KEY or a model call.
-    # Two pins, both exact, both blocking, both bumped by hand (there is no package.json for
-    # Dependabot to track a global CLI):
-    #   - 2.1.287 is the FLOOR, the oldest Claude Code devcycle supports: the first release of the
-    #     hooks-module API hooks/devcycle-mod.mjs is written against (docs/platform-notes.md § (j)).
-    #     The earlier floor, 2.1.271, was the first validator to accept `userConfig.<knob>.options`
-    #     (§ (g)). Raising the floor is a decision for docs/decisions/README.md, not a pin bump.
-    #   - 2.1.292 is the CURRENT pin: a bump that adds a validator warning reddens this job under
-    #     --strict first, which is the intended early warning, not a regression.
+    # Two exact, blocking versions, both read from .github/claude-code/package.json by the
+    # `versions` job: the FLOOR (`claudeCodeFloor`), the oldest Claude Code devcycle supports, which
+    # moves only with a docs/decisions/README.md entry; and the CURRENT version, which Dependabot
+    # bumps weekly and Canary bumps on a break. A release that adds a --strict warning turns its own
+    # bump PR red and no other PR.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
-        cli: ["2.1.287", "2.1.292"]
+        cli: ${{ fromJSON(needs.versions.outputs.matrix) }}
     env:
       CLAUDE_CLI_VERSION: ${{ matrix.cli }}
     steps:

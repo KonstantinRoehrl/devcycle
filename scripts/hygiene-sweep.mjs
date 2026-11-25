@@ -24,8 +24,9 @@ const git = (repoRoot, args) =>
   spawnSync("git", ["-C", repoRoot, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true });
 
 export function detectStacks(files, registry) {
+  // A manifest under .github/ declares CI tooling (such as the Claude Code versions Dependabot bumps), not a stack the project is written in.
   const matches = (signal, file) =>
-    signal.startsWith("*.") ? extname(file) === signal.slice(1) : basename(file) === signal;
+    signal.startsWith("*.") ? extname(file) === signal.slice(1) : basename(file) === signal && !file.startsWith(".github/");
   return Object.entries(registry.stacks)
     .filter(([, s]) => files.some((f) => s.signals.some((sig) => matches(sig, f))))
     .map(([id]) => id);

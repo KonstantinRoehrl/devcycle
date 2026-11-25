@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "description": "The Claude Code versions CI tests devcycle against. Dependabot bumps devDependencies; claudeCodeFloor changes only with a docs/decisions/README.md entry.",
+  "claudeCodeFloor": "2.1.287",
+  "devDependencies": { "@anthropic-ai/claude-code": "2.1.332" }
+}
