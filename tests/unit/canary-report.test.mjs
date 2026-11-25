@@ -2,19 +2,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { computeVerdict, currentPin, decideAction, report } from "../../scripts/canary-report.mjs";
+import { computeVerdict, decideAction, report } from "../../scripts/canary-report.mjs";
 
 const OK = { outcome: "success" };
 const FAIL = { outcome: "failure" };
 const SKIP = { outcome: "skipped" };
 const green = { install: OK, validate_marketplace: OK, validate_manifest: OK, hooks_tests: OK, marketplace_add: OK, plugin_install: OK, load_check: OK, golden_path: OK, pin: SKIP };
 const pinWith = (outputs) => ({ outcome: "success", outputs: { install: "success", ...outputs } });
-
-test("the pin is the last of validate.yml's matrix", () => {
-  assert.equal(currentPin('cli: ["2.1.287", "2.1.292"]'), "2.1.292");
-  assert.match(currentPin(readFileSync(".github/workflows/validate.yml", "utf8")), /^\d+\.\d+\.\d+$/);
-  assert.throws(() => currentPin("no matrix here"), /matrix/);
-});
 
 test("all green passes", () => {
   assert.deepEqual(computeVerdict(green), { verdict: "pass", step: null });

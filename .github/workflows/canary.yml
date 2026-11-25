@@ -118,7 +118,7 @@ jobs:
             done
             return 1
           }
-          pin="$(node scripts/canary-report.mjs pin)"
+          pin="$(node scripts/claude-code-versions.mjs current)"
           if ! retry npm install --prefix "$RUNNER_TEMP/pin" "@anthropic-ai/claude-code@$pin"; then
             echo "install=failure" >> "$GITHUB_OUTPUT"
             exit 0

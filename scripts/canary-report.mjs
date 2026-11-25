@@ -2,7 +2,7 @@
 // The canary's verdict and its one rolling issue. Which step failed does not say why: a flaky mod test
 // or a broken superpowers release fails there too. So a failure on latest is re-run on the pin, and
 // only a failure the pin does not share is called a Claude Code break.
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { isMain } from "./is-main.mjs";
@@ -10,12 +10,6 @@ import { isMain } from "./is-main.mjs";
 const LABEL = "canary";
 const SUSPECT_STEPS = { validate_marketplace: "the marketplace validator", validate_manifest: "the manifest validator", hooks_tests: "the hooks module's tests", plugin_install: "the real plugin install", load_check: "the installed plugin's load" };
 const INFRASTRUCTURE_STEPS = ["install", "marketplace_add"];
-
-export function currentPin(workflowText) {
-  const matrix = workflowText.match(/cli:\s*\[([^\]]+)\]/);
-  if (!matrix) throw new Error("no cli: matrix in the workflow text");
-  return matrix[1].split(",").at(-1).trim().replace(/^["']|["']$/g, "");
-}
 
 // A fetch can fail without Claude Code being at fault. The pin's marketplace outage and an install that
 // failed on latest but passes once tried again there both read as infrastructure, never as a break.
@@ -66,7 +60,6 @@ export function report({ verdict, version, step, runUrl, gh }) {
 }
 
 function main([command, ...rest]) {
-  if (command === "pin") return console.log(currentPin(readFileSync(".github/workflows/validate.yml", "utf8")));
   if (command === "verdict") {
     const { verdict, step } = computeVerdict(JSON.parse(process.env.STEPS));
     appendFileSync(process.env.GITHUB_OUTPUT, `verdict=${verdict}\nstep=${step ?? ""}\n`);
@@ -78,7 +71,7 @@ function main([command, ...rest]) {
     const action = report({ verdict: requireValue(flags, "--verdict"), version: requireValue(flags, "--version"), step: flags["--step"] ?? "", runUrl: requireValue(flags, "--run-url"), gh });
     return console.log(`issue action: ${action.kind}`);
   }
-  console.error("canary-report: usage: canary-report.mjs pin | verdict | report --verdict <v> --version <v> [--step <s>] --run-url <url>");
+  console.error("canary-report: usage: canary-report.mjs verdict | report --verdict <v> --version <v> [--step <s>] --run-url <url>");
   process.exit(2);
 }
 
