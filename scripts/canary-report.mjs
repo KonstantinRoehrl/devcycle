@@ -93,16 +93,30 @@ function listBumpPrs(gh, repo, readTargets) {
   });
 }
 
+// A branch left behind with no open PR (closed in the UI, a failed `gh pr create`, a cancelled run) is reused as it
+// is, never overwritten: it may hold someone's fix, and a plain push onto it would be rejected every day.
+function branchOnRemote(git, branch) {
+  try {
+    git(["ls-remote", "--exit-code", "--heads", "origin", `refs/heads/${branch}`]);
+    return true;
+  } catch (error) {
+    if (error.status === 2) return false; // --exit-code's "no matching ref"
+    throw error;
+  }
+}
+
 function openBumpPr({ version, step, text, devPin, devText, gh, git, root }) {
   const branch = `${CANARY_BRANCH}${version}`;
   const subject = bumpSubject(devPin, version);
-  git(["checkout", "-B", branch, `origin/${BASE}`]);
-  const path = join(root, OWNER_FILE);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, bumpCurrent(devText, version));
-  git(["add", OWNER_FILE]);
-  git(["-c", "user.name=github-actions[bot]", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com", "commit", "-m", subject]);
-  git(["push", "origin", `HEAD:refs/heads/${branch}`]);
+  if (!branchOnRemote(git, branch)) {
+    git(["checkout", "-B", branch, `origin/${BASE}`]);
+    const path = join(root, OWNER_FILE);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, bumpCurrent(devText, version));
+    git(["add", OWNER_FILE]);
+    git(["-c", "user.name=github-actions[bot]", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com", "commit", "-m", subject]);
+    git(["push", "origin", `HEAD:refs/heads/${branch}`]);
+  }
   try {
     gh(["label", "create", LABEL, "--force", "--color", "D93F0B", "--description", "The daily Claude Code canary found a break"]);
   } catch {

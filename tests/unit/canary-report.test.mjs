@@ -141,8 +141,9 @@ const pr = (number, headRefName, commits, markerAt = null) => ({
 });
 const canaryPr = (number, version, extra = [], markerAt = null) => pr(number, `canary/claude-code-${version}`, [SUBJECT("2.1.332", version), ...extra], markerAt);
 
-// gh and git record every call; `gh api` answers with the owner file at a PR's head, `git show` with dev's.
-function fakes({ prs = [], heads = {}, devPin = "2.1.332" } = {}) {
+// gh and git record every call; `gh api` answers with the owner file at a PR's head, `git show` with dev's,
+// and `git ls-remote --exit-code` throws (exit 2) unless the branch is listed in `remoteBranches`.
+function fakes({ prs = [], heads = {}, devPin = "2.1.332", remoteBranches = [] } = {}) {
   const calls = [];
   const gh = (a) => {
     calls.push(["gh", ...a]);
@@ -156,6 +157,11 @@ function fakes({ prs = [], heads = {}, devPin = "2.1.332" } = {}) {
   };
   const git = (a) => {
     calls.push(["git", ...a]);
+    if (a[0] === "ls-remote") {
+      const branch = a.at(-1).replace("refs/heads/", "");
+      if (!remoteBranches.includes(branch)) throw Object.assign(new Error("git ls-remote: exit 2"), { status: 2 });
+      return `0123456789abcdef0123456789abcdef01234567\t${a.at(-1)}\n`;
+    }
     return a[0] === "show" ? owner(devPin) : "";
   };
   return { calls, gh, git };
@@ -189,6 +195,9 @@ test("a break no PR covers authenticates, branches from dev, commits the bump, p
   assert.deepEqual(push, ["git", "push", "origin", "HEAD:refs/heads/canary/claude-code-2.1.340"]);
   assert.ok(!push.some((a) => a.includes("force")), "never a force-push");
   assert.ok(at(f.calls, "git", "remote") < at(f.calls, "git", "push"), "authenticates before it pushes");
+  assert.deepEqual(f.calls[at(f.calls, "git", "ls-remote")], ["git", "ls-remote", "--exit-code", "--heads", "origin", "refs/heads/canary/claude-code-2.1.340"]);
+  assert.ok(at(f.calls, "git", "remote") < at(f.calls, "git", "ls-remote"), "authenticates before it asks the remote");
+  assert.ok(at(f.calls, "git", "ls-remote") < at(f.calls, "git", "checkout"), "looks for an existing branch before it creates one");
   const create = f.calls[at(f.calls, "gh", "pr", "create")];
   const flag = (name) => create[create.indexOf(name) + 1];
   assert.equal(flag("--base"), "dev");
@@ -204,6 +213,19 @@ test("a break no PR covers authenticates, branches from dev, commits the bump, p
   assert.ok(at(f.calls, "gh", "label", "create") < at(f.calls, "gh", "pr", "create"), "the label exists before the PR uses it");
   assert.deepEqual(f.calls[at(f.calls, "gh", "workflow")], ["gh", "workflow", "run", "validate.yml", "--ref", "canary/claude-code-2.1.340"]);
   assert.ok(at(f.calls, "gh", "pr", "create") < at(f.calls, "gh", "workflow"), "the checks are dispatched after the PR opens");
+});
+
+test("a break whose branch already sits on the remote with no PR reuses it: no commit, no push, and the PR, label and checks still follow", () => {
+  const f = fakes({ remoteBranches: ["canary/claude-code-2.1.340"] });
+  const { action, ownerText } = run(f);
+  assert.equal(action.kind, "open");
+  assert.ok(at(f.calls, "git", "remote") < at(f.calls, "git", "ls-remote"), "authenticates before it asks the remote");
+  assert.equal(f.calls.filter((c) => c[0] === "git" && ["checkout", "add", "commit", "push"].some((verb) => c.includes(verb))).length, 0, "no branch, commit or push");
+  assert.equal(ownerText, null, "the owner file is not rewritten");
+  const create = f.calls[at(f.calls, "gh", "pr", "create")];
+  assert.equal(create[create.indexOf("--head") + 1], "canary/claude-code-2.1.340");
+  assert.ok(at(f.calls, "gh", "label", "create") < at(f.calls, "gh", "pr", "create"), "the label exists before the PR uses it");
+  assert.deepEqual(f.calls[at(f.calls, "gh", "workflow")], ["gh", "workflow", "run", "validate.yml", "--ref", "canary/claude-code-2.1.340"]);
 });
 
 test("a break dev already tests at or past pushes nothing, opens nothing, and returns dev's pin", () => {
