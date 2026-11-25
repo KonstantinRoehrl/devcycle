@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { findStateFiles, describe as describeState } from "../../scripts/find-state-files.mjs";
+import { makeRepo, sh } from "./helpers.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/find-state-files.mjs", import.meta.url));
 
@@ -113,5 +114,72 @@ test("a done cycle says it is closed rather than printing an entry or a fault", 
     assert.equal(rec.entryError, undefined);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const listIn = (cwd, ...args) => spawnSync("node", [SCRIPT, ...args], { cwd, encoding: "utf8" });
+
+test("a ledger left by another cycle gives no last event (R4)", () => {
+  const root = makeTempDir("fsf-");
+  try {
+    writeState(root, "# devcycle state\n- stage: planning\n- plan: none\n- run: 00000000000000b2\n- request: fresh cycle\n");
+    writeFileSync(join(root, ".devcycle", "ledger.md"),
+      "Plan: `docs/old-plan.md`\nRun: `00000000000000a1`\n\n- [2020-01-02T00:00:00Z] task=1 event=committed outcome=ok ref=abc123\n");
+    const [rec] = findStateFiles(root).map(describeState);
+    assert.deepEqual([rec.ledgerSlot, rec.lastEvent], ["stale", null]);
+    const r = listIn(root, "--dir", root);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /last event: none for this cycle \(ledger holds a previous cycle's rows\)/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a ledger of this cycle still gives its last event", () => {
+  const root = makeTempDir("fsf-");
+  try {
+    writeState(root, "# devcycle state\n- stage: execution\n- plan: docs/plan.md\n- run: 00000000000000b2\n");
+    writeFileSync(join(root, ".devcycle", "ledger.md"),
+      "Plan: `docs/plan.md`\nRun: `00000000000000b2`\n\n- [2020-01-02T00:00:00Z] task=1 event=committed outcome=ok ref=abc123\n");
+    const [rec] = findStateFiles(root).map(describeState);
+    assert.equal(rec.ledgerSlot, "fresh");
+    assert.ok(rec.lastEvent.includes("event=committed"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("from a sibling worktree, the main checkout's state file is listed with its checkout (R2')", () => {
+  const repo = realpathSync(makeRepo());
+  const parent = makeTempDir("fsf-wt-");
+  try {
+    const wt = join(parent, "wt");
+    sh("git", ["worktree", "add", "-q", "-b", "feat/b", wt], { cwd: repo });
+    writeState(repo, "# devcycle state\n- stage: execution\n- branch: feat/b\n- request: main checkout cycle\n");
+    const r = listIn(wt);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.stdout.includes(join(repo, ".devcycle", "state.md")), r.stdout);
+    assert.ok(r.stdout.includes(`checkout: ${repo}`), r.stdout);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("a nested worktree's state file is listed once, with its checkout; the caller's own has no label (R3)", () => {
+  const repo = realpathSync(makeRepo());
+  try {
+    const nested = join(repo, ".worktrees", "n");
+    sh("git", ["worktree", "add", "-q", "-b", "feat/n", nested], { cwd: repo });
+    writeState(repo, "# devcycle state\n- stage: planning\n- branch: dev\n- request: main cycle\n");
+    writeState(nested, "# devcycle state\n- stage: execution\n- branch: feat/n\n- request: nested cycle\n");
+    const r = listIn(repo);
+    assert.equal(r.status, 0, r.stderr);
+    const nestedState = join(realpathSync(nested), ".devcycle", "state.md");
+    assert.equal(r.stdout.split(nestedState).length - 1, 1, r.stdout);
+    assert.equal(r.stdout.match(/checkout: /g)?.length, 1, r.stdout);
+    assert.ok(r.stdout.includes(`checkout: ${realpathSync(nested)}`), r.stdout);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
   }
 });

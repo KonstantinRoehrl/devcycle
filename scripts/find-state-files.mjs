@@ -4,12 +4,17 @@
 // RTK shell hook that rewrites find/rg to be gitignore-aware cannot blind it — the failure
 // recorded in memory devcycle-state-file-not-found-culprit, where the exact discovery command
 // continue.md ran silently dropped the real state file under the gitignored .devcycle/. This
-// script only lists; commands/continue.md asks which one to resume and never picks.
-import { readdirSync, readFileSync, statSync } from "node:fs";
+// script only lists; commands/continue.md asks which one to resume and never picks. It also lists
+// the state files of the repo's other checkouts, each labelled with the checkout it lives in, and
+// says when the ledger beside a state file holds a previous cycle's rows rather than its own.
+import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
+import { worktrees } from "./git-identity.mjs";
+import { ledgerSlotState } from "./ledger-slot.mjs";
+import { field } from "./md-field.mjs";
 import { stageEntry, entryLines, CLOSED_STAGE, CLOSED_LINE } from "./stage-entry.mjs";
 
 // Reuses scripts/validate.mjs's walk-prune convention: .git holds no state file and node_modules
@@ -45,9 +50,22 @@ export function findStateFiles(root) {
   return out.sort();
 }
 
-const field = (text, name) => {
-  const m = text.match(new RegExp(`^- ${name}:\\s*(.+?)\\s*$`, "m"));
-  return m ? m[1] : null;
+// The checkout holding dir, as a real path; null outside a repo. Not gitToplevel: that folds every
+// worktree into the main checkout, and this is the label that tells them apart.
+function checkoutOf(dir) {
+  const top = spawnSync("git", ["-C", dir, "rev-parse", "--show-toplevel"], { encoding: "utf8" });
+  if (top.status !== 0 || !top.stdout.trim()) return null;
+  try {
+    return realpathSync(top.stdout.trim());
+  } catch {
+    return null;
+  }
+}
+
+// A state field's first token, or null when unset — the plan and run the ledger slot is judged by.
+const recorded = (raw) => {
+  const value = (raw ?? "").split(/\s+/)[0];
+  return ["", "none", "<tbd>"].includes(value) ? null : value;
 };
 
 export function describe(statePath) {
@@ -63,14 +81,20 @@ export function describe(statePath) {
     const t = Date.parse(updated);
     if (!Number.isNaN(t)) ageSeconds = Math.max(0, Math.floor((Date.now() - t) / 1000));
   }
+  const ledgerSlot = ledgerSlotState({
+    root: dirname(dirname(statePath)),
+    plan: recorded(field(text, "plan")),
+    run: recorded(field(text, "run")),
+  });
   let lastEvent = null;
   try {
+    if (ledgerSlot !== "fresh") throw new Error("ledger belongs to another cycle");
     const lines = readFileSync(join(dirname(statePath), "ledger.md"), "utf8")
       .split("\n")
       .filter((l) => LEDGER_EVENT_RE.test(l));
     if (lines.length) lastEvent = lines[lines.length - 1].trim();
   } catch {
-    /* no sibling ledger: lastEvent stays null */
+    /* no sibling ledger, or one left by another cycle: lastEvent stays null */
   }
   return {
     path: statePath,
@@ -78,6 +102,8 @@ export function describe(statePath) {
     request: field(text, "request"),
     branch: field(text, "branch"),
     stage: field(text, "stage"),
+    checkout: checkoutOf(dirname(statePath)),
+    ledgerSlot,
     lastEvent,
     updated,
     ageSeconds,
@@ -104,6 +130,31 @@ function entryFor(stage) {
   }
 }
 
+const realPath = (p) => {
+  try {
+    return realpathSync.native(p);
+  } catch {
+    return p;
+  }
+};
+
+// The walk's state files, then each other live worktree's, once per real path.
+function withOtherCheckouts(walked, callerCheckout) {
+  const seen = new Set(walked.map(realPath));
+  const out = [...walked];
+  for (const w of callerCheckout ? worktrees(callerCheckout) : []) {
+    const sf = join(w.path, ".devcycle", "state.md");
+    try {
+      if (!statSync(sf).isFile() || seen.has(realPath(sf))) continue;
+    } catch {
+      continue; // no state file there, or an unreadable path: stay silent
+    }
+    seen.add(realPath(sf));
+    out.push(sf);
+  }
+  return out;
+}
+
 function main(argv) {
   let flags, root;
   try {
@@ -125,7 +176,8 @@ function main(argv) {
     process.exit(1);
   }
 
-  const records = findStateFiles(root).map(describe);
+  const callerCheckout = checkoutOf(root);
+  const records = withOtherCheckouts(findStateFiles(root), callerCheckout).map(describe);
   if (flags["--json"]) {
     const withEntries = records.map((r) => {
       const { lines, ...e } = entryFor(r.stage);
@@ -141,9 +193,11 @@ function main(argv) {
   console.log(`${records.length} devcycle state file(s) found:\n`);
   records.forEach((r, i) => {
     console.log(`${i + 1}. ${r.path}`);
+    if (r.checkout && callerCheckout && r.checkout !== callerCheckout) console.log(`   checkout: ${r.checkout}`);
     console.log(`   request: ${r.request ?? "(none)"}`);
     console.log(`   branch:  ${r.branch ?? "(none)"}   stage: ${r.stage ?? "(none)"}   age: ${fmtAge(r.ageSeconds)}`);
-    console.log(`   last event: ${r.lastEvent ?? "(no ledger events)"}`);
+    const staleLedger = "none for this cycle (ledger holds a previous cycle's rows)";
+    console.log(`   last event: ${r.ledgerSlot === "stale" ? staleLedger : (r.lastEvent ?? "(no ledger events)")}`);
     for (const line of entryFor(r.stage).lines) console.log(`   ${line}`);
     console.log("");
   });
