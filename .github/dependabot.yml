@@ -1,9 +1,29 @@
 version: 2
+# Every dependency source Dependabot can track. Both entries open their PRs into dev, titled as
+# Conventional Commits: `ci(deps): …` for actions, `ci(deps-dev): …` for the Claude Code pin. The
+# Claude Code floor (claudeCodeFloor in .github/claude-code/package.json) is a custom field Dependabot
+# never reads, so it moves only with a docs/decisions/README.md entry. That log's 2026-11-25 entry
+# names each source left out of this file and why.
 updates:
   - package-ecosystem: github-actions
     directory: /
+    target-branch: dev
     schedule:
       interval: weekly
+    commit-message:
+      prefix: ci
+      include: scope
     groups:
       actions:
         patterns: ["*"]
+  - package-ecosystem: npm
+    directory: /.github/claude-code
+    target-branch: dev
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      claude-code:
+        patterns: ["@anthropic-ai/claude-code"]

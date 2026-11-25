@@ -5,6 +5,46 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-25 — CI's Claude Code versions are owned once and bumped by Dependabot and Canary (#495)
+
+**Decision:** `.github/claude-code/package.json` owns the two Claude Code versions CI tests devcycle
+against. The current version is an exact `devDependencies` pin and the floor is a custom
+`claudeCodeFloor` field. `scripts/claude-code-versions.mjs` is the only code that reads the file.
+`validate.yml`'s matrix and Canary's pin re-run both go through it, so no workflow names a version.
+Dependabot bumps the current pin weekly through a new `npm` entry. Both Dependabot entries now open
+their PRs into `dev`, titled `ci(deps): …` for actions and `ci(deps-dev): …` for the Claude Code
+pin, a devDependency. Before this, every Dependabot PR (#1, #86, #356) opened and merged straight
+into `main`. On a break, the daily Canary now opens or updates a bump PR into `dev` in place of the
+rolling `canary` issue.
+
+The floor stays 2.1.287. It moves only with an entry here that carries a `claude-code-floor:` line.
+`scripts/validate.mjs` check 31 fails when the owner's floor differs from the newest such line,
+when a floor mirror (`MIN_CLAUDE_CODE` in `hooks/devcycle-mod.mjs`, the README's requirement line,
+`docs/README.md`'s hooks-module row, doctor's `mod-inactive` message) states another version, or
+when a workflow carries a Claude Code version literal.
+
+`tests/mod/guard.test.ts`'s boundary values, 2.1.286 and 2.1.287, are exempt from check 31. They
+exercise `MIN_CLAUDE_CODE`, which check 31 does hold to the floor, so a moved floor fails them on
+their own.
+
+**Why:** the current pin sat 36 releases behind `latest`, because nothing prompted a bump, and the
+rolling issue went unseen. A bump PR is checked like any other change, and it is where a fix lands.
+
+**Not tracked by Dependabot, and why:**
+
+| Source | Why |
+| --- | --- |
+| The Claude Code floor (`claudeCodeFloor`) | A deliberate pin. It moves only with an entry here. |
+| Node, `.nvmrc` | No Dependabot ecosystem reads `.nvmrc`. Bumped by hand with its own decision. |
+| gitleaks (version and sha256 in `validate.yml`'s env) | A release asset pinned by digest, not a package manifest. |
+| The `superpowers` plugin dependency and the `claude-plugins-official` marketplace | Unversioned: resolved from the marketplace at install, so there is nothing to bump. |
+| Runner images (`ubuntu-24.04`, `windows-2025`) | Pinned image labels, not a Dependabot ecosystem. |
+| The hygiene-sweep tool versions in `references/hygiene-sweeps.json` | A runtime registry `/devcycle:maintain` runs in other repos, not a manifest of this one. Bumped by hand. |
+
+```text
+claude-code-floor: 2.1.287
+```
+
 ## 2026-11-24 — Re-dispatches re-attempt through task-dispatch, and intake routes the reviewer (#407, #456)
 
 **Decision:** a re-dispatch of a saved brief goes through `task-dispatch.mjs --reattempt`, so each
