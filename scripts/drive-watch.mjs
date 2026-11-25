@@ -162,14 +162,23 @@ async function pollForEnd(statePath, pollMs) {
 
 const WAIT_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
 
+// The registration only feeds the band's display, so a write that cannot land never costs the run's result.
+const bestEffort = (action) => {
+  try {
+    action();
+  } catch {
+    // the band shows no watcher; the wait is unaffected
+  }
+};
+
 // The waiting session is the driver session the band shows.
 export async function waitForEnd({ statePath, pollMs = 30_000, env = process.env }) {
   const sessionId = env.CLAUDE_CODE_SESSION_ID;
   if (!sessionId) return pollForEnd(statePath, pollMs);
-  registerWatcher({ statePath, sessionId });
+  bestEffort(() => registerWatcher({ statePath, sessionId }));
   const handlers = WAIT_SIGNALS.map((signal) => {
     const handler = () => {
-      unregisterWatcher({ statePath });
+      bestEffort(() => unregisterWatcher({ statePath }));
       process.exit(128 + constants.signals[signal]);
     };
     process.once(signal, handler);
@@ -179,7 +188,7 @@ export async function waitForEnd({ statePath, pollMs = 30_000, env = process.env
     return await pollForEnd(statePath, pollMs);
   } finally {
     for (const [signal, handler] of handlers) process.off(signal, handler);
-    unregisterWatcher({ statePath });
+    bestEffort(() => unregisterWatcher({ statePath }));
   }
 }
 

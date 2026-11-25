@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -411,6 +411,20 @@ test("waitForEnd registers its caller's session beside the state file while it w
   releaseLock(c.root);
   await waiting;
   assert.equal(existsSync(watcherFile(c)), false);
+});
+
+// A band's registration only feeds a display, so a write that cannot land never costs the run's result.
+test("waitForEnd still reports the run's end when the watcher registration cannot be written", { skip: process.getuid?.() === 0 }, async () => {
+  const c = makeCycle();
+  const devcycle = join(c.root, ".devcycle");
+  const unregistered = await waitForEnd({ statePath: c.statePath, pollMs: 20, env: WITHOUT_SESSION });
+  chmodSync(devcycle, 0o555);
+  try {
+    const registered = await waitForEnd({ statePath: c.statePath, pollMs: 20, env: { ...process.env, CLAUDE_CODE_SESSION_ID: "watch-denied" } });
+    assert.deepEqual(registered, unregistered);
+  } finally {
+    chmodSync(devcycle, 0o755);
+  }
 });
 
 test("waitForEnd with no session id registers nothing", async () => {
