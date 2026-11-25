@@ -169,10 +169,10 @@ written. Remove the files whose only purpose was to pass content between dispatc
    `.devcycle/findings/*`, `.devcycle/plan-work/<run id>/*`, `.devcycle/research/*`, `.devcycle/sweep-args-*.json`, `.devcycle/sweep-report*.json`, and
    any generated per-task brief files. Nothing else is a candidate.
 2. **Split.** This cycle's files are those modified at or after the `startedAt` of the `run` line
-   opening the file `recordPath(gitToplevel(process.cwd()), <run id>)` names — both exported by
-   `${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs`, the same store the redaction screen reads —
-   plus all of `.devcycle/plan-work/<run id>/`. The rest are prior cycles' leftovers. When that `startedAt`
-   cannot be read, only `.devcycle/plan-work/<run id>/` is this cycle's and every other file is a
+   opening this cycle's run record, plus all of `.devcycle/plan-work/<run id>/`. Print it with
+   `node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs').then(m => console.log(JSON.parse(require('fs').readFileSync(m.recordPath(m.gitToplevel(process.cwd()), '<run id>'), 'utf8').split('\n')[0]).startedAt))"`,
+   which asks `run-record.mjs` for the record's path, the same store the redaction screen reads. The rest are prior cycles' leftovers. When that `startedAt`
+   cannot be read (the command fails or prints nothing), only `.devcycle/plan-work/<run id>/` is this cycle's and every other file is a
    prior leftover, which step 4 asks about.
 3. **Remove this cycle's files without asking.** A file under a directory the archive step copies
    is removed only if its copy succeeded; a failed copy keeps it, reported. The sweep argument and

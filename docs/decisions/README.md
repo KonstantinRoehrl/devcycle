@@ -14,12 +14,12 @@ are evidence of their moment — they get a forward pointer here, never a rewrit
 **Budgets:** the context closures that read `references/resume.md` and `playbooks/finishing-the-cycle.md` grow by the new section, and the runtime surface grows by the section, the pointers and the hub rows.
 
 ```text
-budget: context-budget.json commands/continue.md 81557
-budget: context-budget.json commands/cycle.md 95382
-budget: context-budget.json playbooks/finishing-the-cycle.md 54431
-budget: context-budget.json playbooks/receiving-review.md 130387
-budget: context-budget.json playbooks/sweeping-mechanical-changes.md 100739
-budget: surface-budget.json surfaceTotal 7634
+budget: context-budget.json commands/continue.md 81950
+budget: context-budget.json commands/cycle.md 95775
+budget: context-budget.json playbooks/finishing-the-cycle.md 54641
+budget: context-budget.json playbooks/receiving-review.md 130780
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 101132
+budget: surface-budget.json surfaceTotal 7639
 ```
 
 ## 2026-11-25 — The move-cycle invocation lands with the script

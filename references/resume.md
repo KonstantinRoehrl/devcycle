@@ -194,10 +194,12 @@ checkout and may have switched it back to the integration branch):
   covers asking the user before switching; never switch silently. Never
   create a fresh topic branch when one is recorded: the recorded branch is where
   any committed work lives.
-- A recorded topic branch that another worktree holds is never switched to here: move the
-  cycle into that worktree with
+- A recorded topic branch that another worktree holds is never switched to here: carry the
+  cycle's state over to that worktree with
   `node "${CLAUDE_PLUGIN_ROOT}/scripts/move-cycle.mjs" --state <state path> --to <worktree path>`,
-  which only lists what it would move until `--confirm` is added. That is the `elsewhere` gate.
+  which copies it there and removes the source `state.md`; it only lists what it would copy until
+  `--confirm` is added. The old checkout keeps its ledger and per-task files. That is the
+  `elsewhere` gate.
 - Only if the recorded branch is still the default or an integration branch does
   branch discipline (`references/branch.md`) apply — an interrupted run may have
   stopped before the topic branch was ever created. Create it and record it on the
@@ -221,7 +223,10 @@ file, rewrites `root:` or switches a branch by itself.
 - **`elsewhere`.** `branch-held` names the worktree that holds the branch. `other-checkout` names
   the state file's checkout and whether the caller's checkout holds the branch. The answers:
   - **Move the cycle into the worktree that holds the branch.** Offered only when one holds it.
-    Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/move-cycle.mjs" --state <state path> --to <worktree path>`
+    The cycle's state is copied into that worktree and the source `state.md` removed; the old
+    checkout keeps its ledger and per-task files, which discovery labels
+    `last event: none for this cycle` (`docs/README.md`'s `move-cycle.mjs` row lists what is
+    copied). Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/move-cycle.mjs" --state <state path> --to <worktree path>`
     once without `--confirm` and show its list. Run it with `--confirm` only after the user
     confirms that list. A refusal is reported as it prints.
   - **Resume in the state file's checkout.** Free the branch first, then run `/devcycle:continue`
