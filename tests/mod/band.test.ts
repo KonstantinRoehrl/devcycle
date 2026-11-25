@@ -287,6 +287,15 @@ test('v2: a missing value drops its segment, and only a running or quiet dispatc
   await ui.unmount();
 });
 
+test('v2: a fix pass draws its implementer dispatch\'s model segment like an implementing task', async ($, on) => {
+  const fixing = { ...task('4', 'fixing', 2, 1), health: D4.health, dispatch: D4.dispatch };
+  const { ui } = await drawn($, on, { progress: progressV2({ waves: wave2([fixing]) }) }, AT('2026-10-25T09:12:10Z'), { columns: 140 });
+  expect((await lines(ui)).slice(3)).toEqual([
+    '  wave 2  ⠙ task 4  Sonnet-5.5 (high) · ctx 3% · fixing · round 2 (1 rejection) · fast · 3m · 9 tool calls · 36.0k tok',
+  ]);
+  await ui.unmount();
+});
+
 test('v2: a dispatch that outlived its step draws as a plain row, never with the dispatch\'s model, effort or ctx', async ($, on) => {
   const stale = health('running', 3 * 60_000, 9, 4000);
   const tasks = [

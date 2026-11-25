@@ -68,7 +68,7 @@ const LIVE_DISPATCH = new Set(["running", "quiet"]);
 // The role whose dispatch a step is: the beat's health lags the ledger by up to one heartbeat, so a task
 // that moved on keeps the last beat's role until the step, not the health, says the dispatch has ended.
 // hooks/devcycle-mod.mjs repeats this map, as it may import nothing that imports a node: module.
-const STEP_ROLE = { implementing: "implementer", fixing: "implementer", reviewing: "reviewer" };
+export const STEP_ROLE = { implementing: "implementer", fixing: "implementer", reviewing: "reviewer" };
 
 // One tier's fields with every empty one dropped, an effort of "default" counted as empty, and the
 // model's window added once `tokens` says how deep it is: the one home of the window rule for all tiers.
