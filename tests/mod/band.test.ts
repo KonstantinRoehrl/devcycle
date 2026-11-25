@@ -20,14 +20,14 @@ const RUNNING = {
 };
 const progress = (over: Record<string, unknown> = {}) => JSON.stringify({ ...RUNNING, ...over });
 const hhmm = (iso: string) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-const BAND = (bodyColumns: number, hasSurvey = false) => ({
+const BAND = (bodyColumns: number, hasSurvey = false, maxRows = 10) => ({
   plugin: 'devcycle', surface: 'terminal', component: 'AbovePrompt',
-  props: { hasSurvey, isWorking: false, maxRows: 10, bodyColumns, scroll: { offset: 0, bodyRows: 9 }, view: {} },
+  props: { hasSurvey, isWorking: false, maxRows, bodyColumns, scroll: { offset: 0, bodyRows: 9 }, view: {} },
 }) as const;
 
 // Mounts the band after the session starts and the timer ticks once (frame 1). `lines` reads each
 // drawn row whole; the engine's own drawing, beneath the module, is a Text reading `engine`.
-async function drawn($: any, on: any, world: World, now: number, opts: { columns?: number; hasSurvey?: boolean } = {}) {
+async function drawn($: any, on: any, world: World, now: number, opts: { columns?: number; hasSurvey?: boolean; maxRows?: number } = {}) {
   const clock = mock.clock(on, { now });
   world.surfaces ??= ['terminal'];
   session(on, world);
@@ -35,7 +35,7 @@ async function drawn($: any, on: any, world: World, now: number, opts: { columns
   on('ui.render', ($$: any, e: any) => { const { Text } = $$.ui.resolve(e); return h(Text, null, 'engine'); });
   await $.session.start({ cwd: '/repo/src', surface: 'terminal', isInteractive: true });
   await clock.advance(300);
-  const ui = await $.ui.mount(BAND(opts.columns ?? 115, opts.hasSurvey));
+  const ui = await $.ui.mount(BAND(opts.columns ?? 115, opts.hasSurvey, opts.maxRows));
   return { ui, clock };
 }
 const texts = async (ui: any) => await ui.findAll({ type: 'Text' });
@@ -328,5 +328,39 @@ test('v2 at 80 columns: every row fits, a task row keeps its step, round and rej
     '          ○ task 7  pending',
   ]);
   for (const line of shown) expect([...line].length <= 80).toBe(true);
+  await ui.unmount();
+});
+
+// Six tasks in the running wave: two dispatches, two committed, one pending and one waiting on the user.
+const SIX = progressV2({ waves: RUNNING_V2.waves.map((w) => (w.wave === 2
+  ? { wave: 2, committed: 2, tasks: [D4, D5, task('6', 'committed'), task('7', 'pending'), task('8', 'committed'), task('9', 'needs-user')] }
+  : w)) });
+const SIX_HEAD = [
+  '⠙ devcycle drive · driver Opus-5.5 (high) · ctx 23% · 1h02m · 230.1k tok',
+  '  session 3  Sonnet-5.5 (high) · ctx 18% · 12m · 182.4k tok',
+  `  waves  ✓1 3/3 · ●2 2/6 · ○3 0/2${' '.repeat(34)}4/9 committed`,
+];
+const SIX_DISPATCHES = [
+  '  wave 2  ⠙ task 4  Sonnet-5.5 (high) · ctx 3% · implementing · fas… · 36.0k tok',
+  '          ⠙ task 5  Sonnet-5.5 (high) · reviewing · round 1 (1 rejection) · fas…',
+];
+const FOLDS: [number, string[]][] = [
+  [10, [...SIX_HEAD, ...SIX_DISPATCHES, '          ✓ task 6  committed', '          ○ task 7  pending', '          ✓ task 8  committed', '          ⠙ task 9  needs-user']],
+  [7, [...SIX_HEAD, ...SIX_DISPATCHES, '          ⠙ task 9  needs-user', '          ✓ 2 committed · ○ 1 pending']],
+  [6, [SIX_HEAD[0], SIX_HEAD[2], ...SIX_DISPATCHES, '          ⠙ task 9  needs-user', '          ✓ 2 committed · ○ 1 pending']],
+  [4, [SIX_HEAD[0], '  wave 2  ⠙ task 5  Sonnet-5.5 (high) · reviewing · round 1 (1 rejection) · fas…', '          ⠙ task 9  needs-user', '          +4 more']],
+];
+for (const [maxRows, expected] of FOLDS)
+  test(`v2 at 80 columns with six tasks and maxRows ${maxRows}: every line fits, folded in order, the warnings kept to the last`, async ($, on) => {
+    const { ui } = await drawn($, on, { progress: SIX }, AT('2026-10-25T09:12:10Z'), { columns: 80, maxRows });
+    const shown = await lines(ui);
+    expect(shown).toEqual(expected);
+    for (const line of shown) expect([...line].length <= 80).toBe(true);
+    await ui.unmount();
+  });
+
+test('the fold is v2\'s alone: a v1 file over maxRows draws every row as today', async ($, on) => {
+  const { ui } = await drawn($, on, { progress: progress() }, AT('2026-10-25T09:12:10Z'), { maxRows: 3 });
+  expect((await lines(ui)).slice(2)).toEqual(RUNNING_ROWS);
   await ui.unmount();
 });

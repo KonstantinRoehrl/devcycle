@@ -443,8 +443,46 @@ function dispatchRow(t, spin, columns) {
 
 const hasDispatch = (t) => Boolean(t.dispatch) && (t.health?.state === "running" || t.health?.state === "quiet");
 
+const settled = (t) => t.step === "committed" || t.step === "pending";
+const keptToTheLast = (t) => t.step === "needs-user" || t.rejections > 0;
+
+function summaryRow(tasks) {
+  const committed = tasks.filter((t) => t.step === "committed").length;
+  const pending = tasks.length - committed;
+  return joinDot([
+    committed > 0 ? [{ text: `✓ ${committed} committed`, color: "success" }] : [],
+    pending > 0 ? [{ text: `○ ${pending} pending`, color: "subtle" }] : [],
+  ]);
+}
+
+// Over AbovePrompt's maxRows, whether or not the platform clips there: the running wave's committed and
+// pending rows fold into one summary row, then the session row goes, then the strip, then the task rows
+// past the last that fits become one `+<k> more` row, k counting tasks. The header, needs-user rows and
+// rows with a rejection are kept to the last.
+function foldBand({ session, strip, tasks }, maxRows) {
+  if (!(maxRows > 0)) return { session, strip, tasks };
+  let rows = tasks;
+  const over = () => 1 + (session ? 1 : 0) + (strip ? 1 : 0) + rows.length > maxRows;
+  if (over()) {
+    const folded = rows.filter((r) => r.t && settled(r.t));
+    if (folded.length > 1)
+      rows = [...rows.filter((r) => !folded.includes(r)), { t: null, count: folded.length, row: summaryRow(folded.map((r) => r.t)) }];
+  }
+  if (over()) session = null;
+  if (over()) strip = null;
+  if (over()) {
+    const room = Math.max(0, maxRows - 2);
+    const kept = (r) => r.t !== null && keptToTheLast(r.t);
+    let free = room - rows.filter(kept).length;
+    const shown = rows.filter((r) => kept(r) || free-- > 0).slice(0, room);
+    const hidden = rows.filter((r) => !shown.includes(r)).reduce((sum, r) => sum + r.count, 0);
+    rows = [...shown, { t: null, count: hidden, row: [{ text: `+${hidden} more`, color: "subtle" }] }];
+  }
+  return { session, strip, tasks: rows };
+}
+
 // Each line a list of { text, color } segments; color a theme key, or a literal for the tier segments.
-function bandLines({ progress: p, frame, now }, columns) {
+function bandLines({ progress: p, frame, now }, columns, maxRows = 0) {
   const spin = silent(p, now) ? "?" : SPINNER[frame % SPINNER.length];
   if (p.v === 1) return [headerLine(p, spin, now), stripLine(p, columns), ...bodyLines(p, spin)];
   const header = headerLineV2(p, spin, now, columns);
@@ -454,8 +492,9 @@ function bandLines({ progress: p, frame, now }, columns) {
   if (!wave) return [header, ...(session ? [session] : []), strip, ...bodyLines(p, spin)];
   const lead = `  wave ${wave.wave}  `;
   const tasks = wave.tasks.map((t) => ({ t, count: 1, row: hasDispatch(t) ? dispatchRow(t, spin, columns - cells(lead)) : taskRow(t, spin) }));
-  const body = tasks.map((r, i) => [{ text: i === 0 ? lead : " ".repeat(cells(lead)) }, ...r.row]);
-  return [header, ...(session ? [session] : []), strip, ...body];
+  const folded = foldBand({ session, strip, tasks }, maxRows);
+  const body = folded.tasks.map((r, i) => [{ text: i === 0 ? lead : " ".repeat(cells(lead)) }, ...r.row]);
+  return [header, ...(folded.session ? [folded.session] : []), ...(folded.strip ? [folded.strip] : []), ...body];
 }
 
 async function drawBand(st, $, e, next) {
@@ -463,7 +502,8 @@ async function drawBand(st, $, e, next) {
   const value = (await $.state.get(BAND))?.value;
   if (!value?.progress) return next(e);
   const leavesMark = atLeast(await versionOf(st, $), BODY_COLUMNS_LEAVE_MARK);
-  const lines = bandLines(value, e.props.bodyColumns - (leavesMark ? 0 : MARK_COLUMNS));
+  const maxRows = typeof e.props.maxRows === "number" ? e.props.maxRows : 0;
+  const lines = bandLines(value, e.props.bodyColumns - (leavesMark ? 0 : MARK_COLUMNS), maxRows);
   const { Box, Text } = $.ui.resolve(e);
   return h(Box, { flexDirection: "column" }, ...lines.map((line) =>
     h(Text, { wrap: "truncate" }, ...line.map((s) => (s.color ? h(Text, { color: s.color }, s.text) : s.text)))));
