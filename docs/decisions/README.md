@@ -5,6 +5,41 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-25 — resume refuses a state file that doesn't match the live checkout (#429)
+
+**Decision:** `/devcycle:continue` stops and asks when a cycle's branch already landed or when the cycle belongs to another checkout (its state file sits in a different worktree, or another worktree holds its branch). The answers are close the cycle, resume anyway (recorded as `- merged-ack: <tip sha>`), move the cycle into the worktree that holds the branch, resume in its own checkout, or leave it. No check closes a cycle, moves a file, rewrites `root:` or switches a branch by itself. Driven runs map the cases onto existing stop reasons: `merged` stops `resume-check`, `branch-held` stops `branch` and `other-checkout` stops `foreign-state`, so the run record schema is unchanged.
+
+**Why:** a state file resumed from the wrong worktree, or for a branch already merged, sent the session into work that was done or that the checkout refuses to switch to. The gate wording lives in `references/resume.md` § When git disagrees with the state file, and `commands/continue.md` keeps pointers, because continue sits at the 187-line `commandMax` ceiling.
+
+**Budgets:** the context closures that read `references/resume.md` and `playbooks/finishing-the-cycle.md` grow by the new section, and the runtime surface grows by the section, the pointers and the hub rows.
+
+```text
+budget: context-budget.json commands/continue.md 81950
+budget: context-budget.json commands/cycle.md 95775
+budget: context-budget.json playbooks/finishing-the-cycle.md 54753
+budget: context-budget.json playbooks/receiving-review.md 130780
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 101132
+budget: surface-budget.json surfaceTotal 7639
+```
+
+## 2026-11-25 — The move-cycle invocation lands with the script
+
+**Decision:** `references/resume.md` § Settle the branch first names
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/move-cycle.mjs"` in the same change that adds the script. The
+entry points and playbooks that read `resume.md` are longer, and the runtime surface grew by three
+lines; the budget lines below record the new figures.
+
+**Why:** the golden-path test (C3 leg 3) fails any change that adds a CLI script no command,
+playbook or reference invokes, so the invocation cannot wait for the later documentation task.
+
+```text
+budget: context-budget.json commands/continue.md 78962
+budget: context-budget.json commands/cycle.md 93111
+budget: context-budget.json playbooks/receiving-review.md 128116
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 98468
+budget: surface-budget.json surfaceTotal 7596
+```
+
 ## 2026-11-24 — Re-dispatches re-attempt through task-dispatch, and intake routes the reviewer (#407, #456)
 
 **Decision:** a re-dispatch of a saved brief goes through `task-dispatch.mjs --reattempt`, so each

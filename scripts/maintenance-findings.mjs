@@ -16,6 +16,7 @@ import { fileMatchesGlob } from "./lessons.mjs";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { verifyMaintenance } from "./verification.mjs";
 import { loadRegistry, sourcedKinds } from "./hygiene-registry.mjs";
+import { contentLanded, mergedPrAt } from "./branch-landed.mjs";
 
 const STORE_PATH = "docs/devcycle/maintenance-findings";
 export const maintDir = (root) => join(root, STORE_PATH);
@@ -324,36 +325,6 @@ export function dismissFinding(root, { id, reason = null, revoke = false, title 
 
 const STORE_BRANCHES = ["refs/heads/chore/maintenance-findings-*", "refs/remotes/origin/chore/maintenance-findings-*"];
 
-// null when gh cannot answer (missing, unauthenticated, offline), so the caller falls back to history.
-function mergedPr(root, head) {
-  const r = spawnSync("gh", ["pr", "list", "--state", "merged", "--head", head, "--json", "number", "--limit", "1"],
-    { cwd: root, encoding: "utf8", timeout: 30_000 });
-  if (r.error || r.status !== 0) return null;
-  try {
-    return JSON.parse(r.stdout).length > 0;
-  } catch {
-    return null;
-  }
-}
-
-// Offline: a squash merge leaves no ancestry link, so a ref has landed when every store path it
-// changed since the merge-base has its blob — or its deletion — somewhere in base's history for
-// that path since the merge-base. A later change on base does not un-land it.
-function contentReachedBase(root, mergeBase, base, ref) {
-  const blobAt = (rev, path) => {
-    const r = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${rev}:${path}`], { cwd: root, encoding: "utf8" });
-    return r.status === 0 ? r.stdout.trim() : null;
-  };
-  const changed = git(root, ["diff", "--no-renames", "--name-only", "-z", mergeBase, ref, "--", `${STORE_PATH}/`])
-    .split("\0").filter(Boolean);
-  return changed.every((path) => {
-    const want = blobAt(ref, path);
-    return git(root, ["rev-list", `${mergeBase}..${base}`, "--", path])
-      .split("\n").filter(Boolean)
-      .some((commit) => blobAt(commit, path) === want);
-  });
-}
-
 // An earlier pass's store branch that never landed on base (#243).
 export function findStranded(root, base) {
   const at = resolveRefName(root, base);
@@ -366,7 +337,8 @@ export function findStranded(root, base) {
       continue;
     }
     if (mb.status !== 0) throw new Error(`git merge-base ${at} ${ref} failed: ${mb.stderr.trim()}`);
-    const landed = mergedPr(root, ref.replace(/^origin\//, "")) ?? contentReachedBase(root, mb.stdout.trim(), at, ref);
+    const landed = mergedPrAt(root, ref.replace(/^origin\//, ""), { timeout: 30_000 })?.merged
+      ?? contentLanded({ root, mergeBase: mb.stdout.trim(), base: at, ref, pathspec: `${STORE_PATH}/` }) !== false;
     if (!landed) out.push({ ref, status: "stranded" });
   }
   return out;

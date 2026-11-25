@@ -343,7 +343,9 @@ function readSetup(opts) {
     if (started === undefined) return stop("needs-user", pluginUpdateDetail("an earlier version", pluginVersion));
     if (started !== pluginVersion) return stop("plugin-updated", pluginUpdateDetail(started, pluginVersion));
   }
-  const checked = checkState(abs);
+  // A branch held by another worktree is an ok result here (not a failure) so the entry lines and stale
+  // checks still run for it; the verdict below carries it.
+  const checked = checkState(abs, { cwd, allowBranchHeld: true });
   // The format settles here, after the gates that decide whether this session may act at all and
   // before any verdict reads the cycle: a migration may rename the stage or rewrite the ledger, so
   // what it changes is read again from the top.
@@ -364,6 +366,10 @@ function readSetup(opts) {
   if (settled.status === "question") result.formatQuestion = settled.question;
   state.stopped = checked.stopped ?? null;
   if (checked.kind === "foreign") return stop("foreign-state", `its root: ${checked.recordedRoot} is not this checkout (${checked.actualRoot})`);
+  if (checked.kind === "elsewhere") {
+    const holds = checked.rule === "other-checkout" ? ` — your checkout ${checked.holdsBranch ? "holds" : "does not hold"} the recorded branch` : "";
+    return stop("foreign-state", `${checked.errors[0]}${holds}`);
+  }
 
   const planText = readPlan(root, plan);
   const map = mapPositions(root, planText, lines, ledger);
@@ -380,6 +386,7 @@ function readSetup(opts) {
     ? compareKnobs(parseRecordedLine(recordedKnobs), parseRecordedLine(knobsLine)).map((c) => `${c.key}: ${c.old} → ${c.new}`)
     : [];
   result.branch = branchVerdict(root, field(stateText, "branch"));
+  if (checked.branchHeld) result.branch = { ...result.branch, verdict: "elsewhere", worktree: checked.branchHeld.worktree };
   Object.assign(result, wavePosition(root, planText, map, lines));
   if (!drive) {
     let decision = driveAction(result.drive, driver, result.pendingDecision);
@@ -402,7 +409,7 @@ function readSetup(opts) {
   result.drive = decided({ action: "none", writeRow: null, confirm: null, gate: null });
   if (result.knobDrift.length && !state.knobsDeclined) return stop("knob-drift", result.knobDrift.join("; "));
   if (result.branch.verdict !== "ok")
-    return stop("branch", `recorded ${result.branch.recorded ?? "none"}, current ${result.branch.current ?? "unknown"}: ${result.branch.verdict}`);
+    return stop("branch", `recorded ${result.branch.recorded ?? "none"}, current ${result.branch.current ?? "unknown"}: ${result.branch.verdict}${result.branch.worktree ? ` (checked out in ${result.branch.worktree})` : ""}`);
   if (depth.band === "over-budget" || depth.band === "hard-stop") return stop("depth-at-start", `the session starts at ${depth.tokens} tokens (${depth.band})`);
   const sweep = result.tasks.find((t) => t.position === "sweep-decision");
   if (sweep) return stop("sweep-fallback", `task ${sweep.task}: sweep-decision`, sweep.task);

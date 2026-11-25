@@ -2262,19 +2262,25 @@ const wtSlug = (p) => p.replace(/[^A-Za-z0-9]/g, "-");
 const ownsSlug = (files, absCwd) =>
   [...files].some((f) => String(f).split("/").includes(wtSlug(absCwd)));
 
-function seedProject(projectsDir, absCwd) {
-  const dir = join(projectsDir, wtSlug(absCwd));
+// dirName defaults to the slug Claude Code would give absCwd; a different name seeds a session
+// whose project directory no longer matches its checkout (a moved or renamed repo).
+function seedProject(projectsDir, absCwd, dirName = wtSlug(absCwd)) {
+  const dir = join(projectsDir, dirName);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "s.jsonl"),
     JSON.stringify({ cwd: absCwd, timestamp: "2026-08-29T00:00:00Z",
       message: { role: "user", content: "hi" }, sessionId: "s" }) + "\n");
 }
 
+// worktreeRoots drops a listed worktree whose directory is gone, so a fake `worktree list` must
+// name directories that exist.
+const gitDirs = (...names) => names.map((n) => makeTempDir("dream-" + n + "-"));
+
 // One fake git runner: worktree list returns main + wt; --git-common-dir maps both to main.
 const gitFake = (main, wt) => (cmd, args) => {
   const k = args.join(" ");
   if (k.includes("worktree list --porcelain"))
-    return { status: 0, stdout: `worktree ${main}\nworktree ${wt}\n` };
+    return { status: 0, stdout: `worktree ${main}\n\nworktree ${wt}\n` };
   if (k.includes("--git-common-dir")) {
     const cwd = args[args.indexOf("-C") + 1];
     return (cwd === main || cwd === wt)
@@ -2284,12 +2290,14 @@ const gitFake = (main, wt) => (cmd, args) => {
   return { status: 1, stdout: "" };
 };
 
-// Same identity mapping, but `worktree list` names a single non-existent root so no
-// enumerated slug dir exists → the whole-root fallback path is exercised.
-const gitFakeFallback = (main, wt) => (cmd, args) => {
+// Same identity mapping, but `worktree list` names a single worktree whose directory is gone.
+// worktreeRoots drops it and answers [repoRoot]; the fallback tests seed repoRoot's sessions under
+// a directory that is not repoRoot's slug, so no enumerated slug dir exists and the whole-root
+// fallback path is exercised.
+const gitFakeFallback = (main, wt, gone) => (cmd, args) => {
   const k = args.join(" ");
   if (k.includes("worktree list --porcelain"))
-    return { status: 0, stdout: `worktree /x/nope\n` };
+    return { status: 0, stdout: `worktree ${gone}\n` };
   if (k.includes("--git-common-dir")) {
     const cwd = args[args.indexOf("-C") + 1];
     return (cwd === main || cwd === wt)
@@ -2301,55 +2309,70 @@ const gitFakeFallback = (main, wt) => (cmd, args) => {
 
 test("corpus unions worktree sessions and excludes a sibling project (primary path)", () => {
   const projectsDir = makeTempDir("proj-");
-  const main = "/x/repo", wt = "/x/repo-wt", other = "/x/other";
-  seedProject(projectsDir, main); seedProject(projectsDir, wt); seedProject(projectsDir, other);
-  const { sessions } = planCorpus({
-    repoRoot: main, projectsDir, since: null, gitRunner: gitFake(main, wt) });
-  const cwds = new Set(sessions.flatMap((s) => s.files ?? []).map(String));
-  assert.ok(ownsSlug(cwds, main), "main missing");
-  assert.ok(ownsSlug(cwds, wt), "worktree missing");
-  assert.ok(!ownsSlug(cwds, other), "sibling project leaked");
+  const [main, wt] = gitDirs("main", "wt"), other = "/x/other";
+  try {
+    seedProject(projectsDir, main); seedProject(projectsDir, wt); seedProject(projectsDir, other);
+    const { sessions } = planCorpus({
+      repoRoot: main, projectsDir, since: null, gitRunner: gitFake(main, wt) });
+    const cwds = new Set(sessions.flatMap((s) => s.files ?? []).map(String));
+    assert.ok(ownsSlug(cwds, main), "main missing");
+    assert.ok(ownsSlug(cwds, wt), "worktree missing");
+    assert.ok(!ownsSlug(cwds, other), "sibling project leaked");
+  } finally {
+    rmSync(main, { recursive: true, force: true });
+    rmSync(wt, { recursive: true, force: true });
+  }
 });
 
 test("corpus fallback scan unions worktrees and excludes a sibling project (fallback path)", () => {
   const projectsDir = makeTempDir("proj-");
-  const main = "/x/repo", wt = "/x/repo-wt", other = "/x/other";
-  seedProject(projectsDir, main); seedProject(projectsDir, wt); seedProject(projectsDir, other);
-  // `worktree list` names /x/nope (no slug dir) → primary is empty → whole-root scan runs,
-  // filtering each session's own cwd through the git-identity mapping.
-  const { sessions } = planCorpus({
-    repoRoot: main, projectsDir, since: null, gitRunner: gitFakeFallback(main, wt) });
-  const cwds = new Set(sessions.flatMap((s) => s.files ?? []).map(String));
-  assert.ok(ownsSlug(cwds, main), "main missing");
-  assert.ok(ownsSlug(cwds, wt), "worktree missing");
-  assert.ok(!ownsSlug(cwds, other), "sibling project leaked");
+  const [main, wt] = gitDirs("main", "wt"), other = "/x/other", gone = "/x/nope";
+  try {
+    seedProject(projectsDir, main, "moved-main"); seedProject(projectsDir, wt); seedProject(projectsDir, other);
+    // `worktree list` names /x/nope, which does not exist, so it is dropped and the roots are
+    // [main]. main has no slug dir, so primary is empty and the whole-root scan runs, filtering
+    // each session's own cwd through the git-identity mapping.
+    const { sessions } = planCorpus({
+      repoRoot: main, projectsDir, since: null, gitRunner: gitFakeFallback(main, wt, gone) });
+    const cwds = new Set(sessions.flatMap((s) => s.files ?? []).map(String));
+    assert.ok([...cwds].some((f) => f.split("/").includes("moved-main")), "main missing");
+    assert.ok(ownsSlug(cwds, wt), "worktree missing");
+    assert.ok(!ownsSlug(cwds, other), "sibling project leaked");
+  } finally {
+    rmSync(main, { recursive: true, force: true });
+    rmSync(wt, { recursive: true, force: true });
+  }
 });
 
 test("the fallback scan memoizes gitToplevel per cwd (spec Component 3: one git call per distinct cwd)", () => {
   const projectsDir = makeTempDir("proj-");
-  const main = "/x/repo", other = "/x/other";
-  seedProject(projectsDir, main);
-  // A sibling project whose single transcript holds TWO records sharing one cwd: without per-cwd
-  // memoization the fallback filter resolves gitToplevel(other) once per record, not once per cwd.
-  const otherDir = join(projectsDir, wtSlug(other));
-  mkdirSync(otherDir, { recursive: true });
-  const rec = (i) => JSON.stringify({ cwd: other, timestamp: "2026-08-29T00:00:00Z",
-    message: { role: "user", content: `m${i}` }, sessionId: "o" });
-  writeFileSync(join(otherDir, "s.jsonl"), rec(1) + "\n" + rec(2) + "\n");
+  const [main] = gitDirs("main"), other = "/x/other";
+  try {
+    seedProject(projectsDir, main, "moved-main");
+    // A sibling project whose single transcript holds TWO records sharing one cwd: without per-cwd
+    // memoization the fallback filter resolves gitToplevel(other) once per record, not once per cwd.
+    const otherDir = join(projectsDir, wtSlug(other));
+    mkdirSync(otherDir, { recursive: true });
+    const rec = (i) => JSON.stringify({ cwd: other, timestamp: "2026-08-29T00:00:00Z",
+      message: { role: "user", content: `m${i}` }, sessionId: "o" });
+    writeFileSync(join(otherDir, "s.jsonl"), rec(1) + "\n" + rec(2) + "\n");
 
-  let otherCalls = 0;
-  const counting = (cmd, args) => {
-    const k = args.join(" ");
-    if (k.includes("worktree list --porcelain")) return { status: 0, stdout: "worktree /x/nope\n" };
-    if (k.includes("--git-common-dir")) {
-      const cwd = args[args.indexOf("-C") + 1];
-      if (cwd === other) otherCalls++;
-      return { status: 0, stdout: `${cwd}/.git\n` }; // each cwd resolves to its own toplevel
-    }
-    return { status: 1, stdout: "" };
-  };
-  planCorpus({ repoRoot: main, projectsDir, since: null, gitRunner: counting });
-  assert.equal(otherCalls, 1, `expected one git call for ${other}, got ${otherCalls}`);
+    let otherCalls = 0;
+    const counting = (cmd, args) => {
+      const k = args.join(" ");
+      if (k.includes("worktree list --porcelain")) return { status: 0, stdout: "worktree /x/nope\n" };
+      if (k.includes("--git-common-dir")) {
+        const cwd = args[args.indexOf("-C") + 1];
+        if (cwd === other) otherCalls++;
+        return { status: 0, stdout: `${cwd}/.git\n` }; // each cwd resolves to its own toplevel
+      }
+      return { status: 1, stdout: "" };
+    };
+    planCorpus({ repoRoot: main, projectsDir, since: null, gitRunner: counting });
+    assert.equal(otherCalls, 1, `expected one git call for ${other}, got ${otherCalls}`);
+  } finally {
+    rmSync(main, { recursive: true, force: true });
+  }
 });
 
 test("resolveProjectFiles reports which path resolved the corpus", () => {
