@@ -190,6 +190,10 @@ checkout and may have switched it back to the integration branch):
   covers asking the user before switching; never switch silently. Never
   create a fresh topic branch when one is recorded: the recorded branch is where
   any committed work lives.
+- A recorded topic branch that another worktree holds is never switched to here: move the
+  cycle into that worktree with
+  `node "${CLAUDE_PLUGIN_ROOT}/scripts/move-cycle.mjs" --state <state path> --to <worktree path>`,
+  which only lists what it would move until `--confirm` is added.
 - Only if the recorded branch is still the default or an integration branch does
   branch discipline (`references/branch.md`) apply — an interrupted run may have
   stopped before the topic branch was ever created. Create it and record it on the

@@ -5,6 +5,24 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-25 — The move-cycle invocation lands with the script
+
+**Decision:** `references/resume.md` § Settle the branch first names
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/move-cycle.mjs"` in the same change that adds the script. The
+entry points and playbooks that read `resume.md` are longer, and the runtime surface grew by three
+lines; the budget lines below record the new figures.
+
+**Why:** the golden-path test (C3 leg 3) fails any change that adds a CLI script no command,
+playbook or reference invokes, so the invocation cannot wait for the later documentation task.
+
+```text
+budget: context-budget.json commands/continue.md 78962
+budget: context-budget.json commands/cycle.md 93111
+budget: context-budget.json playbooks/receiving-review.md 128116
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 98468
+budget: surface-budget.json surfaceTotal 7596
+```
+
 ## 2026-11-24 — Re-dispatches re-attempt through task-dispatch, and intake routes the reviewer (#407, #456)
 
 **Decision:** a re-dispatch of a saved brief goes through `task-dispatch.mjs --reattempt`, so each
