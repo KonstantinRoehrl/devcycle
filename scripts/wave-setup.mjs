@@ -366,7 +366,10 @@ function readSetup(opts) {
   if (settled.status === "question") result.formatQuestion = settled.question;
   state.stopped = checked.stopped ?? null;
   if (checked.kind === "foreign") return stop("foreign-state", `its root: ${checked.recordedRoot} is not this checkout (${checked.actualRoot})`);
-  if (checked.kind === "elsewhere") return stop("foreign-state", checked.errors[0]);
+  if (checked.kind === "elsewhere") {
+    const holds = checked.rule === "other-checkout" ? ` — your checkout ${checked.holdsBranch ? "holds" : "does not hold"} the recorded branch` : "";
+    return stop("foreign-state", `${checked.errors[0]}${holds}`);
+  }
 
   const planText = readPlan(root, plan);
   const map = mapPositions(root, planText, lines, ledger);

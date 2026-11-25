@@ -136,6 +136,24 @@ function elsewhereOf(statePath, text, cwd, allowBranchHeld) {
   };
 }
 
+// Reflog subjects that bring a branch to a commit it did not author: its creation, a fast-forward and a
+// reset onto an existing commit.
+const CREATED = /^branch: Created from/;
+const ADOPTED = /^(branch: Reset to|reset: moving to|.*: Fast-forward$)/;
+
+// Whether the topic branch may carry commits of its own. Graph ancestry cannot tell a topic that was
+// fast-forward merged into its base from a topic with no work that was fast-forwarded to a newer base
+// tip, so the branch's reflog decides: false only when it starts at the branch's creation and holds
+// nothing but fast-forwards and resets. A missing, expired or unreadable reflog allows own commits,
+// which keeps the ancestry signal firing.
+function mayHaveOwnCommits(git, branch) {
+  const log = git("reflog", "show", "--format=%gs", `refs/heads/${branch}`);
+  if (log.status !== 0) return true;
+  const subjects = log.stdout.split("\n").filter(Boolean).reverse();
+  if (!subjects.length || !CREATED.test(subjects[0])) return true;
+  return !subjects.slice(1).every((subject) => ADOPTED.test(subject));
+}
+
 // Which signal shows the recorded topic branch already landed in its base, as { branch, base, signal },
 // or null when it has not or when that cannot be confirmed: a missing repo, base, cut sha or gh never
 // blocks a resume. Cheapest signal first, and at most one gh call.
@@ -165,7 +183,7 @@ function landedSignal(statePath, text, branch) {
   if (cutSha === tip) return null;
   const landed = (signal) => ({ branch, base: cut.base, signal });
 
-  if (cutSha !== null && git("merge-base", "--is-ancestor", tip, cut.base).status === 0) return landed("ancestry");
+  if (cutSha !== null && git("merge-base", "--is-ancestor", tip, cut.base).status === 0 && mayHaveOwnCommits(git, branch)) return landed("ancestry");
   if (git("remote").stdout.trim()) {
     const pr = mergedPrAt(stateCheckout, branch);
     if (pr?.merged && pr.headOid === tip) return landed("pr");
@@ -303,6 +321,7 @@ function main(argv) {
     console.error(`  - state file's checkout: ${result.stateCheckout ?? toplevelOf(dirname(statePath))}`);
     console.error(`  - your checkout: ${result.callerCheckout ?? toplevelOf(process.cwd())}`);
     if (result.rule === "branch-held") console.error(`  - ${result.branch} is checked out in: ${result.worktree}`);
+    else console.error(`  - your checkout holds the recorded branch: ${result.holdsBranch ? "yes" : "no"}`);
     console.error("  Move the cycle, resume it in its own checkout, or leave it — the user decides.");
     process.exit(1);
   }

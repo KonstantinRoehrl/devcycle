@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// Moves one cycle's run-scoped files between two worktrees of one repository, on the user's
-// confirmation: the state file, its ledger, the stage log, the per-task directories, and the
-// gitignored spec/plan/checklist/diagnosis/scope files the state names. Without --confirm it
-// prints what it would move and writes nothing. The run record keeps its id and needs no move,
-// because its slug is per repository.
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+// Moves one cycle between two worktrees of one repository, on the user's confirmation. It copies
+// the state file, its ledger, the stage log, the per-task directories, and the gitignored
+// spec/plan/checklist/diagnosis/scope files the state names, then deletes only the source state
+// file: the source ledger and per-task files stay behind. Without --confirm it prints what it
+// would copy and writes nothing. The run record keeps its id and needs no move, because its slug
+// is per repository.
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, rmdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
@@ -60,13 +61,35 @@ function artifactsToCopy({ state, from, to }) {
     existsSync(join(from, p)) && git(from, ["check-ignore", "-q", p]).status === 0 && !existsSync(join(to, p)));
 }
 
-function copyVerified(copies) {
+// The directories from `dir` upward that do not exist yet, outermost first.
+function missingDirs(dir) {
+  const missing = [];
+  for (let at = dir; !existsSync(at) && dirname(at) !== at; at = dirname(at)) missing.unshift(at);
+  return missing;
+}
+
+// Writes each copy and reads it back, returning the first target whose bytes differ. `created` receives
+// every file and directory this call brings into being, so a failure can remove exactly those.
+function copyVerified(copies, created) {
   for (const { target, bytes } of copies) {
+    created.dirs.push(...missingDirs(dirname(target)));
     mkdirSync(dirname(target), { recursive: true });
+    created.files.push(target);
     writeFileSync(target, bytes);
   }
   const bad = copies.find(({ target, bytes }) => !readFileSync(target).equals(bytes));
   return bad ? bad.target : null;
+}
+
+function undoCopy({ files, dirs }) {
+  for (const file of files) rmSync(file, { force: true });
+  for (const dir of dirs.reverse()) {
+    try {
+      rmdirSync(dir);
+    } catch {
+      // not empty or already gone: it holds something this call did not create
+    }
+  }
 }
 
 export function moveCycle({ statePath, to, confirm = false }) {
@@ -84,18 +107,31 @@ export function moveCycle({ statePath, to, confirm = false }) {
   const state = readFileSync(statePath, "utf8");
   const moved = runScopedFiles({ state, devcycleDir, from: fromRoot });
   const copiedArtifacts = artifactsToCopy({ state, from: fromRoot, to: toRoot });
+  const collisions = moved.filter((rel) => rel !== "state.md" && existsSync(join(toRoot, ".devcycle", rel))).map((rel) => join(toRoot, ".devcycle", rel));
+  if (collisions.length)
+    return refusal(`${to} already holds files this move would overwrite: ${collisions.join(", ")} — move or remove them first`, fromRoot, toRoot);
   const plan = { ok: true, dryRun: !confirm, from: fromRoot, to: toRoot, moved, copiedArtifacts };
   if (!confirm) return plan;
 
-  const copies = [
-    ...moved.map((rel) => ({
-      target: join(toRoot, ".devcycle", rel),
-      bytes: rel === "state.md" ? Buffer.from(state.replace(/^- root:.*$/m, () => `- root: ${toRoot}`)) : readFileSync(join(devcycleDir, rel)),
-    })),
+  const copyOf = (rel) => ({ target: join(toRoot, ".devcycle", rel), bytes: readFileSync(join(devcycleDir, rel)) });
+  const stateCopy = { target: targetState, bytes: Buffer.from(state.replace(/^- root:.*$/m, () => `- root: ${toRoot}`)) };
+  const others = [
+    ...moved.filter((rel) => rel !== "state.md").map(copyOf),
     ...copiedArtifacts.map((rel) => ({ target: join(toRoot, rel), bytes: readFileSync(join(fromRoot, rel)) })),
   ];
-  const unverified = copyVerified(copies);
-  if (unverified !== null) return refusal(`copy did not verify: ${unverified}`, fromRoot, toRoot);
+  // The state file goes last: it is what makes the target a cycle, so a copy that fails earlier leaves
+  // nothing a retry would refuse. A failure removes exactly what this call wrote.
+  const created = { files: [], dirs: [] };
+  try {
+    const unverified = copyVerified(others, created) ?? copyVerified([stateCopy], created);
+    if (unverified !== null) {
+      undoCopy(created);
+      return refusal(`copy did not verify: ${unverified}`, fromRoot, toRoot);
+    }
+  } catch (err) {
+    undoCopy(created);
+    return refusal(`copy failed: ${err.message}`, fromRoot, toRoot);
+  }
   unlinkSync(statePath);
   return plan;
 }

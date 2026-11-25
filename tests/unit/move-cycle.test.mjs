@@ -83,6 +83,51 @@ test("refuses when the target already holds a state file, and names it", () => {
   }
 });
 
+test("refuses when the target already holds a file the move would write, dry run or not, and names it", () => {
+  const c = twoCheckouts();
+  try {
+    const leftover = writeInto(c.wt, ".devcycle/ledger.md", "an earlier cycle's ledger\n");
+    const leftoverBrief = writeInto(c.wt, ".devcycle/briefs/1.md", "an earlier cycle's brief\n");
+    for (const args of [[], ["--confirm"]]) {
+      const r = move("--state", c.statePath, "--to", c.wt, ...args);
+      assert.equal(r.status, 1, JSON.stringify(r.out));
+      assert.equal(r.out.ok, false);
+      assert.ok(r.out.refused.includes(leftover) && r.out.refused.includes(leftoverBrief), r.out.refused);
+    }
+    assert.equal(readFileSync(leftover, "utf8"), "an earlier cycle's ledger\n");
+    assert.equal(readFileSync(leftoverBrief, "utf8"), "an earlier cycle's brief\n");
+    assert.equal(existsSync(join(c.wt, ".devcycle/state.md")), false);
+    assert.equal(existsSync(c.statePath), true);
+  } finally {
+    cleanup(c.repo, c.parent);
+  }
+});
+
+test("a copy that fails midway leaves no state file and none of its files, and a retry succeeds", () => {
+  const c = twoCheckouts();
+  try {
+    // A regular file where the briefs directory has to go makes that write throw after the others succeeded.
+    const blocker = writeInto(c.wt, ".devcycle/briefs", "not a directory\n");
+    const failed = move("--state", c.statePath, "--to", c.wt, "--confirm");
+    assert.equal(failed.status, 1);
+    assert.equal(failed.out.ok, false);
+    assert.equal(existsSync(join(c.wt, ".devcycle/state.md")), false, "state.md is written last");
+    assert.equal(existsSync(join(c.wt, ".devcycle/ledger.md")), false);
+    assert.equal(existsSync(join(c.wt, ".devcycle/stage-log")), false);
+    assert.equal(existsSync(join(c.wt, "docs/superpowers")), false, "directories this call made are removed too");
+    assert.equal(readFileSync(blocker, "utf8"), "not a directory\n", "what was there before is untouched");
+    assert.equal(existsSync(c.statePath), true, "the source state file is intact");
+
+    rmSync(blocker);
+    const retried = move("--state", c.statePath, "--to", c.wt, "--confirm");
+    assert.equal(retried.status, 0, retried.stderr + JSON.stringify(retried.out));
+    assert.equal(existsSync(join(c.wt, ".devcycle/state.md")), true);
+    assert.equal(existsSync(c.statePath), false);
+  } finally {
+    cleanup(c.repo, c.parent);
+  }
+});
+
 test("refuses a checkout of another repository", () => {
   const c = twoCheckouts();
   const other = realpathSync(makeRepo());

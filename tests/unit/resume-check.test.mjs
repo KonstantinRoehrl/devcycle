@@ -797,6 +797,19 @@ test("other-checkout: a nested worktree's state file read from the main checkout
   }
 });
 
+test("other-checkout: the CLI says whether the caller's checkout holds the recorded branch", () => {
+  const s = withSibling();
+  try {
+    const state = writeCycle(s.repo, "feat/b");
+    assert.match(runIn(state, s.wt).stderr, /your checkout holds the recorded branch: yes/);
+    const other = join(s.parent, "other");
+    sh("git", ["worktree", "add", "-q", "-b", "feat/other", other], { cwd: s.repo });
+    assert.match(runIn(state, realpathSync(other)).stderr, /your checkout holds the recorded branch: no/);
+  } finally {
+    s.done();
+  }
+});
+
 test("a state file in an unrelated repository is not elsewhere", () => {
   const a = realpathSync(makeRepo());
   const b = realpathSync(makeRepo());
@@ -867,6 +880,66 @@ test("merged: a fast-forward merge into the base is caught by ancestry (R1)", ()
     c.done();
   }
 });
+
+test("not merged: a topic with no commits of its own, fast-forwarded to a newer base tip", () => {
+  const c = landedRepo();
+  try {
+    c.g("branch", "-D", "feat/t");
+    c.g("branch", "feat/t", c.cut);
+    writeInto(c.repo, "base.txt", "newer base\n");
+    commitAll(c.repo, "base moves on");
+    c.g("checkout", "-q", "feat/t");
+    c.g("merge", "-q", "--ff-only", "main");
+    c.g("checkout", "-q", "main");
+    const checked = checkState(c.state, { cwd: c.repo });
+    assert.equal(checked.ok, true, JSON.stringify(checked));
+    assert.equal(runIn(c.state, c.repo).status, 0);
+  } finally {
+    c.done();
+  }
+});
+
+test("not merged: a topic reset onto a newer base tip with no commits of its own", () => {
+  const c = landedRepo();
+  try {
+    c.g("branch", "-D", "feat/t");
+    c.g("branch", "feat/t", c.cut);
+    writeInto(c.repo, "base.txt", "newer base\n");
+    commitAll(c.repo, "base moves on");
+    c.g("branch", "-f", "feat/t", "main");
+    assert.equal(checkState(c.state, { cwd: c.repo }).ok, true);
+  } finally {
+    c.done();
+  }
+});
+
+test("merged: a topic with its own commits stays caught by ancestry after it was caught up and merged", () => {
+  const c = landedRepo();
+  try {
+    writeInto(c.repo, "base.txt", "newer base\n");
+    commitAll(c.repo, "base moves on");
+    c.g("checkout", "-q", "feat/t");
+    c.g("rebase", "-q", "main");
+    c.g("checkout", "-q", "main");
+    c.g("merge", "-q", "--ff-only", "feat/t");
+    const checked = checkState(c.state, { cwd: c.repo });
+    assert.deepEqual([checked.kind, checked.signal], ["merged", "ancestry"]);
+  } finally {
+    c.done();
+  }
+});
+
+test("merged: ancestry still fires when the topic's reflog is gone", () => {
+  const c = landedRepo();
+  try {
+    c.g("merge", "-q", "--ff-only", "feat/t");
+    rmSync(join(c.repo, ".git", "logs", "refs", "heads", "feat"), { recursive: true, force: true });
+    assert.equal(checkState(c.state, { cwd: c.repo }).signal, "ancestry");
+  } finally {
+    c.done();
+  }
+});
+
 
 test("merged: a local squash merge is caught offline by content (R1s)", () => {
   const c = landedRepo();

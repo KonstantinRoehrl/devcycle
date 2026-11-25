@@ -1185,4 +1185,16 @@ test("a nested worktree's cycle read from the main checkout stops foreign-state 
   const r = setup({ ...c, statePath });
   assert.equal(r.stopReason, "foreign-state", r.stopDetail);
   assert.ok(r.stopDetail.includes(realpathSync(nested)), r.stopDetail);
+  assert.match(r.stopDetail, /your checkout does not hold the recorded branch/);
+  assert.match(r.stopDetail, /^[^;&|`\n]+$/, "one line a drive-mode stop can print");
+  assert.ok(!r.stopDetail.includes("$("), r.stopDetail);
+});
+
+test("a cycle read from the worktree that holds its branch stops foreign-state and says so", () => {
+  const c = heldElsewhere();
+  const r = setup(c, { cwd: c.wt });
+  assert.equal(r.stopReason, "foreign-state", r.stopDetail);
+  assert.match(r.stopDetail, /your checkout holds the recorded branch/);
+  assert.doesNotMatch(r.stopDetail, /does not hold/);
+  assert.match(r.stopDetail, /^[^;&|`\n]+$/, "one line a drive-mode stop can print");
 });
