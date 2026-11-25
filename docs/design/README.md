@@ -136,6 +136,7 @@ devcycle/                (public GitHub repo)
 │   ├── lib/find-state-file.mjs        # the bounded .devcycle/state.md walk the git guard and both sensors key off
 │   ├── lib/poll-guard.mjs             # the until/while-loop-that-sleeps check the git guard applies to a guarded dispatch (#385)
 │   ├── lib/run-scope.mjs              # which state file names an active run — node-free, shared by the depth-sensor and the hooks module
+│   ├── lib/row-format.mjs             # the drive band's row shape, ported from cc-statusline — node-free, imported by the hooks module
 │   ├── lib/run-context.mjs            # state file → active run → joined session, for the depth-sensor and the module's sink
 │   ├── workload-sensor.mjs       # PostToolUse(Bash) commit-sensor: re-derives the run's workload record (#139)
 │   ├── dispatch-sensor.mjs       # SubagentStop depth-sensor: one agent-depth record and one agent-cost record per finished subagent; holds an implementer that stops before its report; on a released stop marks its dispatch record ended and retires it in the process registry; on Stop holds the live driver's turn while a dispatch works

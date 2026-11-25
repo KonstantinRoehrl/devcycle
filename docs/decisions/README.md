@@ -5,6 +5,41 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-25 — The drive band shows each tier's model, effort and context (#456 slice 1)
+
+**Decision:** `.devcycle/drive-progress.json` moves to schema v2. It carries three tiers of its own:
+`driver` for the driver session, `session` for the live driven session (`null` outside one), and,
+on a task whose dispatch reads `running` or `quiet`, a `dispatch` with its role, model, effort,
+tokens, window and routing label. `hooks/devcycle-mod.mjs` draws v2 and still draws a v1 file
+exactly as before.
+
+Each tier's values come from its own transcript's last usage record, the model it actually ran on,
+never the model requested. The driver reads a dispatch's transcript on its 30 s heartbeat through
+`readTranscript`, and the driven session's values from the stream it already parses. It tail-reads
+the driver session's transcript behind the latest `--wait` registration whose pid is alive
+(`.devcycle/drive-watcher.json`, `scripts/drive-watcher.mjs`). The routing label comes from the
+ledger's `outcome=model …` line.
+
+"The driver" stays `scripts/drive-execution.mjs`. The interactive session that watches the run is
+now "the driver session", which these docs called "the watching session" or "the watcher", and
+the header's silent text reads `? drive silent since`. The model, ctx and token segments keep
+cc-statusline's literal colors (`#5fafaf`, a green-amber-red gradient from 40% to 65%, `#d0d0d0`);
+the run-state colors stay theme keys. A row that does not fit drops its tokens, then its ctx, before
+it cuts a task's step, round or rejection warning, and is never wrapped. A band taller than
+AbovePrompt's `maxRows` folds the running wave's committed and pending rows into one summary row,
+then drops the session row, then the strip, then the rows past the last that fits.
+
+**Why:** the band showed one run-level model, so an escalation, a pin or a configured default
+subagent model was invisible until the run was over. The three tiers read the same today by
+construction; slice 2's model policy (with #494) will route them apart and needs no second band
+change. A heartbeat-driven read keeps the file's one writer and costs no model turn, and an
+assumed window shows tokens without a `ctx` guess. The gradient is continuous and the model name
+must match cc-statusline's own agent rows, so neither fits a theme key.
+
+**Supersedes:** the v1 header `session <n> · <model> · <effort>` for files a v2 driver writes, and
+the names "the watching session" and "the watcher" in `docs/playbooks/executing-waves/unattended.md`
+and `references/drive.md`.
+
 ## 2026-11-25 — CI's Claude Code versions are owned once and bumped by Dependabot and Canary (#495)
 
 **Decision:** `.github/claude-code/package.json` owns the two Claude Code versions CI tests devcycle
