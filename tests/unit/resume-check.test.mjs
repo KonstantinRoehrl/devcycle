@@ -858,6 +858,9 @@ function landedRepo({ annotate = true, extra = [] } = {}) {
     "# devcycle state", "- stage: execution", `- root: ${repo}`,
     `- branch: feat/t${annotate ? ` (cut from main at ${cut})` : ""}`, "- spec: none", "- plan: none", "- checklist: none", ...extra, "",
   ].join("\n"));
+  // Rebases and merges commit as the runner, which CI leaves without an identity.
+  sh("git", ["config", "user.name", "devcycle-test"], { cwd: repo });
+  sh("git", ["config", "user.email", "test@devcycle.invalid"], { cwd: repo });
   const g = (...args) => sh("git", args, { cwd: repo });
   return { repo, cut, tip, state, g, done: () => rmSync(repo, { recursive: true, force: true }) };
 }
