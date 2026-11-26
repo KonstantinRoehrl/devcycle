@@ -36,21 +36,23 @@ const rejectionsOf = (entries) => entries.filter((e) =>
   (e.event === "review-verdict" && e.outcome.startsWith("rejected") && !isNoVerdict(e.outcome)) ||
   e.outcome.startsWith(INTAKE_BOUNCE)).length;
 
-// The band's routing label for a ledger `outcome=` text. Producers: scripts/model-pool.mjs (pinned,
-// pooled, ceiling), scripts/task-intake.mjs (the reviewer's auto forms) and the coordinator's
-// implementer decision, passed verbatim through task-dispatch.mjs --model-decision. Released plugins up
-// to 0.34.0 write the prefix twice ("model model fast…"), so every leading "model " is stripped, and any
-// form that is not a routing decision reads as null: the band then draws no routing.
-const ROUTING_FORMS = [
-  [/^fast(?::\S+)? \(auto\b.*\)$/, () => "fast"],
-  [/^session \(auto: escalated on (.+)\)$/, (m) => `esc ${m[1]}`],
-  [/^session \(auto(?:: no file list)?\)$/, () => "session"],
-  [/^session \(ceiling: .*\)$/, () => "ceiling"],
-  [/^\S+ \(pinned\)$/, () => "pinned"],
-  [/^\S+ \(pinned, clamped from \S+\)$/, () => "pinned, clamped"],
-  [/^\S+ \(pooled: rung (\d+\/\d+)\)$/, (m) => `pool ${m[1]}`],
-  [/^\S+ \(pooled: rung (\d+\/\d+), clamped from \S+\)$/, (m) => `pool ${m[1]} + clamped`],
-];
+// The band's routing label for a ledger `outcome=` text. Producers: scripts/model-policy.mjs, through
+// scripts/task-dispatch.mjs, and scripts/model-pool.mjs for a set knob, whose outcome the policy passes on
+// verbatim. A driven dispatch names the ceiling after `session:`. Released plugins up to 0.34.0 write the
+// prefix twice ("model model fast…"), so every leading "model " is stripped, and any form that is not a
+// routing decision reads as null: the band then draws no routing. Each form carries its documented
+// label template, which docs/playbooks/executing-waves/unattended.md lists and a test keeps equal.
+export const ROUTING_FORMS = Object.freeze([
+  [/^fast(?::\S+)? \(auto\b.*\)$/, () => "fast", "fast"],
+  [/^session(?::\S+)? \(auto: escalated on (.+)\)$/, (m) => `esc ${m[1]}`, "esc <signals>"],
+  [/^session(?::\S+)? \(auto(?:: no file list)?\)$/, () => "session", "session"],
+  [/^session \(ceiling: .*\)$/, () => "ceiling", "ceiling"],
+  [/^\S+ \(pinned\)$/, () => "pinned", "pinned"],
+  [/^\S+ \(pinned, clamped from \S+\)$/, () => "pinned, clamped", "pinned, clamped"],
+  [/^\S+ \(pooled: rung (\d+\/\d+)\)$/, (m) => `pool ${m[1]}`, "pool <n>/<len>"],
+  [/^\S+ \(pooled: rung (\d+\/\d+), clamped from \S+\)$/, (m) => `pool ${m[1]} + clamped`, "pool <n>/<len> + clamped"],
+]);
+export const PRODUCIBLE_ROUTING_LABELS = Object.freeze(ROUTING_FORMS.map(([, , template]) => template));
 
 export function routingLabel(outcome) {
   if (typeof outcome !== "string") return null;
