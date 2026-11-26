@@ -53,7 +53,7 @@ test("a clean report: report-received complete and a dispatch row carrying every
   const r = intake(f, ["--agent-id", "agent-a12394549e76f104a"]);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.out.action, "review");
-  assert.deepEqual(routed(r), ["session", null, "model session (auto: no file list)"]);
+  assert.deepEqual(routed(r), [null, null, "model session (auto: no file list)"]);
   assert.deepEqual(r.out.appended, ["5/report-received/0/0", "rr:dispatch"]);
   assert.match(ledgerTail(f), / task=5 event=report-received outcome=complete ref=\.devcycle\/reports\/5\.md key=5\/report-received\/0\/0$/);
   const [row] = rows(f);
@@ -190,7 +190,7 @@ const ledgerText = ({ repo }) => readFileSync(join(repo, ".devcycle/ledger.md"),
 
 test("--compose-review writes the reviewer brief and dispatches the task's next review round", () => {
   const f = planned();
-  const r = intake(f, ["--compose-review"]);
+  const r = intake(f, ["--compose-review", "--orchestrator", "claude-opus-5-5"]);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.out.action, "review");
   assert.deepEqual(
@@ -198,7 +198,7 @@ test("--compose-review writes the reviewer brief and dispatches the task's next 
     [".devcycle/briefs/5-reviewer-round-1.md", ".devcycle/findings/5-round-1.md", 1],
   );
   assert.deepEqual(r.out.appended, ["5/report-received/0/0", "rr:dispatch", "5/review-round/1/0"]);
-  assert.match(ledgerTail(f), / task=5 event=review-round outcome=model fast \(auto: lines=0, files=0\) ref=\.devcycle\/briefs\/5-reviewer-round-1\.md key=5\/review-round\/1\/0$/);
+  assert.match(ledgerTail(f), / task=5 event=review-round outcome=model fast:claude-sonnet-5-5 \(auto: lines=0, files=0\) ref=\.devcycle\/briefs\/5-reviewer-round-1\.md key=5\/review-round\/1\/0$/);
   // The scripts resolve the root through the git toplevel, which resolves symlinks.
   const findingsAbs = join(realpathSync(f.repo), ".devcycle/findings/5-round-1.md");
   const brief = readFileSync(join(f.repo, r.out.reviewBriefPath), "utf8");
@@ -395,7 +395,7 @@ function orchestratedBy(model) {
   return { CLAUDE_CODE_SESSION_ID: "sess-1", CLAUDE_DOCTOR_PROJECTS: projects };
 }
 
-const routed = (r) => [r.out.reviewTier, r.out.reviewModel, r.out.reviewDecision];
+const routed = (r) => [r.out.reviewModel, r.out.reviewDispatchModel, r.out.reviewDecision];
 
 test("--compose-review routes the reviewer from the task's diff, tracked edits and new files both, and records the decision", () => {
   const f = planned();
@@ -403,19 +403,19 @@ test("--compose-review routes the reviewer from the task's diff, tracked edits a
   commitAll(f.repo, "chore: seed");
   writeInto(f.repo, "src/a.mjs", "a\nb\nc\n");
   writeInto(f.repo, "tests/a.test.mjs", "t1\nt2\n");
-  const r = intake(f, ["--compose-review"]);
+  const r = intake(f, ["--compose-review", "--orchestrator", "claude-opus-5-5"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(routed(r), ["fast", null, "model fast (auto: lines=4, files=2)"]);
-  assert.match(ledgerTail(f), / event=review-round outcome=model fast \(auto: lines=4, files=2\) ref=\.devcycle\/briefs\/5-reviewer-round-1\.md key=5\/review-round\/1\/0$/);
-  assert.deepEqual(routed(intake(f, ["--compose-review"])), routed(r));
+  assert.deepEqual(routed(r), ["claude-sonnet-5-5", "sonnet", "model fast:claude-sonnet-5-5 (auto: lines=4, files=2)"]);
+  assert.match(ledgerTail(f), / event=review-round outcome=model fast:claude-sonnet-5-5 \(auto: lines=4, files=2\) ref=\.devcycle\/briefs\/5-reviewer-round-1\.md key=5\/review-round\/1\/0$/);
+  assert.deepEqual(routed(intake(f, ["--compose-review", "--orchestrator", "claude-opus-5-5"])), routed(r));
 });
 
 test("an auto reviewer escalates to the session tier past 400 changed lines or 5 files, naming the limit crossed", () => {
-  assert.deepEqual(routed(intake(plannedWith(["src/a.mjs"], 401), ["--compose-review"])),
-    ["session", null, "model session (auto: escalated on lines=401)"]);
+  assert.deepEqual(routed(intake(plannedWith(["src/a.mjs"], 401), ["--compose-review", "--orchestrator", "claude-opus-5-5"])),
+    [null, null, "model session (auto: escalated on lines=401)"]);
   const six = ["1", "2", "3", "4", "5", "6"].map((n) => `src/${n}.mjs`);
-  assert.equal(intake(plannedWith(six), ["--compose-review"]).out.reviewDecision, "model session (auto: escalated on files=6)");
-  assert.equal(intake(plannedWith(six.slice(0, 5), 80), ["--compose-review"]).out.reviewDecision, "model fast (auto: lines=400, files=5)");
+  assert.equal(intake(plannedWith(six), ["--compose-review", "--orchestrator", "claude-opus-5-5"]).out.reviewDecision, "model session (auto: escalated on files=6)");
+  assert.equal(intake(plannedWith(six.slice(0, 5), 80), ["--compose-review", "--orchestrator", "claude-opus-5-5"]).out.reviewDecision, "model fast:claude-sonnet-5-5 (auto: lines=400, files=5)");
 });
 
 test("a pinned or pooled taskReviewerModel resolves through model-pool, one signal per limit crossed", () => {
@@ -423,12 +423,12 @@ test("a pinned or pooled taskReviewerModel resolves through model-pool, one sign
   writeInto(pinned.repo, ".devcycle/state.md", "# devcycle state\n- stage: execution\n- knobs: profile=standard taskReviewerModel=claude-sonnet-5-5\n");
   const r = intake(pinned, ["--compose-review"], "complete", orchestratedBy("claude-opus-5-5"));
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(routed(r), [null, "claude-sonnet-5-5", "model claude-sonnet-5-5 (pinned)"]);
+  assert.deepEqual(routed(r), ["claude-sonnet-5-5", "sonnet", "model claude-sonnet-5-5 (pinned)"]);
   const pooled = plannedWith(["src/a.mjs"], 401);
   writeInto(pooled.repo, ".devcycle/state.md",
     "# devcycle state\n- stage: execution\n- knobs: profile=standard taskReviewerModel=claude-haiku-4-5,claude-sonnet-5-5\n");
   assert.deepEqual(routed(intake(pooled, ["--compose-review"], "complete", orchestratedBy("claude-opus-5-5"))),
-    [null, "claude-sonnet-5-5", "model claude-sonnet-5-5 (pooled: rung 2/2)"]);
+    ["claude-sonnet-5-5", "sonnet", "model claude-sonnet-5-5 (pooled: rung 2/2)"]);
 });
 
 test("a pooled reviewer that crosses both the line and the file limit climbs two rungs", () => {
@@ -437,7 +437,7 @@ test("a pooled reviewer that crosses both the line and the file limit climbs two
   writeInto(both.repo, ".devcycle/state.md",
     "# devcycle state\n- stage: execution\n- knobs: profile=standard taskReviewerModel=claude-haiku-4-5,claude-sonnet-5-5,claude-opus-5-5\n");
   assert.deepEqual(routed(intake(both, ["--compose-review"], "complete", orchestratedBy("claude-opus-5-5"))),
-    [null, "claude-opus-5-5", "model claude-opus-5-5 (pooled: rung 3/3)"]);
+    ["claude-opus-5-5", "opus", "model claude-opus-5-5 (pooled: rung 3/3)"]);
 });
 
 test("the reviewer's diff measure counts a binary file as a changed file with no lines, and a last line with no newline as a line", () => {
@@ -449,10 +449,10 @@ test("the reviewer's diff measure counts a binary file as a changed file with no
     writeInto(f.repo, "src/a.mjs", binary(5));
     return f;
   };
-  assert.equal(intake(withBinaryEdit(), ["--compose-review"]).out.reviewDecision, "model fast (auto: lines=0, files=1)", "a binary-only diff");
+  assert.equal(intake(withBinaryEdit(), ["--compose-review", "--orchestrator", "claude-opus-5-5"]).out.reviewDecision, "model fast:claude-sonnet-5-5 (auto: lines=0, files=1)", "a binary-only diff");
   const beside = withBinaryEdit();
   writeInto(beside.repo, "tests/a.test.mjs", "t1\nt2");
-  assert.equal(intake(beside, ["--compose-review"]).out.reviewDecision, "model fast (auto: lines=2, files=2)", "a binary file beside a new file with no trailing newline");
+  assert.equal(intake(beside, ["--compose-review", "--orchestrator", "claude-opus-5-5"]).out.reviewDecision, "model fast:claude-sonnet-5-5 (auto: lines=2, files=2)", "a binary file beside a new file with no trailing newline");
 });
 
 test("a tier or family word as --model is a usage error that names the fix and writes nothing", () => {
@@ -462,7 +462,7 @@ test("a tier or family word as --model is a usage error that names the fix and w
     const before = readFileSync(join(f.repo, ".devcycle/ledger.md"), "utf8");
     const r = intake(f, ["--model", word]);
     assert.equal(r.status, 2, word);
-    assert.match(r.out.error, new RegExp(`--model must be a model id such as claude-sonnet-5-5, got "${word}": pass the model the router returned, or this session's own model id when it returned null`));
+    assert.match(r.out.error, new RegExp(`--model must be a model id such as claude-sonnet-5-5, got "${word}": pass the model task-dispatch printed, or this session's own model id when it printed null`));
     assert.equal(readFileSync(join(f.repo, ".devcycle/ledger.md"), "utf8"), before);
     assert.deepEqual(rows(f), []);
   }
@@ -471,4 +471,24 @@ test("a tier or family word as --model is a usage error that names the fix and w
     writeInto(f.repo, ".devcycle/reports/5.md", report());
     assert.equal(intake(f, ["--model", id]).status, 0, id);
   }
+});
+
+test("intake's review result carries the model task-dispatch resolves, with and without --compose-review", () => {
+  const preview = intake(plannedWith(["src/a.mjs"], 2), ["--orchestrator", "claude-opus-5-5"]);
+  assert.equal(preview.status, 0, preview.stderr);
+  assert.deepEqual(routed(preview), ["claude-sonnet-5-5", "sonnet", "model fast:claude-sonnet-5-5 (auto: lines=2, files=1)"]);
+  assert.equal("reviewTier" in preview.out, false);
+  const composed = intake(plannedWith(["src/a.mjs"], 2), ["--compose-review", "--orchestrator", "claude-opus-5-5"]);
+  assert.equal(composed.status, 0, composed.stderr);
+  assert.deepEqual(routed(composed), routed(preview));
+});
+
+test("a driven reviewer's ceiling is the drive row's model, whatever --orchestrator says", () => {
+  const f = plannedWith(["src/a.mjs"], 401);
+  writeInto(f.repo, ".devcycle/state.md",
+    "# devcycle state\n- stage: branch-review\n- drive: auto model=claude-opus-5-5 opted=2026-11-26T09:00:00Z via=answer\n");
+  const r = intake(f, ["--compose-review", "--orchestrator", "claude-sonnet-5-5"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(routed(r), ["claude-opus-5-5", "opus", "model session:claude-opus-5-5 (auto: escalated on lines=401)"]);
+  assert.match(ledgerTail(f), / event=review-round outcome=model session:claude-opus-5-5 \(auto: escalated on lines=401\) ref=/);
 });

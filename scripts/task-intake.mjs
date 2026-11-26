@@ -3,23 +3,20 @@
 // evidence line, runs the two report lints a reviewer would otherwise spend a round on, and writes
 // the `report-received` ledger line and the `dispatch` run-record row for the task's latest
 // dispatch. The envelope's `status:` arrives as --status, since the report itself carries none.
-// With --compose-review, a report bound for review also gets its reviewer brief and dispatch here, routed from
-// the task's diff stat, so the coordinator never reads the diff to pick the reviewer's model.
+// With --compose-review, a report bound for review also gets its reviewer brief and dispatch here;
+// task-dispatch resolves the reviewer's model from the task's diff, so the coordinator never reads it.
 // Contract: references/ledger.md § Task scripts; resume rows and retry caps: references/resume.md.
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { atomicWrite } from "./atomic-write.mjs";
 import { authoredClaimsLeg } from "./authored-claims-check.mjs";
-import { resolveDepth } from "./depth-probe.mjs";
 import { gitToplevel } from "./git-identity.mjs";
 import { isMain } from "./is-main.mjs";
 import { field } from "./md-field.mjs";
-import { loadTable, parsePool, resolveModel } from "./model-pool.mjs";
-import { parseRecordedLine } from "./resolve-knobs.mjs";
 import { now } from "./stamp.mjs";
-import { dispatch, roundFindingsPath } from "./task-dispatch.mjs";
+import { dispatch, roundFindingsPath, routeDispatch } from "./task-dispatch.mjs";
 import {
   UsageError, appendLedgerLine, appendRunRecordOnce, checkIds, latestKeyed, ledgerKey, nextReviewRound, retryCount,
   runTaskScript, taskEntries, taskFiles, taskFlags, taskGate, workTreeRoot,
@@ -28,6 +25,7 @@ import {
 const FLAGS = {
   "--run": "value", "--task": "value", "--report": "value", "--status": "value", "--agent-type": "value",
   "--model": "value", "--model-source": "value", "--agent-id": "value", "--ledger": "value", "--compose-review": "none",
+  "--orchestrator": "value",
 };
 const REQUIRED = ["--run", "--task", "--report", "--status", "--agent-type", "--model", "--model-source"];
 const EVIDENCE_COMPLETENESS = fileURLToPath(new URL("./evidence-completeness-check.mjs", import.meta.url));
@@ -37,9 +35,6 @@ const EVIDENCE_LINE_RE = /^-\s*Evidence:/m;
 const MISSING = "rejected (missing report file)";
 const BOUNCE = "rejected (intake bounce)";
 const RETRY_CAP = 2;
-// The taskReviewerModel=auto predicate's limits: references/model-routing.md § Model tiers owns them.
-const REVIEW_LINES = 400;
-const REVIEW_FILES = 5;
 // A dispatch row's model is an id (claude-sonnet-5-5, a dated or provider-prefixed id), never a tier
 // or family word: an id has a hyphen-joined part and a digit, which no tier word has.
 const MODEL_ID_RE = /^(?=\S*\d)[^\s-]+(?:-[^\s-]+)+$/;
@@ -127,62 +122,10 @@ function reviewerBrief({ root, ledger, task, round, reportRel, report, findingsP
   ].join("\n");
 }
 
-// The task's uncommitted diff over its own files, as the reviewer will see it: tracked edits from
-// numstat, plus each new (untracked) file's lines, since diff cannot see a file the index lacks.
-function diffStat(root, files) {
-  const git = (args) => spawnSync("git", ["-C", root, ...args, "--", ...files], { encoding: "utf8" }).stdout ?? "";
-  let lines = 0;
-  let changed = 0;
-  for (const row of git(["diff", "--numstat", "HEAD"]).split("\n").filter(Boolean)) {
-    const [add, del] = row.split("\t");
-    changed += 1;
-    lines += (add === "-" ? 0 : Number(add)) + (del === "-" ? 0 : Number(del));
-  }
-  for (const path of git(["ls-files", "--others", "--exclude-standard"]).split("\n").filter(Boolean)) {
-    changed += 1;
-    const text = readFileSync(join(root, path), "utf8");
-    lines += (text.match(/\n/g)?.length ?? 0) + (text && !text.endsWith("\n") ? 1 : 0);
-  }
-  return { lines, files: changed };
-}
-
-// This session's own model id, the ceiling a pin or pool resolves under; "unknown" when no transcript
-// says, which model-pool treats as unranked and answers with no override.
-function orchestratorId(env, cwd) {
-  try {
-    return resolveDepth(env, cwd, {}).model;
-  } catch {
-    return "unknown";
-  }
-}
-
-// The reviewer's model, per references/model-routing.md § Model tiers. Under auto the predicate runs
-// here and the tier comes back for the coordinator to map, as it maps an implementer's; a pin or pool
-// resolves through model-pool with one signal per limit crossed. With no file list, nothing is measured:
-// auto takes the session tier and a pool its top rung.
-function reviewerRouting({ root, ledger, task, env, cwd }) {
-  const statePath = join(dirname(ledger), "state.md");
-  const stateText = existsSync(statePath) ? readFileSync(statePath, "utf8") : "";
-  const knob = parseRecordedLine(field(stateText, "knobs") ?? "").taskReviewerModel;
-  const files = [...(taskFiles(ledger, task) ?? [])];
-  const stat = files.length ? diffStat(root, files) : null;
-  const over = stat ? [stat.lines > REVIEW_LINES && `lines=${stat.lines}`, stat.files > REVIEW_FILES && `files=${stat.files}`].filter(Boolean) : null;
-  if (parsePool(knob).kind === "unset") {
-    if (!stat) return { reviewTier: "session", reviewModel: null, reviewDecision: "model session (auto: no file list)" };
-    return over.length
-      ? { reviewTier: "session", reviewModel: null, reviewDecision: `model session (auto: escalated on ${over.join(", ")})` }
-      : { reviewTier: "fast", reviewModel: null, reviewDecision: `model fast (auto: lines=${stat.lines}, files=${stat.files})` };
-  }
-  const { model, outcome } = resolveModel({
-    value: knob, signalCount: over ? over.length : Infinity, orchestratorId: orchestratorId(env, cwd), table: loadTable(),
-  });
-  return { reviewTier: model ? null : "session", reviewModel: model, reviewDecision: outcome };
-}
-
 // The review step 4 hands on, dispatched here through task-dispatch's own reviewer path, so its
 // ledger line and findings set-aside stay that script's. A round already dispatched since the latest
 // report makes this a re-run: it points at that round's brief and writes nothing.
-function composeReview({ root, ledger, run, task, cwd, ledgerFlag, reportRel, report, dispatched, routing }) {
+function composeReview({ root, ledger, run, task, cwd, ledgerFlag, orchestrator, reportRel, report, dispatched, routing }) {
   const entries = taskEntries(ledger, task);
   const round = nextReviewRound(entries);
   const findingsPath = roundFindingsPath(task, round);
@@ -190,7 +133,7 @@ function composeReview({ root, ledger, run, task, cwd, ledgerFlag, reportRel, re
   const sent = since.find((e) => e.event === "review-round" && Number(e.key?.split("/")[2]) === round);
   if (sent) return { reviewBriefPath: sent.ref, findingsPath, reviewRound: round, ...routing, appended: [] };
   const brief = reviewerBrief({ root, ledger, task, round, reportRel, report, findingsPath, dispatched });
-  const argv = ["--run", run, "--task", task, "--role", "reviewer", "--round", String(round), "--model-decision", routing.reviewDecision, ...(ledgerFlag ? ["--ledger", ledgerFlag] : [])];
+  const argv = ["--run", run, "--task", task, "--role", "reviewer", "--round", String(round), ...(orchestrator ? ["--orchestrator", orchestrator] : []), ...(ledgerFlag ? ["--ledger", ledgerFlag] : [])];
   const { briefPath, appended } = dispatch(argv, brief, cwd);
   return { reviewBriefPath: briefPath, findingsPath, reviewRound: round, ...routing, appended };
 }
@@ -203,8 +146,8 @@ export function intake(argv, cwd = process.cwd()) {
   if (!["explicit", "inherited"].includes(modelSource))
     throw new UsageError(`--model-source must be explicit or inherited, got "${modelSource}"`);
   if (!MODEL_ID_RE.test(flags["--model"]))
-    throw new UsageError(`--model must be a model id such as claude-sonnet-5-5, got "${flags["--model"]}": pass the model the router returned, ` +
-      "or this session's own model id when it returned null and the dispatch inherited it");
+    throw new UsageError(`--model must be a model id such as claude-sonnet-5-5, got "${flags["--model"]}": pass the model task-dispatch printed, ` +
+      "or this session's own model id when it printed null and the dispatch inherited it");
 
   const root = workTreeRoot(cwd);
   const ledger = flags["--ledger"] ?? join(root, ".devcycle/ledger.md");
@@ -260,9 +203,11 @@ export function intake(argv, cwd = process.cwd()) {
   }
   ledgerLine("complete", reportRel);
   dispatchRow("complete");
-  const routing = reviewerRouting({ root, ledger, task, env: process.env, cwd });
+  const orchestrator = flags["--orchestrator"];
+  const route = routeDispatch({ role: "reviewer", root, ledger, task, orchestrator, cwd });
+  const routing = { reviewModel: route.model, reviewDispatchModel: route.dispatchModel, reviewDecision: route.modelOutcome };
   if (!flags["--compose-review"]) return { ...base, action: "review", ...routing, appended };
-  const review = composeReview({ root, ledger, run, task, cwd, ledgerFlag: flags["--ledger"], reportRel, report: text, dispatched, routing });
+  const review = composeReview({ root, ledger, run, task, cwd, ledgerFlag: flags["--ledger"], orchestrator, reportRel, report: text, dispatched, routing });
   return { ...base, action: "review", ...review, appended: [...appended, ...review.appended] };
 }
 
