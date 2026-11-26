@@ -1732,6 +1732,28 @@ test("--model overrides the coordinator only; a Sonnet or Haiku opt-in keeps its
   assert.equal(haiku.calls[0].argv[haiku.calls[0].argv.indexOf("--model") + 1], "claude-haiku-5-5");
 });
 
+// 300k uncached input tokens cost $0.60 on claude-sonnet-5-5 ($2 per million) and $1.20 on claude-opus-5-5 ($4).
+test("a session that dies without a result event is priced at the coordinator's model, not the ceiling's", async () => {
+  const crashing = { ledger: [line(1, "report-received")], noResult: true, exitCode: 1, usage: { input_tokens: 300_000 } };
+  const r = await drive(makeCycle({ drive: opusRow }), [crashing], { flags: ["--max-usd", "1"] });
+  assert.equal(r.code, 6, r.out);
+  assert.equal(r.calls[0].argv[r.calls[0].argv.indexOf("--model") + 1], "claude-sonnet-5-5");
+  assert.match(r.out, /session 1 ended — [^\n]*, ~\$0\.60 estimated\n/);
+  assert.match(r.out, /spent \$1\.20 of --max-usd 1/);
+});
+
+test("the coordinator's effort is read from the settings for the coordinator's model, not the ceiling's", async () => {
+  const root = makeCycle({ drive: "- drive: auto model=claude-opus-5-5 opted=2026-11-26T00:00:00Z via=answer" });
+  writeInto(root, ".claude/settings.json", JSON.stringify({
+    modelSettings: { "claude-sonnet-5-5": { effortLevel: "xhigh" }, "claude-opus-5-5": { effortLevel: "low" } },
+  }));
+  const r = await drive(root, [{ ledger: DONE, stage: "branch-review" }]);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.calls[0].argv[r.calls[0].argv.indexOf("--model") + 1], "claude-sonnet-5-5");
+  assert.deepEqual(r.calls[0].argv.slice(4, 6), ["--effort", "xhigh"]);
+  assert.match(startsLine(root), /model claude-sonnet-5-5 \(ceiling claude-opus-5-5\), effort xhigh/);
+});
+
 test("pickCoordinator falls back to the ceiling when the fast tier is refused, and reports a refused ceiling", () => {
   assert.deepEqual(pickCoordinator({ ceiling: "claude-opus-5-5", refuse: () => null }), { model: "claude-sonnet-5-5", refusal: null });
   assert.deepEqual(pickCoordinator({ ceiling: "claude-opus-5-5", refuse: (m) => (m === "claude-sonnet-5-5" ? "no window" : null) }),

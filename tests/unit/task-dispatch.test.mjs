@@ -536,6 +536,26 @@ test("an explicit --model above the ceiling exits 3 and writes nothing; at or be
   assert.equal(outcomeOf(ledgerLines(repo)[0]), `model ${SONNET} (pinned)`);
 });
 
+test("an explicit --model equal to the ceiling is recorded as a pin, not refused", () => {
+  const repo = routedRepo();
+  const equal = dispatch(repo, [...implementer, "--orchestrator", SONNET, "--model", SONNET]);
+  assert.equal(equal.status, 0, equal.stderr);
+  assert.deepEqual([equal.out.model, equal.out.dispatchModel, equal.out.modelOutcome], [SONNET, "sonnet", `model ${SONNET} (pinned)`]);
+  assert.equal(outcomeOf(ledgerLines(repo)[0]), `model ${SONNET} (pinned)`);
+});
+
+test("an explicit --model under a ceiling that has no tier is not refused, since nothing can rank above it", () => {
+  const unranked = routedRepo();
+  const named = dispatch(unranked, [...implementer, "--orchestrator", "gpt-9", "--model", OPUS]);
+  assert.equal(named.status, 0, named.stderr);
+  assert.equal(ledgerLines(unranked).length, 1);
+  // No --orchestrator, no drive row and no session transcript: the ceiling is "unknown".
+  const unknown = routedRepo();
+  const bare = dispatch(unknown, [...implementer, "--model", OPUS]);
+  assert.equal(bare.status, 0, bare.stderr);
+  assert.equal(ledgerLines(unknown).length, 1);
+});
+
 test("--model-decision is gone, and --steps-unspecified is an implementer signal only", () => {
   const repo = routedRepo();
   const old = dispatch(repo, [...implementer, "--model-decision", "fast (auto: files=1)"]);
