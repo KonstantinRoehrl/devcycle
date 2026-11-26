@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { planningBreakdown, corpusGateLegs, corpusGateLegsLine, reworkFails, projectionError, errorPctText } from "../../scripts/doctor-planning.mjs";
 import { loadTable } from "../../scripts/model-pool.mjs";
+import { loadPolicy } from "../../scripts/model-policy.mjs";
 
 const cost = (agentId, role, usd, extra = {}) => ({
   kind: "agent-cost", stage: "planning", agentType: "devcycle:implementer", agentId, model: "claude-sonnet-5-5",
@@ -348,4 +349,16 @@ test("errorPctText: a signed one-decimal percent, unknown for null", () => {
   assert.equal(errorPctText(0), "+0.0%");
   assert.equal(errorPctText(-20), "-20.0%");
   assert.equal(errorPctText(null), "unknown");
+});
+
+test("tierFit: which roles must run fast, and how fast, come from the policy", () => {
+  const rows = [cost("c1", "checker", 0.1, { model: "claude-opus-5" }), cost("d1", "drafter", 0.1, { model: "claude-opus-5" })];
+  const policy = loadPolicy();
+  const checkerSession = { ...policy, roles: { ...policy.roles, checker: { ...policy.roles.checker, tier: "session" } } };
+  const drafterFast = { ...policy, roles: { ...policy.roles, drafter: { ...policy.roles.drafter, tier: "fast" } } };
+  assert.deepEqual(planningBreakdown(healthy({ agentCosts: rows }), { tierTable: TIERS, policy: checkerSession }).tierFit, []);
+  assert.deepEqual(planningBreakdown(healthy({ agentCosts: rows }), { tierTable: TIERS, policy: drafterFast }).tierFit,
+    [{ role: "checker", agentId: "c1", model: "claude-opus-5" }, { role: "drafter", agentId: "d1", model: "claude-opus-5" }]);
+  const opusFast = { ...policy, fastFamily: "opus" };
+  assert.deepEqual(planningBreakdown(healthy({ agentCosts: rows }), { tierTable: TIERS, policy: opusFast }).tierFit, []);
 });

@@ -4,6 +4,7 @@
 // scripts/plan-strategy.mjs projects each decision with it; scripts/plan-bench.mjs takes its
 // per-task rates from it.
 import { CACHE_WRITE_5M_MULTIPLIER, cacheReadDollars, priceFor } from "./pricing.mjs";
+import { loadPolicy, resolveRole } from "./model-policy.mjs";
 
 // Input-token model of one drafter: a shared prefix and the pack, plus a base and a per-weight
 // share for each task it drafts.
@@ -35,22 +36,26 @@ export const EXECUTION_RATE = 2.5;
 // A pass entry is { id, errorPct }: the projection's error against what that benchmark pass spent.
 export const CALIBRATION = Object.freeze({ passes: Object.freeze([]), maxErrorPct: 35 });
 
-// The session model prices the coordinator; the fast tier prices a drafter that
-// references/model-routing.md § Planning dispatches routes to it, and every edge checker.
+// The session model prices the coordinator. references/model-policy.json routes a drafter or an edge
+// checker to the fast tier; "fast" here is the id the projection prices that tier at.
 export const PLANNING_MODELS = Object.freeze({ session: "claude-opus-5-5", fast: "claude-haiku-5-5" });
 
 // One edge-checker dispatch checks this many consumer/producer pairs (references/delegated-planning.md § Edge checker).
 export const CHECKER_PAIRS_PER_DISPATCH = 8;
 
-// A drafter is fast only when every task is small and its interfaces are pinned.
-const FAST_TIER_MAX_FILES = 5;
-
 export const taskWeight = (task) => (task.files.length + task.produces) * (task.codePinned ? 2 : 1);
 
 export const taskTokens = (task) => PROFILE.taskBaseTokens + PROFILE.tokensPerWeight * taskWeight(task);
 
-export const draftTier = (tasks) =>
-  tasks.every((task) => !task.codePinned && !task.newAbstraction && task.files.length <= FAST_TIER_MAX_FILES) ? "fast" : "session";
+export const draftTier = (tasks, policy = loadPolicy()) => {
+  const facts = {
+    codePinned: tasks.some((task) => task.codePinned),
+    newAbstraction: tasks.some((task) => task.newAbstraction),
+    maxFiles: Math.max(0, ...tasks.map((task) => task.files.length)),
+    crossPackage: false,
+  };
+  return resolveRole("drafter", { ceiling: PLANNING_MODELS.session, facts, policy }).tier === "fast" ? "fast" : "session";
+};
 
 export function isCalibrated(calibration = CALIBRATION) {
   return calibration.passes.filter((pass) => Math.abs(pass.errorPct) <= calibration.maxErrorPct).length >= 2;
