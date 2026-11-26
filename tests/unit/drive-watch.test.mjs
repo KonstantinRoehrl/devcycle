@@ -439,7 +439,7 @@ test("waitForEnd with no session id registers nothing", async () => {
 });
 
 for (const [name, script] of [["drive-watch.mjs", WATCH], ["drive-execution.mjs", DRIVER]])
-  test(`${name} --wait removes its registration on SIGTERM and exits 143`, async () => {
+  test(`${name} --wait removes its registration on SIGTERM and exits 143`, { skip: process.platform === "win32" && "Windows: child.kill() ends a process without running its signal handlers" }, async () => {
     const c = makeCycle();
     liveLock(c.root);
     const child = spawn(process.execPath, [script, "--wait", "--state", c.statePath], { env: { ...POLL_ENV, CLAUDE_CODE_SESSION_ID: "watch-1" } });
