@@ -71,14 +71,13 @@ Each prints one JSON object (`ok`, `action`, `appended` — the keys it wrote an
 run-record row — and `depthBand`) and exits non-zero only on a usage (2) or environment (3) error. A usage error names every missing required
 flag at once; `--help` answers `action: "usage"` with the script's `required` and `optional` flags, exit 0.
 
-- `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-dispatch.mjs" --run <run-id> --task <id> --role implementer|reviewer [--round <n> | --reattempt] [--model-decision "<decision>"]`,
+- `node "${CLAUDE_PLUGIN_ROOT}/scripts/task-dispatch.mjs" --run <run-id> --task <id> --role implementer|reviewer [--round <n> | --reattempt] [--steps-unspecified] [--orchestrator <id>] [--model <alias|id>]`,
   the brief on stdin, immediately before each dispatch: writes it to
   `.devcycle/briefs/<id>-<role>[-round-<n>].md` (an implementer's with its `**Lessons:**` line filled
-  from the task's matched lessons), appends `dispatched` (`outcome=model <decision>`, the
-  `references/model-routing.md` audit shape, its `model ` prefix never doubled; `outcome=implementer retry <k>` without the flag)
-  or `review-round` (the same decision form, `outcome=round <n>` without the flag) with that path as `ref=`, and keeps the dispatch's start
+  from the task's matched lessons), appends `dispatched` or `review-round`, each recording the policy's audit string as
+  `outcome=model <…>` (`references/model-routing.md` § Roles), with that path as `ref=`, and keeps the dispatch's start
   time, which an implementer's `dispatch` row takes. A reviewer dispatch refuses any round but the
-  task's next, and first moves aside a findings file already at that round's path. `--reattempt` reads no
+  task's next, and first moves aside a findings file already at that round's path. An explicit `--model` above the cycle's ceiling exits 3 and writes nothing. The result's routing fields are `model`, `dispatchModel`, `effort` and `modelOutcome`. `--reattempt` reads no
   stdin: it re-sends the brief already saved for the task's open round (a reviewer) or its latest
   `dispatched` round (an implementer) at the next retry, adding no lessons and no gate tail. An implementer
   brief whose task resolves a gate ends with its `**Gate command:**` line, which cites
@@ -104,7 +103,7 @@ flag at once; `--help` answers `action: "usage"` with the script's `required` an
   or one with no `- Evidence:` line, appends `outcome=rejected (missing report file)` (`missing-report`);
   a report failing `authored-claims-check.mjs` or `evidence-completeness-check.mjs --task <id>` (its
   `cmd:` held to the task's gate through this ledger's plan) appends `outcome=rejected (intake bounce)` with its findings file as `ref=` (`bounce`); a clean one appends
-  `outcome=complete` (`review`), whose result carries the reviewer's `reviewTier`, `reviewModel` and `reviewDecision`. Each writes the `dispatch` row. With
+  `outcome=complete` (`review`), whose result carries the reviewer's `reviewModel`, `reviewDispatchModel` and `reviewDecision`. Each writes the `dispatch` row. With
   `--compose-review`, `review` also composes the reviewer brief and runs the reviewer dispatch above
   in-process, adding `reviewBriefPath`, `findingsPath` and `reviewRound`; a `review-round` for that
   round already after the latest `report-received` makes it write nothing and print those paths.

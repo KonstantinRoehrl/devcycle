@@ -815,6 +815,8 @@ test("harvested: executing-waves/model-routing — every escalation trigger and 
   assert.ok(t.includes("outcome=model session (auto: escalated on files=9)"), "the derived-escalation audit shape changed");
   assert.ok(t.includes("outcome=model <id> (pinned)"), "the pinned audit shape changed");
   assert.ok(t.includes("`outcome=model session (auto)`"), "Auditability omits the outcome scripts/model-pool.mjs prints for an unset knob (#296)");
+  assert.ok(t.includes("outcome=model session:<ceiling id> (auto: escalated on files=9)"), "Auditability omits the driven escalation form, which names the ceiling");
+  assert.ok(t.includes("outcome=model fast:<id> (auto: session tier is the fast tier; signals files=9)"), "Auditability omits the same-tier form, which records no escalation");
   assert.match(t, /escalation always names the signal that fired/);
 });
 

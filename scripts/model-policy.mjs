@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseFlags, requireValue } from "./cli-flags.mjs";
 import { isMain } from "./is-main.mjs";
+import { sectionText } from "./md-sections.mjs";
 import { loadTable, parsePool, rank, resolveModel } from "./model-pool.mjs";
 import { PRICING, compareSegments, parseModelId } from "./pricing.mjs";
 
@@ -160,6 +161,34 @@ export function resolveRole(role, { ceiling, driven = false, knob, facts = {}, p
   if (sameTier)
     return result(fast, "fast", `model fast:${fast} (auto: session tier is the fast tier; signals ${signals.join(", ")})`);
   return sessionTier(`model session (auto: escalated on ${signals.join(", ")})`);
+}
+
+// references/model-routing.md § Roles renders this table from the policy; validate check 32 holds
+// the two together, so the role table is written once, in references/model-policy.json.
+export const ROLES_TABLE_HEAD = "| Role | Layer | Default | Override |\n| --- | --- | --- | --- |";
+
+export function rolesTableRows(policy = loadPolicy()) {
+  return Object.entries(policy.roles).map(
+    ([role, { layer, default: fallback, knob }]) => `| \`${role}\` | ${layer} | ${fallback} | ${knob ? `\`${knob}\`` : "none"} |`,
+  );
+}
+
+export function rolesTableErrors(policy, routingText) {
+  const section = sectionText(routingText, "roles");
+  if (section === null)
+    return ["references/model-routing.md: no ## Roles section to render references/model-policy.json's role table into"];
+  const present = section.split("\n").filter((line) => line.startsWith("| `"));
+  const roleOf = (row) => /^\| `([^`]+)`/.exec(row)?.[1];
+  const errors = [];
+  for (const row of rolesTableRows(policy)) {
+    if (!present.includes(row))
+      errors.push(`references/model-routing.md § Roles: the ${roleOf(row)} row differs from references/model-policy.json — expected: ${row}`);
+  }
+  for (const row of present) {
+    if (!Object.hasOwn(policy.roles, roleOf(row)))
+      errors.push(`references/model-routing.md § Roles: a row names ${roleOf(row)}, which references/model-policy.json does not hold`);
+  }
+  return errors;
 }
 
 // Every flag this CLI reads; an unrecognised one is an operator error, as in scripts/model-pool.mjs.

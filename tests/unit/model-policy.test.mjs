@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
-  POLICY_PATH, ROLES, ceilingFrom, dispatchAlias, fastTierId, implementerSignals, loadPolicy, resolveRole, reviewerSignals,
+  POLICY_PATH, ROLES, ROLES_TABLE_HEAD, ceilingFrom, dispatchAlias, fastTierId, implementerSignals, loadPolicy, resolveRole, reviewerSignals, rolesTableErrors, rolesTableRows,
 } from "../../scripts/model-policy.mjs";
 
 const SCRIPT = new URL("../../scripts/model-policy.mjs", import.meta.url).pathname;
@@ -194,4 +194,34 @@ test("the CLI prints resolveRole's result as one JSON line and exits 2 on a usag
     assert.equal(r.status, 2, bad.join(" "));
     assert.match(r.stderr, /^model-policy: /, bad.join(" "));
   }
+});
+
+test("the role table renders one row per policy role, in key order, with its knob or none", () => {
+  const rows = rolesTableRows(policy);
+  const keys = Object.keys(policy.roles);
+  assert.equal(rows.length, keys.length);
+  const r0 = policy.roles[keys[0]];
+  assert.equal(rows[0], `| \`${keys[0]}\` | ${r0.layer} | ${r0.default} | ${r0.knob ? `\`${r0.knob}\`` : "none"} |`);
+  const imp = policy.roles.implementer;
+  assert.ok(rows.includes(`| \`implementer\` | ${imp.layer} | ${imp.default} | \`implementerModel\` |`));
+  assert.equal(ROLES_TABLE_HEAD, "| Role | Layer | Default | Override |\n| --- | --- | --- | --- |");
+});
+
+test("rolesTableErrors: a matching section passes; a missing section, a drifted row and a stray role each fail", () => {
+  const rows = rolesTableRows(policy);
+  const doc = (body) => `# Model routing\n\n## Roles\n\n${ROLES_TABLE_HEAD}\n${body.join("\n")}\n\n## Next\n`;
+  assert.deepEqual(rolesTableErrors(policy, doc(rows)), []);
+  assert.deepEqual(rolesTableErrors(policy, "# Model routing\n"),
+    ["references/model-routing.md: no ## Roles section to render references/model-policy.json's role table into"]);
+  const drifted = rows.map((row) => (row.startsWith("| `driver` |") ? "| `driver` | Node script | the session tier | none |" : row));
+  assert.deepEqual(rolesTableErrors(policy, doc(drifted)),
+    [`references/model-routing.md § Roles: the driver row differs from references/model-policy.json — expected: ${rows.find((row) => row.startsWith("| `driver` |"))}`]);
+  assert.deepEqual(rolesTableErrors(policy, doc([...rows, "| `oracle` | subagent | session tier | none |"])),
+    ["references/model-routing.md § Roles: a row names oracle, which references/model-policy.json does not hold"]);
+});
+
+test("the shipped model-routing.md renders the shipped policy", () => {
+  const text = readFileSync(new URL("../../references/model-routing.md", import.meta.url), "utf8");
+  assert.deepEqual(rolesTableErrors(policy, text), []);
+  assert.doesNotMatch(text, /^## Planning dispatches$/m);
 });

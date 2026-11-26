@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { resolveRole } from "../../scripts/model-policy.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const agent = readFileSync(join(root, "agents/plan-drafter.md"), "utf8");
@@ -59,7 +60,7 @@ test("delegated planning consumes the stop, the delta and the lock, and batches 
 });
 
 test("model routing sends every edge checker batch to the fast tier", () => {
+  assert.equal(resolveRole("checker", { ceiling: "claude-opus-5-5" }).tier, "fast");
   const routing = readFileSync(join(root, "references/model-routing.md"), "utf8");
-  assert.match(routing, /\| Edge checker, one per batch of producer→consumer pairs \| `checker` \| fast \|/);
   assert.doesNotMatch(routing, /unless the pair's Files together exceed 5/);
 });

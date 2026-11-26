@@ -5,6 +5,45 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-26 — One model-selection policy owns every role's model (#456 slice 2, #494)
+
+**Decision:** `references/model-policy.json` and `scripts/model-policy.mjs` own the role table: which
+model each devcycle role runs on, the limits that escalate a tier, and the audit string every
+resolution records. `references/model-routing.md` keeps the knob arithmetic (pins, pools, the ladder,
+the ceiling) and the derivation predicates as prose, and renders the table in § Roles, which
+`scripts/validate.mjs` check 32 holds to the JSON. The driven coordinator runs the fast tier under the
+opt-in model, which is now the **ceiling**: the model the cycle was opted in on, not the one the
+coordinator runs. Dispatch decisions are made by the scripts (`scripts/task-dispatch.mjs` for
+implementers and task reviewers, `scripts/drive-execution.mjs` for the coordinator), and the playbooks
+dispatch on what those scripts print instead of applying the predicates by hand.
+
+**Why:** each layer's model was chosen in a different place: the coordinator copied whatever the
+opting-in session ran, subagent tiers came from prose predicates the coordinator applied by hand,
+planning dispatches came from a second table, and effort was set once per cycle. #456 asks what that
+costs and what interrupts a run, and #494 needs the same choice made for an unattended planning stage.
+One policy that every layer reads removes the second table and the hand-applied predicates.
+
+**Supersedes:** the § Planning dispatches table in `references/model-routing.md` and the
+`--model-decision` flag of `scripts/task-dispatch.mjs`.
+
+**Budgets:** `references/model-routing.md` grows by the rendered role table and the driven-run
+wording, which moves the closure of every entry point that reads it: the seven playbooks below.
+`playbooks/planning-waves.md` falls, because it no longer reads a section of that file. The runtime
+surface grows by the lines those edits add.
+
+```text
+budget: context-budget.json playbooks/executing-waves.md 126801
+budget: context-budget.json playbooks/maintaining-the-repo.md 82712
+budget: context-budget.json playbooks/planning-waves.md 74483
+budget: context-budget.json playbooks/receiving-review.md 132918
+budget: context-budget.json playbooks/reviewing-code.md 109206
+budget: context-budget.json playbooks/reviewing-the-branch.md 65605
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 103270
+budget: context-budget.json playbooks/taking-the-fast-path.md 58087
+budget: context-budget.json references/model-routing.md 13235
+budget: surface-budget.json surfaceTotal 7665
+```
+
 ## 2026-11-25 — The drive band shows each tier's model, effort and context (#456 slice 1)
 
 **Decision:** `.devcycle/drive-progress.json` moves to schema v2. It carries three tiers of its own:

@@ -61,7 +61,7 @@ than a redraft, logged as `plan-repair-<n>` before the re-assembly, and after on
 still open goes to the user, per
 [`references/delegated-planning.md`](../../../references/delegated-planning.md). Every planning
 dispatch names its model, at the tier
-[`references/model-routing.md`](../../../references/model-routing.md) § Planning dispatches assigns,
+[`references/model-routing.md`](../../../references/model-routing.md) § Roles resolves,
 and doctor's Planning breakdown reports it: `drafters:` lists each drafter's turns and model,
 `source prints:` counts Bash calls that printed a source file, and `tier-fit:` flags a spike,
 research or checker dispatch that ran outside the fast tier. Whichever

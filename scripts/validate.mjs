@@ -28,6 +28,7 @@ import { DECISIONS_DOC } from "./doc-paths.mjs";
 import { floorErrors } from "./claude-code-floor.mjs";
 import { OWNER_FILE, readVersions } from "./claude-code-versions.mjs";
 import { validateRegistry } from "./hygiene-registry.mjs";
+import { rolesTableErrors } from "./model-policy.mjs";
 
 
 // devcycle's own record stores must stay tracked: README/DECISIONS say lessons + promotion
@@ -1417,6 +1418,23 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
             .map((f) => ({ path: `.github/workflows/${f}`, text: readFileSync(join(workflowsDir, f), "utf8") }))
         : [];
       for (const message of floorErrors({ floor: versions.floor, read: readUnderRoot, workflows, decisionsText: decisionsText ?? "" })) fail(message);
+    }
+  }
+
+  // 32. The role table in references/model-routing.md § Roles is a rendering of references/model-policy.json,
+  //     the owner; a tree without the policy file, a fixture plugin, has nothing to hold.
+  const rolePolicyFile = join(root, "references/model-policy.json");
+  if (existsSync(rolePolicyFile)) {
+    let rolePolicy = null;
+    try {
+      rolePolicy = JSON.parse(readFileSync(rolePolicyFile, "utf8"));
+    } catch (err) {
+      fail(`references/model-policy.json: not valid JSON — ${err.message}`);
+    }
+    if (rolePolicy !== null) {
+      const routingFile = join(root, "references/model-routing.md");
+      const routingText = existsSync(routingFile) ? readFileSync(routingFile, "utf8") : "";
+      for (const message of rolesTableErrors(rolePolicy, routingText)) fail(message);
     }
   }
 
