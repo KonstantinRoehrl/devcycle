@@ -11,7 +11,9 @@ import { readSection } from "../../scripts/read-section.mjs";
 import { UNREADABLE_PLUGIN_VERSION, installedVersion } from "../../scripts/verification.mjs";
 import { DRIVE_LOCK_REL, readDriveLockHolder } from "../../scripts/drive-lock.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
-import { childEnv, classifyTrackedChanges, inFlightFiles, SESSION_START_TOKENS, stopDriver } from "../../scripts/drive-execution.mjs";
+import { WATCHER_FILE } from "../../scripts/drive-watcher.mjs";
+import { windowFor } from "../../scripts/depth-bands.mjs";
+import { childEnv, classifyTrackedChanges, inFlightFiles, pickCoordinator, SCRUBBED_ENV, SESSION_START_TOKENS, stopDriver } from "../../scripts/drive-execution.mjs";
 import { classifyDrive, HANDLED_REL, readDriveResult, readHandledResult, RESULT_REL, STOP_REQUEST_REL } from "../../scripts/drive-result.mjs";
 import { commitAll, makeFakeBin, makeRepo, sh, writeInto } from "./helpers.mjs";
 
@@ -88,13 +90,14 @@ function harness(scenario = [], env = {}, { prelude = "" } = {}) {
 
 const calls = (h) => (existsSync(h.callsPath) ? readFileSync(h.callsPath, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
 
-function records(h) {
+function rowsOf(h, kind) {
   if (!existsSync(h.runsDir)) return [];
   return readdirSync(h.runsDir).flatMap((slug) => {
     const p = join(h.runsDir, slug, `${RUN}.jsonl`);
-    return existsSync(p) ? readFileSync(p, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.kind === "drive") : [];
+    return existsSync(p) ? readFileSync(p, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.kind === kind) : [];
   });
 }
+const records = (h) => rowsOf(h, "drive");
 
 function startDriver(root, h, flags = []) {
   const child = spawn(process.execPath, [DRIVER, "--state", join(root, ".devcycle", "state.md"), "--claude", h.bin, ...flags], { cwd: root, env: h.env });
@@ -131,6 +134,19 @@ async function waitFor(predicate, ms = 15000) {
 const lockPath = (root) => join(root, DRIVE_LOCK_REL);
 const writeLock = (root, fields) =>
   writeFileSync(lockPath(root), JSON.stringify({ hostname: hostname(), state: ".devcycle/state.md", log: ".devcycle/drive.log", ...fields }));
+
+test("the relayed ledger line carries a keyed line's review round, and an unkeyed line none", async () => {
+  const root = makeCycle();
+  const keyed = "task=1 event=review-round outcome=model fast (auto: lines=2, files=1) ref=.devcycle/briefs/1-reviewer-round-2.md key=1/review-round/2/0";
+  const r = await drive(root, [
+    { ledger: [keyed, line(1, "dispatched"), DONE[0]] },
+    { ledger: [line(2, "dispatched"), DONE[1]], stage: "branch-review" },
+  ]);
+  assert.equal(r.code, 0, r.out);
+  const log = readFileSync(join(root, ".devcycle", "drive.log"), "utf8");
+  assert.match(log, /session 1 · \d+ tool calls · task=1 event=review-round round=2 outcome=model fast \(auto: lines=2, files=1\)$/m);
+  assert.match(log, /session 1 · \d+ tool calls · task=1 event=dispatched outcome=ok$/m);
+});
 
 test("drives one fresh session per wave until the state reaches branch-review, writing one drive record per session", async () => {
   const root = makeCycle();
@@ -187,7 +203,7 @@ test("a driven session starts with no MCP servers and only the kept plugins, and
   assert.equal(surface.length, 5);
   assert.deepEqual(r.calls[1].argv.slice(argv.indexOf("--verbose") + 1, argv.indexOf("--max-budget-usd")), surface, "the list is read once and every session gets the same surface");
   const log = readFileSync(join(root, ".devcycle", "drive.log"), "utf8");
-  assert.match(startLine(log), new RegExp(`session 1 starts — wave 1, model ${MODEL}, effort \\S+, plugins devcycle,impeccable,superpowers, mcp none$`));
+  assert.match(startLine(log), new RegExp(`session 1 starts — wave 1, model ${MODEL} \\(ceiling ${MODEL}\\), effort \\S+, plugins devcycle,impeccable,superpowers, mcp none$`));
   assert.doesNotMatch(log, /plugin list unavailable/);
 });
 
@@ -243,7 +259,7 @@ test("effort comes from --effort, else the drive row's effort=, else the setting
   assert.equal(resolved.code, 0, resolved.out);
   assert.deepEqual(resolved.calls[0].argv.slice(4, 6), ["--effort", "xhigh"]);
   assert.equal(resolved.calls[0].effort, "xhigh", "the session's CLAUDE_CODE_EFFORT_LEVEL disagrees with its --effort");
-  assert.match(startsLine(legacy), new RegExp(`session 1 starts — wave 1, model ${MODEL}, effort xhigh`));
+  assert.match(startsLine(legacy), new RegExp(`session 1 starts — wave 1, model ${MODEL} \\(ceiling ${MODEL}\\), effort xhigh`));
   assert.doesNotMatch(readFileSync(join(legacy, ".devcycle", "state.md"), "utf8"), /effort=/, "the resolved effort was written back to the row");
 
   const inherited = await drive(makeCycle(), [{ ledger: DONE, stage: "branch-review" }], { env: { CLAUDE_EFFORT: "low" } });
@@ -1375,7 +1391,7 @@ test("the driver keeps .devcycle/drive-progress.json on the run: running per ses
     await waitFor(() => driveLogOf(root).includes("] wait: "));
     const waiting = readProgress(root);
     assert.equal(waiting?.state, "waiting", JSON.stringify(waiting));
-    assert.equal(waiting.session, 1);
+    assert.equal(waiting.session, null, "a waiting run has no live driven session");
     assert.equal(waiting.waitWhat, "usage limit until its reset");
     assert.equal(waiting.waitUntil, driveLogOf(root).match(/wait: usage limit until its reset — resuming at (\S+)/)[1]);
     assert.equal(Date.parse(waiting.waitUntil), t0 + 120_000, "the deadline is the limit's reset plus the driver's one-minute margin");
@@ -1399,17 +1415,21 @@ test("the driver keeps .devcycle/drive-progress.json on the run: running per ses
     const effort = log.match(/\] session 1 starts — .*, effort ([^,]+),/)[1];
     const [atSession1, atSession2, ...more] = readFileSync(snaps, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
     assert.deepEqual(more, [], "a fake claude ran more than twice");
-    const pending = { v: 1, state: "running", model: MODEL, effort, waitUntil: null, waitWhat: null, stopDetail: null, outcome: null, total: 2 };
-    assert.deepEqual(timeless(atSession1), { ...pending, session: 1, currentWave: 1, committed: 0, waves: [
+    const driverRow = { model: MODEL, ...(effort === "default" ? {} : { effort }), watcher: false };
+    const pending = { v: 2, state: "running", driver: driverRow, session: null, waitUntil: null, waitWhat: null, stopDetail: null, outcome: null, total: 2 };
+    const sessionRow = (n) => ({ n, model: MODEL, ...(effort === "default" ? {} : { effort }) });
+    const untimed = (p) => ({ ...timeless(p), session: p.session && (({ startedAt: _t, ...rest }) => rest)(p.session) });
+    for (const snap of [atSession1, atSession2]) assert.match(snap.session?.startedAt ?? "", PROGRESS_ISO, "a running session's row has its start stamp");
+    assert.deepEqual(untimed(atSession1), { ...pending, session: sessionRow(1), currentWave: 1, committed: 0, waves: [
       { wave: 1, committed: 0, tasks: [{ task: "1", step: "pending", round: 0, rejections: 0 }] },
       { wave: 2, committed: 0, tasks: [{ task: "2", step: "pending", round: 0, rejections: 0 }] },
     ] });
-    assert.deepEqual(timeless(atSession2), { ...pending, session: 2, currentWave: 1, committed: 0, waves: [
+    assert.deepEqual(untimed(atSession2), { ...pending, session: sessionRow(2), currentWave: 1, committed: 0, waves: [
       { wave: 1, committed: 0, tasks: [{ task: "1", step: "implementing", round: 0, rejections: 0 }] },
       { wave: 2, committed: 0, tasks: [{ task: "2", step: "pending", round: 0, rejections: 0 }] },
     ] });
     const final = readProgress(root);
-    assert.deepEqual(timeless(final), { ...pending, state: "ended", outcome: "complete", session: 2, currentWave: null, committed: 2, waves: [
+    assert.deepEqual(timeless(final), { ...pending, state: "ended", outcome: "complete", currentWave: null, committed: 2, waves: [
       { wave: 1, committed: 1, tasks: [{ task: "1", step: "committed", round: 0, rejections: 0 }] },
       { wave: 2, committed: 1, tasks: [{ task: "2", step: "committed", round: 0, rejections: 0 }] },
     ] });
@@ -1480,7 +1500,7 @@ test("a stop for the user leaves the progress file stopped with the stop's reaso
   assert.equal(p.stopDetail, "needs-user: task 1: a decision");
   assert.match(driveLogOf(root), /stopped for you — needs-user: task 1: a decision\n/);
   assert.equal(p.outcome, null);
-  assert.equal(p.session, 1);
+  assert.equal(p.session, null, "a stopped run has no live driven session");
   assert.equal(p.currentWave, 1);
   assert.deepEqual(p.waves[0].tasks, [{ task: "1", step: "reviewing", round: 2, rejections: 2 }]);
 });
@@ -1563,4 +1583,195 @@ test("the watchdog never acts while a sibling dispatch is running", async () => 
       readFileSync(HEALTH_FIX("pending-tool"), "utf8").replaceAll("5-implementer.md", "2-implementer.md"));
   } });
   assert.notEqual(r.records[0].exitReason, "dead-dispatch");
+});
+
+test("a <synthetic> assistant turn leaves the drive row's depth at the session's last real turn", async () => {
+  const r = await drive(makeCycle(), [{ ledger: DONE, stage: "branch-review", synthetic: true }]);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.records[0].depthTokens, 60010);
+});
+
+test("every drive row carries the session's resolved effort, default included", async () => {
+  const pinned = await drive(makeCycle({ drive: effortRow("high") }), [{ ledger: DONE, stage: "branch-review" }]);
+  assert.equal(pinned.records[0].effort, "high");
+  const root = makeCycle({ drive: effortRow("default") });
+  const unset = await drive(root, [{ ledger: DONE, stage: "branch-review" }]);
+  assert.equal(unset.records[0].effort, "default");
+  assert.match(startsLine(root), /effort default/);
+});
+
+test("a session with no result event records its priced estimate as costUsdEstimated, never as costUsd", async () => {
+  const crashing = { ledger: [line(1, "report-received")], noResult: true, exitCode: 1, usage: { input_tokens: 300_000 } };
+  const r = await drive(makeCycle(), [crashing], { flags: ["--max-usd", "1"] });
+  assert.equal(r.code, 6, r.out);
+  assert.deepEqual(r.records.map((x) => [x.costUsd, Math.round(x.costUsdEstimated * 100) / 100]), [[undefined, 0.6], [undefined, 0.6]]);
+  const measured = await drive(makeCycle(), [{ ledger: DONE, stage: "branch-review", costUsd: 0.25 }]);
+  assert.deepEqual([measured.records[0].costUsd, measured.records[0].costUsdEstimated], [0.25, undefined]);
+});
+
+test("a stop request found before the next session appends a stop-request event row and no drive row for it", async () => {
+  const request = `require("node:fs").writeFileSync(${JSON.stringify(STOP_REQUEST_REL)}, "2026-10-13T00:00:00Z\\n");\n`;
+  const root = makeCycle();
+  const h = harness([{ ledger: [line(1, "dispatched"), DONE[0]] }, { ledger: [DONE[1]], stage: "branch-review" }], {}, { prelude: request });
+  const r = await startDriver(root, h).result();
+  assert.equal(r.code, 130, r.out);
+  assert.equal(records(h).length, 1, "the stop wrote a drive row for a session that never ran");
+  const stops = rowsOf(h, "event").filter((e) => e.event === "stop-request");
+  assert.equal(stops.length, 1);
+  assert.equal(stops[0].stage, "execution");
+  assert.match(stops[0].ts, STAMP);
+});
+
+test("a --stop delivered by signal while the driver waits between sessions appends one stop-request event row and no drive row for it", async () => {
+  const root = makeCycle();
+  const h = harness([{ rateLimitInSec: 3600 }], { DEVCYCLE_DRIVE_SLICE_MS: "50" });
+  const d = startDriver(root, h);
+  try {
+    await waitFor(() => driveLogOf(root).includes("] wait: "));
+    const stop = spawnSync(process.execPath, [DRIVER, "--stop", "--state", statePathOf(root)], { cwd: root, env: h.env, encoding: "utf8" });
+    assert.equal(stop.status, 0, stop.stdout + stop.stderr);
+    const r = await Promise.race([d.result(), new Promise((res) => setTimeout(() => res(null), 10000))]);
+    assert.ok(r, "the driver waited on past a stop");
+    assert.equal(r.code, 130, r.out);
+    assert.equal(resultOf(root).outcome, "stopped");
+    assert.equal(records(h).length, 1, "the stop wrote a drive row for a session that never ran");
+    const stops = rowsOf(h, "event").filter((e) => e.event === "stop-request");
+    assert.equal(stops.length, 1, "a stop that arrived by signal between sessions left no single stop-request row");
+    assert.equal(stops[0].stage, "execution");
+    assert.match(stops[0].ts, STAMP);
+  } finally {
+    if (d.child.exitCode === null) d.child.kill("SIGKILL");
+  }
+});
+
+const OPUS = "claude-opus-5-5";
+// A driver session behind the cycle's live --wait: its registration beside the state file, and its main
+// transcript under the harness's HOME, holding one usage record.
+function seedWatcher(root, home, pid) {
+  writeFileSync(join(root, ".devcycle", WATCHER_FILE),
+    JSON.stringify({ v: 1, watchers: [{ sessionId: "watch-1", pid, startedAt: "2026-11-25T10:00:00.000Z" }] }) + "\n");
+  mkdirSync(join(home, ".claude", "projects", "-w"), { recursive: true });
+  writeFileSync(join(home, ".claude", "projects", "-w", "watch-1.jsonl"), JSON.stringify({ type: "assistant", timestamp: "2026-11-25T10:00:00.000Z",
+    effort: "xhigh", message: { role: "assistant", model: OPUS, content: [], usage: { input_tokens: 230_100 } } }) + "\n");
+}
+const deadPidOf = () => Number(spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"], { encoding: "utf8" }).stdout);
+
+test("the driver row is the live watcher's session: its model, effort and depth; with its pid dead, the drive row's model and no watcher", async () => {
+  const live = makeCycle({ drive: effortRow("high") });
+  const r = await drive(live, [{ ledger: DONE, stage: "branch-review" }], { beforeStart: (h) => seedWatcher(live, h.env.HOME, process.pid) });
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(readProgress(live).driver, { model: OPUS, effort: "xhigh", tokens: 230_100, window: windowFor(OPUS).window, watcher: true });
+  const dead = makeCycle({ drive: effortRow("high") });
+  const d = await drive(dead, [{ ledger: DONE, stage: "branch-review" }], { beforeStart: (h) => seedWatcher(dead, h.env.HOME, deadPidOf()) });
+  assert.equal(d.code, 0, d.out);
+  assert.deepEqual(readProgress(dead).driver, { model: MODEL, effort: "high", watcher: false });
+});
+
+test("while a driven session runs, its row carries the model and depth its stream reports", async () => {
+  const root = makeCycle({ drive: effortRow("high") });
+  const h = harness([
+    { ledger: [line(1, "dispatched")], model: "claude-haiku-5-5", hangMs: 1_500 },
+    { ledger: DONE, stage: "branch-review" },
+  ], { DEVCYCLE_DRIVE_HEARTBEAT_MS: "50" });
+  const driver = startDriver(root, h);
+  try {
+    await waitFor(() => readProgress(root)?.session?.model === "claude-haiku-5-5");
+    const { startedAt: _t, ...session } = readProgress(root).session;
+    assert.deepEqual(session, { n: 1, model: "claude-haiku-5-5", effort: "high", tokens: 60_010, window: windowFor("claude-haiku-5-5").window });
+    const r = await driver.result();
+    assert.equal(r.code, 0, r.out);
+    assert.equal(readProgress(root).session, null, "an ended run has no live session");
+  } finally {
+    driver.child.kill("SIGKILL");
+  }
+});
+
+test("a running dispatch's row carries its transcript's model, effort and depth and the routing its ledger line records", async () => {
+  const root = makeCycle();
+  mkdirSync(join(root, ".devcycle/dispatch"), { recursive: true });
+  const routed = "task=1 event=dispatched outcome=model fast:claude-haiku-5-5 (auto: lines=40, files=2) ref=.devcycle/briefs/1-implementer.md key=1/dispatched/0/0";
+  const h = harness([
+    { ledger: [routed], toolUseId: "toolu_1", toolResult: true, hangMs: 1_500 },
+    { ledger: [DONE[0], DONE[1]], stage: "branch-review" },
+  ], { DEVCYCLE_DRIVE_HEARTBEAT_MS: "50" });
+  seedDispatch(root, h.env.HOME, "usage");
+  const driver = startDriver(root, h);
+  try {
+    await waitFor(() => readProgress(root)?.waves?.[0]?.tasks?.[0]?.dispatch !== undefined);
+    const [task1] = readProgress(root).waves[0].tasks;
+    assert.equal(task1.health.state, "running");
+    assert.deepEqual(task1.dispatch, { role: "implementer", model: "claude-sonnet-5-5", effort: "medium", tokens: 36_012,
+      window: windowFor("claude-sonnet-5-5").window, routing: "fast" });
+    const r = await driver.result();
+    assert.equal(r.code, 0, r.out);
+  } finally {
+    driver.child.kill("SIGKILL");
+  }
+});
+
+const opusRow = `- drive: auto model=claude-opus-5-5 effort=high opted=2026-11-26T00:00:00Z via=answer`;
+
+test("an Opus opt-in runs its coordinator on the fast tier: spawn, record and start line; the ceiling stays the run's model", async () => {
+  const root = makeCycle({ drive: opusRow });
+  const r = await drive(root, [{ ledger: DONE, stage: "branch-review" }]);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.calls[0].argv[r.calls[0].argv.indexOf("--model") + 1], "claude-sonnet-5-5");
+  assert.equal(r.calls[0].argv[r.calls[0].argv.indexOf("--effort") + 1], "high");
+  assert.equal(r.records[0].model, "claude-sonnet-5-5");
+  assert.equal(readProgress(root).driver.model, "claude-opus-5-5");
+  assert.match(startLine(readFileSync(join(root, ".devcycle", "drive.log"), "utf8")),
+    /session 1 starts — wave 1, model claude-sonnet-5-5 \(ceiling claude-opus-5-5\), effort high, plugins /);
+});
+
+test("--model overrides the coordinator only; a Sonnet or Haiku opt-in keeps its own model", async () => {
+  const pinned = await drive(makeCycle({ drive: opusRow }), [{ ledger: DONE, stage: "branch-review" }], { flags: ["--model", "claude-haiku-5-5"] });
+  assert.equal(pinned.code, 0, pinned.out);
+  assert.equal(pinned.calls[0].argv[pinned.calls[0].argv.indexOf("--model") + 1], "claude-haiku-5-5");
+  const haikuRoot = makeCycle({ drive: "- drive: auto model=claude-haiku-5-5 opted=2026-11-26T00:00:00Z via=answer" });
+  const haiku = await drive(haikuRoot, [{ ledger: DONE, stage: "branch-review" }]);
+  assert.equal(haiku.calls[0].argv[haiku.calls[0].argv.indexOf("--model") + 1], "claude-haiku-5-5");
+});
+
+// 300k uncached input tokens cost $0.60 on claude-sonnet-5-5 ($2 per million) and $1.20 on claude-opus-5-5 ($4).
+test("a session that dies without a result event is priced at the coordinator's model, not the ceiling's", async () => {
+  const crashing = { ledger: [line(1, "report-received")], noResult: true, exitCode: 1, usage: { input_tokens: 300_000 } };
+  const r = await drive(makeCycle({ drive: opusRow }), [crashing], { flags: ["--max-usd", "1"] });
+  assert.equal(r.code, 6, r.out);
+  assert.equal(r.calls[0].argv[r.calls[0].argv.indexOf("--model") + 1], "claude-sonnet-5-5");
+  assert.match(r.out, /session 1 ended — [^\n]*, ~\$0\.60 estimated\n/);
+  assert.match(r.out, /spent \$1\.20 of --max-usd 1/);
+});
+
+test("the coordinator's effort is read from the settings for the coordinator's model, not the ceiling's", async () => {
+  const root = makeCycle({ drive: "- drive: auto model=claude-opus-5-5 opted=2026-11-26T00:00:00Z via=answer" });
+  writeInto(root, ".claude/settings.json", JSON.stringify({
+    modelSettings: { "claude-sonnet-5-5": { effortLevel: "xhigh" }, "claude-opus-5-5": { effortLevel: "low" } },
+  }));
+  const r = await drive(root, [{ ledger: DONE, stage: "branch-review" }]);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.calls[0].argv[r.calls[0].argv.indexOf("--model") + 1], "claude-sonnet-5-5");
+  assert.deepEqual(r.calls[0].argv.slice(4, 6), ["--effort", "xhigh"]);
+  assert.match(startsLine(root), /model claude-sonnet-5-5 \(ceiling claude-opus-5-5\), effort xhigh/);
+});
+
+test("pickCoordinator falls back to the ceiling when the fast tier is refused, and reports a refused ceiling", () => {
+  assert.deepEqual(pickCoordinator({ ceiling: "claude-opus-5-5", refuse: () => null }), { model: "claude-sonnet-5-5", refusal: null });
+  assert.deepEqual(pickCoordinator({ ceiling: "claude-opus-5-5", refuse: (m) => (m === "claude-sonnet-5-5" ? "no window" : null) }),
+    { model: "claude-opus-5-5", refusal: null });
+  assert.deepEqual(pickCoordinator({ ceiling: "claude-opus-5-5", refuse: () => "no window" }), { model: "claude-opus-5-5", refusal: "no window" });
+  assert.deepEqual(pickCoordinator({ ceiling: "claude-opus-5-5", override: "claude-haiku-5-5", refuse: () => null }), { model: "claude-haiku-5-5", refusal: null });
+  assert.deepEqual(pickCoordinator({ ceiling: "claude-fable-5-2", refuse: () => null }), { model: "claude-fable-5-2", refusal: null });
+});
+
+test("a driven session's env holds none of the subagent model or effort overrides, whatever the driver's env held", () => {
+  assert.deepEqual([...SCRUBBED_ENV], ["CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "CLAUDE_CODE_SUBAGENT_EFFORT"]);
+  const saved = Object.fromEntries(SCRUBBED_ENV.map((k) => [k, process.env[k]]));
+  for (const k of SCRUBBED_ENV) process.env[k] = "claude-haiku-5-5";
+  try {
+    const env = childEnv({ token: "t", effort: "high" });
+    for (const k of SCRUBBED_ENV) assert.equal(k in env, false, k);
+    assert.equal(env.CLAUDE_CODE_EFFORT_LEVEL, "high");
+  } finally {
+    for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
+  }
 });

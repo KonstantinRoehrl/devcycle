@@ -11,6 +11,7 @@ import { DECISIONS_DOC } from "../../scripts/doc-paths.mjs";
 import { makePluginFixture as makeBaseFixture, writeInto, runValidate, recordBudgets, rebaseline, FIXTURE_PLAYBOOK_HEAD } from "./helpers.mjs";
 import { recordStoreTrackingErrors, docsSubdirTrackingErrors } from "../../scripts/validate.mjs";
 import { closure } from "../../scripts/context-closure.mjs";
+import { ROLES_TABLE_HEAD, rolesTableRows } from "../../scripts/model-policy.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 
@@ -1144,8 +1145,12 @@ test("check 13 rule 2 fails when no surface instruction names --knob for the kno
   // (--knobs, wave-setup.mjs's flag) must not be waved through. Same byte count, so no budget trips.
   const failDir = makeTempDir("validate13e-fail-");
   cpSync(REPO_ROOT, failDir, { recursive: true, filter: (s) => !s.includes("/.git/") });
-  const cyclePath = join(failDir, "commands/cycle.md");
-  writeFileSync(cyclePath, readFileSync(cyclePath, "utf8").replaceAll("--knob ", "--knobs"));
+  // references/model-routing.md § Roles shows model-policy.mjs's `[--knob <value>]` flag, which names
+  // --knob too, so it is rewritten with cycle.md.
+  for (const rel of ["commands/cycle.md", "references/model-routing.md"]) {
+    const path = join(failDir, rel);
+    writeFileSync(path, readFileSync(path, "utf8").replaceAll("--knob ", "--knobs"));
+  }
   const rFail = spawnSync(process.execPath, [join(failDir, "scripts/validate.mjs")], { cwd: failDir, encoding: "utf8" });
   assert.notStrictEqual(rFail.status, 0);
   assert.match(rFail.stdout + rFail.stderr, /knobs/);
@@ -2865,4 +2870,80 @@ test("check 29: engages only where the format module ships, and fails with no co
   const r = runValidate(dir);
   assert.equal(r.status, 1);
   assert.match(r.stderr, /tests\/fixtures\/cycle-format-contract\.json/);
+});
+
+// --- check 31: the Claude Code floor ---
+
+// A tree with the versions owner file is held to it, so the green tree ships every floor mirror at
+// the owner's floor and a decisions line recording it. hooks/ needs a registration (check 22).
+const withFloor = (dir) => {
+  const owner = { private: true, description: "x", claudeCodeFloor: "2.1.287", devDependencies: { "@anthropic-ai/claude-code": "2.1.332" } };
+  writeInto(dir, ".github/claude-code/package.json", JSON.stringify(owner, null, 2) + "\n");
+  writeInto(dir, "hooks/devcycle-mod.mjs", "const MIN_CLAUDE_CODE = [2, 1, 287];\n");
+  writeInto(dir, "hooks/hooks.json", JSON.stringify({ modules: ["devcycle-mod.mjs"], hooks: {} }, null, 2) + "\n");
+  writeInto(dir, "README.md", "# Fixture\n\nRequires Claude Code 2.1.287 or later.\n");
+  writeInto(dir, "docs/README.md", "# Docs\n\nThe hooks module (Claude Code 2.1.287 or later) does nothing below 2.1.287.\n");
+  writeInto(dir, "scripts/doctor.mjs", "// Claude Code below 2.1.287 runs no hooks module.\n");
+  writeInto(dir, DECISIONS_DOC, readFileSync(join(dir, DECISIONS_DOC), "utf8") + "\n```text\nclaude-code-floor: 2.1.287\n```\n");
+  return dir;
+};
+const LITERAL_WORKFLOW = "name: CI\non: push\npermissions:\n  contents: read\njobs:\n  a:\n    env:\n      CLI: 2.1.300\n";
+
+test("floor check: a tree that agrees with its owner file passes, and a drifted mirror fails naming the file", () => {
+  const dir = withFloor(makePluginFixture());
+  ok(runValidate(dir));
+  writeInto(dir, "README.md", "# Fixture\n\nRequires Claude Code 2.1.286 or later.\n");
+  failsWith(runValidate(dir), /README\.md: the README's requirement line says 2\.1\.286/);
+});
+
+test("floor check: a Claude Code version literal in a workflow fails, and a tree without the owner file is not checked", () => {
+  const dir = withFloor(makePluginFixture());
+  writeInto(dir, ".github/workflows/ci.yml", LITERAL_WORKFLOW);
+  failsWith(runValidate(dir), /\.github\/workflows\/ci\.yml:8: Claude Code version literal 2\.1\.300/);
+  const plain = makePluginFixture();
+  writeInto(plain, ".github/workflows/ci.yml", LITERAL_WORKFLOW);
+  ok(runValidate(plain));
+});
+
+test("floor check: an owner file that does not parse fails, naming it", () => {
+  const dir = withFloor(makePluginFixture());
+  writeInto(dir, ".github/claude-code/package.json", "{");
+  failsWith(runValidate(dir), /\.github\/claude-code\/package\.json/);
+});
+
+// --- check 32: the role table ---
+
+// The policy file needs a script that names it (check 11) and model-routing.md a prefixed read.
+const ROLE_POLICY = {
+  dispatchForm: "alias", fastFamily: "sonnet",
+  roles: {
+    driver: { layer: "Node script", default: "none: model-free", tier: "none", knob: null, effort: null },
+    implementer: { layer: "subagent", default: "fast; session tier on a signal", tier: "auto", knob: "implementerModel", effort: "inherit", limits: { maxFiles: 5 } },
+  },
+};
+const withRoles = (dir, rows = rolesTableRows(ROLE_POLICY)) => {
+  writeInto(dir, "references/model-policy.json", JSON.stringify(ROLE_POLICY, null, 2) + "\n");
+  writeInto(dir, "scripts/reads-policy.mjs", 'export const POLICY = "references/model-policy.json";\n');
+  writeInto(dir, "references/model-routing.md", `# Model routing\n\n## Roles\n\n${ROLES_TABLE_HEAD}\n${rows.join("\n")}\n`);
+  playbook(dir, readSection("model-routing.md"));
+  rebaseline(dir);
+  return dir;
+};
+
+test("role table check: rows rendered from the policy pass, and a drifted cell fails naming the role", () => {
+  ok(runValidate(withRoles(makePluginFixture())));
+  const [driver, implementer] = rolesTableRows(ROLE_POLICY);
+  failsWith(runValidate(withRoles(makePluginFixture(), [driver, implementer.replace("fast;", "session;")])),
+    /references\/model-routing\.md § Roles: the implementer row differs from references\/model-policy\.json/);
+});
+
+test("role table check: an unparseable policy fails, and a tree without the policy file is not checked", () => {
+  const dir = withRoles(makePluginFixture());
+  writeInto(dir, "references/model-policy.json", "{ not json\n");
+  failsWith(runValidate(dir), /references\/model-policy\.json: not valid JSON/);
+  const plain = makePluginFixture();
+  writeInto(plain, "references/model-routing.md", "# Model routing\n\n## Roles\n\n| `oracle` | x | y | none |\n");
+  playbook(plain, readSection("model-routing.md"));
+  rebaseline(plain);
+  ok(runValidate(plain));
 });

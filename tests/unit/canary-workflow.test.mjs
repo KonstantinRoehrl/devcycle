@@ -38,7 +38,7 @@ name=$(basename "$0")
 line="$name $*"
 echo "noise from $line"
 echo "Installing plugin devcycle@devcycle"
-if [ "$line" = "node scripts/canary-report.mjs pin" ]; then echo 2.1.292; exit 0; fi
+if [ "$line" = "node scripts/claude-code-versions.mjs current" ]; then echo 2.1.332; exit 0; fi
 IFS=';'
 for plan in $STUB_FAIL; do
   prefix=\${plan%=*}

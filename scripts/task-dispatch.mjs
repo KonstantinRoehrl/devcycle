@@ -6,26 +6,34 @@
 // agent to it. A session that dies mid-dispatch therefore still leaves the line that tells the
 // resume table where the task stood. A reviewer dispatch takes the task's next review round only,
 // and moves aside any findings file already at that round's path, so the verdict task-verdict
-// reads back is this dispatch's reviewer's or none.
+// reads back is this dispatch's reviewer's or none. A `--reattempt` dispatch re-sends the brief an
+// earlier dispatch saved, at the next retry, so every attempt has its own ledger line and start record.
+// The dispatch also resolves its own model through scripts/model-policy.mjs, from the facts it
+// derives (the plan's file list and dependencies, the ledger's rejections, the reviewer's diff) and
+// the cycle's ceiling, and records the policy's audit string as the ledger line's outcome.
 // Contract: references/ledger.md § Task scripts.
 import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { atomicWrite } from "./atomic-write.mjs";
+import { resolveDepth } from "./depth-probe.mjs";
 import { holdsDriveToken } from "./drive-lock.mjs";
 import { isMain } from "./is-main.mjs";
 import { matchedLessons } from "./lesson-match.mjs";
 import { fieldText } from "./md-field.mjs";
+import { loadTable, rank } from "./model-pool.mjs";
+import { ceilingFrom, loadPolicy, resolveRole } from "./model-policy.mjs";
 import { parseRecordedLine } from "./resolve-knobs.mjs";
 import { CLOSED_STAGE, loadStages } from "./stage-entry.mjs";
 import { now } from "./stamp.mjs";
 import {
-  UsageError, appendLedgerLine, checkIds, countFlag, ledgerKey, nextReviewRound, nextRetry, runTaskScript, taskEntries, taskFiles,
-  taskFlags, taskGate, workTreeRoot,
+  UsageError, appendLedgerLine, checkIds, countFlag, isNoVerdict, latestKeyed, ledgerKey, nextReviewRound, nextRetry, runTaskScript,
+  taskDependencyLine, taskEntries, taskFiles, taskFlags, taskGate, workTreeRoot,
 } from "./task-ledger.mjs";
 
 const FLAGS = {
-  "--run": "value", "--task": "value", "--role": "value", "--round": "value", "--ledger": "value", "--model-decision": "value",
-  "--capture-cmd": "value",
+  "--run": "value", "--task": "value", "--role": "value", "--round": "value", "--ledger": "value",
+  "--capture-cmd": "value", "--reattempt": "none", "--orchestrator": "value", "--steps-unspecified": "none", "--model": "value",
 };
 const ROLES = new Set(["implementer", "reviewer"]);
 const LESSONS_LINE_RE = /^\*\*Lessons:\*\*.*$/m;
@@ -116,52 +124,121 @@ function refuseDriverOwnedWaves(ledger, cwd) {
   );
 }
 
+// A re-attempt re-sends the round an earlier dispatch of this task and role was sent at: a reviewer's
+// open round, an implementer's latest dispatched round (0, or the fix pass's).
+function reattemptRound(ledger, task, role) {
+  if (role === "reviewer") return nextReviewRound(taskEntries(ledger, task));
+  const last = latestKeyed(ledger, task, "dispatched");
+  if (!last) throw new UsageError(`task ${task} has no implementer dispatch to re-attempt`);
+  return last.round;
+}
+
+// The task's uncommitted diff over its own files, as the reviewer will see it: tracked edits from
+// numstat, plus each new (untracked) file's lines, since diff cannot see a file the index lacks.
+export function diffStat(root, files) {
+  const git = (args) => spawnSync("git", ["-C", root, ...args, "--", ...files], { encoding: "utf8" }).stdout ?? "";
+  let lines = 0;
+  let changed = 0;
+  for (const row of git(["diff", "--numstat", "HEAD"]).split("\n").filter(Boolean)) {
+    const [add, del] = row.split("\t");
+    changed += 1;
+    lines += (add === "-" ? 0 : Number(add)) + (del === "-" ? 0 : Number(del));
+  }
+  for (const path of git(["ls-files", "--others", "--exclude-standard"]).split("\n").filter(Boolean)) {
+    changed += 1;
+    const text = readFileSync(join(root, path), "utf8");
+    lines += (text.match(/\n/g)?.length ?? 0) + (text && !text.endsWith("\n") ? 1 : 0);
+  }
+  return { lines, files: changed };
+}
+
+const POLICY_ROLES = { implementer: "implementer", reviewer: "task-reviewer" };
+
+// The model a dispatch runs on, resolved through the policy. The ceiling is the state file's drive row
+// (a driven run's recorded model), else --orchestrator, else the running session's transcript; a
+// `requested` model above it is refused, and one at or below it is the policy's pin.
+export function routeDispatch({ role, root, ledger, task, orchestrator, stepsUnspecified = false, requested, env = process.env, cwd = process.cwd() }) {
+  const statePath = join(dirname(resolve(cwd, ledger)), "state.md");
+  const stateText = existsSync(statePath) ? readFileSync(statePath, "utf8") : "";
+  const { ceiling, driven } = ceilingFrom({
+    driveRow: fieldText(stateText, "drive"), orchestrator, transcriptModel: () => resolveDepth(env, cwd, {}).model,
+  });
+  const policyRole = POLICY_ROLES[role];
+  const files = [...(taskFiles(ledger, task) ?? [])];
+  const facts = role === "implementer"
+    ? {
+        files: files.length, deps: taskDependencyLine(ledger, task) ?? "none", stepsUnspecified,
+        priorRejected: taskEntries(ledger, task).some((e) => e.event === "review-verdict" && e.outcome.startsWith("rejected") && !isNoVerdict(e.outcome)),
+      }
+    : { stat: files.length ? diffStat(root, files) : null };
+  let knob = parseRecordedLine(fieldText(stateText, "knobs"))[loadPolicy().roles[policyRole].knob];
+  if (requested) {
+    const table = loadTable();
+    const [requestedRank, ceilingRank] = [rank(requested, table), rank(ceiling, table)];
+    if (requestedRank !== null && ceilingRank !== null && requestedRank > ceilingRank)
+      throw new Error(`--model ${requested} is above this cycle's ceiling ${ceiling}: request a model at or below it, or drop --model to dispatch on the policy's choice`);
+    knob = requested;
+  }
+  const { model, dispatch, effort, outcome } = resolveRole(policyRole, { ceiling, driven, knob, facts });
+  return { model, dispatchModel: dispatch, effort, modelOutcome: outcome };
+}
+
 export function dispatch(argv, brief, cwd = process.cwd()) {
   const flags = taskFlags(argv, FLAGS, ["--run", "--task", "--role"]);
   const { "--run": run, "--task": task, "--role": role } = flags;
   checkIds({ run, task });
   if (!ROLES.has(role)) throw new UsageError(`--role must be implementer or reviewer, got "${role}"`);
-  const roundFlag = countFlag(flags, "--round", role === "reviewer" ? 1 : 0);
-  if (role === "reviewer" && roundFlag === undefined) throw new UsageError("--round is required for a reviewer dispatch");
-  const round = roundFlag ?? 0;
+  const reattempt = flags["--reattempt"] === true;
   const captureCmd = flags["--capture-cmd"];
+  if (reattempt && (flags["--round"] !== undefined || captureCmd !== undefined))
+    throw new UsageError("--reattempt reads the round and the brief from the earlier dispatch: drop --round and --capture-cmd");
+  const roundFlag = reattempt ? undefined : countFlag(flags, "--round", role === "reviewer" ? 1 : 0);
+  if (!reattempt && role === "reviewer" && roundFlag === undefined) throw new UsageError("--round is required for a reviewer dispatch");
+  if (flags["--steps-unspecified"] && role !== "implementer") throw new UsageError("--steps-unspecified is an implementer signal");
   if (captureCmd !== undefined && (role !== "implementer" || /\n/.test(captureCmd) || !captureCmd.trim()))
     throw new UsageError("--capture-cmd takes one line, on an implementer dispatch only");
-  if (!brief.trim()) throw new UsageError("the brief text on stdin is empty");
+  if (!reattempt && !brief.trim()) throw new UsageError("the brief text on stdin is empty");
 
   const root = workTreeRoot(cwd);
   const ledger = flags["--ledger"] ?? join(root, ".devcycle/ledger.md");
   refuseDriverOwnedWaves(ledger, cwd);
   const event = role === "implementer" ? "dispatched" : "review-round";
+  const round = reattempt ? reattemptRound(ledger, task, role) : roundFlag ?? 0;
   if (role === "reviewer") {
     const expected = nextReviewRound(taskEntries(ledger, task));
     if (round !== expected) throw new UsageError(`task ${task}'s next review is round ${expected}, not ${round}`);
   }
+  const routed = routeDispatch({
+    role, root, ledger, task, orchestrator: flags["--orchestrator"], stepsUnspecified: flags["--steps-unspecified"] === true,
+    requested: flags["--model"], cwd,
+  });
   const retry = nextRetry(ledger, task, event);
   const briefPath = briefPathFor(task, role, round);
+  if (reattempt && !existsSync(join(root, briefPath))) throw new UsageError(`no saved brief at ${briefPath} to re-attempt`);
   mkdirSync(join(root, ".devcycle/briefs"), { recursive: true });
   mkdirSync(join(root, ".devcycle/dispatch"), { recursive: true });
-  // An implementer brief ends with the task's resolved gate, so the brief, the capture helper's cmd:
-  // and the evidence check agree with no hand slicing (references/evidence.md § File-backed evidence).
-  const gate = role === "implementer" ? taskGate(ledger, task) : null;
-  const filled = role === "implementer" ? withLessons(brief, root, ledger, task) : { text: brief };
-  const tail = briefTail(gate, captureCmd);
-  atomicWrite(join(root, briefPath), tail ? `${filled.text.replace(/\n*$/, "\n")}${tail}` : filled.text);
+  // The saved brief of a re-attempt already carries its lessons block and gate tail.
+  let filled = {};
+  if (!reattempt) {
+    // An implementer brief ends with the task's resolved gate, so the brief, the capture helper's cmd:
+    // and the evidence check agree with no hand slicing (references/evidence.md § File-backed evidence).
+    const gate = role === "implementer" ? taskGate(ledger, task) : null;
+    filled = role === "implementer" ? withLessons(brief, root, ledger, task) : { text: brief };
+    const tail = briefTail(gate, captureCmd);
+    atomicWrite(join(root, briefPath), tail ? `${filled.text.replace(/\n*$/, "\n")}${tail}` : filled.text);
+  }
   if (role === "reviewer") setAsideFindings(root, task, round, retry);
   atomicWrite(join(root, `.devcycle/dispatch/${task}-${role}-${round}-${retry}.json`), JSON.stringify({ startedAt: now(), sessionId: process.env.CLAUDE_CODE_SESSION_ID || null }) + "\n");
-  // The routing decision is the audit shape references/model-routing.md records on `dispatched`.
-  const decision = flags["--model-decision"];
-  const outcome = role === "implementer" ? (decision ? `model ${decision}` : `implementer retry ${retry}`) : `round ${round}`;
-  const { appended } = appendLedgerLine(ledger, { task, event, outcome, ref: briefPath, round, retry });
+  const { appended } = appendLedgerLine(ledger, { task, event, outcome: routed.modelOutcome, ref: briefPath, round, retry });
   return {
-    action: "dispatch", task, role, round, retry, briefPath, ...("lessons" in filled ? { lessons: filled.lessons } : {}),
+    action: "dispatch", task, role, round, retry, briefPath, ...("lessons" in filled ? { lessons: filled.lessons } : {}), ...routed,
     appended: appended ? [ledgerKey({ task, event, round, retry })] : [],
   };
 }
 
-// --help is answered before stdin is read, so an interactive call never waits on a brief.
+// --help and --reattempt are answered before stdin is read, so neither waits on a brief.
 function dispatchMain(argv) {
-  runTaskScript("task-dispatch", () => dispatch(argv, argv.includes("--help") ? "" : readFileSync(0, "utf8")));
+  runTaskScript("task-dispatch", () => dispatch(argv, argv.includes("--help") || argv.includes("--reattempt") ? "" : readFileSync(0, "utf8")));
 }
 
 if (isMain(import.meta.url, process.argv[1])) dispatchMain(process.argv.slice(2));

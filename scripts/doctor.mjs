@@ -353,6 +353,31 @@ export const MOD_SINCE = "0.24.0";
 // The first release whose `single` review engine runs one reviewer per lens (#438). The engine string
 // stayed `single`, so an older run is told apart by its version alone.
 export const PER_LENS_SINGLE_SINCE = "0.32.2";
+// The first release whose re-dispatches carry a cause (assumption: 0.34.1, re-checked at finish).
+// Before it a killed attempt had no retry index and a missing report no dispatch row, so neither
+// cause can be told; from it on re-dispatch counts rise for the same behaviour, which the report's
+// split explains.
+export const REDISPATCH_CAUSE_SINCE = "0.34.1";
+
+// Only task-intake.mjs writes dispatch rows, so a previous attempt with a row reached intake: this
+// attempt is a fix pass. One without was killed, interrupted or ended without output: a redo. The
+// previous attempt may sit in an earlier session window of the same run, so the search ranges over the run.
+export function redispatchCause(record, d) {
+  const v = record.pluginVersion;
+  if (!v || v === "unknown" || compareVersions(v, REDISPATCH_CAUSE_SINCE) < 0) return "unknown";
+  const reached = (record.runDispatches ?? record.dispatches ?? []).some((p) => p.taskId === d.taskId && p.agentType === d.agentType && p.retryIndex === d.retryIndex - 1);
+  return reached ? "fix-pass" : "redo";
+}
+
+export function redispatchCauses(record) {
+  const counts = { "fix-pass": 0, redo: 0, unknown: 0 };
+  for (const e of deriveEvents(record)) if (e.event === "re-dispatch") counts[e.cause]++;
+  return counts;
+}
+
+export const redispatchNote = (c) =>
+  `_re-dispatch by cause: fix-pass ${c["fix-pass"]}, redo ${c.redo}, unknown ${c.unknown}. Runs before ${REDISPATCH_CAUSE_SINCE} ` +
+  `recorded no killed attempt and no missing-report retry, so re-dispatch counts rise from that release on because more retries are now recorded, shared between both causes (vintage break)._`;
 export const SINGLE_ONE_REVIEWER = "single (one reviewer)";
 // Why a forward-filled session has no run record: a standalone command mints none by design, a
 // session from before 0.13.0 predates the record, and anything else expected one and is missing it.
@@ -1088,6 +1113,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
         // The run's workload is the last workload line written for the session (a rerun overwrites
         // an earlier estimate); null when the run wrote none (GC3 — workload-unknown, not zero).
         const rec = { runId, pluginVersion, profile, knobs, resolvedReviewDepth, resolvedDepthKnob, resolvedConsent, schemaMismatch, triage, ...w,
+          runDispatches: runWindows.flatMap((x) => x.dispatches),
           workload: w.workloads.at(-1) ?? null, planningRuns: h === planningWindow ? [planningRun] : [],
           traceRuns: h === firstWindow ? [traceRun] : [],
           drive: drives.length ? "auto" : "manual", driveRuns: h === firstWindow ? [{ runId, rows: drives }] : [] };
@@ -1096,6 +1122,7 @@ export function readRunRecords(dir = process.env.DEVCYCLE_RUNS_DIR ??
           ? { ...rec,
               stages: [...prior.stages, ...rec.stages],
               dispatches: [...prior.dispatches, ...rec.dispatches],
+              runDispatches: [...prior.runDispatches, ...rec.runDispatches],
               verdicts: [...prior.verdicts, ...rec.verdicts],
               events: [...prior.events, ...rec.events],
               workloads: [...prior.workloads, ...rec.workloads],
@@ -1424,6 +1451,7 @@ export function summarizeSession(sessionId, records, runRecords = new Map()) {
     // References/impact-scoring.md owns the formula; this is the only call site that scores a
     // session, and every table downstream reads the result rather than recomputing it.
     impact: record ? impactScores(record, costByStage) : null,
+    redispatchCauses: record ? redispatchCauses(record) : null,
     culpritsByKey: culpritsByKey(record),
     attributionSource,
     firstTag,
@@ -2072,7 +2100,7 @@ export function deriveEvents(record) {
   const byTask = new Map();
   for (const d of record.dispatches ?? []) {
     if (d.retryIndex > 0)
-      out.push({ event: "re-dispatch", stage: stageOf(Date.parse(d.startedAt)), task: d.taskId, ts: d.startedAt });
+      out.push({ event: "re-dispatch", stage: stageOf(Date.parse(d.startedAt)), task: d.taskId, ts: d.startedAt, cause: redispatchCause(record, d) });
     if (!byTask.has(d.taskId)) byTask.set(d.taskId, []);
     byTask.get(d.taskId).push(d);
   }
@@ -2107,8 +2135,8 @@ export function journalEvents(record) {
 }
 
 // Markers that a gate or review ran, or which review engine ran: none is friction, whatever its
-// result.
-const NEUTRAL_EVENTS = new Set(["gate-ran", "spec-review", "review-depth"]);
+// result. A stop request between driven sessions is a marker too.
+const NEUTRAL_EVENTS = new Set(["gate-ran", "spec-review", "review-depth", "stop-request"]);
 
 export function impactScores(record, costByStage) {
   const all = journalEvents(record);
@@ -3269,6 +3297,9 @@ export function renderReport(summaries, ctx) {
     "no scored culprit events in this corpus",
   ));
   L.push("", `_Priced by ${IMPACT_SCORING}'s formula; "unmeasurable" could not be priced and is not $0._`);
+  const causes = { "fix-pass": 0, redo: 0, unknown: 0 };
+  for (const s of summaries) for (const k of Object.keys(causes)) causes[k] += s.redispatchCauses?.[k] ?? 0;
+  if (Object.values(causes).some((n) => n > 0)) L.push("", redispatchNote(causes));
 
   section("### Compliance", "compliance");
   L.push(...(compliance.length

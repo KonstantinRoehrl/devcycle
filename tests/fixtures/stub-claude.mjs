@@ -13,14 +13,15 @@
 // state's `- stage:` row), `stop` ({ reason, detail } written as drive-stop.json), `rateLimitInSec`
 // (a rejected rate_limit_event resetting that many seconds from now),
 // `rateLimitNoReset` (a rejected rate_limit_event that names no reset time), `result`, `isError`,
-// `costUsd`, `denials`, `usage` (the assistant event's usage block), `messageId` and `repeat` (that
+// `costUsd`, `denials`, `usage` (the assistant event's usage block), `model` (its `message.model`), `messageId` and `repeat` (that
 // event's message id, and how many times it is streamed, as Claude Code streams one event per
 // content block), `toolUseId` (the id of that event's `tool_use` block) and `toolResult` (a main-thread
 // `user` event carrying that call's `tool_result` follows it), `pauseAfterWritesMs` (wait that long
 // after the step's file writes, before its next event), `hangMs` (wait before the result event),
 // `hangAfterResultMs` (stay alive and silent after it), `noResult` (exit without a result event, as a
 // crashed session does), `noInit` (exit before even the init event, as a `claude` that fails at
-// startup does; exit code 1 unless `exitCode` says otherwise), `exitCode`.
+// startup does; exit code 1 unless `exitCode` says otherwise), `exitCode`, `synthetic` (after the tool
+// use, one `<synthetic>` assistant event with an all-zero usage block, as an API-error turn writes).
 //
 // A step plays in this order: the init event; its `tool_use` event(s) when it sets `toolUseId`, since
 // in a real session the main-thread tool call is already pending while it writes the ledger; the file
@@ -80,7 +81,7 @@ const emitToolUse = () => {
     emit({
       type: "assistant",
       parent_tool_use_id: null,
-      message: { ...(step.messageId ? { id: step.messageId } : {}), content: [{ type: "tool_use", name: "Bash", ...(step.toolUseId ? { id: step.toolUseId } : {}) }], usage },
+      message: { ...(step.messageId ? { id: step.messageId } : {}), ...(step.model ? { model: step.model } : {}), content: [{ type: "tool_use", name: "Bash", ...(step.toolUseId ? { id: step.toolUseId } : {}) }], usage },
     });
 };
 if (step.toolUseId) emitToolUse();
@@ -96,6 +97,12 @@ if (step.rateLimitInSec !== undefined)
   emit({ type: "rate_limit_event", rate_limit_info: { status: "rejected", resetsAt: Math.floor(clockNow() / 1000) + step.rateLimitInSec } });
 if (step.rateLimitNoReset) emit({ type: "rate_limit_event", rate_limit_info: { status: "rejected" } });
 if (!step.toolUseId) emitToolUse();
+if (step.synthetic)
+  emit({
+    type: "assistant",
+    parent_tool_use_id: null,
+    message: { model: "<synthetic>", content: [{ type: "text", text: "API Error" }], usage: { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 } },
+  });
 if (step.toolUseId && step.toolResult)
   emit({ type: "user", parent_tool_use_id: null, message: { role: "user", content: [{ type: "tool_result", tool_use_id: step.toolUseId }] } });
 

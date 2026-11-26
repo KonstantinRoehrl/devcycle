@@ -9,7 +9,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { atomicWrite } from "./atomic-write.mjs";
-import { claudeProjectsDir } from "./depth-probe.mjs";
+import { claudeProjectsDir, contextDepth, lastUsageOf } from "./depth-probe.mjs";
 import { isMain } from "./is-main.mjs";
 import { eachRecord } from "./jsonl.mjs";
 import { sleepSync } from "./sleep.mjs";
@@ -127,19 +127,22 @@ function callSummary(name, input) {
 // writes it (2.1.288–2.1.311): the tool_result of the closing SubagentHandback (`toolEndsTurn`), an
 // interrupt marker (a denied tool call, or the session killed under it), or a final assistant message
 // with no tool call — an API error message (a usage limit) among them. Hook attachments and a torn
-// trailing line are skipped, so a call whose result line was torn reads pending.
+// trailing line are skipped, so a call whose result line was torn reads pending. The last usage record is
+// the model, effort and depth the dispatch actually runs on.
 export function readTranscript(file) {
   if (!existsSync(file)) return null;
   let first = null;
   let last = null;
   let lastTool = null;
   let apiError = null;
+  let usageRecord = null;
   const uses = [];
   const returned = new Set();
   eachRecord(file, (r) => {
     if (!isMessage(r)) return true;
     first ??= r;
     last = r;
+    usageRecord = lastUsageOf(r) ? r : usageRecord;
     if (r.isApiErrorMessage === true) apiError = textOf(r.message?.content);
     for (const b of Array.isArray(r.message?.content) ? r.message.content : []) {
       if (r.type === "assistant" && b?.type === "tool_use") {
@@ -156,15 +159,18 @@ export function readTranscript(file) {
   });
   const pending = calls.findLast((c) => !c.completed);
   const toolCalls = { toolUses: calls.length, lastTool, apiError, calls, pendingCall: pending ? { name: pending.name, summary: pending.summary } : null };
+  const usage = usageRecord && {
+    model: usageRecord.message.model, effort: typeof usageRecord.effort === "string" ? usageRecord.effort : null, tokens: contextDepth(usageRecord.message.usage),
+  };
   const mtimeMs = statSync(file).mtimeMs;
-  if (!first) return { firstStamp: null, prompt: "", ...toolCalls, terminal: false, pendingSince: null, mtimeMs, lastStamp: null };
+  if (!first) return { firstStamp: null, prompt: "", ...toolCalls, usage, terminal: false, pendingSince: null, mtimeMs, lastStamp: null };
   const blocks = Array.isArray(last.message?.content) ? last.message.content : [];
   const callsTool = blocks.some((b) => b?.type === "tool_use");
   const terminal = last.toolEndsTurn === true
     || (last.type === "user" && INTERRUPTED.test(textOf(last.message?.content).trim()))
     || (last.type === "assistant" && FINAL_STOPS.has(last.message?.stop_reason) && !callsTool);
   return {
-    firstStamp: Date.parse(first.timestamp) || null, prompt: textOf(first.message?.content), ...toolCalls, terminal,
+    firstStamp: Date.parse(first.timestamp) || null, prompt: textOf(first.message?.content), ...toolCalls, usage, terminal,
     pendingSince: last.type === "assistant" && callsTool ? Date.parse(last.timestamp) || null : null, mtimeMs,
     lastStamp: Date.parse(last.timestamp) || null,
   };
@@ -295,12 +301,13 @@ export function inFlight({ root, ledgerPath = join(root, LEDGER_REL), sessionId,
         const u = readTranscript(a.file);
         return u && u.firstStamp !== null && u.firstStamp >= startedMs && transcriptState(u, { now, ended: metaFinished(a.file) }) !== "ended";
       }).length;
-      return { ...base, state: "unbound", toolUses: 0, sinceActivityMs: null, lastTool: null, liveUnknown, outputPresent: outputPresent(root, rec) };
+      return { ...base, state: "unbound", model: null, effort: null, tokens: null, toolUses: 0, sinceActivityMs: null, lastTool: null, liveUnknown, outputPresent: outputPresent(root, rec) };
     }
     const ended = Boolean(rec.record.endedAt) || metaFinished(agent.file);
     const state = !ended && heldInGrace(rec.record, t, now) ? "running" : transcriptState(t, { now, ended });
     return {
-      ...base, toolUses: t.toolUses, sinceActivityMs: now - t.mtimeMs, lastTool: t.lastTool,
+      ...base, model: t.usage?.model ?? null, effort: t.usage?.effort ?? null, tokens: t.usage?.tokens ?? null,
+      toolUses: t.toolUses, sinceActivityMs: now - t.mtimeMs, lastTool: t.lastTool,
       state: state !== "ended" ? state : outputPresent(root, rec) ? "ended-with-output" : "ended-without-output",
     };
   });

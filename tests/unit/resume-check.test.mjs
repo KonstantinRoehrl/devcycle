@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { gitToplevel, hashSession, repoSlug } from "../../scripts/run-record.mjs";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { makeRepo, sh } from "./helpers.mjs";
+import { checkState, ownershipOf } from "../../scripts/resume-check.mjs";
+import { commitAll, makeFakeBin, makeRepo, sh, writeInto } from "./helpers.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/resume-check.mjs");
 const run = (statePath) => spawnSync("node", [SCRIPT, "--state", statePath], { encoding: "utf8" });
@@ -714,5 +715,449 @@ test("no uncontrolled: line for a running last session, a ready handoff or a don
     const lines = linesOf(interrupted(opts));
     assert.ok(!lines.some((line) => line.startsWith("uncontrolled:")), `${what}: ${lines.join("\n")}`);
     assert.match(lines.at(-1), /^handoff: /, what);
+  }
+});
+
+const runIn = (statePath, cwd, env = process.env) =>
+  spawnSync("node", [SCRIPT, "--state", statePath], { cwd, env, encoding: "utf8" });
+const writeCycle = (checkout, branch) => writeInto(checkout, ".devcycle/state.md", [
+  "# devcycle state", "- stage: execution", `- root: ${checkout}`, `- branch: ${branch} (cut from main at 0000000)`,
+  "- spec: none", "- plan: none", "- checklist: none", "",
+].join("\n"));
+// The main checkout on main, and a sibling worktree on feat/b.
+function withSibling() {
+  const repo = realpathSync(makeRepo());
+  const parent = makeTempDir("resume-check-wt-");
+  const wt = join(parent, "wt");
+  sh("git", ["worktree", "add", "-q", "-b", "feat/b", wt], { cwd: repo });
+  return { repo, parent, wt: realpathSync(wt), done: () => [repo, parent].forEach((d) => rmSync(d, { recursive: true, force: true })) };
+}
+
+test("ownershipOf reports a foreign root with errors, and passes an own or unreadable file", () => {
+  const repo = realpathSync(makeRepo());
+  try {
+    const own = writeCycle(repo, "feat/b");
+    assert.deepEqual(ownershipOf(own), { ok: true });
+    assert.deepEqual(ownershipOf(join(repo, "missing.md")), { ok: true });
+    writeFileSync(own, readFileSync(own, "utf8").replace(`- root: ${repo}`, "- root: /somewhere/else"));
+    const foreign = ownershipOf(own);
+    assert.deepEqual([foreign.ok, foreign.kind, foreign.actualRoot], [false, "foreign", repo]);
+    assert.ok(foreign.errors.length > 0);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("branch-held: the recorded branch is checked out in a sibling worktree (R2)", () => {
+  const s = withSibling();
+  try {
+    const state = writeCycle(s.repo, "feat/b");
+    const checked = checkState(state, { cwd: s.repo });
+    assert.deepEqual([checked.ok, checked.kind, checked.rule, checked.worktree], [false, "elsewhere", "branch-held", s.wt]);
+    assert.ok(checked.errors.length > 0);
+    const allowed = checkState(state, { cwd: s.repo, allowBranchHeld: true });
+    assert.deepEqual([allowed.ok, allowed.branchHeld], [true, { worktree: s.wt }]);
+    const r = runIn(state, s.repo);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /this cycle belongs to another checkout/);
+    assert.match(r.stderr, /branch-held/);
+    assert.ok(r.stderr.includes(s.wt), r.stderr);
+  } finally {
+    s.done();
+  }
+});
+
+test("other-checkout: run from the sibling worktree that holds the branch (R2')", () => {
+  const s = withSibling();
+  try {
+    const state = writeCycle(s.repo, "feat/b");
+    const checked = checkState(state, { cwd: s.wt });
+    assert.deepEqual([checked.kind, checked.rule, checked.stateCheckout, checked.callerCheckout, checked.holdsBranch],
+      ["elsewhere", "other-checkout", s.repo, s.wt, true]);
+    const r = runIn(state, s.wt);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /other-checkout/);
+    assert.ok(r.stderr.includes(s.repo), r.stderr);
+  } finally {
+    s.done();
+  }
+});
+
+test("other-checkout: a nested worktree's state file read from the main checkout (R3)", () => {
+  const repo = realpathSync(makeRepo());
+  try {
+    const nested = join(repo, ".worktrees", "n");
+    sh("git", ["worktree", "add", "-q", "-b", "feat/n", nested], { cwd: repo });
+    const state = writeCycle(realpathSync(nested), "feat/n");
+    const checked = checkState(state, { cwd: repo });
+    assert.deepEqual([checked.rule, checked.stateCheckout, checked.holdsBranch], ["other-checkout", realpathSync(nested), false]);
+    assert.equal(runIn(state, repo).status, 1);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("other-checkout: the CLI says whether the caller's checkout holds the recorded branch", () => {
+  const s = withSibling();
+  try {
+    const state = writeCycle(s.repo, "feat/b");
+    assert.match(runIn(state, s.wt).stderr, /your checkout holds the recorded branch: yes/);
+    const other = join(s.parent, "other");
+    sh("git", ["worktree", "add", "-q", "-b", "feat/other", other], { cwd: s.repo });
+    assert.match(runIn(state, realpathSync(other)).stderr, /your checkout holds the recorded branch: no/);
+  } finally {
+    s.done();
+  }
+});
+
+test("a state file in an unrelated repository is not elsewhere", () => {
+  const a = realpathSync(makeRepo());
+  const b = realpathSync(makeRepo());
+  try {
+    sh("git", ["branch", "feat/b"], { cwd: a });
+    const r = runIn(writeCycle(a, "feat/b"), b);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  } finally {
+    [a, b].forEach((d) => rmSync(d, { recursive: true, force: true }));
+  }
+});
+
+test("a worktree whose directory is gone does not hold the branch", () => {
+  const s = withSibling();
+  try {
+    rmSync(s.wt, { recursive: true, force: true });
+    const r = runIn(writeCycle(s.repo, "feat/b"), s.repo);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  } finally {
+    s.done();
+  }
+});
+
+test("a cycle in the worktree that holds its own branch passes", () => {
+  const s = withSibling();
+  try {
+    const r = runIn(writeCycle(s.wt, "feat/b"), s.wt);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  } finally {
+    s.done();
+  }
+});
+
+// main with .devcycle/ ignored; feat/t cut from main's tip with one commit; the state file records the cut.
+function landedRepo({ annotate = true, extra = [] } = {}) {
+  const repo = realpathSync(makeRepo());
+  writeInto(repo, ".gitignore", ".devcycle/\n");
+  commitAll(repo, "ignore the cycle dir");
+  const cut = sh("git", ["rev-parse", "HEAD"], { cwd: repo }).trim();
+  sh("git", ["checkout", "-qb", "feat/t"], { cwd: repo });
+  writeInto(repo, "t.txt", "t\n");
+  commitAll(repo, "topic work");
+  const tip = sh("git", ["rev-parse", "HEAD"], { cwd: repo }).trim();
+  sh("git", ["checkout", "-q", "main"], { cwd: repo });
+  const state = writeInto(repo, ".devcycle/state.md", [
+    "# devcycle state", "- stage: execution", `- root: ${repo}`,
+    `- branch: feat/t${annotate ? ` (cut from main at ${cut})` : ""}`, "- spec: none", "- plan: none", "- checklist: none", ...extra, "",
+  ].join("\n"));
+  // Rebases and merges commit as the runner, which CI leaves without an identity.
+  sh("git", ["config", "user.name", "devcycle-test"], { cwd: repo });
+  sh("git", ["config", "user.email", "test@devcycle.invalid"], { cwd: repo });
+  const g = (...args) => sh("git", args, { cwd: repo });
+  return { repo, cut, tip, state, g, done: () => rmSync(repo, { recursive: true, force: true }) };
+}
+const ghPrAt = (headRefOid) => {
+  const bin = makeFakeBin("gh", `process.stdout.write(${JSON.stringify(JSON.stringify([{ number: 7, headRefOid }]))});`);
+  return { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+};
+
+test("merged: a fast-forward merge into the base is caught by ancestry (R1)", () => {
+  const c = landedRepo();
+  try {
+    c.g("merge", "-q", "--ff-only", "feat/t");
+    const r = runIn(c.state, c.repo);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /this cycle's branch has already landed/);
+    for (const want of [/feat\/t/, /base: main/, /signal: ancestry/]) assert.match(r.stderr, want);
+    const checked = checkState(c.state, { cwd: c.repo });
+    assert.deepEqual([checked.kind, checked.branch, checked.base, checked.signal], ["merged", "feat/t", "main", "ancestry"]);
+  } finally {
+    c.done();
+  }
+});
+
+test("not merged: a topic with no commits of its own, fast-forwarded to a newer base tip", () => {
+  const c = landedRepo();
+  try {
+    c.g("branch", "-D", "feat/t");
+    c.g("branch", "feat/t", c.cut);
+    writeInto(c.repo, "base.txt", "newer base\n");
+    commitAll(c.repo, "base moves on");
+    c.g("checkout", "-q", "feat/t");
+    c.g("merge", "-q", "--ff-only", "main");
+    c.g("checkout", "-q", "main");
+    const checked = checkState(c.state, { cwd: c.repo });
+    assert.equal(checked.ok, true, JSON.stringify(checked));
+    assert.equal(runIn(c.state, c.repo).status, 0);
+  } finally {
+    c.done();
+  }
+});
+
+test("not merged: a topic reset onto a newer base tip with no commits of its own", () => {
+  const c = landedRepo();
+  try {
+    c.g("branch", "-D", "feat/t");
+    c.g("branch", "feat/t", c.cut);
+    writeInto(c.repo, "base.txt", "newer base\n");
+    commitAll(c.repo, "base moves on");
+    c.g("branch", "-f", "feat/t", "main");
+    assert.equal(checkState(c.state, { cwd: c.repo }).ok, true);
+  } finally {
+    c.done();
+  }
+});
+
+// A topic with no commits of its own, cut at the cut sha and caught up to a newer base tip, must never
+// read as merged, whichever way the catch-up was done.
+const caughtUpTopic = (c, catchUp) => {
+  c.g("branch", "-D", "feat/t");
+  c.g("branch", "feat/t", c.cut);
+  writeInto(c.repo, "base.txt", "newer base\n");
+  commitAll(c.repo, "base moves on");
+  catchUp(c);
+  c.g("checkout", "-q", "main");
+  return checkState(c.state, { cwd: c.repo });
+};
+for (const [how, catchUp] of [
+  ["git rebase main", (c) => { c.g("checkout", "-q", "feat/t"); c.g("rebase", "-q", "main"); }],
+  ["git rebase --onto main <cut>", (c) => { c.g("checkout", "-q", "feat/t"); c.g("rebase", "-q", "--onto", "main", c.cut); }],
+  ["git fetch . main:feat/t", (c) => { c.g("fetch", "-q", ".", "main:feat/t"); }],
+]) {
+  test(`not merged: a topic with no commits of its own, caught up with ${how}`, () => {
+    const c = landedRepo();
+    try {
+      const checked = caughtUpTopic(c, catchUp);
+      assert.equal(checked.ok, true, JSON.stringify(checked));
+    } finally {
+      c.done();
+    }
+  });
+}
+
+test("merged: a topic with its own commits stays caught by ancestry after it was caught up and merged", () => {
+  const c = landedRepo();
+  try {
+    writeInto(c.repo, "base.txt", "newer base\n");
+    commitAll(c.repo, "base moves on");
+    c.g("checkout", "-q", "feat/t");
+    c.g("rebase", "-q", "main");
+    c.g("checkout", "-q", "main");
+    c.g("merge", "-q", "--ff-only", "feat/t");
+    const checked = checkState(c.state, { cwd: c.repo });
+    assert.deepEqual([checked.kind, checked.signal], ["merged", "ancestry"]);
+  } finally {
+    c.done();
+  }
+});
+
+test("merged: ancestry still fires when the topic's reflog is gone", () => {
+  const c = landedRepo();
+  try {
+    c.g("merge", "-q", "--ff-only", "feat/t");
+    rmSync(join(c.repo, ".git", "logs", "refs", "heads", "feat"), { recursive: true, force: true });
+    assert.equal(checkState(c.state, { cwd: c.repo }).signal, "ancestry");
+  } finally {
+    c.done();
+  }
+});
+
+// A bare repository to push to and pull from, and a topic branch deleted and recreated at the cut.
+const bareRemote = () => {
+  const remote = makeTempDir("resume-check-remote-");
+  sh("git", ["init", "-q", "--bare"], { cwd: remote });
+  return remote;
+};
+const recreateTopicAtCut = (c) => {
+  c.g("branch", "-D", "feat/t");
+  c.g("branch", "feat/t", c.cut);
+  c.g("checkout", "-q", "feat/t");
+};
+
+// Known gap, pinned so a change is deliberate: nothing in a repository separates a topic caught up to
+// a newer base tip from one that pulled in commits authored elsewhere (both leave `pull: Fast-forward`
+// or `reset: moving to`), so both read as having no commits of their own. Offline, such a topic that
+// is fast-forward merged and kept resumes silently; gh still catches it online.
+test("not merged (known gap): a topic updated only by pull reads as having no commits of its own", () => {
+  const c = landedRepo();
+  const remote = bareRemote();
+  try {
+    c.g("push", "-q", remote, "feat/t");
+    c.g("remote", "add", "origin", remote);
+    recreateTopicAtCut(c);
+    c.g("pull", "-q", "--ff-only", "origin", "feat/t");
+    c.g("checkout", "-q", "main");
+    c.g("merge", "-q", "--ff-only", "feat/t");
+    assert.equal(c.g("rev-parse", "feat/t").trim(), c.tip);
+    assert.equal(runIn(c.state, c.repo, ghPrAt("0".repeat(40))).status, 0);
+  } finally {
+    c.done();
+    rmSync(remote, { recursive: true, force: true });
+  }
+});
+
+test("not merged (known gap): a topic updated only by reset --hard reads as having no commits of its own", () => {
+  const c = landedRepo();
+  try {
+    recreateTopicAtCut(c);
+    c.g("reset", "-q", "--hard", c.tip);
+    c.g("checkout", "-q", "main");
+    c.g("merge", "-q", "--ff-only", "feat/t");
+    assert.equal(checkState(c.state, { cwd: c.repo }).ok, true);
+  } finally {
+    c.done();
+  }
+});
+
+test("merged: ancestry fires when the oldest reflog entries have expired", () => {
+  const c = landedRepo();
+  try {
+    c.g("branch", "-D", "feat/t");
+    c.g("branch", "feat/t", c.cut);
+    writeInto(c.repo, "base.txt", "newer base\n");
+    commitAll(c.repo, "base moves on");
+    c.g("checkout", "-q", "feat/t");
+    c.g("merge", "-q", "--ff-only", "main");
+    c.g("checkout", "-q", "main");
+    assert.equal(checkState(c.state, { cwd: c.repo }).ok, true);
+    const reflog = join(c.repo, ".git", "logs", "refs", "heads", "feat", "t");
+    writeFileSync(reflog, readFileSync(reflog, "utf8").split("\n").slice(1).join("\n"));
+    assert.equal(checkState(c.state, { cwd: c.repo }).signal, "ancestry");
+  } finally {
+    c.done();
+  }
+});
+
+test("merged: a topic created from a remote-tracking ref with its own commit is caught by ancestry", () => {
+  const c = landedRepo();
+  const remote = bareRemote();
+  try {
+    c.g("remote", "add", "origin", remote);
+    c.g("push", "-q", "origin", "main");
+    c.g("fetch", "-q", "origin");
+    c.g("branch", "-D", "feat/t");
+    c.g("branch", "feat/t", "origin/main");
+    c.g("checkout", "-q", "feat/t");
+    writeInto(c.repo, "t.txt", "t\n");
+    commitAll(c.repo, "topic work");
+    c.g("checkout", "-q", "main");
+    c.g("merge", "-q", "--ff-only", "feat/t");
+    assert.equal(checkState(c.state, { cwd: c.repo }).signal, "ancestry");
+  } finally {
+    c.done();
+    rmSync(remote, { recursive: true, force: true });
+  }
+});
+
+test("merged: a local squash merge is caught offline by content (R1s)", () => {
+  const c = landedRepo();
+  try {
+    c.g("merge", "--squash", "-q", "feat/t");
+    commitAll(c.repo, "squash");
+    assert.equal(checkState(c.state, { cwd: c.repo }).signal, "content");
+  } finally {
+    c.done();
+  }
+});
+
+test("merged: a merged PR whose head is the tip is caught by gh (R1s)", () => {
+  const c = landedRepo();
+  try {
+    c.g("remote", "add", "origin", "https://example.invalid/r.git");
+    const r = runIn(c.state, c.repo, ghPrAt(c.tip));
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /signal: pr/);
+  } finally {
+    c.done();
+  }
+});
+
+test("not merged: a commit after the merged PR keeps the cycle live", () => {
+  const c = landedRepo();
+  try {
+    c.g("remote", "add", "origin", "https://example.invalid/r.git");
+    const r = runIn(c.state, c.repo, ghPrAt("0".repeat(40)));
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+  } finally {
+    c.done();
+  }
+});
+
+test("not merged: a branch still at its resolved cut sha", () => {
+  const c = landedRepo();
+  try {
+    c.g("branch", "-f", "feat/t", c.cut);
+    assert.equal(runIn(c.state, c.repo).status, 0);
+  } finally {
+    c.done();
+  }
+});
+
+test("not merged: a branch whose commits net to an empty diff", () => {
+  const c = landedRepo();
+  try {
+    c.g("checkout", "-q", "feat/t");
+    c.g("rm", "-q", "t.txt");
+    commitAll(c.repo, "revert the topic work");
+    c.g("checkout", "-q", "main");
+    assert.equal(runIn(c.state, c.repo).status, 0);
+  } finally {
+    c.done();
+  }
+});
+
+test("not merged: no recorded base, and stage done, stay silent", () => {
+  const bare = landedRepo({ annotate: false });
+  const done = landedRepo();
+  try {
+    bare.g("merge", "-q", "--ff-only", "feat/t");
+    assert.equal(runIn(bare.state, bare.repo).status, 0);
+    done.g("merge", "-q", "--ff-only", "feat/t");
+    writeFileSync(done.state, readFileSync(done.state, "utf8").replace("- stage: execution", "- stage: done"));
+    assert.equal(runIn(done.state, done.repo).status, 0);
+  } finally {
+    bare.done();
+    done.done();
+  }
+});
+
+test("merged-ack at the tip is silent, and a new landed commit fires again", () => {
+  const c = landedRepo();
+  try {
+    c.g("merge", "-q", "--ff-only", "feat/t");
+    writeFileSync(c.state, readFileSync(c.state, "utf8") + `- merged-ack: ${c.tip}\n`);
+    assert.equal(runIn(c.state, c.repo).status, 0);
+    c.g("checkout", "-q", "feat/t");
+    writeInto(c.repo, "u.txt", "u\n");
+    commitAll(c.repo, "more topic work");
+    c.g("checkout", "-q", "main");
+    c.g("merge", "-q", "--ff-only", "feat/t");
+    assert.equal(runIn(c.state, c.repo).status, 1);
+  } finally {
+    c.done();
+  }
+});
+
+test("the base comes from a ledger of this cycle, never from a previous cycle's", () => {
+  const fresh = landedRepo({ annotate: false, extra: ["- run: 00000000000000d4"] });
+  const stale = landedRepo({ annotate: false, extra: ["- run: 00000000000000d4"] });
+  try {
+    for (const [c, run] of [[fresh, "00000000000000d4"], [stale, "00000000000000a1"]]) {
+      c.g("merge", "-q", "--ff-only", "feat/t");
+      writeInto(c.repo, ".devcycle/ledger.md", `Run: \`${run}\`\nBranch: \`feat/t\` (cut from \`main\` at \`${c.cut}\`)\n`);
+    }
+    assert.equal(checkState(fresh.state, { cwd: fresh.repo }).kind, "merged");
+    assert.equal(runIn(stale.state, stale.repo).status, 0);
+  } finally {
+    fresh.done();
+    stale.done();
   }
 });

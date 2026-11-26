@@ -3,7 +3,8 @@
 // evidence line, runs the two report lints a reviewer would otherwise spend a round on, and writes
 // the `report-received` ledger line and the `dispatch` run-record row for the task's latest
 // dispatch. The envelope's `status:` arrives as --status, since the report itself carries none.
-// With --compose-review, a report bound for review also gets its reviewer brief and dispatch here.
+// With --compose-review, a report bound for review also gets its reviewer brief and dispatch here;
+// task-dispatch resolves the reviewer's model from the task's diff, so the coordinator never reads it.
 // Contract: references/ledger.md § Task scripts; resume rows and retry caps: references/resume.md.
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -15,7 +16,7 @@ import { gitToplevel } from "./git-identity.mjs";
 import { isMain } from "./is-main.mjs";
 import { field } from "./md-field.mjs";
 import { now } from "./stamp.mjs";
-import { dispatch, roundFindingsPath } from "./task-dispatch.mjs";
+import { dispatch, roundFindingsPath, routeDispatch } from "./task-dispatch.mjs";
 import {
   UsageError, appendLedgerLine, appendRunRecordOnce, checkIds, latestKeyed, ledgerKey, nextReviewRound, retryCount,
   runTaskScript, taskEntries, taskFiles, taskFlags, taskGate, workTreeRoot,
@@ -24,6 +25,7 @@ import {
 const FLAGS = {
   "--run": "value", "--task": "value", "--report": "value", "--status": "value", "--agent-type": "value",
   "--model": "value", "--model-source": "value", "--agent-id": "value", "--ledger": "value", "--compose-review": "none",
+  "--orchestrator": "value",
 };
 const REQUIRED = ["--run", "--task", "--report", "--status", "--agent-type", "--model", "--model-source"];
 const EVIDENCE_COMPLETENESS = fileURLToPath(new URL("./evidence-completeness-check.mjs", import.meta.url));
@@ -33,6 +35,9 @@ const EVIDENCE_LINE_RE = /^-\s*Evidence:/m;
 const MISSING = "rejected (missing report file)";
 const BOUNCE = "rejected (intake bounce)";
 const RETRY_CAP = 2;
+// A dispatch row's model is an id (claude-sonnet-5-5, a dated or provider-prefixed id), never a tier
+// or family word: an id has a hyphen-joined part and a digit, which no tier word has.
+const MODEL_ID_RE = /^(?=\S*\d)[^\s-]+(?:-[^\s-]+)+$/;
 
 // Both lints over the report, as one list of finding lines; evidence-completeness-check runs against
 // the task's gate as the CLI it is (it has no importable entry), from the checkout root its relative
@@ -120,17 +125,17 @@ function reviewerBrief({ root, ledger, task, round, reportRel, report, findingsP
 // The review step 4 hands on, dispatched here through task-dispatch's own reviewer path, so its
 // ledger line and findings set-aside stay that script's. A round already dispatched since the latest
 // report makes this a re-run: it points at that round's brief and writes nothing.
-function composeReview({ root, ledger, run, task, cwd, ledgerFlag, reportRel, report, dispatched }) {
+function composeReview({ root, ledger, run, task, cwd, ledgerFlag, orchestrator, reportRel, report, dispatched, routing }) {
   const entries = taskEntries(ledger, task);
   const round = nextReviewRound(entries);
   const findingsPath = roundFindingsPath(task, round);
   const since = entries.slice(entries.findLastIndex((e) => e.event === "report-received") + 1);
   const sent = since.find((e) => e.event === "review-round" && Number(e.key?.split("/")[2]) === round);
-  if (sent) return { reviewBriefPath: sent.ref, findingsPath, reviewRound: round, appended: [] };
+  if (sent) return { reviewBriefPath: sent.ref, findingsPath, reviewRound: round, ...routing, appended: [] };
   const brief = reviewerBrief({ root, ledger, task, round, reportRel, report, findingsPath, dispatched });
-  const argv = ["--run", run, "--task", task, "--role", "reviewer", "--round", String(round), ...(ledgerFlag ? ["--ledger", ledgerFlag] : [])];
+  const argv = ["--run", run, "--task", task, "--role", "reviewer", "--round", String(round), ...(orchestrator ? ["--orchestrator", orchestrator] : []), ...(ledgerFlag ? ["--ledger", ledgerFlag] : [])];
   const { briefPath, appended } = dispatch(argv, brief, cwd);
-  return { reviewBriefPath: briefPath, findingsPath, reviewRound: round, appended };
+  return { reviewBriefPath: briefPath, findingsPath, reviewRound: round, ...routing, appended };
 }
 
 export function intake(argv, cwd = process.cwd()) {
@@ -140,6 +145,9 @@ export function intake(argv, cwd = process.cwd()) {
   if (!["complete", "blocked"].includes(status)) throw new UsageError(`--status must be complete or blocked, got "${status}"`);
   if (!["explicit", "inherited"].includes(modelSource))
     throw new UsageError(`--model-source must be explicit or inherited, got "${modelSource}"`);
+  if (!MODEL_ID_RE.test(flags["--model"]))
+    throw new UsageError(`--model must be a model id such as claude-sonnet-5-5, got "${flags["--model"]}": pass the model task-dispatch printed, ` +
+      "or this session's own model id when it printed null and the dispatch inherited it");
 
   const root = workTreeRoot(cwd);
   const ledger = flags["--ledger"] ?? join(root, ".devcycle/ledger.md");
@@ -177,6 +185,7 @@ export function intake(argv, cwd = process.cwd()) {
   }
   if (!text.trim() || !EVIDENCE_LINE_RE.test(text)) {
     ledgerLine(MISSING, reportRel);
+    dispatchRow("rejected");
     return capped(MISSING)
       ? { ...base, action: "needs-user", reason: "retry cap: a third missing report file", appended }
       : { ...base, action: "missing-report", appended };
@@ -194,8 +203,11 @@ export function intake(argv, cwd = process.cwd()) {
   }
   ledgerLine("complete", reportRel);
   dispatchRow("complete");
-  if (!flags["--compose-review"]) return { ...base, action: "review", appended };
-  const review = composeReview({ root, ledger, run, task, cwd, ledgerFlag: flags["--ledger"], reportRel, report: text, dispatched });
+  const orchestrator = flags["--orchestrator"];
+  const route = routeDispatch({ role: "reviewer", root, ledger, task, orchestrator, cwd });
+  const routing = { reviewModel: route.model, reviewDispatchModel: route.dispatchModel, reviewDecision: route.modelOutcome };
+  if (!flags["--compose-review"]) return { ...base, action: "review", ...routing, appended };
+  const review = composeReview({ root, ledger, run, task, cwd, ledgerFlag: flags["--ledger"], orchestrator, reportRel, report: text, dispatched, routing });
   return { ...base, action: "review", ...review, appended: [...appended, ...review.appended] };
 }
 

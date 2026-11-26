@@ -136,6 +136,7 @@ devcycle/                (public GitHub repo)
 │   ├── lib/find-state-file.mjs        # the bounded .devcycle/state.md walk the git guard and both sensors key off
 │   ├── lib/poll-guard.mjs             # the until/while-loop-that-sleeps check the git guard applies to a guarded dispatch (#385)
 │   ├── lib/run-scope.mjs              # which state file names an active run — node-free, shared by the depth-sensor and the hooks module
+│   ├── lib/row-format.mjs             # the drive band's row shape, ported from cc-statusline — node-free, imported by the hooks module
 │   ├── lib/run-context.mjs            # state file → active run → joined session, for the depth-sensor and the module's sink
 │   ├── workload-sensor.mjs       # PostToolUse(Bash) commit-sensor: re-derives the run's workload record (#139)
 │   ├── dispatch-sensor.mjs       # SubagentStop depth-sensor: one agent-depth record and one agent-cost record per finished subagent; holds an implementer that stops before its report; on a released stop marks its dispatch record ended and retires it in the process registry; on Stop holds the live driver's turn while a dispatch works
@@ -282,8 +283,8 @@ gated by `userConfig.crossModelReview`.
 - The model options are four flat string keys — the plugin manifest's `userConfig` schema
   supports no object-valued options, so the originally planned `modelLineup` object was not
   expressible (verified in `docs/platform-notes.md` §(a)).
-- Model options default to `auto`: the coordinator derives the model per task from
-  plan-observable attributes and logs the derivation in the ledger. An explicitly configured
+- Model options default to `auto`: `scripts/model-policy.mjs` derives the model per task from
+  plan-observable attributes, through the role table in `references/model-policy.json`, and the dispatch script logs the derivation in the ledger. An explicitly configured
   model id is binding — used verbatim, never overridden.
 - `reviewDepth` and `onDeviceGate` ship `auto` as their default, and since 2026-10-24 it means
   "pick for me", as on the model options. For `reviewDepth` that pick is risk-based at every
@@ -305,7 +306,7 @@ gated by `userConfig.crossModelReview`.
   push`, and the cycle's branch being the repo's default branch — clamping to
   `local-commits-only` for that run if either fires. `local-commits-only` needs no check;
   it is already the floor.
-- Model names are config values, not skill prose — they rot otherwise.
+- Model names are config values, not skill prose — they rot otherwise. The tier each role takes is data too: one table, `references/model-policy.json`, which a validate check pins the prose rendering to.
 - `learnStalenessSessions` (5) and `learnStalenessDays` (14) are non-profile integer knobs
   gating the finish stage's staleness nudge: the finish stage runs `dream.mjs --staleness`
   against the distilling checkpoint's `last-run:` and, when either threshold is crossed,

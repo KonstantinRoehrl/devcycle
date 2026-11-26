@@ -14,6 +14,7 @@
 // per-load state, `st`, as an argument, and one tool.call hook serves every behaviour.
 import { HARD_STOP, OVER_BUDGET, STAGE_FILES_READ, STAGE_TOOL_CALLS, budgetBand, contextDepth, windowFor } from "../scripts/depth-bands.mjs";
 import { activeRun } from "./lib/run-scope.mjs";
+import { cells, fitRow, joinDot, tierParts, width } from "./lib/row-format.mjs";
 
 // The first Claude Code whose hooks-module API this module is written against; below it the
 // early-access API differs, so the module stays inert (docs/platform-notes.md § (j)).
@@ -257,7 +258,8 @@ function flush($, seen, agentId, a, e) {
 // The drive band: a running execution driver's progress above the prompt, read from the file the
 // driver keeps (PROGRESS_REL), so watching a run costs no model turn. A timer stats the file each tick,
 // reads it only when its size or mtime moved, and writes what the drawing needs into BAND; the
-// drawing reads only BAND. Interactive sessions only: a `claude -p` run has nothing to draw on.
+// drawing reads only BAND. Interactive sessions only: a `claude -p` run has nothing to draw on. The tier
+// segments' colors are cc-statusline's literals; the run-state colors stay theme keys (docs/decisions/README.md).
 const BAND = { plugin: "devcycle", key: "band" };
 const BAND_TICK_MS = 300;
 const SILENT_AFTER_MS = 120_000;
@@ -269,7 +271,6 @@ const LIVE_STATES = new Set(["running", "waiting"]);
 const BODY_COLUMNS_LEAVE_MARK = [2, 1, 292];
 const MARK_COLUMNS = 5;
 
-const cells = (text) => [...text].length;
 const pad2 = (n) => String(n).padStart(2, "0");
 const clockTime = (iso) => {
   const at = new Date(iso);
@@ -284,7 +285,7 @@ function elapsedText(ms) {
 function parseProgress(text) {
   try {
     const p = JSON.parse(text);
-    return p?.v === 1 && RUN_STATES.has(p.state) && Array.isArray(p.waves) ? p : null;
+    return (p?.v === 1 || p?.v === 2) && RUN_STATES.has(p.state) && Array.isArray(p.waves) ? p : null;
   } catch {
     return null;
   }
@@ -333,7 +334,6 @@ function waveMark(wave, currentWave) {
 }
 
 const joined = (marks, separator) => marks.flatMap((m, i) => (i === 0 ? [m] : [{ text: separator }, m]));
-const width = (segments) => segments.reduce((sum, s) => sum + cells(s.text), 0);
 
 // Separators go first, then the strip is windowed around the current wave; it never wraps.
 function fitStrip(marks, at, room) {
@@ -404,10 +404,99 @@ function bodyLines(p, spin) {
   return wave.tasks.map((t, i) => [{ text: i === 0 ? lead : " ".repeat(cells(lead)) }, ...taskRow(t, spin)]);
 }
 
-// Each line a list of { text, color } segments; color a theme key.
-function bandLines({ progress: p, frame, now }, columns) {
+// Schema v 2 draws the driver session, the live driven session and each running dispatch as their own
+// tiers, in cc-statusline's row shape (hooks/lib/row-format.mjs); every other row draws as v 1 does.
+function headerLineV2(p, spin, now, columns) {
+  const driver = p.driver ?? {};
+  const parts = tierParts(driver);
+  if (silent(p, now)) {
+    const model = parts.model.map((s) => s.text).join("");
+    return fitRow({ prefix: [{ text: `? drive silent since ${clockTime(p.updatedAt)} · devcycle drive · driver ${model}`, color: "warning" }] }, columns);
+  }
+  const live = LIVE_STATES.has(p.state);
+  const elapsed = elapsedText((live ? now : Date.parse(p.updatedAt)) - Date.parse(p.startedAt));
+  const what = joinDot([driver.watcher === false ? [{ text: "no watcher", color: "subtle" }] : [], [{ text: elapsed }]]);
+  return fitRow({ prefix: [{ text: `${live ? `${spin} ` : ""}devcycle drive · driver ` }], lead: [parts.model, parts.ctx], what, tail: [parts.tokens] }, columns);
+}
+
+function sessionLine(s, now, columns) {
+  const parts = tierParts(s);
+  return fitRow({ prefix: [{ text: `  session ${s.n}  ` }], lead: [parts.model, parts.ctx], what: [{ text: elapsedText(now - Date.parse(s.startedAt)) }], tail: [parts.tokens] }, columns);
+}
+
+// The step, round and rejection warning are the row's kept head: a narrow terminal drops the tokens,
+// then ctx, before it cuts them (the 2026-11-25 narrow-fit decision, docs/decisions/README.md).
+function dispatchRow(t, spin, columns) {
+  const health = t.health;
+  const quiet = health.state === "quiet";
+  const parts = tierParts(t.dispatch);
+  const round = (t.step === "reviewing" || t.step === "fixing") && t.round > 0 ? ` · round ${t.round}` : "";
+  const what = [{ text: `${t.step}${round}` }];
+  if (t.rejections > 0) what.push({ text: ` (${t.rejections} rejection${t.rejections === 1 ? "" : "s"})`, color: "warning" });
+  const keep = what.length;
+  if (t.dispatch.routing) what.push({ text: ` · ${t.dispatch.routing}` });
+  what.push(quiet
+    ? { text: ` · silent ${minutes(health.sinceActivityMs ?? 0)}`, color: "warning" }
+    : { text: ` · ${minutes(health.elapsedMs)} · ${health.toolUses} tool call${health.toolUses === 1 ? "" : "s"}` });
+  return fitRow({ prefix: [{ text: `${quiet ? "?" : spin} task ${t.task}  ` }], lead: [parts.model, parts.ctx], what, keep, tail: [parts.tokens] }, columns);
+}
+
+// The step names the dispatch's role, as scripts/drive-progress.mjs's STEP_ROLE does: a stale dispatch on a task that has moved on draws as a plain row.
+const STEP_ROLE = { implementing: "implementer", fixing: "implementer", reviewing: "reviewer" };
+const hasDispatch = (t) => Boolean(t.dispatch) && (t.health?.state === "running" || t.health?.state === "quiet") && STEP_ROLE[t.step] === t.dispatch.role;
+
+const settled = (t) => t.step === "committed" || t.step === "pending";
+const keptToTheLast = (t) => t.step === "needs-user" || t.rejections > 0;
+
+function summaryRow(tasks) {
+  const committed = tasks.filter((t) => t.step === "committed").length;
+  const pending = tasks.length - committed;
+  return joinDot([
+    committed > 0 ? [{ text: `✓ ${committed} committed`, color: "success" }] : [],
+    pending > 0 ? [{ text: `○ ${pending} pending`, color: "subtle" }] : [],
+  ]);
+}
+
+// Over AbovePrompt's maxRows, whether or not the platform clips there: the running wave's committed and
+// pending rows fold into one summary row, then the session row goes, then the strip, then the task rows
+// past the last that fits become one `+<k> more` row, k counting tasks. The header, needs-user rows and
+// rows with a rejection are kept to the last.
+function foldBand({ session, strip, tasks }, maxRows) {
+  if (!(maxRows > 0)) return { session, strip, tasks };
+  let rows = tasks;
+  const over = () => 1 + (session ? 1 : 0) + (strip ? 1 : 0) + rows.length > maxRows;
+  if (over()) {
+    const folded = rows.filter((r) => r.t && settled(r.t));
+    if (folded.length > 1)
+      rows = [...rows.filter((r) => !folded.includes(r)), { t: null, count: folded.length, row: summaryRow(folded.map((r) => r.t)) }];
+  }
+  if (over()) session = null;
+  if (over()) strip = null;
+  if (over()) {
+    const room = Math.max(0, maxRows - 2);
+    const kept = (r) => r.t !== null && keptToTheLast(r.t);
+    let free = room - rows.filter(kept).length;
+    const shown = rows.filter((r) => kept(r) || free-- > 0).slice(0, room);
+    const hidden = rows.filter((r) => !shown.includes(r)).reduce((sum, r) => sum + r.count, 0);
+    rows = [...shown, { t: null, count: hidden, row: [{ text: `+${hidden} more`, color: "subtle" }] }];
+  }
+  return { session, strip, tasks: rows };
+}
+
+// Each line a list of { text, color } segments; color a theme key, or a literal for the tier segments.
+function bandLines({ progress: p, frame, now }, columns, maxRows = 0) {
   const spin = silent(p, now) ? "?" : SPINNER[frame % SPINNER.length];
-  return [headerLine(p, spin, now), stripLine(p, columns), ...bodyLines(p, spin)];
+  if (p.v === 1) return [headerLine(p, spin, now), stripLine(p, columns), ...bodyLines(p, spin)];
+  const header = headerLineV2(p, spin, now, columns);
+  const session = p.session ? sessionLine(p.session, now, columns) : null;
+  const strip = stripLine(p, columns);
+  const wave = p.state === "running" ? p.waves.find((w) => w.wave === p.currentWave) : null;
+  if (!wave) return [header, ...(session ? [session] : []), strip, ...bodyLines(p, spin)];
+  const lead = `  wave ${wave.wave}  `;
+  const tasks = wave.tasks.map((t) => ({ t, count: 1, row: hasDispatch(t) ? dispatchRow(t, spin, columns - cells(lead)) : taskRow(t, spin) }));
+  const folded = foldBand({ session, strip, tasks }, maxRows);
+  const body = folded.tasks.map((r, i) => [{ text: i === 0 ? lead : " ".repeat(cells(lead)) }, ...r.row]);
+  return [header, ...(folded.session ? [folded.session] : []), ...(folded.strip ? [folded.strip] : []), ...body];
 }
 
 async function drawBand(st, $, e, next) {
@@ -415,7 +504,8 @@ async function drawBand(st, $, e, next) {
   const value = (await $.state.get(BAND))?.value;
   if (!value?.progress) return next(e);
   const leavesMark = atLeast(await versionOf(st, $), BODY_COLUMNS_LEAVE_MARK);
-  const lines = bandLines(value, e.props.bodyColumns - (leavesMark ? 0 : MARK_COLUMNS));
+  const maxRows = typeof e.props.maxRows === "number" ? e.props.maxRows : 0;
+  const lines = bandLines(value, e.props.bodyColumns - (leavesMark ? 0 : MARK_COLUMNS), maxRows);
   const { Box, Text } = $.ui.resolve(e);
   return h(Box, { flexDirection: "column" }, ...lines.map((line) =>
     h(Text, { wrap: "truncate" }, ...line.map((s) => (s.color ? h(Text, { color: s.color }, s.text) : s.text)))));

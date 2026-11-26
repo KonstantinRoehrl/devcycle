@@ -17,9 +17,11 @@ import { defaultBranches, isProtectedBranch } from "./branch-names.mjs";
 import { EFFORT_LEVELS, resolveEffort } from "./claude-settings.mjs";
 import { parseFlags, requireCount, requireValue } from "./cli-flags.mjs";
 import { contextDepth, OVER_BUDGET, windowFor } from "./depth-bands.mjs";
+import { SYNTHETIC_MODEL } from "./depth-probe.mjs";
 import { DISPATCH_ENDED, dispatchHealth, recordDeath, sessionSlugDir } from "./dispatch-health.mjs";
 import { acquireDriveLock, DRIVE_LOCK_REL, driveLockUnavailable, driveTokenHash, lockNamesState, readDriveLockHolder, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
 import { buildProgress, removeProgress, writeProgress } from "./drive-progress.mjs";
+import { driverTier } from "./drive-watcher.mjs";
 import { holderLiveness, LOG_REL, markResultHandled, noProgressEndsAfter, RESULT_REL, STOP_REQUEST_REL, writeCrashedResult, writeDriveResult } from "./drive-result.mjs";
 import { readPluginList, surfaceArgs } from "./drive-surface.mjs";
 import { stopWindowOpen } from "./stop-files.mjs";
@@ -27,6 +29,7 @@ import { follow, statusReport, WATCH_LEVELS, waitForEnd } from "./drive-watch.mj
 import { atomicWrite } from "./atomic-write.mjs";
 import { rejectedLimit, resetWaitMs, textLimit } from "./usage-limit.mjs";
 import { isMain } from "./is-main.mjs";
+import { resolveRole } from "./model-policy.mjs";
 import { UNREADABLE_PLUGIN_VERSION, installedVersion } from "./verification.mjs";
 import { field } from "./md-field.mjs";
 import { gitToplevel, hashSession } from "./run-record.mjs";
@@ -278,6 +281,18 @@ function sandboxed() {
   }
 }
 
+// The variables a driven session's env never carries over from the driver's.
+export const SCRUBBED_ENV = Object.freeze(["CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "CLAUDE_CODE_SUBAGENT_EFFORT"]);
+
+// The coordinator is the model a driven session runs on. The ceiling is the model the user opted in on;
+// the policy keeps the coordinator on the fast tier beneath it, unless that tier has no known window.
+export function pickCoordinator({ ceiling, override, refuse = modelRefusal }) {
+  if (override) return { model: override, refusal: refuse(override) };
+  const { model } = resolveRole("coordinator", { ceiling, driven: true });
+  if (model !== ceiling && refuse(model) === null) return { model, refusal: null };
+  return { model: ceiling, refusal: refuse(ceiling) };
+}
+
 function modelRefusal(model) {
   const w = windowFor(model);
   if (!w) return `no context window is known for ${model} — add it to scripts/pricing.mjs`;
@@ -314,8 +329,7 @@ function checkEnvironment(root, state, opts) {
     throw new Exit(3, "the state file has no `drive: auto` row — run /devcycle:continue and answer Start unattended");
   if (state.stage !== "execution") throw new Exit(3, `the state is at stage ${state.stage}, not execution`);
   if (!RUN_ID.test(state.run ?? "")) throw new Exit(3, "the state file names no run id, so no drive record could be written");
-  const model = opts.model ?? state.model;
-  if (!model) throw new Exit(3, "no model: the drive row records none and --model is absent");
+  if (!state.model && !opts.model) throw new Exit(3, "no model: the drive row records none and --model is absent");
   const current = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]);
   if (current !== state.branch) throw new Exit(3, `the checkout is on ${current}, but the state records ${state.branch}`);
   if (!defaultBranches(root).length)
@@ -333,13 +347,14 @@ function checkEnvironment(root, state, opts) {
     const each = refused.map(({ path, task }) => `${path}: commit, stash or revert it — task ${task} writes this file`);
     throw new Exit(3, `tracked changes a remaining task would overwrite: ${each.join("; ")}`);
   }
-  const refusal = modelRefusal(model);
+  const ceiling = state.model ?? opts.model;
+  const { model, refusal } = pickCoordinator({ ceiling, override: opts.model });
   if (refusal) throw new Exit(3, refusal);
   const effort = driveEffort(root, state, opts, model);
   const unavailable = driveLockUnavailable();
   if (unavailable) throw new Exit(3, unavailable);
   if (sandboxed()) throw new Exit(3, SANDBOX_REFUSAL);
-  return { model, effort, planText, plan: state.plan, run: state.run, leftAlone };
+  return { ceiling, model, effort, planText, plan: state.plan, run: state.run, leftAlone };
 }
 
 function release(ctx) {
@@ -409,6 +424,9 @@ export function childEnv(ctx, pluginVersion = DRIVER_PLUGIN_VERSION) {
   if (ctx.effort === "default") delete env.CLAUDE_CODE_EFFORT_LEVEL;
   else env.CLAUDE_CODE_EFFORT_LEVEL = ctx.effort;
   delete env.CLAUDE_EFFORT;
+  // Claude Code reads these to override a subagent's model and effort, which would bypass the policy's
+  // dispatch choice (references/model-routing.md).
+  for (const name of SCRUBBED_ENV) delete env[name];
   // Headless -p stops background subagents 10 minutes after the last turn (docs/platform-notes.md § (p)).
   env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS = "0";
   return env;
@@ -532,7 +550,7 @@ function markProgressed(ctx) {
 }
 
 function runSession(ctx, bin, args, log, n) {
-  const s = { sessionId: null, environment: null, result: null, limit: null, silent: false, tools: 0, depthTokens: null, requests: new Map(),
+  const s = { sessionId: null, environment: null, result: null, limit: null, silent: false, tools: 0, depthTokens: null, model: null, requests: new Map(),
     pending: new Set(), deadDispatch: null };
   let seen = ledgerEntries(ctx.root, ctx.plan).length;
   return new Promise((settle, fail) => {
@@ -563,7 +581,11 @@ function runSession(ctx, bin, args, log, n) {
         tallyRequest(s.requests, e.message);
         if (!e.parent_tool_use_id) {
           s.tools += (e.message?.content ?? []).filter((c) => c?.type === "tool_use").length;
-          s.depthTokens = contextDepth(e.message?.usage) ?? s.depthTokens;
+          // A <synthetic> turn (an API error) carries an all-zero usage block, which is no depth.
+          if (e.message?.model !== SYNTHETIC_MODEL) {
+            s.depthTokens = contextDepth(e.message?.usage) ?? s.depthTokens;
+            if (typeof e.message?.model === "string" && e.message.model) s.model = e.message.model;
+          }
           for (const c of e.message?.content ?? []) if (c?.type === "tool_use" && typeof c.id === "string") s.pending.add(c.id);
         }
       } else if (e.type === "user" && !e.parent_tool_use_id) {
@@ -585,7 +607,10 @@ function runSession(ctx, bin, args, log, n) {
       onEvent(event);
       const entries = ledgerEntries(ctx.root, ctx.plan);
       for (const entry of entries.slice(seen)) {
-        log(`session ${n} · ${s.tools} tool calls · task=${entry.task} event=${entry.event} outcome=${entry.outcome}`);
+        // A reviewer's outcome is its routing decision, so a keyed line's review round rides in the
+        // relayed line: scripts/drive-watch.mjs counts review rounds from it.
+        const round = entry.key ? ` round=${entry.key.split("/")[2]}` : "";
+        log(`session ${n} · ${s.tools} tool calls · task=${entry.task} event=${entry.event}${round} outcome=${entry.outcome}`);
         if (!NO_PROGRESS_EVENTS.has(entry.event)) markProgressed(ctx);
       }
       seen = Math.max(seen, entries.length);
@@ -738,6 +763,7 @@ function writeRecord(ctx, s, r, n) {
     startedAt: r.startedAt,
     endedAt: now(),
     model: ctx.model,
+    effort: ctx.effort,
     ledgerLinesBefore: r.before.lines,
     ledgerLinesAfter: r.after.lines,
     committedBefore: r.before.committed,
@@ -747,10 +773,18 @@ function writeRecord(ctx, s, r, n) {
     guardDenials: s.denials,
   };
   if (r.stopReason) fields.stopReason = r.stopReason;
+  // A measured cost and an estimate never share one field (references/ledger.md § The run record).
   if (s.costUsd !== null) fields.costUsd = s.costUsd;
+  else fields.costUsdEstimated = s.spentUsd;
   if (s.depthTokens !== null) fields.depthTokens = s.depthTokens;
   if (r.waveAtStart !== null) fields.waveAtStart = r.waveAtStart;
   appendRunRecordOnce({ toplevel: gitToplevel(ctx.root), run: ctx.run, kind: "drive", fields, matchKeys: ["sessionHash"] });
+}
+
+// A stop found between sessions ended no session, so it leaves an event row, never a drive row.
+function recordStopRequest(ctx) {
+  const fields = { event: "stop-request", stage: "execution", ts: now() };
+  appendRunRecordOnce({ toplevel: gitToplevel(ctx.root), run: ctx.run, kind: "event", fields, matchKeys: ["event", "ts"] });
 }
 
 // Idle: no main-thread tool call awaits its result and no dispatch of the session is running
@@ -883,7 +917,8 @@ function watchdogBeat(ctx, log) {
   const live = ctx.live;
   if (!live?.s.sessionId || live.s.deadDispatch) return null;
   const dispatches = dispatchHealth({ root: ctx.root, sessionId: live.s.sessionId, now: clockNow() }).filter((d) => d.kind === "task");
-  const health = new Map(dispatches.map((d) => [d.task, { state: d.state, elapsedMs: d.elapsedMs, toolUses: d.toolUses, sinceActivityMs: d.sinceActivityMs }]));
+  const health = new Map(dispatches.map((d) => [d.task, { state: d.state, elapsedMs: d.elapsedMs, toolUses: d.toolUses, sinceActivityMs: d.sinceActivityMs,
+    role: d.role, model: d.model, effort: d.effort, tokens: d.tokens }]));
   const dead = dispatches.filter((d) => DEAD_STATES.has(d.state));
   if (!dead.length || dispatches.some((d) => d.state === "running") || live.s.pending.size) {
     live.deadSince = null;
@@ -902,14 +937,27 @@ function watchdogBeat(ctx, log) {
 
 // The drive band's data (scripts/drive-progress.mjs), rewritten before every log line and on a
 // heartbeat. The band is a view of the run: a write that fails never stops it, and the next line or
-// beat writes it again.
+// beat writes it again. The driver session's tier is read on the heartbeat only, the driven session's
+// comes from the stream the driver already parses.
 function trackProgress(ctx, beat = () => null) {
-  const run = { state: "running", session: 0, model: ctx.model, effort: ctx.effort, startedAt: ctx.startedAt,
+  const run = { state: "running", session: 0, model: ctx.ceiling, effort: ctx.effort, startedAt: ctx.startedAt, sessionStartedAt: null,
     waitUntil: null, waitWhat: null, stopDetail: null, outcome: null };
   let health = null;
-  const write = () => {
+  const readDriver = () => {
     try {
-      writeProgress(ctx.root, buildProgress({ run, plan: planProgress({ root: ctx.root, statePath: ctx.statePath }), health }));
+      return driverTier({ statePath: ctx.statePath });
+    } catch {
+      return null;
+    }
+  };
+  let driver;
+  const write = () => {
+    if (driver === undefined) driver = readDriver();
+    const session = run.state === "running" && run.sessionStartedAt
+      ? { startedAt: run.sessionStartedAt, model: ctx.live?.s.model ?? ctx.model, effort: ctx.effort, tokens: ctx.live?.s.depthTokens ?? null }
+      : null;
+    try {
+      writeProgress(ctx.root, buildProgress({ run, plan: planProgress({ root: ctx.root, statePath: ctx.statePath }), health, tiers: { driver, session } }));
     } catch {
       // Left as it was.
     }
@@ -920,6 +968,7 @@ function trackProgress(ctx, beat = () => null) {
     } catch {
       health = null;
     }
+    driver = readDriver();
     write();
   }, HEARTBEAT_MS);
   heartbeat.unref();
@@ -952,9 +1001,14 @@ async function walk(ctx, opts, log, trap, runState) {
   let waited = 0;
   let attempts = 0;
   for (let n = 1; ; n++) {
-    if (trap.interrupted) return ended(130, "interrupted");
-    if (stopRequested(ctx.root)) {
-      log("a --stop request is on disk; stopping before the next session");
+    // A --stop signals as well as writing its request, so the signal can end a wait before the request
+    // is read: either way the request on disk is recorded, once.
+    const requested = stopRequested(ctx.root);
+    if (requested || trap.interrupted) {
+      if (requested) {
+        log("a --stop request is on disk; stopping before the next session");
+        recordStopRequest(ctx);
+      }
       return ended(130, "interrupted");
     }
     const stage = readState(ctx.statePath).stage;
@@ -971,10 +1025,11 @@ async function walk(ctx, opts, log, trap, runState) {
     const before = progressOf(entriesBefore);
     const waveAtStart = inFlightFiles(ctx.planText, entriesBefore).wave;
     const startedAt = now();
-    Object.assign(runState, { state: "running", session: n, waitUntil: null, waitWhat: null });
+    Object.assign(runState, { state: "running", session: n, sessionStartedAt: startedAt, waitUntil: null, waitWhat: null });
     if (n === 1 && ctx.surface.note) log(ctx.surface.note);
-    log(`session ${n} starts — wave ${waveAtStart ?? "?"}, model ${ctx.model}, effort ${ctx.effort}, plugins ${ctx.surface.plugins}, mcp ${ctx.surface.mcp}`);
+    log(`session ${n} starts — wave ${waveAtStart ?? "?"}, model ${ctx.model} (ceiling ${ctx.ceiling}), effort ${ctx.effort}, plugins ${ctx.surface.plugins}, mcp ${ctx.surface.mcp}`);
     const s = await runSession(ctx, opts.bin, sessionArgs(ctx, opts, spent), log, n);
+    runState.sessionStartedAt = null;
     const entriesAfter = ledgerEntries(ctx.root, ctx.plan);
     const after = progressOf(entriesAfter);
     if (after.advanced > before.advanced) {

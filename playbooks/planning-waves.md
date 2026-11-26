@@ -183,9 +183,8 @@ procedure
 searching file-by-file, with the confirmed scope and affected areas recorded in `.devcycle/scope.md`
 as this stage's relevance filter, starting from implementation-scoped docs (a `frontend.md`,
 `backend.md`, or equivalent). That dispatch's `description` opens with `plan-research: `
-(`references/delegated-planning.md` owns the role prefixes), and the dispatch names its model at
-the tier `node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/model-routing.md planning-dispatches`
-assigns.
+(`references/delegated-planning.md` owns the role prefixes), and the dispatch names the model
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/model-policy.mjs" --role research --ceiling <this session's own model id>` prints.
 
 ## Handoff — required final output
 

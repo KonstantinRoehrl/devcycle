@@ -19,7 +19,7 @@ const COMMANDS = {
   read: { "--state": "value", "--stage": "value" },
 };
 
-const logPath = (devcycleDir, run) => join(devcycleDir, "stage-log", `${run}.jsonl`);
+export const stageLogPath = (devcycleDir, run) => join(devcycleDir, "stage-log", `${run}.jsonl`);
 
 function checkIdentity({ run, stage }) {
   if (!RUN_ID.test(run ?? "")) throw new UsageError(`a stage log belongs to a 16-hex run id, got "${run}"`);
@@ -30,7 +30,7 @@ function checkIdentity({ run, stage }) {
 export function readStage(devcycleDir, { run, stage }) {
   checkIdentity({ run, stage });
   const latest = new Map();
-  eachRecord(logPath(devcycleDir, run), (line) => {
+  eachRecord(stageLogPath(devcycleDir, run), (line) => {
     if (line?.stage !== stage) return;
     latest.delete(line.key);
     latest.set(line.key, line);
@@ -44,7 +44,7 @@ export function logStep(devcycleDir, { run, stage, key, data, ref, now = stamp()
   checkIdentity({ run, stage });
   if (!NAME.test(key ?? "")) throw new UsageError(`--key must be one token of letters, digits, dots, dashes or underscores, got "${key}"`);
   if (ref !== undefined && isAbsolute(ref)) throw new UsageError(`--ref must be relative to the checkout, so no machine path lands in the log, got "${ref}"`);
-  const path = logPath(devcycleDir, run);
+  const path = stageLogPath(devcycleDir, run);
   mkdirSync(dirname(path), { recursive: true });
   return withFileLock(path, () => {
     const previous = readStage(devcycleDir, { run, stage }).find((line) => line.key === key);

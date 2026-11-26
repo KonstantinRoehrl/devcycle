@@ -28,7 +28,9 @@ model id written here, because ids in playbook prose rot as models change:
 - **session tier** — dispatch with NO model override, so the subagent
   inherits this coordinator session's own model: the strongest model the
   user has already sanctioned, tracking model generations without this
-  playbook naming any. This only works when the agent definition itself carries
+  playbook naming any. In a driven run the session tier is the cycle's **ceiling**, the drive
+  row's `model=` (`references/drive.md`). The coordinator there runs below it, so a session-tier
+  dispatch names the ceiling's id explicitly rather than omitting the override. This only works when the agent definition itself carries
   no `model:` frontmatter key — an omitted dispatch-time override resolves to
   the agent definition's own frontmatter model when it has one, and only
   falls through to the caller's model when the definition names none. The
@@ -36,9 +38,12 @@ model id written here, because ids in playbook prose rot as models change:
   free of a `model:` key. **Caveat:** that inheritance is what "no override"
   assumes, and it does NOT hold for a subagent when a default subagent model
   is configured — a dispatch with no override then resolves to that default,
-  not to the orchestrator's own model, and **outside planning nothing mitigates that today**:
+  not to the orchestrator's own model, and **in an interactive run outside planning nothing mitigates that today**:
   with one configured, every dispatch that resolves to this tier runs at that
-  default instead. The escape hatch is implemented, unwired, and **narrower than
+  default instead, while its `dispatch` row records the session's own id. In a driven run the
+  caveat does not apply: the driver removes `CLAUDE_CODE_SUBAGENT_MODEL`,
+  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and `CLAUDE_CODE_SUBAGENT_EFFORT` from the session's
+  environment, and every session-tier dispatch names the ceiling. The escape hatch is implemented, unwired, and **narrower than
   this caveat** — `resolveModel` in `scripts/model-pool.mjs` takes a
   `sessionTierUnreachable` parameter (its `--session-tier-unreachable` CLI flag)
   under which an escalation that would land on the session tier names the
@@ -48,14 +53,14 @@ model id written here, because ids in playbook prose rot as models change:
   An `auto` or unset knob — every knob's shipped default — is no pool, so the
   implementer default below stays uncovered and closing that case needs a different
   fix. A pool on `walkthroughModel` or `branchReviewModel` saturates the ladder to its top rung
-  with no signal having fired: the saturating `Infinity` the invocation below has
-  them pass is a sentinel, not a counted signal, so nothing climbs.
+  with no signal having fired: the saturating `Infinity` `scripts/model-policy.mjs`
+  passes for them is a sentinel, not a counted signal, so nothing climbs.
   That leaves `implementerModel` and `taskReviewerModel` the only knobs that can reach
   the hatch at all. What it does cover is a pool on one of those two that climbed and
   then fell through to this tier for any reason: the climb is the whole test, so an
   unrankable rung fires it even when a dispatchable lower rung sits in the pool, and
   the orchestrator's own id must itself be rankable, since that id is what the
-  override names. No caller passes it: not the invocation below, not any other file
+  override names. No caller passes it: not `scripts/model-policy.mjs`, not any other file
   in the surface.
 - **fast tier** — the newest fast/small Claude model available to this
   session (the current Sonnet-class generation). If no such id can be
@@ -72,9 +77,10 @@ Derivation predicates (dispatch-time-observable inputs only):
   the first attempt). Measured, fast-tier implementers did the same raw work
   as session-tier ones (785k vs 794k context units, 18k vs 20k output tokens
   per run) at the lower per-token rates `scripts/pricing.mjs` holds, and a wrong cheap guess
-  costs at most one review round.
+  costs at most one review round. `scripts/task-dispatch.mjs` derives all four signals but the
+  unnamed-step one, which the coordinator passes as `--steps-unspecified`.
 - **task-reviewer**: fast tier iff the task diff is ≤400 changed lines
-  and ≤5 files; else session tier.
+  and ≤5 files; else session tier. `scripts/task-dispatch.mjs` applies it through `scripts/model-policy.mjs`, which holds both limits.
 - **research / exploration dispatch** (`references/delegation.md` §
   Research dispatches): fast tier, always — read-only work whose output is a
   map rather than a judgment. Session tier remains for dispatches that must
@@ -88,7 +94,8 @@ have no complexity predicate — both judge — so a pool on either saturates th
 ladder and resolves to its top rung, still under the ceiling below.
 
 **The ceiling.** No dispatch, by any path — `auto`, a pool, or a pin — resolves
-to a model above the orchestrator's own tier. Ordering is by family, held in
+to a model above the orchestrator's own tier. In a driven run the orchestrator's tier is the
+ceiling's, the model the cycle was opted in on, not the coordinator's. Ordering is by family, held in
 `${CLAUDE_PLUGIN_ROOT}/references/model-tiers.json` rather than in this text, for
 the reason this section already gives about ids in prose; a newer model of a
 weaker family does not outrank an older model of a stronger one. A pick above the
@@ -100,27 +107,28 @@ the orchestrator — resolution dispatches with no model override at all, the on
 form that cannot exceed the orchestrator by construction. A clamp is logged, never
 silent.
 
-**Resolving a configured knob.** When a `*Model` knob resolves to a single id or a
-comma-separated pool — never for `auto`, which this section already treats as unset — run the
-pin, pool, ladder and ceiling arithmetic rather than reasoning it out:
-
-    node "${CLAUDE_PLUGIN_ROOT}/scripts/model-pool.mjs" --value "<the knob's value>" \
-      --orchestrator "<this session's own model id>" --signals <escalation signals fired>
-
-It prints one line of JSON — `{"model": "<id>"|null, "outcome": "<audit string>"}`. Dispatch on
-`model`, with `null` meaning dispatch with no model override at all, and record `outcome` verbatim
-as the ledger event's `outcome=` field: it is already written in every form the Auditability
-paragraph below enumerates. Pass `--signals Infinity` for `walkthroughModel` and
-`branchReviewModel`, which have no complexity predicate and saturate the ladder. The `auto`
-predicates above stay with the caller — the caller derives, this module only keeps the result
-under the ceiling, which is why an unset knob needs no invocation at all.
+**Resolving a configured knob.** `scripts/task-dispatch.mjs` resolves `implementerModel` and
+`taskReviewerModel` per dispatch. The branch review and the on-device walkthrough are not dispatched
+through it, so a caller resolves `branchReviewModel` and `walkthroughModel` with § Roles'
+`model-policy.mjs --role branch-review|walkthrough --knob "<the knob's value>"`. It runs the pin,
+pool, ladder and ceiling arithmetic of `scripts/model-pool.mjs`, giving a pool the saturating
+`Infinity` signal, and prints `model`, `dispatch`, `effort` and `outcome`. Dispatch on `model`, with
+`null` meaning dispatch with no model override at all, and record `outcome` verbatim as the ledger
+event's `outcome=` field: it is already written in every form the Auditability paragraph below
+enumerates. Nothing runs `model-pool.mjs` by hand.
 
 Upstream's Model Selection tiers are background only; these predicates
 decide. Auditability: every dispatch's ledger event records the decision and
 its inputs — `outcome=model fast:<resolved id> (auto: files=3, deps=none,
 steps=specified)` or `outcome=model session (auto: escalated on files=9)` for
 derived choices, `outcome=model session (auto)` for an unset knob passed to the module
-anyway, `outcome=model <id> (pinned)` for explicit config. A pooled
+anyway, `outcome=model fast:<resolved id> (auto: lines=40, files=2)` for a task reviewer, `outcome=model <id> (pinned)` for explicit config.
+In a driven run a session-tier outcome names the ceiling, as in
+`outcome=model session:<ceiling id> (auto: escalated on files=9)`. An escalation whose session
+and fast tiers share a family records
+`outcome=model fast:<id> (auto: session tier is the fast tier; signals files=9)`, never an
+escalation. The coordinator's start records `model <id> (coordinator: fast tier under <ceiling id>)`
+or `model <id> (coordinator: ceiling)`. A pooled
 pick records `outcome=model <id> (pooled: rung <n>/<len>)`, gaining
 `, clamped from <requested-id>` when the ceiling moved it; a clamped pin records
 `outcome=model <id> (pinned, clamped from <requested-id>)`; a fall-through to no
@@ -136,20 +144,39 @@ caveat above, which also records that no caller passes that flag — so neither 
 ledger this version writes. An escalation always names the signal that fired. Research dispatches
 that run before any ledger exists log nothing; where a ledger exists, same shape.
 
-## Planning dispatches
+## Roles
 
-Planning names the model of every dispatch it makes: a fast-tier dispatch names the fast-tier id,
-and a session-tier one names the orchestrator's own id rather than omitting the override, so a
-configured default subagent model cannot take it over. `references/delegated-planning.md` owns the role, `repair` included.
+`references/model-policy.json` owns which model each devcycle role runs on and
+`scripts/model-policy.mjs` resolves it. A caller runs the resolver, or the script that does
+(`scripts/task-dispatch.mjs` for implementers and task reviewers, `scripts/drive-execution.mjs` for
+the coordinator), never this table.
 
-| Dispatch | Role | Tier |
-| --- | --- | --- |
-| Research map, spike | `research`, `spike` | fast; `Explore`, since neither writes a file (the coordinator persists the result) |
-| Drafter, alone or of a group, whose tasks are not `code-pinned` and each have Files ≤ 5 | `drafter` | fast |
-| Drafter, alone or of a group, with a `code-pinned` task, a new abstraction, Files > 5 or cross-package scope | `drafter` | session |
-| Repair, a finding sent back to its drafter by `SendMessage` | `repair` | that drafter's tier |
-| Edge checker, one per batch of producer→consumer pairs | `checker` | fast |
-| Coordinator | — | session (unchanged) |
+    node "${CLAUDE_PLUGIN_ROOT}/scripts/model-policy.mjs" --role <role> --ceiling <this session's own model id> [--driven] [--knob <value>] [--facts '<json>']
+
+It prints `model` (the id), `dispatch` (the alias the Agent tool takes, which accepts only `sonnet`,
+`opus`, `haiku` or `fable`), `effort` and `outcome`.
+
+| Role | Layer | Default | Override |
+| --- | --- | --- | --- |
+| `starter` | interactive session that starts the driver | the user's own model; hands off, no relayed turns at driveWatch=end | none |
+| `driver` | Node script | none: model-free | none |
+| `coordinator` | driven claude -p, one per wave | fast tier, capped at the ceiling | none |
+| `implementer` | subagent | fast tier; session tier on the existing signals | `implementerModel` |
+| `task-reviewer` | subagent | fast tier within the line and file limits, else session tier | `taskReviewerModel` |
+| `branch-review` | subagent | session tier | `branchReviewModel` |
+| `walkthrough` | subagent | session tier | `walkthroughModel` |
+| `planning-session` | session or a later driven session | session tier | none |
+| `research` | planning subagent | fast tier | none |
+| `spike` | planning subagent | fast tier | none |
+| `checker` | planning subagent | fast tier | none |
+| `drafter` | planning subagent | fast tier; session tier on a code-pinned task, a new abstraction, too many files or cross-package scope | none |
+| `repair` | planning subagent | the tier of the drafter it repairs | none |
+
+Planning names the model of every dispatch it makes (`--role research|spike|drafter|repair|checker`,
+with the drafter's facts `codePinned`, `newAbstraction`, `maxFiles` and `crossPackage`): a fast-tier
+dispatch names the fast-tier id, and a session-tier one names the orchestrator's own id rather than
+omitting the override, so a configured default subagent model cannot take it over.
+`references/delegated-planning.md` owns the role, `repair` included.
 
 A planning dispatch's audit record is its `agent-cost` run-record row: the `model` and `explicitModel`
 fields the dispatch sensor writes. Doctor's Planning breakdown reads them and flags a

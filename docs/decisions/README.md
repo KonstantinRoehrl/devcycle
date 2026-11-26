@@ -5,6 +5,265 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-26 — The unattended-execution audit stays tracked as the one audit kept as evidence (#456 slice 2)
+
+**Decision:** `docs/audits/2026-11-26-unattended-execution.md` stays tracked, re-included by name in
+`.gitignore`, although `CONTRIBUTING.md` § What belongs in docs/ keeps run reports and benchmarks out of
+the repository. It is the one audit kept that way: the model policy and the docs hub cite it as the
+measured basis for the coordinator's fast-tier default, and a shipped default should link the evidence
+it rests on. `CONTRIBUTING.md` and the `.gitignore` comment both name it as the exception.
+
+**Why:** its figures come from the run records of one machine, which an installer cannot reproduce,
+so it is a dated record of why the default was chosen, not a benchmark to re-run. The v0.12
+disposition register is tracked on a different ground, as a closure ledger this log cites.
+
+**Also in this change:** the same round corrected prose that still disagreed with the policy. The
+walkthrough takes the session tier, as `references/model-routing.md` § Roles renders it, where
+`references/config.md`, `playbooks/verifying-on-device.md` and `docs/configuration/README.md` said a
+fast model. The branch review and the walkthrough resolve their knobs through
+`model-policy.mjs --role`, not a hand call of `model-pool.mjs`. A driven session-tier dispatch names the
+ceiling in `references/delegation.md`, and four knob descriptions in `.claude-plugin/plugin.json` no
+longer say the coordinator derives per task.
+
+**Budgets:** the prose edits moved these closure figures (old to new, in bytes; the `surfaceTotal` in lines):
+
+```text
+commands/continue.md 81950 -> 81860
+commands/cycle.md 95775 -> 95601
+commands/learn.md 17884 -> 17939
+commands/maintain.md 19121 -> 19176
+commands/onboard.md 18172 -> 18227
+commands/reconcile.md 25609 -> 25664
+commands/review.md 26239 -> 26288
+commands/verify.md 25337 -> 25392
+playbooks/executing-waves.md 126801 -> 126798
+playbooks/finishing-the-cycle.md 54753 -> 54808
+playbooks/learning-from-sessions.md 66856 -> 67020
+playbooks/maintaining-the-repo.md 82712 -> 82709
+playbooks/onboarding-a-repo.md 31715 -> 31770
+playbooks/planning-waves.md 74483 -> 74606
+playbooks/receiving-review.md 132918 -> 132915
+playbooks/reviewing-code.md 109206 -> 109203
+playbooks/reviewing-the-branch.md 65605 -> 65479
+playbooks/scoping-the-request.md 38199 -> 38308
+playbooks/sweeping-mechanical-changes.md 103270 -> 103212
+playbooks/taking-the-fast-path.md 58087 -> 57906
+playbooks/triaging-issues.md 21401 -> 21510
+playbooks/verifying-on-device.md 68258 -> 68326
+references/config.md 15242 -> 15297
+references/delegation.md 12832 -> 12937
+references/model-routing.md 13235 -> 13054
+surfaceTotal (surface-budget.json) 7665 -> 7662
+```
+
+and the fixtures now read:
+
+```text
+budget: context-budget.json commands/continue.md 81860
+budget: context-budget.json commands/cycle.md 95601
+budget: context-budget.json commands/learn.md 17939
+budget: context-budget.json commands/maintain.md 19176
+budget: context-budget.json commands/onboard.md 18227
+budget: context-budget.json commands/reconcile.md 25664
+budget: context-budget.json commands/review.md 26288
+budget: context-budget.json commands/verify.md 25392
+budget: context-budget.json playbooks/executing-waves.md 126798
+budget: context-budget.json playbooks/finishing-the-cycle.md 54808
+budget: context-budget.json playbooks/learning-from-sessions.md 67020
+budget: context-budget.json playbooks/maintaining-the-repo.md 82709
+budget: context-budget.json playbooks/onboarding-a-repo.md 31770
+budget: context-budget.json playbooks/planning-waves.md 74606
+budget: context-budget.json playbooks/receiving-review.md 132915
+budget: context-budget.json playbooks/reviewing-code.md 109203
+budget: context-budget.json playbooks/reviewing-the-branch.md 65479
+budget: context-budget.json playbooks/scoping-the-request.md 38308
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 103212
+budget: context-budget.json playbooks/taking-the-fast-path.md 57906
+budget: context-budget.json playbooks/triaging-issues.md 21510
+budget: context-budget.json playbooks/verifying-on-device.md 68326
+budget: context-budget.json references/config.md 15297
+budget: context-budget.json references/delegation.md 12937
+budget: context-budget.json references/model-routing.md 13054
+budget: surface-budget.json surfaceTotal 7662
+```
+
+## 2026-11-26 — One model-selection policy owns every role's model (#456 slice 2, #494)
+
+**Decision:** `references/model-policy.json` and `scripts/model-policy.mjs` own the role table: which
+model each devcycle role runs on, the limits that escalate a tier, and the audit string every
+resolution records. `references/model-routing.md` keeps the knob arithmetic (pins, pools, the ladder,
+the ceiling) and the derivation predicates as prose, and renders the table in § Roles, which
+`scripts/validate.mjs` check 32 holds to the JSON. The driven coordinator runs the fast tier under the
+opt-in model, which is now the **ceiling**: the model the cycle was opted in on, not the one the
+coordinator runs. Dispatch decisions are made by the scripts (`scripts/task-dispatch.mjs` for
+implementers and task reviewers, `scripts/drive-execution.mjs` for the coordinator), and the playbooks
+dispatch on what those scripts print instead of applying the predicates by hand.
+
+**Why:** each layer's model was chosen in a different place: the coordinator copied whatever the
+opting-in session ran, subagent tiers came from prose predicates the coordinator applied by hand,
+planning dispatches came from a second table, and effort was set once per cycle. #456 asks what that
+costs and what interrupts a run, and #494 needs the same choice made for an unattended planning stage.
+One policy that every layer reads removes the second table and the hand-applied predicates.
+
+**Supersedes:** the § Planning dispatches table in `references/model-routing.md` and the
+`--model-decision` flag of `scripts/task-dispatch.mjs`.
+
+**Budgets:** `references/model-routing.md` grows by the rendered role table and the driven-run
+wording, which moves the closure of every entry point that reads it: the seven playbooks below.
+`playbooks/planning-waves.md` falls, because it no longer reads a section of that file. The runtime
+surface grows by the lines those edits add.
+
+```text
+budget: context-budget.json playbooks/executing-waves.md 126801
+budget: context-budget.json playbooks/maintaining-the-repo.md 82712
+budget: context-budget.json playbooks/planning-waves.md 74483
+budget: context-budget.json playbooks/receiving-review.md 132918
+budget: context-budget.json playbooks/reviewing-code.md 109206
+budget: context-budget.json playbooks/reviewing-the-branch.md 65605
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 103270
+budget: context-budget.json playbooks/taking-the-fast-path.md 58087
+budget: context-budget.json references/model-routing.md 13235
+budget: surface-budget.json surfaceTotal 7665
+```
+
+## 2026-11-25 — The drive band shows each tier's model, effort and context (#456 slice 1)
+
+**Decision:** `.devcycle/drive-progress.json` moves to schema v2. It carries three tiers of its own:
+`driver` for the driver session, `session` for the live driven session (`null` outside one), and,
+on a task whose dispatch reads `running` or `quiet`, a `dispatch` with its role, model, effort,
+tokens, window and routing label. `hooks/devcycle-mod.mjs` draws v2 and still draws a v1 file
+exactly as before.
+
+Each tier's values come from its own transcript's last usage record, the model it actually ran on,
+never the model requested. The driver reads a dispatch's transcript on its 30 s heartbeat through
+`readTranscript`, and the driven session's values from the stream it already parses. It tail-reads
+the driver session's transcript behind the latest `--wait` registration whose pid is alive
+(`.devcycle/drive-watcher.json`, `scripts/drive-watcher.mjs`). The routing label comes from the
+ledger's `outcome=model …` line.
+
+"The driver" stays `scripts/drive-execution.mjs`. The interactive session that watches the run is
+now "the driver session", which these docs called "the watching session" or "the watcher", and
+the header's silent text reads `? drive silent since`. The model, ctx and token segments keep
+cc-statusline's literal colors (`#5fafaf`, a green-amber-red gradient from 40% to 65%, `#d0d0d0`);
+the run-state colors stay theme keys. A row that does not fit drops its tokens, then its ctx, before
+it cuts a task's step, round or rejection warning, and is never wrapped. A band taller than
+AbovePrompt's `maxRows` folds the running wave's committed and pending rows into one summary row,
+then drops the session row, then the strip, then the rows past the last that fits.
+
+**Why:** the band showed one run-level model, so an escalation, a pin or a configured default
+subagent model was invisible until the run was over. The three tiers read the same today by
+construction; slice 2's model policy (with #494) will route them apart and needs no second band
+change. A heartbeat-driven read keeps the file's one writer and costs no model turn, and an
+assumed window shows tokens without a `ctx` guess. The gradient is continuous and the model name
+must match cc-statusline's own agent rows, so neither fits a theme key.
+
+**Supersedes:** the v1 header `session <n> · <model> · <effort>` for files a v2 driver writes, and
+the names "the watching session" and "the watcher" in `docs/playbooks/executing-waves/unattended.md`
+and `references/drive.md`.
+
+## 2026-11-25 — CI's Claude Code versions are owned once and bumped by Dependabot and Canary (#495)
+
+**Decision:** `.github/claude-code/package.json` owns the two Claude Code versions CI tests devcycle
+against. The current version is an exact `devDependencies` pin and the floor is a custom
+`claudeCodeFloor` field. `scripts/claude-code-versions.mjs` is the only code that reads the file.
+`validate.yml`'s matrix and Canary's pin re-run both go through it, so no workflow names a version.
+Dependabot bumps the current pin weekly through a new `npm` entry. Both Dependabot entries now open
+their PRs into `dev`, titled `ci(deps): …` for actions and `ci(deps-dev): …` for the Claude Code
+pin, a devDependency. Before this, every Dependabot PR (#1, #86, #356) opened and merged straight
+into `main`. On a break, the daily Canary now opens or updates a bump PR into `dev` in place of the
+rolling `canary` issue.
+
+The floor stays 2.1.287. It moves only with an entry here that carries a `claude-code-floor:` line.
+`scripts/validate.mjs` check 31 fails when the owner's floor differs from the newest such line,
+when a floor mirror (`MIN_CLAUDE_CODE` in `hooks/devcycle-mod.mjs`, the README's requirement line,
+`docs/README.md`'s hooks-module row, doctor's `mod-inactive` message) states another version, or
+when a workflow carries a Claude Code version literal.
+
+`tests/mod/guard.test.ts`'s boundary values, 2.1.286 and 2.1.287, are exempt from check 31. They
+exercise `MIN_CLAUDE_CODE`, which check 31 does hold to the floor, so a moved floor fails them on
+their own.
+
+**Why:** the current pin sat 36 releases behind `latest`, because nothing prompted a bump, and the
+rolling issue went unseen. A bump PR is checked like any other change, and it is where a fix lands.
+
+**Not tracked by Dependabot, and why:**
+
+| Source | Why |
+| --- | --- |
+| The Claude Code floor (`claudeCodeFloor`) | A deliberate pin. It moves only with an entry here. |
+| Node, `.nvmrc` | No Dependabot ecosystem reads `.nvmrc`. Bumped by hand with its own decision. |
+| gitleaks (version and sha256 in `validate.yml`'s env) | A release asset pinned by digest, not a package manifest. |
+| The `superpowers` plugin dependency and the `claude-plugins-official` marketplace | Unversioned: resolved from the marketplace at install, so there is nothing to bump. |
+| Runner images (`ubuntu-24.04`, `windows-2025`) | Pinned image labels, not a Dependabot ecosystem. |
+| The hygiene-sweep tool versions in `references/hygiene-sweeps.json` | A runtime registry `/devcycle:maintain` runs in other repos, not a manifest of this one. Bumped by hand. |
+
+```text
+claude-code-floor: 2.1.287
+```
+
+## 2026-11-25 — resume refuses a state file that doesn't match the live checkout (#429)
+
+**Decision:** `/devcycle:continue` stops and asks when a cycle's branch already landed or when the cycle belongs to another checkout (its state file sits in a different worktree, or another worktree holds its branch). The answers are close the cycle, resume anyway (recorded as `- merged-ack: <tip sha>`), move the cycle into the worktree that holds the branch, resume in its own checkout, or leave it. No check closes a cycle, moves a file, rewrites `root:` or switches a branch by itself. Driven runs map the cases onto existing stop reasons: `merged` stops `resume-check`, `branch-held` stops `branch` and `other-checkout` stops `foreign-state`, so the run record schema is unchanged.
+
+**Why:** a state file resumed from the wrong worktree, or for a branch already merged, sent the session into work that was done or that the checkout refuses to switch to. The gate wording lives in `references/resume.md` § When git disagrees with the state file, and `commands/continue.md` keeps pointers, because continue sits at the 187-line `commandMax` ceiling.
+
+**Budgets:** the context closures that read `references/resume.md` and `playbooks/finishing-the-cycle.md` grow by the new section, and the runtime surface grows by the section, the pointers and the hub rows.
+
+```text
+budget: context-budget.json commands/continue.md 81950
+budget: context-budget.json commands/cycle.md 95775
+budget: context-budget.json playbooks/finishing-the-cycle.md 54753
+budget: context-budget.json playbooks/receiving-review.md 130780
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 101132
+budget: surface-budget.json surfaceTotal 7639
+```
+
+## 2026-11-25 — The move-cycle invocation lands with the script
+
+**Decision:** `references/resume.md` § Settle the branch first names
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/move-cycle.mjs"` in the same change that adds the script. The
+entry points and playbooks that read `resume.md` are longer, and the runtime surface grew by three
+lines; the budget lines below record the new figures.
+
+**Why:** the golden-path test (C3 leg 3) fails any change that adds a CLI script no command,
+playbook or reference invokes, so the invocation cannot wait for the later documentation task.
+
+```text
+budget: context-budget.json commands/continue.md 78962
+budget: context-budget.json commands/cycle.md 93111
+budget: context-budget.json playbooks/receiving-review.md 128116
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 98468
+budget: surface-budget.json surfaceTotal 7596
+```
+
+## 2026-11-24 — Re-dispatches re-attempt through task-dispatch, and intake routes the reviewer (#407, #456)
+
+**Decision:** a re-dispatch of a saved brief goes through `task-dispatch.mjs --reattempt`, so each
+attempt has its own retry index and routing decision; `task-intake.mjs` applies the task-reviewer
+predicate and returns the tier the reviewer is dispatched on; the run record's `drive` row names
+`effort` and `costUsdEstimated`, and a new `stop-request` event records a stop between sessions;
+doctor splits `re-dispatch` by cause and marks the vintage break at `REDISPATCH_CAUSE_SINCE`
+(assumed `0.34.1`, re-checked against the version actually released). The executing-waves, resume,
+ledger and model-routing text that points at these is longer, so every closure that reads it and the
+runtime surface grew; the budget lines below record the new figures.
+
+**Why:** the ledger recorded neither a killed attempt nor a reviewer's model, so re-dispatch and
+routing figures could not be trusted by the economy cycles that measure against them.
+
+```text
+budget: context-budget.json commands/continue.md 78678
+budget: context-budget.json commands/cycle.md 92829
+budget: context-budget.json playbooks/executing-waves.md 124179
+budget: context-budget.json playbooks/maintaining-the-repo.md 80257
+budget: context-budget.json playbooks/receiving-review.md 127829
+budget: context-budget.json playbooks/reviewing-code.md 106751
+budget: context-budget.json playbooks/reviewing-the-branch.md 63136
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 98181
+budget: context-budget.json playbooks/taking-the-fast-path.md 55618
+budget: context-budget.json references/model-routing.md 10766
+budget: surface-budget.json surfaceTotal 7593
+```
+
 ## 2026-11-22 — The sweep's resolution refusal and the documentation criteria name their sources (#478, #485)
 
 **Decision:** the maintain playbook states that a pass with no finalized sweep passes no

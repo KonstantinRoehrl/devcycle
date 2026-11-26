@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.35.0 — 2026-11-26
+
+- feat(models): one model-selection policy, drive band tiers, resume checkout gates and self-maintaining CI pins (#456, #429, #495)
+
+One policy now chooses the model for every devcycle role, the drive band shows what each tier of a run is actually using, `/devcycle:continue` refuses to resume a cycle that belongs to another checkout, and CI's Claude Code versions maintain themselves.
+
+**Model-selection policy (#456 slice 2, #494, #500).** `references/model-policy.json` and `scripts/model-policy.mjs` own the role table: which model the driver coordinator, session, implementer, task-reviewer, branch-review, walkthrough and planning drafters run on, the limits that escalate a tier, and the audit string every resolution records. A driven run's coordinator now runs the fast tier, and the model a cycle was opted in on becomes its ceiling rather than what the coordinator runs. `scripts/task-dispatch.mjs` and `scripts/drive-execution.mjs` make the dispatch decisions and the playbooks dispatch on what they print instead of applying the predicates by hand; planning reads its tiers from the same policy. `references/model-routing.md` keeps the knob arithmetic and renders the role table, which `scripts/validate.mjs` check 32 holds to the JSON. The audit that motivated it is kept at `docs/audits/2026-11-26-unattended-execution.md`.
+
+**Drive band tiers (#456 slice 1, #498).** `.devcycle/drive-progress.json` moves to schema v2 and carries the driver session, the live driven session and each running dispatch with its role, model, effort, context and routing label, read from each tier's own transcript so the band shows the model that ran, not the one requested. The band draws them in cc-statusline's row shape and still draws a v1 file as before.
+
+**Re-dispatch measurement (#407, #456).** A re-dispatch goes through `task-dispatch.mjs --reattempt` so each attempt has its own routing decision, intake routes the task reviewer, the run record's `drive` row names effort and estimated cost, and doctor splits re-dispatch by cause.
+
+**Resume checkout gates (#429, #496).** `/devcycle:continue` now stops and asks when a cycle's branch already landed or the cycle belongs to another checkout, offering to close it, resume anyway, move it into the worktree that holds its branch (`scripts/move-cycle.mjs`), resume in its own checkout or leave it. State-file discovery labels other checkouts and stale ledgers.
+
+**CI Claude Code versions (#495, #497).** `.github/claude-code/package.json` owns the floor and the current version CI tests against, read through `scripts/claude-code-versions.mjs`; Dependabot bumps the current pin weekly and opens its PRs into `dev`, and the daily Canary opens or updates a bump PR in place of its rolling issue.
+
+**Known issues.** #494 stays open: the policy is shared, but planning does not yet run unattended under a driver. #456 stays open: the follow-up issues the audit drafted are not filed. #429 stays open: a state file with already-answered open questions is not yet surfaced on resume.
+
 ## 0.34.0 — 2026-11-22
 
 - feat(maintain): verified hygiene sweep, write-issue and triage-issues skills, and shared issue folding (#478, #485, #489)

@@ -2,8 +2,8 @@
 
 How `playbooks/planning-waves.md` splits a large plan across dispatches once its spike threshold trips
 or its decision table picks `delegated` or `grouped`, so the coordinator's window holds answers and interfaces, never a spike's or a draft's body.
-Every dispatch here follows `references/delegation.md`'s envelope rules and runs at the tier
-`references/model-routing.md` § Planning dispatches assigns, naming its model explicitly; this file
+Every dispatch here follows `references/delegation.md`'s envelope rules and runs at the model
+`references/model-routing.md` § Roles resolves for its role, naming it explicitly; this file
 owns only the flow, the context pack and the two brief shapes. A finished plan must not show whether
 it was delegated.
 
@@ -63,8 +63,8 @@ detail level asks of it. Before returning it runs the per-draft gate, `reference
 result-file shape, with any `Blast-radius override` it wrote as the summary. The coordinator picks each
 drafter's tier from the task cut it already holds (its estimated file count, whether the cut marks the
 task `code-pinned`, whether it adds an abstraction or crosses packages) by
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/read-section.mjs" references/model-routing.md planning-dispatches`,
-and falls back as `references/model-routing.md` § Model tiers says.
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/model-policy.mjs" --role drafter --ceiling <this session's own model id> --facts '{"codePinned":…,"newAbstraction":…,"maxFiles":…,"crossPackage":…}'`,
+and a repair takes `--role repair --facts '{"drafterTier":"<fast|session>"}'`; it falls back as `references/model-routing.md` § Model tiers says.
 
 A drafter whose summary begins `stopped: <what pin cannot hold>` wrote no draft. The coordinator, who
 owns Interfaces, decides that pin and re-dispatches the task, or drafts it inline.

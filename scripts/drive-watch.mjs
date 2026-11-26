@@ -3,9 +3,11 @@
 // worth relaying, or a wait for the run's end. What a run's state means is classifyDrive's alone
 // (scripts/drive-result.mjs); this file only reads the log beside it.
 import { closeSync, existsSync, fstatSync, openSync, readSync, statSync } from "node:fs";
+import { constants } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { parseFlags, requireCount, requireValue } from "./cli-flags.mjs";
 import { classifyDrive, LOG_REL } from "./drive-result.mjs";
+import { registerWatcher, unregisterWatcher } from "./drive-watcher.mjs";
 import { isMain } from "./is-main.mjs";
 
 export const LOG_TAIL_LINES = 40;
@@ -14,8 +16,9 @@ export const WATCH_LEVELS = ["end", "wave", "all"];
 const TAIL_BYTES = 64 * 1024;
 const DRIVER_PREFIX = /^\[drive [^\]]*\] /;
 const ERROR_PREFIX = "drive-execution: ";
-const LEDGER_LINE = /^session \d+ · \d+ tool calls · task=(\S+) event=(\S+) outcome=(.*)$/;
+const LEDGER_LINE = /^session \d+ · \d+ tool calls · task=(\S+) event=(\S+)(?: round=(\d+))? outcome=(.*)$/;
 const REPORTED_EVENTS = new Set(["committed", "review-verdict", "user-decision"]);
+// An unkeyed line carries no round=, so its review round is its `round N` outcome.
 const REVIEW_ROUND = /^round (\d+)$/;
 const USAGE =
   "drive-watch: usage: drive-watch.mjs (--status | --follow [--since <bytes>] [--level <end|wave|all>] | --wait) --state <path>";
@@ -63,7 +66,7 @@ export function reportedLine(rawLine, level = "all") {
   if (message === null) return null;
   if (isMilestone(message)) return message;
   const entry = level === "all" && message.match(LEDGER_LINE);
-  return entry && (REPORTED_EVENTS.has(entry[2]) || entry[3].startsWith("rejected (intake bounce)")) ? message : null;
+  return entry && (REPORTED_EVENTS.has(entry[2]) || entry[4].startsWith("rejected (intake bounce)")) ? message : null;
 }
 
 // One follow's memory: a repeated `wait:` line is printed once, and at `all` a task's accepted
@@ -77,7 +80,7 @@ export function createRelay(level = "all") {
   const batched = (message) => {
     const entry = message.match(LEDGER_LINE);
     if (!entry) return message;
-    const [, task, event, outcome] = entry;
+    const [, task, event, , outcome] = entry;
     if (event === "review-verdict" && outcome.startsWith("accepted")) return null;
     if (event !== "committed") return message;
     const seen = rounds.get(task);
@@ -87,7 +90,7 @@ export function createRelay(level = "all") {
   };
   const countRound = (rawLine) => {
     const entry = driverMessage(rawLine)?.match(LEDGER_LINE);
-    const round = entry?.[2] === "review-round" && Number(entry[3].match(REVIEW_ROUND)?.[1]);
+    const round = entry?.[2] === "review-round" && Number(entry[3] ?? entry[4].match(REVIEW_ROUND)?.[1]);
     if (!round) return;
     const seen = rounds.get(entry[1]) ?? { fromFirst: false, highest: 0 };
     rounds.set(entry[1], { fromFirst: seen.fromFirst || round === 1, highest: Math.max(seen.highest, round) });
@@ -149,11 +152,43 @@ export async function follow({ statePath, since = null, pollMs = 2000, level = "
   }
 }
 
-export async function waitForEnd({ statePath, pollMs = 30_000 }) {
+async function pollForEnd(statePath, pollMs) {
   for (;;) {
     const run = classifyDrive({ statePath });
     if (!run.running) return withTail(run, statePath);
     await sleep(pollMs);
+  }
+}
+
+const WAIT_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
+
+// The registration only feeds the band's display, so a write that cannot land never costs the run's result.
+const bestEffort = (action) => {
+  try {
+    action();
+  } catch {
+    // the band shows no watcher; the wait is unaffected
+  }
+};
+
+// The waiting session is the driver session the band shows.
+export async function waitForEnd({ statePath, pollMs = 30_000, env = process.env }) {
+  const sessionId = env.CLAUDE_CODE_SESSION_ID;
+  if (!sessionId) return pollForEnd(statePath, pollMs);
+  bestEffort(() => registerWatcher({ statePath, sessionId }));
+  const handlers = WAIT_SIGNALS.map((signal) => {
+    const handler = () => {
+      bestEffort(() => unregisterWatcher({ statePath }));
+      process.exit(128 + constants.signals[signal]);
+    };
+    process.once(signal, handler);
+    return [signal, handler];
+  });
+  try {
+    return await pollForEnd(statePath, pollMs);
+  } finally {
+    for (const [signal, handler] of handlers) process.off(signal, handler);
+    bestEffort(() => unregisterWatcher({ statePath }));
   }
 }
 

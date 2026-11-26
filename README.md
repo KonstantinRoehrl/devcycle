@@ -103,6 +103,11 @@ automatically from the official Claude Code plugin directory; afterwards
 Requires Claude Code 2.1.287 or later — earlier releases reject the manifest's `userConfig` pick-lists
 (before 2.1.271) or run an earlier hooks-module API, under which devcycle's hooks module stays off.
 
+CI tests every change on two exact Claude Code versions, the floor above and a current release, both
+declared in `.github/claude-code/package.json`. Dependabot proposes each new release weekly, and the
+daily canary opens a bump PR when one breaks devcycle; see
+[`CONTRIBUTING.md` § Before opening a PR](CONTRIBUTING.md#before-opening-a-pr).
+
 **What the hooks module can see.** Besides its settings hooks, devcycle ships a hooks module
 (`hooks/devcycle-mod.mjs`) that Claude Code runs in-process: it sees your sessions' prompts, tool
 calls and tool results, it is not sandboxed, and `claude plugin validate <plugin directory>` lists
@@ -115,7 +120,11 @@ terminal notification `scripts/handoff-mark.mjs` asks for (`handoffNotification`
 a `.devcycle/state.md`, checks the one file `.devcycle/drive-progress.json` beside it about every 300
 ms (reading it only when it changed) to draw the drive band above the prompt while an unattended run's
 driver is running or an ended run awaits `/devcycle:continue`; that file is written by the
-unattended-run driver, and the band spends no model turn.
+unattended-run driver, and the band spends no model turn. The band shows the driver session (the
+session whose `--wait` is live), the live driven session, which runs on the coordinator model under the cycle's ceiling, and each running dispatch, each with its
+model, effort and context use; to know the driver session, each `--wait` writes its session id,
+pid and process start time to `.devcycle/drive-watcher.json` beside the state file and removes
+them when it exits.
 
 For the on-device verification stage's agent pass, also install the claude-in-chrome
 plugin — Claude Code's integration with your own Chrome (without it, the stage still launches
@@ -138,7 +147,7 @@ confirm, then the items only your eyes can judge).
 
 The pipeline saves its position to files under `.devcycle/` at every stage boundary, so it
 survives `/clear`, compaction, and new sessions — resume any time with `/devcycle:continue`.
-How the stages hand off and how the state file is verified is covered in
+How the stages hand off and how the state file is verified against the live checkout is covered in
 [`docs/pipeline/`](docs/pipeline/README.md).
 
 The pipeline pauses between stages by design: it stops at most stage boundaries and asks you to

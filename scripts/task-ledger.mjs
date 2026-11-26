@@ -11,7 +11,7 @@ import { now } from "./stamp.mjs";
 import { parseFlags, requireCount } from "./cli-flags.mjs";
 import { recordPath, subSchemaFor, validate, validateCulprit, writeLine } from "./run-record.mjs";
 import { resolveDepth } from "./depth-probe.mjs";
-import { gateCommand, taskFileMap } from "./task-files.mjs";
+import { fieldValue, gateCommand, taskBlocks, taskFileMap } from "./task-files.mjs";
 
 const SCHEMA_PATH = new URL("../tests/fixtures/run-record.schema.json", import.meta.url);
 export const LEDGER_LINE_RE = /^- \[([^\]]+)\] task=(\S+) event=(\S+) outcome=(.*?) ref=(\S+)(?: key=(\S+))?$/;
@@ -73,6 +73,16 @@ export function taskGate(ledgerPath, task) {
 export function taskFiles(ledgerPath, task) {
   const text = taskPlanText(ledgerPath, task);
   return text === null ? null : (taskFileMap(text).get(Number(task)) ?? null);
+}
+
+// A task's **Dependencies:** value through the ledger's plan: its first line, cut at the first `(`
+// that opens a reason. Null when there is no plan to read or the task declares none.
+export function taskDependencyLine(ledgerPath, task) {
+  const text = taskPlanText(ledgerPath, task);
+  if (text === null) return null;
+  const block = taskBlocks(text).find((b) => b.num === Number(task));
+  const line = (block && fieldValue(block.text, "Dependencies"))?.split("\n")[0].split("(")[0].trim();
+  return line || null;
 }
 
 export const MISSING_FINDINGS = "rejected (missing findings file)";

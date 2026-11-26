@@ -123,8 +123,8 @@ node scripts/cost-model-fit.mjs --runs <dir>   # the planning cost model's F, t,
 node scripts/plan-bench-corpus.mjs    # proposes the benchmark manifest from this repo's archived cycles, as manifest.proposed.json for the user to confirm — local
 node scripts/spec-claims.mjs check --spec <spec-path>   # which of the spec reviewer's confirmed claims in .devcycle/spec-claims.md still hold at HEAD; `write --spec <path> --verified <file>` records them — local
 node --test tests/unit/*.test.mjs     # the whole unit suite, golden path included (stubbed CLIs, keyless) — CI
-claude plugin validate . --strict     # the plugin under Claude Code's real loader (CI also validates .claude-plugin/plugin.json) — CI, on the floor and current pins
-claude plugin test .                  # the hooks module's TypeScript tests under tests/mod/ — CI, on the floor and current pins
+claude plugin validate . --strict     # the plugin under Claude Code's real loader (CI also validates .claude-plugin/plugin.json) — CI, on the floor and current versions in .github/claude-code/package.json
+claude plugin test .                  # the hooks module's TypeScript tests under tests/mod/ — CI, on the floor and current versions in .github/claude-code/package.json
 gitleaks git --no-banner --redact     # credentials, over the full history — CI
 node scripts/doctor.mjs               # token/context profile; --depth adapts scripts/depth-probe.mjs, the context gate's probe — local only
 ```
@@ -231,7 +231,15 @@ merged. A keyword inside a code span is ignored, so a PR can explain the syntax 
 CI enforces the convention: a PR into `dev` fails `PR body names an issue or says there is none` unless its body has a
 closing keyword, a `Refs #n`, or a line reading `No issue`.
 
-`.github/workflows/canary.yml` runs `claude plugin validate`, the hooks tests, a real install and the golden-path suite against the latest Claude Code once a day, and reports a suspected break to one rolling issue labelled `canary`. It is not a required check. A manual run on a branch never touches the issue, and the schedule runs only from `main`, so a change to it takes effect after the next release.
+`.github/claude-code/package.json` declares the two Claude Code versions CI tests against: the floor,
+`claudeCodeFloor`, and the current release, an exact `devDependencies` pin. `scripts/claude-code-versions.mjs`
+is the only code that reads it, so no workflow names a version. Dependabot proposes each new release
+weekly as a `ci(deps-dev): …` PR into `dev`. The floor moves only with a `docs/decisions/README.md`
+entry carrying a `claude-code-floor:` line, and `scripts/validate.mjs` check 31 fails when the floor,
+one of its restatements (the hooks module's `MIN_CLAUDE_CODE`, the README's requirement line,
+`docs/README.md`'s hooks-module row, doctor's `mod-inactive` message) or a workflow disagrees.
+
+`.github/workflows/canary.yml` runs `claude plugin validate`, the hooks tests, a real install and the golden-path suite against the latest Claude Code once a day. On a suspected break it opens a bump PR into `dev` to that release, labelled `canary`, or comments on an open PR that already bumps to it, and it closes its own PR once a later release passes. It dispatches `validate.yml` on its branch, and the PR body links the canary run as the evidence. It is not a required check. A manual run on a branch never touches a PR, and the schedule runs only from `main`, so a change to it takes effect after the next release.
 
 ## What belongs in `docs/`
 
@@ -245,7 +253,10 @@ empirically verified platform behavior, the memos explaining why a devcycle stag
 its superpowers upstream, open defects. Keep run reports, benchmarks, dry runs, on-device checklists and
 results, plans, and specs out of the repository — they are records of one run on one machine,
 they date immediately, and nobody installing the plugin has a use for them. `.devcycle/` is
-gitignored and is where those belong.
+gitignored and is where those belong. The one exception is
+`docs/audits/2026-11-26-unattended-execution.md`: the model policy cites it as the measured basis
+for the coordinator's default tier (`docs/decisions/README.md`, 2026-11-26). The v0.12 disposition
+register is tracked as a ledger the decision log cites, not as a run report.
 
 Three places hold defect state, each for one kind, and this paragraph owns the split.
 `docs/known-issues.md` is the hand-curated store of confirmed defects in devcycle's own engines;

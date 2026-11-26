@@ -1,6 +1,6 @@
 {
   "name": "devcycle",
-  "version": "0.34.0",
+  "version": "0.35.0",
   "description": "Opinionated pipeline from a feature, bug, or refactor description to a verified, publish-ready implementation: scoped interview, wave-based plan, parallelized subagent execution, cross-model branch review, on-device UI verification via claude-in-chrome, and GitHub reconcile — layered on the superpowers skill set, with a doctor/learn loop that benchmarks and improves the pipeline from session to session.",
   "author": {
     "name": "Konstantin Röhrl",
@@ -54,25 +54,25 @@
       "type": "string",
       "title": "Implementer model",
       "default": "auto",
-      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let the coordinator derive per task. A pool routes by task complexity; no value ever dispatches above the orchestrator's own model tier. Default: auto."
+      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let devcycle's dispatch script pick per task. A pool picks by task complexity; no value ever dispatches above the orchestrator's own model tier. Default: auto."
     },
     "taskReviewerModel": {
       "type": "string",
       "title": "Task reviewer model",
       "default": "auto",
-      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let the coordinator derive per task. A pool routes by task complexity; no value ever dispatches above the orchestrator's own model tier. Default: auto."
+      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let devcycle's dispatch script pick per task. A pool picks by task complexity; no value ever dispatches above the orchestrator's own model tier. Default: auto."
     },
     "walkthroughModel": {
       "type": "string",
       "title": "Walkthrough model",
       "default": "auto",
-      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let the coordinator derive per task. A pool routes by task complexity; no value ever dispatches above the orchestrator's own model tier. Default: auto."
+      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to use the session's own model. A pool always uses its most capable id that the orchestrator's own model tier allows; no value ever dispatches above that tier. Default: auto."
     },
     "branchReviewModel": {
       "type": "string",
       "title": "Branch review model",
       "default": "auto",
-      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to let the coordinator derive per task. A pool routes by task complexity; no value ever dispatches above the orchestrator's own model tier. Default: auto."
+      "description": "Model id, a comma-separated pool of ids ordered from simplest to most capable, or 'auto' (default) to use the session's own model. A pool always uses its most capable id that the orchestrator's own model tier allows; no value ever dispatches above that tier. Default: auto."
     },
     "planningStrategy": {
       "type": "string",

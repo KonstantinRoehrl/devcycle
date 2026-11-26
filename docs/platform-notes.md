@@ -453,7 +453,7 @@ skill for the rest.
 leaves, derives its sink's path from `import.meta.url`, attaches its budget note to `context`, and
 stays inert below 2.1.287, the first release of the API it is written against. devcycle's own
 instructions file lives at `.claude/CLAUDE.md`. CI runs both strict validations and `claude plugin
-test .` on 2.1.287 and 2.1.292. Whether `allowManagedModsOnly` refuses the whole `hooks.json` or
+test .` on 2.1.287 and 2.1.292. [Since 2026-11-25 CI reads the versions it tests from `.github/claude-code/package.json`; see `docs/decisions/README.md`.] Whether `allowManagedModsOnly` refuses the whole `hooks.json` or
 only its `modules` cannot be checked without managed settings; doctor's `mod-inactive` candidate
 reports the effect either way.
 
@@ -462,6 +462,7 @@ prints, through `$.ui.notify`, in any session, joined or not. A Bash-tool child 
 terminal (`/dev/tty` opens with `ENXIO`), and writing the session's tty directly is denied by auto
 mode's classifier, so the module is the one path to the terminal. `$.ui.notify` writes through the
 user's `preferredNotifChannel`. Where a Claude Code build has no `$.ui.notify`, the relay does nothing; CI's two pinned versions lack the event, so `tests/mod/harness.ts` registers the handler only for `tests/mod/notify.test.ts`, which runs only where the CLI knows it.]
+[2026-11-25: "CI's two pinned versions" are those of that date; `.github/claude-code/package.json` names the versions CI tests now.]
 
 ## (k) Headless `claude -p` as a driven session
 
@@ -595,7 +596,7 @@ Measured on Claude Code 2.1.316 under a zsh login shell on macOS, 2026-10-31 (#3
 - Every `SubagentStop` hook fires on a blocked stop too.
 - A blocked stop does not set `.meta.json`'s `finished`; after a block the transcript's last message record is a `user` record with `isMeta: true` carrying the hook's feedback.
 
-**Consequence.** `hooks/dispatch-sensor.mjs` is the one `SubagentStop` handler, so nothing marks ended a stop it held: it holds an implementer whose owed report is missing, counting holds on the dispatch record (cap 3) rather than trusting `stop_hook_active`, and `scripts/dispatch-health.mjs` reads a hold newer than the transcript's last record as in flight for a minute. The CI-pinned versions (2.1.287, 2.1.292) are assumed to honour the block; where one does not, the agent ends, the `heldAt` grace lapses and the transcript classifier records the death as before.
+**Consequence.** `hooks/dispatch-sensor.mjs` is the one `SubagentStop` handler, so nothing marks ended a stop it held: it holds an implementer whose owed report is missing, counting holds on the dispatch record (cap 3) rather than trusting `stop_hook_active`, and `scripts/dispatch-health.mjs` reads a hold newer than the transcript's last record as in flight for a minute. The CI-pinned versions (2.1.287, 2.1.292) [those were CI's versions on that date; `.github/claude-code/package.json` names today's] are assumed to honour the block; where one does not, the agent ends, the `heldAt` grace lapses and the transcript classifier records the death as before.
 
 ## (p) Headless `-p` stops background subagents 10 minutes after the last turn
 
@@ -685,3 +686,32 @@ The raw output stayed outside version control.
 `pluginConfigs` override, answers each gate from the entry's answer file by resuming the session,
 and scores what it collected with doctor's own rubric (`docs/playbooks/planning-waves/README.md`
 § Benchmarking planning strategies).
+
+## (s) Subagent model and effort under a driven session
+
+**What was tried.** A probe on 2026-11-26 against Claude Code 2.1.332 (#456), coordinator
+`--model claude-sonnet-5-5`, in a scratch directory outside this checkout holding one project agent
+with `effort: low` and no `model:`, under `--setting-sources project --strict-mcp-config --permission-mode auto`.
+Three runs: `CLAUDE_CODE_EFFORT_LEVEL=high` with `--effort high`; `--effort high` alone; and `--effort`
+at `low`, `medium`, `xhigh` and `max` with no tools. Each dispatched that agent, a `general-purpose`
+agent with `model: "haiku"` and no effort key, and an Agent call naming a full model id. Effort was read
+from each assistant record's `effort` field. Total cost $0.25.
+
+**Exact result.**
+
+- The Agent tool's `model` takes a family alias only (`sonnet`, `opus`, `haiku`, `fable`); a full id is
+  an `InputValidationError`.
+- With `CLAUDE_CODE_EFFORT_LEVEL` exported, every subagent ran at that level, its `effort:` frontmatter
+  included.
+- Without it, the `effort: low` frontmatter held, and a subagent with no effort key ran at `medium`
+  under a `high` coordinator (assumption: the model's default), not at the session's `--effort`.
+- The coordinator's own effort held from `--effort` alone, and a Sonnet coordinator accepted every
+  level a `drive:` row can carry.
+
+**Consequence.** `scripts/model-policy.mjs` hands the Agent tool the family alias and keeps each
+dispatch under the ceiling by family rank, so an opt-in on an id older than its family's newest is
+a known limit. The driver keeps exporting `CLAUDE_CODE_EFFORT_LEVEL`: no devcycle agent carries an
+effort key, so dropping it would move every subagent to the model default. It removes
+`CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and `CLAUDE_CODE_SUBAGENT_EFFORT` from a
+driven session's environment, so a configured default cannot reroute a resolved dispatch
+(`docs/playbooks/executing-waves/unattended.md` § What the driver does).

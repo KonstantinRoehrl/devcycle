@@ -217,7 +217,9 @@ ledger, and state file on disk are what carry the run forward, and the conversat
 produced them is not needed again. On re-entry `/devcycle:continue` locates that state file with
 `scripts/find-state-files.mjs`, a Node walk that consults no gitignore — so the gitignored
 `.devcycle/` directory cannot hide a state file from it the way it can from an ad-hoc
-`find`/`rg` search. Compacting is deliberately not one of the options: it leaves
+`find`/`rg` search. Discovery also looks in each other worktree of the repo and labels a file that
+belongs elsewhere. `resume-check` refuses a cycle whose branch already landed or that belongs to
+another checkout, and asks you what to do. Compacting is deliberately not one of the options: it leaves
 the expensive part of a context behind, where clearing actually returns it. Between execution's
 waves you can hand those stops to a driver instead — next section.
 

@@ -144,7 +144,9 @@ As this stage's final state-file write, set `stage: done` and a fresh `updated:`
 
 `.devcycle/ledger.md` is a single slot the next cycle overwrites, and the cleanup below removes
 the ephemeral set — so without this step a finished cycle leaves no durable record for a later
-consolidation pass to read.
+consolidation pass to read. `/devcycle:continue`'s close-merged answer runs this section and
+§ Clean up this cycle's ephemeral artifacts on their own, with nothing before them, and writes
+`stage: done` after them, so both must stay runnable alone.
 
 Before copying the audit trail below, move every status file in `.devcycle/findings/` whose
 verdict the run superseded into `.devcycle/archive-<YYYY-MM-DD>-<branch-slug>/`, per
@@ -159,16 +161,19 @@ copy is reported and the stage continues, and the cleanup below keeps that copy'
 
 ## Clean up this cycle's ephemeral artifacts
 
-After the state file is closed above and before the handoff block below, remove the files whose
-only purpose was to pass content between dispatches.
+This section runs after § Archive: in the normal flow after the state file is closed above and
+before the handoff block below, in `/devcycle:continue`'s close-merged flow before `stage: done` is
+written. Remove the files whose only purpose was to pass content between dispatches.
 
 1. **Enumerate.** The ephemeral set is exactly: `.devcycle/reports/*`, `.devcycle/evidence/*`,
    `.devcycle/findings/*`, `.devcycle/plan-work/<run id>/*`, `.devcycle/research/*`, `.devcycle/sweep-args-*.json`, `.devcycle/sweep-report*.json`, and
    any generated per-task brief files. Nothing else is a candidate.
 2. **Split.** This cycle's files are those modified at or after the `startedAt` of the `run` line
-   opening `<the run-record dir screened above>/<run id>.jsonl`, plus all of
-   `.devcycle/plan-work/<run id>/`. The rest are prior cycles' leftovers. When that `startedAt`
-   cannot be read, only `.devcycle/plan-work/<run id>/` is this cycle's and every other file is a
+   opening this cycle's run record, plus all of `.devcycle/plan-work/<run id>/`. `<run id>` is the
+   `run:` row of `.devcycle/state.md`. Print it with
+   `node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/run-record.mjs').then(m => console.log(JSON.parse(require('fs').readFileSync(m.recordPath(m.gitToplevel(process.cwd()), '<run id>'), 'utf8').split('\n')[0]).startedAt))"`,
+   which asks `run-record.mjs` for the record's path, the same store the redaction screen reads. The rest are prior cycles' leftovers. When that `startedAt`
+   cannot be read (the command fails, as it does with an ENOENT stack for a missing record, or prints nothing), only `.devcycle/plan-work/<run id>/` is this cycle's and every other file is a
    prior leftover, which step 4 asks about.
 3. **Remove this cycle's files without asking.** A file under a directory the archive step copies
    is removed only if its copy succeeded; a failed copy keeps it, reported. The sweep argument and

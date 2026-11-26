@@ -4,8 +4,10 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { makeRepo } from "./helpers.mjs";
+import { makeRepo, writeInto } from "./helpers.mjs";
 import { briefPathFor } from "../../scripts/task-dispatch.mjs";
+import { isNoVerdict, retryCount, taskDependencyLine, taskEntries, unparseableFindings, MISSING_FINDINGS } from "../../scripts/task-ledger.mjs";
+import { deathsOf } from "../../scripts/dispatch-health.mjs";
 import { acquireDriveLock, driveTokenHash, releaseDriveLock } from "../../scripts/drive-lock.mjs";
 
 const SCRIPT = new URL("../../scripts/task-dispatch.mjs", import.meta.url).pathname;
@@ -44,12 +46,13 @@ test("an implementer dispatch writes the brief, its start time and the dispatche
   assert.deepEqual(r.out, {
     ok: true, appended: ["5/dispatched/0/0"], action: "dispatch", task: "5", role: "implementer", round: 0, retry: 0,
     briefPath: ".devcycle/briefs/5-implementer.md", lessons: null, depthBand: "unknown",
+    model: null, dispatchModel: null, effort: "inherit", modelOutcome: "model session (ceiling: unknown unranked)",
   });
   assert.equal(readFileSync(join(repo, ".devcycle/briefs/5-implementer.md"), "utf8"), "# Brief for task 5\n");
   const { startedAt } = JSON.parse(readFileSync(join(repo, ".devcycle/dispatch/5-implementer-0-0.json"), "utf8"));
   assert.match(startedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
   const [line] = ledgerLines(repo);
-  assert.equal(line, `- [${line.slice(3, 23)}] task=5 event=dispatched outcome=implementer retry 0 ref=.devcycle/briefs/5-implementer.md key=5/dispatched/0/0`);
+  assert.equal(line, `- [${line.slice(3, 23)}] task=5 event=dispatched outcome=model session (ceiling: unknown unranked) ref=.devcycle/briefs/5-implementer.md key=5/dispatched/0/0`);
 });
 
 test("a second implementer dispatch of the same task is the next retry, and a fix pass names its round", () => {
@@ -58,7 +61,7 @@ test("a second implementer dispatch of the same task is the next retry, and a fi
   const fix = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer", "--round", "1"]);
   assert.equal(fix.out.retry, 1);
   assert.equal(fix.out.briefPath, ".devcycle/briefs/5-implementer-round-1.md");
-  assert.match(ledgerLines(repo)[1], / outcome=implementer retry 1 ref=\.devcycle\/briefs\/5-implementer-round-1\.md key=5\/dispatched\/1\/1$/);
+  assert.match(ledgerLines(repo)[1], / outcome=model session \(ceiling: unknown unranked\) ref=\.devcycle\/briefs\/5-implementer-round-1\.md key=5\/dispatched\/1\/1$/);
 });
 
 test("a reviewer dispatch appends review-round for its round; a re-dispatch of that round is its next retry", () => {
@@ -66,7 +69,7 @@ test("a reviewer dispatch appends review-round for its round; a re-dispatch of t
   const first = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"]);
   const again = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"]);
   assert.deepEqual([first.out.appended, again.out.appended], [["5/review-round/1/0"], ["5/review-round/1/1"]]);
-  assert.match(ledgerLines(repo)[0], / task=5 event=review-round outcome=round 1 ref=\.devcycle\/briefs\/5-reviewer-round-1\.md key=5\/review-round\/1\/0$/);
+  assert.match(ledgerLines(repo)[0], / task=5 event=review-round outcome=model session \(auto: no file list\) ref=\.devcycle\/briefs\/5-reviewer-round-1\.md key=5\/review-round\/1\/0$/);
 });
 
 // A verdict closes its round — the reviewer's, or the green gate's after an accept — so a findings
@@ -111,17 +114,6 @@ test("a run that died before reaching the ledger is re-run at the same retry and
   assert.equal(r.out.retry, 0);
   assert.equal(ledgerLines(repo).length, 1);
   assert.equal(readFileSync(join(repo, ".devcycle/briefs/5-implementer.md"), "utf8"), "# Brief\n");
-});
-
-test("--model-decision records the routing decision as the implementer line's outcome; the key keeps the retry", () => {
-  const repo = repoWithLedger();
-  const decision = "fast (auto: files=1, deps=none, steps=specified)";
-  const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer", "--model-decision", decision]);
-  assert.deepEqual([r.out.retry, r.out.appended], [0, ["5/dispatched/0/0"]]);
-  assert.match(ledgerLines(repo)[0], / task=5 event=dispatched outcome=model fast \(auto: files=1, deps=none, steps=specified\) ref=\.devcycle\/briefs\/5-implementer\.md key=5\/dispatched\/0\/0$/);
-  const again = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer", "--round", "1", "--model-decision", "standard (pinned)"]);
-  assert.equal(again.out.retry, 1);
-  assert.match(ledgerLines(repo)[1], / outcome=model standard \(pinned\) ref=\.devcycle\/briefs\/5-implementer-round-1\.md key=5\/dispatched\/1\/1$/);
 });
 
 test("usage errors exit 2 with one JSON object and write nothing", () => {
@@ -386,4 +378,191 @@ test("a dispatch goes through on a manual row, the driver's own session, a walke
     assert.equal(r.status, 0, `${why}: ${r.stderr}`);
     assert.deepEqual(r.out.appended, ["5/dispatched/0/0"], why);
   }
+});
+
+test("--reattempt re-sends the saved implementer brief at the next retry, with no second lessons block or gate tail", () => {
+  const repo = gatedRepo();
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer"], "# Brief for task 5\n");
+  const saved = briefAt(repo, ".devcycle/briefs/5-implementer.md");
+  const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer", "--reattempt"], "");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.out.round, r.out.retry, r.out.briefPath, r.out.appended], [0, 1, ".devcycle/briefs/5-implementer.md", ["5/dispatched/0/1"]]);
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer.md"), saved);
+  assert.equal(existsSync(join(repo, ".devcycle/dispatch/5-implementer-0-1.json")), true);
+  assert.match(ledgerLines(repo)[1], / task=5 event=dispatched outcome=model session \(ceiling: unknown unranked\) ref=\.devcycle\/briefs\/5-implementer\.md key=5\/dispatched\/0\/1$/);
+});
+
+test("--reattempt takes the latest implementer dispatch's round, so a fix pass is re-sent as itself", () => {
+  const repo = repoWithLedger();
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer"]);
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer", "--round", "1"], "# Fix pass\n");
+  const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer", "--reattempt"], "");
+  assert.deepEqual([r.out.round, r.out.retry, r.out.briefPath], [1, 2, ".devcycle/briefs/5-implementer-round-1.md"]);
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-implementer-round-1.md"), "# Fix pass\n");
+});
+
+test("--reattempt re-sends a reviewer at its open round", () => {
+  const repo = repoWithLedger();
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"], "# Review brief\n");
+  const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--reattempt"], "");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.out.round, r.out.retry, r.out.appended], [1, 1, ["5/review-round/1/1"]]);
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-reviewer-round-1.md"), "# Review brief\n");
+});
+
+test("--reattempt re-sends a reviewer at the open round after an earlier round's verdict, not at round 1", () => {
+  const repo = repoWithLedger();
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"], "# Round 1 brief\n");
+  appendFileSync(join(repo, ".devcycle/ledger.md"), "- [2026-11-24T10:00:00Z] task=5 event=review-verdict outcome=rejected (1 blocking) ref=none key=5/review-verdict/1/0\n");
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "2"], "# Round 2 brief\n");
+  const r = dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--reattempt"], "");
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.out.round, r.out.retry, r.out.appended, r.out.briefPath], [2, 2, ["5/review-round/2/2"], ".devcycle/briefs/5-reviewer-round-2.md"]);
+  assert.equal(briefAt(repo, ".devcycle/briefs/5-reviewer-round-2.md"), "# Round 2 brief\n");
+});
+
+test("--reattempt with nothing to re-attempt, or with --round or --capture-cmd, is a usage error that writes nothing", () => {
+  const repo = repoWithLedger();
+  for (const [args, message] of [
+    [["--role", "implementer", "--reattempt"], /task 5 has no implementer dispatch to re-attempt/],
+    [["--role", "reviewer", "--reattempt"], /no saved brief at \.devcycle\/briefs\/5-reviewer-round-1\.md to re-attempt/],
+    [["--role", "reviewer", "--reattempt", "--round", "1"], /--reattempt reads the round and the brief from the earlier dispatch: drop --round and --capture-cmd/],
+    [["--role", "implementer", "--reattempt", "--capture-cmd", "node --test x"], /drop --round and --capture-cmd/],
+  ]) {
+    const r = dispatch(repo, ["--run", RUN, "--task", "5", ...args], "");
+    assert.equal(r.status, 2, JSON.stringify(r.out));
+    assert.match(r.out.error, message);
+  }
+  assert.deepEqual(ledgerLines(repo), []);
+});
+
+test("an extra attempt line moves neither the prefix retry caps, the no-verdict cap nor either role's death cap", () => {
+  const repo = repoWithLedger();
+  const ledger = join(repo, ".devcycle/ledger.md");
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "implementer"]);
+  dispatch(repo, ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"]);
+  appendFileSync(ledger, "- [2026-11-24T10:00:00Z] task=5 event=report-received outcome=rejected (missing report file) ref=.devcycle/reports/5.md key=5/report-received/0/0\n");
+  appendFileSync(ledger, "- [2026-11-24T10:01:00Z] task=5 event=dispatch-ended outcome=without output (implementer) ref=.devcycle/dispatch/5-implementer-0-0.json key=5/dispatch-ended/0/0\n");
+  appendFileSync(ledger, `- [2026-11-24T10:02:00Z] task=5 event=review-verdict outcome=${MISSING_FINDINGS} ref=none key=5/review-verdict/1/0\n`);
+  appendFileSync(ledger, `- [2026-11-24T10:03:00Z] task=5 event=review-verdict outcome=${unparseableFindings("no verdict line")} ref=none key=5/review-verdict/1/1\n`);
+  appendFileSync(ledger, "- [2026-11-24T10:04:00Z] task=5 event=dispatch-ended outcome=without output (reviewer) ref=.devcycle/dispatch/5-reviewer-1-0.json key=5/dispatch-ended/1/1\n");
+  const caps = () => [
+    retryCount(ledger, "5", "rejected (missing report file)"),
+    retryCount(ledger, "5", "rejected (intake bounce)"),
+    retryCount(ledger, "5", isNoVerdict),
+    deathsOf(taskEntries(ledger, "5"), "implementer"),
+    deathsOf(taskEntries(ledger, "5"), "reviewer"),
+  ];
+  const before = caps();
+  for (const role of ["implementer", "reviewer"])
+    assert.equal(dispatch(repo, ["--run", RUN, "--task", "5", "--role", role, "--reattempt"], "").status, 0, role);
+  assert.deepEqual(caps(), before);
+  assert.deepEqual(before, [1, 0, 2, 1, 1]);
+});
+
+const OPUS = "claude-opus-5-5";
+const SONNET = "claude-sonnet-5-5";
+// A plan whose task 5 lists `files` and declares `deps`, named by the ledger's preamble.
+function routedRepo({ files = ["src/a.mjs"], deps = "none (completely independent)", state = null } = {}) {
+  const repo = repoWithLedger();
+  writeInto(repo, "docs/plan.md", ["# P", "", "**Verification gate:** `npm test`", "", "### Task 5: T", "**Files:**",
+    ...files.map((path) => `- Modify: ${path}`), `**Dependencies:** ${deps}`, "**Evidence:** red-green", "",
+    "## Dispatch Map", "", "- Wave 1: Task 5", ""].join("\n"));
+  if (state) writeInto(repo, ".devcycle/state.md", state);
+  return repo;
+}
+const outcomeOf = (line) => line.match(/ outcome=(.*) ref=/)[1];
+const reviewer = ["--run", RUN, "--task", "5", "--role", "reviewer", "--round", "1"];
+
+test("taskDependencyLine reads the task's Dependencies value up to its reason", () => {
+  assert.equal(taskDependencyLine(join(routedRepo(), ".devcycle/ledger.md"), "5"), "none");
+  assert.equal(taskDependencyLine(join(routedRepo({ deps: "Tasks 1+4 committed" }), ".devcycle/ledger.md"), "5"), "Tasks 1+4 committed");
+  assert.equal(taskDependencyLine(join(repoWithLedger(), ".devcycle/ledger.md"), "5"), null);
+});
+
+test("an implementer dispatch resolves its model from the plan's facts and records the policy's outcome", () => {
+  const repo = routedRepo();
+  const r = dispatch(repo, [...implementer, "--orchestrator", OPUS]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.out.model, r.out.dispatchModel, r.out.effort, r.out.modelOutcome],
+    [SONNET, "sonnet", "inherit", `model fast:${SONNET} (auto: files=1, deps=none, steps=specified)`]);
+  assert.equal(outcomeOf(ledgerLines(repo)[0]), r.out.modelOutcome);
+});
+
+test("an implementer escalates on its files, its dependencies, unspecified steps and a rejected round", () => {
+  const six = ["1", "2", "3", "4", "5", "6"].map((n) => `src/${n}.mjs`);
+  const repo = routedRepo({ files: six, deps: "Task 2 (consumes its X interface)" });
+  appendFileSync(join(repo, ".devcycle/ledger.md"),
+    "- [2026-11-26T10:00:00Z] task=5 event=review-verdict outcome=rejected ref=.devcycle/findings/5-round-1.md key=5/review-verdict/1/0\n");
+  const r = dispatch(repo, [...implementer, "--round", "1", "--orchestrator", OPUS, "--steps-unspecified"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.out.model, r.out.dispatchModel, r.out.modelOutcome],
+    [null, null, "model session (auto: escalated on files=6, deps=Task 2, steps=unspecified, retry=prior-rejection)"]);
+});
+
+test("a reviewer dispatch measures the task's diff itself: fast within the limits, session past them or with no file list", () => {
+  const repo = routedRepo({ files: ["src/a.mjs", "src/b.mjs"] });
+  writeInto(repo, "src/a.mjs", "a\nb\n");
+  const r = dispatch(repo, [...reviewer, "--orchestrator", OPUS]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.out.model, r.out.dispatchModel, r.out.modelOutcome], [SONNET, "sonnet", `model fast:${SONNET} (auto: lines=2, files=1)`]);
+  assert.equal(outcomeOf(ledgerLines(repo)[0]), r.out.modelOutcome);
+  const big = routedRepo();
+  writeInto(big, "src/a.mjs", "x\n".repeat(401));
+  assert.equal(dispatch(big, [...reviewer, "--orchestrator", OPUS]).out.modelOutcome, "model session (auto: escalated on lines=401)");
+  assert.equal(dispatch(repoWithLedger(), [...reviewer, "--orchestrator", OPUS]).out.modelOutcome, "model session (auto: no file list)");
+});
+
+test("a driven dispatch's ceiling is the drive row's model, and an escalation names it", () => {
+  const state = ["# devcycle state", "- stage: branch-review", `- run: ${RUN}`,
+    `- drive: auto model=${OPUS} opted=2026-11-26T09:00:00Z via=answer`].join("\n") + "\n";
+  const repo = routedRepo({ files: ["1", "2", "3", "4", "5", "6"].map((n) => `src/${n}.mjs`), state });
+  const r = dispatch(repo, [...implementer, "--orchestrator", SONNET]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual([r.out.model, r.out.dispatchModel, r.out.modelOutcome], [OPUS, "opus", `model session:${OPUS} (auto: escalated on files=6)`]);
+});
+
+test("an explicit --model above the ceiling exits 3 and writes nothing; at or below it, it is recorded as a pin", () => {
+  const repo = routedRepo();
+  const over = dispatch(repo, [...implementer, "--orchestrator", SONNET, "--model", OPUS]);
+  assert.equal(over.status, 3, over.stderr);
+  assert.match(over.out.error, /--model claude-opus-5-5 is above this cycle's ceiling claude-sonnet-5-5/);
+  assert.equal(ledgerLines(repo).length, 0);
+  assert.equal(existsSync(join(repo, ".devcycle/briefs")), false);
+  assert.equal(existsSync(join(repo, ".devcycle/dispatch")), false);
+  const under = dispatch(repo, [...implementer, "--orchestrator", OPUS, "--model", SONNET]);
+  assert.equal(under.status, 0, under.stderr);
+  assert.deepEqual([under.out.model, under.out.dispatchModel, under.out.modelOutcome], [SONNET, "sonnet", `model ${SONNET} (pinned)`]);
+  assert.equal(outcomeOf(ledgerLines(repo)[0]), `model ${SONNET} (pinned)`);
+});
+
+test("an explicit --model equal to the ceiling is recorded as a pin, not refused", () => {
+  const repo = routedRepo();
+  const equal = dispatch(repo, [...implementer, "--orchestrator", SONNET, "--model", SONNET]);
+  assert.equal(equal.status, 0, equal.stderr);
+  assert.deepEqual([equal.out.model, equal.out.dispatchModel, equal.out.modelOutcome], [SONNET, "sonnet", `model ${SONNET} (pinned)`]);
+  assert.equal(outcomeOf(ledgerLines(repo)[0]), `model ${SONNET} (pinned)`);
+});
+
+test("an explicit --model under a ceiling that has no tier is not refused, since nothing can rank above it", () => {
+  const unranked = routedRepo();
+  const named = dispatch(unranked, [...implementer, "--orchestrator", "gpt-9", "--model", OPUS]);
+  assert.equal(named.status, 0, named.stderr);
+  assert.equal(ledgerLines(unranked).length, 1);
+  // No --orchestrator, no drive row and no session transcript: the ceiling is "unknown".
+  const unknown = routedRepo();
+  const bare = dispatch(unknown, [...implementer, "--model", OPUS]);
+  assert.equal(bare.status, 0, bare.stderr);
+  assert.equal(ledgerLines(unknown).length, 1);
+});
+
+test("--model-decision is gone, and --steps-unspecified is an implementer signal only", () => {
+  const repo = routedRepo();
+  const old = dispatch(repo, [...implementer, "--model-decision", "fast (auto: files=1)"]);
+  assert.equal(old.status, 2);
+  assert.match(old.out.error, /unrecognised flag --model-decision/);
+  const steps = dispatch(repo, [...reviewer, "--steps-unspecified"]);
+  assert.equal(steps.status, 2);
+  assert.match(steps.out.error, /--steps-unspecified is an implementer signal/);
+  assert.equal(ledgerLines(repo).length, 0);
 });

@@ -36,7 +36,7 @@ load each only when its action needs it.
 - `- drive: manual chosen=<stamp> via=<answer|knob>` — they are walked in an interactive session.
 
 `<id>` and `<level>` are the `model` and `effort` that
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/depth-probe.mjs" --json` prints, never self-report. An `effort`
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/depth-probe.mjs" --json` prints, never self-report. `model=` is the cycle's **ceiling**, the model it was opted in on. Each session's coordinator runs the policy's `coordinator` role under it (`references/model-routing.md` § Roles), resolved at every start and never written here. An `effort`
 of `null` stops the start: write no row, and tell the user the `effortProblem` it prints beside it.
 A row without `effort=` stays valid: the driver resolves it at each start and never writes it back.
 `<stamp>` is `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`. `via=answer` records the user's answer; `via=knob` records that the `executionMode` knob wrote the
@@ -153,7 +153,7 @@ When the `--wait` task returns, stop any follow monitor and act on the `next` it
   `${CLAUDE_PLUGIN_ROOT}/references/handoff.md` and relay the `notify:` lines as it says. After a
   `--stop` this session ran, report it and end instead; the next `/devcycle:continue` asks.
 
-**The watcher shares the account's limits.** Every `Monitor` expiry and relayed line is a turn, and
+**Watching shares the account's limits.** Every `Monitor` expiry and relayed line is a turn, and
 one the usage limit rejects can leave the follow unarmed or the `--wait` unhandled. The driver runs
 on; the next `/devcycle:continue` resumes it. A long wait for a usage-limit reset is reported once,
 with its resume time, never polled.

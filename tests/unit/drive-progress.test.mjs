@@ -6,13 +6,17 @@ import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { parseLedgerLine } from "../../scripts/task-ledger.mjs";
-import { buildProgress, PROGRESS_REL, removeProgress, writeProgress } from "../../scripts/drive-progress.mjs";
+import { buildProgress, PRODUCIBLE_ROUTING_LABELS, PROGRESS_REL, removeProgress, ROUTING_FORMS, routingLabel, writeProgress } from "../../scripts/drive-progress.mjs";
+import { windowFor } from "../../scripts/depth-bands.mjs";
 import { planProgress, taskPosition } from "../../scripts/wave-setup.mjs";
 import { writeInto } from "./helpers.mjs";
 
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 const RUN = { state: "running", session: 4, model: "claude-opus-5-5", effort: "high", startedAt: "2026-10-25T08:00:00Z",
   waitUntil: null, waitWhat: null, stopDetail: null, outcome: null };
+const { session: _session, model: _model, effort: _effort, ...RUN_HEAD } = RUN;
+const FALLBACK_DRIVER = { model: "claude-opus-5-5", effort: "high", watcher: false };
+const windowOf = (model) => windowFor(model).window;
 const entry = (task, event, outcome, key = "") =>
   parseLedgerLine(`- [2026-10-25T08:00:00Z] task=${task} event=${event} outcome=${outcome} ref=none${key ? ` key=${key}` : ""}`);
 const UNPARSEABLE = "rejected (unparseable findings file: no verdict line)";
@@ -70,7 +74,7 @@ test("a task's round is its latest review round, and its rejections count review
       entries: new Map([["6", [entry(6, "committed", "green gate passed")]], ["7", seven], ["8", []]]),
     };
     const { updatedAt, ...progress } = buildProgress({ run: RUN, plan });
-    assert.deepEqual(progress, { v: 1, ...RUN, currentWave: 2, committed: 1, total: 3, waves: [
+    assert.deepEqual(progress, { v: 2, ...RUN_HEAD, driver: FALLBACK_DRIVER, session: null, currentWave: 2, committed: 1, total: 3, waves: [
       { wave: 1, committed: 1, tasks: [{ task: "6", step: "committed", round: 0, rejections: 0 }] },
       { wave: 2, committed: 0, tasks: [{ task: "7", step: "fixing", round: 2, rejections: 3 }, { task: "8", step: "pending", round: 0, rejections: 0 }] },
     ] }, noVerdict);
@@ -102,7 +106,7 @@ test("an implementer dispatched after a rejection or an intake bounce is a fix p
 
 test("with no usable plan the file still carries the run state, with no waves", () => {
   const { updatedAt, ...progress } = buildProgress({ run: { ...RUN, state: "ended", outcome: "complete" }, plan: null });
-  assert.deepEqual(progress, { v: 1, ...RUN, state: "ended", outcome: "complete", currentWave: null, committed: 0, total: 0, waves: [] });
+  assert.deepEqual(progress, { v: 2, ...RUN_HEAD, driver: FALLBACK_DRIVER, session: null, state: "ended", outcome: "complete", currentWave: null, committed: 0, total: 0, waves: [] });
   assert.match(updatedAt, ISO);
 });
 
@@ -167,4 +171,144 @@ test("a task the heartbeat measured carries its health; the rest are unchanged",
   const [one, two] = p.waves[0].tasks;
   assert.deepEqual(one.health, { state: "quiet", elapsedMs: 900_000, toolUses: 4, sinceActivityMs: 880_000 });
   assert.equal("health" in two, false);
+});
+
+test("routingLabel maps each ledger routing outcome to its band label and drops every other form", () => {
+  const cases = [
+    ["model fast:claude-haiku-5-5 (auto: lines=40, files=2)", "fast"],
+    ["model fast (auto: lines=40, files=2)", "fast"],
+    ["model model fast:claude-haiku-5-5 (auto: lines=40, files=2)", "fast"],
+    ["model session (auto: escalated on deps=Tasks 1+3)", "esc deps=Tasks 1+3"],
+    ["model session (auto: escalated on lines=520, files=7)", "esc lines=520, files=7"],
+    ["model session (auto)", "session"],
+    ["model session (auto: no file list)", "session"],
+    ["model claude-sonnet-5-5 (pinned)", "pinned"],
+    ["model claude-sonnet-5-5 (pinned, clamped from claude-opus-5-5)", "pinned, clamped"],
+    ["model claude-sonnet-5-5 (pooled: rung 2/3)", "pool 2/3"],
+    ["model claude-sonnet-5-5 (pooled: rung 2/3, clamped from claude-opus-5-5)", "pool 2/3 + clamped"],
+    ["model session (ceiling: claude-foo-9 unranked)", "ceiling"],
+    ["model session (ceiling: no rung at or below claude-opus-5-5)", "ceiling"],
+    ["model session (escalated, unreachable and unranked)", null],
+    ["model claude-opus-5-5 (escalated, session unreachable: explicit override)", null],
+    ["model sonnet", null], ["model x", null], ["round 2", null], ["implementer retry 1", null],
+    ["", null], [null, null], [undefined, null],
+  ];
+  for (const [outcome, label] of cases) assert.equal(routingLabel(outcome), label, String(outcome));
+});
+
+test("v2 carries the driver session and the live driven session as their own tiers, a window only where windowFor knows one", () => {
+  const p = buildProgress({ run: RUN, plan: null, tiers: {
+    driver: { watcher: true, model: "claude-opus-5-5", effort: "xhigh", tokens: 230_100 },
+    session: { startedAt: "2026-10-25T08:10:00Z", model: "claude-sonnet-5-5", tokens: 182_400 },
+  } });
+  assert.equal(p.v, 2);
+  for (const gone of ["model", "effort"]) assert.equal(gone in p, false, `v2's head has no ${gone}: the tiers carry it`);
+  assert.deepEqual(p.driver, { model: "claude-opus-5-5", effort: "xhigh", tokens: 230_100, window: windowOf("claude-opus-5-5"), watcher: true });
+  assert.deepEqual(p.session, { n: 4, startedAt: "2026-10-25T08:10:00Z", model: "claude-sonnet-5-5", effort: "high", tokens: 182_400, window: windowOf("claude-sonnet-5-5") });
+  const assumed = buildProgress({ run: RUN, plan: null, tiers: { driver: { watcher: true, model: "gpt-x", tokens: 5000 } } });
+  assert.deepEqual(assumed.driver, { model: "gpt-x", tokens: 5000, window: 1_000_000, windowAssumed: true, watcher: true });
+  const unknown = buildProgress({ run: RUN, plan: null, tiers: { driver: { watcher: true, model: "claude-sonnet-3-5", tokens: 5000 } } });
+  assert.deepEqual(unknown.driver, { model: "claude-sonnet-3-5", tokens: 5000, watcher: true });
+  const bare = buildProgress({ run: RUN, plan: null, tiers: { driver: { watcher: true, model: "claude-opus-5-5", effort: null, tokens: null } } });
+  assert.deepEqual(bare.driver, { model: "claude-opus-5-5", watcher: true });
+});
+
+test("with no watcher the driver row is the drive row's model and effort, and a default effort is left out", () => {
+  const none = buildProgress({ run: RUN, plan: null });
+  assert.deepEqual([none.driver, none.session], [FALLBACK_DRIVER, null]);
+  const dflt = buildProgress({ run: { ...RUN, effort: "default" }, plan: null, tiers: { driver: null, session: { startedAt: "2026-10-25T08:10:00Z" } } });
+  assert.deepEqual(dflt.driver, { model: "claude-opus-5-5", watcher: false });
+  assert.deepEqual(dflt.session, { n: 4, startedAt: "2026-10-25T08:10:00Z", model: "claude-opus-5-5" });
+});
+
+test("a running or quiet dispatch carries its model, effort, depth and the routing of its role's latest line; any other health carries none", () => {
+  const root = makeRoot({ lines: [
+    "task=1 event=dispatched outcome=model fast:claude-haiku-5-5 (auto: lines=40, files=2) ref=none",
+    "task=2 event=dispatched outcome=model session (auto) ref=none",
+    "task=2 event=report-received outcome=complete ref=none",
+    "task=2 event=review-round outcome=model session (auto: escalated on lines=520, files=7) ref=none key=2/review-round/1/0",
+  ] });
+  const plan = planProgress({ root, statePath: join(root, ".devcycle/state.md") });
+  const live = (state, role, over = {}) => ({ state, elapsedMs: 180_000, toolUses: 9, sinceActivityMs: 4000, role,
+    model: "claude-sonnet-5-5", effort: "high", tokens: 36_000, ...over });
+  const [one, two] = buildProgress({ run: RUN, plan, health: new Map([["1", live("running", "implementer")], ["2", live("quiet", "reviewer")]]) }).waves[0].tasks;
+  assert.deepEqual(one.health, { state: "running", elapsedMs: 180_000, toolUses: 9, sinceActivityMs: 4000 });
+  assert.deepEqual(one.dispatch, { role: "implementer", model: "claude-sonnet-5-5", effort: "high", tokens: 36_000, window: windowOf("claude-sonnet-5-5"), routing: "fast" });
+  assert.equal(two.dispatch.routing, "esc lines=520, files=7");
+  const unrouted = buildProgress({ run: RUN, plan, health: new Map([["2", live("running", "reviewer", { model: null, effort: null, tokens: null })]]) }).waves[0].tasks[1];
+  assert.deepEqual(unrouted.dispatch, { role: "reviewer", routing: "esc lines=520, files=7" });
+  for (const state of ["ended-with-output", "ended-without-output", "unbound"]) {
+    const t = buildProgress({ run: RUN, plan, health: new Map([["1", live(state, "implementer")]]) }).waves[0].tasks[0];
+    assert.equal("dispatch" in t, false, state);
+    assert.equal(t.health.state, state);
+  }
+});
+
+test("a reviewer whose latest review-round line carries no routing decision draws no routing, even after one that did", () => {
+  const root = makeRoot({ lines: [
+    "task=1 event=dispatched outcome=model session (auto) ref=none",
+    "task=1 event=report-received outcome=complete ref=none",
+    "task=1 event=review-round outcome=model fast (auto: lines=10, files=1) ref=none key=1/review-round/1/0",
+    "task=1 event=review-verdict outcome=rejected ref=none key=1/review-verdict/1/0",
+    "task=1 event=review-round outcome=round 2 ref=none key=1/review-round/2/0",
+  ] });
+  const plan = planProgress({ root, statePath: join(root, ".devcycle/state.md") });
+  const health = new Map([["1", { state: "running", elapsedMs: 1000, toolUses: 1, sinceActivityMs: 0, role: "reviewer", model: "claude-sonnet-5-5" }]]);
+  const [one] = buildProgress({ run: RUN, plan, health }).waves[0].tasks;
+  assert.deepEqual(one.dispatch, { role: "reviewer", model: "claude-sonnet-5-5" });
+});
+
+// A task that has left its dispatch still has the last beat's health, so the step decides whether that health's dispatch is drawn.
+test("a dispatch is carried only while the task's step is its role's: implementing or fixing for an implementer, reviewing for a reviewer", () => {
+  const dispatched = entry(1, "dispatched", "model sonnet"), received = entry(1, "report-received", "complete");
+  const round = entry(1, "review-round", "round 1", "1/review-round/1/0");
+  const rejected = entry(1, "review-verdict", "rejected", "1/review-verdict/1/0");
+  const accepted = entry(1, "review-verdict", "accepted", "1/review-verdict/1/0");
+  const committed = entry(1, "committed", "green gate passed");
+  const stale = (role) => new Map([["1", { state: "running", elapsedMs: 1000, toolUses: 1, sinceActivityMs: 0, role, model: "claude-sonnet-5-5", effort: "high", tokens: 9000 }]]);
+  const taskOf = (entries, role, position = taskPosition(entries)) => {
+    const plan = {
+      overview: { waves: 1, tasks: 1, committed: 0, nextWave: 1, perWave: [{ wave: 1, tasks: ["1"], committed: 0 }] },
+      positions: new Map([["1", position]]), entries: new Map([["1", entries]]),
+    };
+    return buildProgress({ run: RUN, plan, health: stale(role) }).waves[0].tasks[0];
+  };
+  const cases = [
+    ["report-received", [dispatched, received], "reviewing", "implementer", false],
+    ["accepted", [dispatched, received, round, accepted], "committing", "reviewer", false],
+    ["committed", [dispatched, received, round, accepted, committed], "committed", "reviewer", false],
+    ["committed", [dispatched, received, round, accepted, committed], "committed", "implementer", false],
+    ["not-dispatched", [], "pending", "implementer", false],
+    ["rejected", [dispatched, received, round, rejected], "fixing", "reviewer", false],
+    ["dispatched", [dispatched], "implementing", "reviewer", false],
+    ["review-round", [dispatched, received, round], "reviewing", "reviewer", true],
+    ["dispatched", [dispatched], "implementing", "implementer", true],
+  ];
+  for (const [position, entries, step, role, carries] of cases) {
+    const t = taskOf(entries, role);
+    assert.equal(t.step, step, position);
+    assert.equal("dispatch" in t, carries, `${position} with a ${role}`);
+    assert.equal(t.health.state, "running", position);
+  }
+  const fix = taskOf([dispatched, received, round, rejected, entry(1, "dispatched", "model sonnet", "1/dispatched/2/0")], "implementer");
+  assert.deepEqual([fix.step, "dispatch" in fix], ["fixing", true]);
+  const waiting = taskOf([dispatched, received, round], "reviewer", { position: "exhausted-unresolved", next: "ask-user" });
+  assert.deepEqual([waiting.step, "dispatch" in waiting], ["needs-user", false]);
+});
+
+test("a driven dispatch's session forms, which name the ceiling, read as their interactive labels", () => {
+  assert.equal(routingLabel("model session:claude-opus-5-5 (auto: escalated on files=6)"), "esc files=6");
+  assert.equal(routingLabel("model session:claude-opus-5-5 (auto)"), "session");
+  assert.equal(routingLabel("model session:claude-opus-5-5 (auto: no file list)"), "session");
+  assert.equal(routingLabel("model fast:claude-sonnet-5-5 (auto: session tier is the fast tier; signals files=9)"), "fast");
+  assert.equal(routingLabel("model session:claude-opus-5-5 (escalated, unreachable and unranked)"), null);
+});
+
+test("the documented routing vocabulary is exactly the band's producible labels", () => {
+  const doc = readFileSync(new URL("../../docs/playbooks/executing-waves/unattended.md", import.meta.url), "utf8");
+  const list = doc.match(/the routing outcome that picked the model \(([^)]*)\)/)?.[1] ?? "";
+  const documented = [...list.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  assert.deepEqual([...documented].sort(), [...PRODUCIBLE_ROUTING_LABELS].sort());
+  assert.equal(PRODUCIBLE_ROUTING_LABELS.length, ROUTING_FORMS.length);
+  assert.deepEqual(PRODUCIBLE_ROUTING_LABELS, ["fast", "esc <signals>", "session", "ceiling", "pinned", "pinned, clamped", "pool <n>/<len>", "pool <n>/<len> + clamped"]);
 });

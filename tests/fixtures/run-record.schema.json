@@ -124,7 +124,7 @@
       "properties": {
         "kind": { "const": "event" },
         "runId": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
-        "event": { "enum": ["gate-fail", "gate-pass-clean", "gate-deferred-foreign-change", "user-correction-at-gate", "review-reject", "depth-breach", "gate-ran", "spec-review", "review-depth"] },
+        "event": { "enum": ["gate-fail", "gate-pass-clean", "gate-deferred-foreign-change", "user-correction-at-gate", "review-reject", "depth-breach", "gate-ran", "spec-review", "review-depth", "stop-request"] },
         "stage": {
           "enum": [
             "scoping", "audit", "diagnosis", "brainstorm", "planning", "execution",
@@ -370,6 +370,8 @@
           ]
         },
         "costUsd": { "type": "number", "minimum": 0 },
+        "costUsdEstimated": { "type": "number", "minimum": 0 },
+        "effort": { "enum": ["low", "medium", "high", "xhigh", "max", "default"] },
         "depthTokens": { "type": "integer", "minimum": 0 },
         "guardDenials": { "type": "integer", "minimum": 0 },
         "waveAtStart": { "type": "integer", "minimum": 1 }

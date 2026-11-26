@@ -112,11 +112,12 @@ exit 2 or 3 a stop.
      command, and a brief never nests git in `$(…)` or backticks: `hooks/block-destructive-git.mjs`
      denies an implementer all of them.
 3. **Dispatch devcycle:implementer** with that brief only, never accumulated session history or other
-   tasks' reports, on the model `references/model-routing.md` resolves, in a response that holds no
+   tasks' reports, on the `dispatchModel` that `task-dispatch.mjs` prints (no model override when it is `null`), which
+   `references/model-routing.md` § Roles resolves, in a response that holds no
    `Bash` call (`references/delegation.md` § One Bash call per response). The dispatch prompt must NEVER
    instruct the implementer to commit, stage, or push. Immediately before it, give the brief to
-   `task-dispatch.mjs --role implementer --model-decision "<the routing decision>"` (a fix pass adds
-   `--round <n>`) on stdin as a quoted heredoc (`<<'EOF'`) — one `node` call, nothing chained to it,
+   `task-dispatch.mjs --role implementer` (a fix pass adds
+   `--round <n>`; add `--steps-unspecified` when a step fails to name its file and expected behavior) on stdin as a quoted heredoc (`<<'EOF'`) — one `node` call, nothing chained to it,
    no `$(…)` in its flags: the one form the git guard reads as data. Dispatch the file at the
    `briefPath` it prints, gate line appended, never the piped text. The dispatch prompt names that
    path verbatim: `dispatch-health.mjs` binds the agent to its dispatch by it. While the wave setup's
@@ -126,15 +127,16 @@ exit 2 or 3 a stop.
    implementer returns the envelope `references/delegation.md` defines — never the report body — and that envelope's
    on-device count is what triggers the checklist below.
 4. **Intake.** `task-intake.mjs`, given the envelope's `report:` path and `status:` and the task
-   notification's agent id as `--agent-id`, checks the report against its evidence class and lints
+   notification's agent id as `--agent-id`, and as `--model` the dispatch's model id (the `model` task-dispatch printed, or
+   this session's own id when it printed `null`), checks the report against its evidence class and lints
    it — the envelope's `report:` field is a claim, not proof. At `lean` / `standard` add
    `--compose-review`: a `review` result then also writes step 5's reviewer brief and its
    `review-round` line, and prints `reviewBriefPath`, `findingsPath` and `reviewRound`. `review` →
    step 5. `bounce` or `missing-report` → back to the implementer with its `findings`, no reviewer
    dispatch. `needs-user` → the user decides (driven: a `needs-user` stop). The coordinator neither
    produces nor reads the task diff; step 5 does both.
-5. **Dispatch devcycle:task-reviewer** (read-only apart from its own findings file), on the model
-   `references/model-routing.md` resolves, with the brief, the report path, the task's file list, the
+5. **Dispatch devcycle:task-reviewer** (read-only apart from its own findings file), on intake's
+   `reviewDispatchModel`, no override when it is `null` (`references/model-routing.md` § Roles), with the brief, the report path, the task's file list, the
    two evidence-file paths the report names, and the task's constraints block, instructing it to
    produce the diff itself: `git add -N <new files>` first, or they are invisible to diff, then
    `git diff -U10 HEAD -- <files>`. It returns the task-reviewer envelope `references/delegation.md`
@@ -142,7 +144,9 @@ exit 2 or 3 a stop.
    itself (the dispatch supplies the path and round n).
    Dispatch the file at intake's `reviewBriefPath`; when intake printed none (at `thorough`, a
    `missing-findings` re-dispatch, the `dispatch-reviewer` resume position), give its brief to
-   `task-dispatch.mjs --role reviewer --round <n>` the same way first. Read the verdict with
+   `task-dispatch.mjs --role reviewer --round <n>` the same way
+   first (a `missing-findings` re-dispatch uses `--reattempt` in place of `--round` and the brief). The
+   script measures the diff and resolves the reviewer itself, so a resumed position dispatches the same way; dispatch on the `dispatchModel` it prints. Read the verdict with
    `task-verdict.mjs --round <n> --findings <that path> --evidence-class <evidenceClass> --plan <plan> --test-cmd "<gateCmd>" --subject "<subject>"`
    (plus `--trailers` when the convention carries any), which commits an accepted task in-process.
    The wave setup's `tasks[]` gives each uncommitted task its `reviewRound`, `evidenceClass`, `testCmd`
@@ -188,8 +192,8 @@ to the check below, a Bash call with `timeout: 600000` that returns once a line'
 nothing is in flight or the limit passes, and repeats it. On every wake and before every wait,
 first run `node "${CLAUDE_PLUGIN_ROOT}/scripts/dispatch-health.mjs" --record` and act on each line's
 action, never on a missing report (`references/delegation.md` § Return envelopes): `wait`; `intake` or
-`verdict` (its notification is due); `redispatch-implementer` or `redispatch-reviewer` (the same brief,
-a reviewer at the same round); `needs-user` (driven: a `needs-user` stop with `--task`);
+`verdict` (its notification is due); `redispatch-implementer` or `redispatch-reviewer` (re-attempt the
+saved brief through `task-dispatch.mjs --reattempt`, `references/ledger.md` § Task scripts); `needs-user` (driven: a `needs-user` stop with `--task`);
 `stop-agent <agentId>`: stop it with `TaskStop` where the tool exists, then rerun with
 `--stopped <task>`. With no working stop, never redispatch over it — walked, the user decides (stop it
 from the task list, then redispatch, or wait); driven, let running siblings finish, then a

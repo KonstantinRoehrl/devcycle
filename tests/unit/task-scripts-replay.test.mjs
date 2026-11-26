@@ -17,7 +17,8 @@ import { gitToplevel, repoSlug } from "../../scripts/run-record.mjs";
 import { makeRepo, commitAll, writeInto, sh } from "./helpers.mjs";
 
 const RUN = "5c4a5c4a5c4a5c4a";
-const DECISION = "fast (auto: files=1, deps=none, steps=specified)";
+const DECISION = "fast:claude-sonnet-5-5 (auto: files=1, deps=none, steps=specified)";
+const REVIEW = "model fast:claude-sonnet-5-5 (auto: lines=2, files=1)";
 const PLAN = [
   "# Plan",
   "",
@@ -82,10 +83,10 @@ function call(fx, name, args, input) {
 
 // Step 3 — the routing decision is what model-routing.md's audit shape records on `dispatched`.
 const dispatchImplementer = (fx, task, round) =>
-  call(fx, "task-dispatch", ["--task", task, "--role", "implementer", "--model-decision", DECISION,
+  call(fx, "task-dispatch", ["--task", task, "--role", "implementer", "--orchestrator", "claude-opus-5-5",
     ...(round ? ["--round", String(round)] : [])], `brief for task ${task}\n`);
 const dispatchReviewer = (fx, task, round) =>
-  call(fx, "task-dispatch", ["--task", task, "--role", "reviewer", "--round", String(round)], `review brief for task ${task}\n`);
+  call(fx, "task-dispatch", ["--task", task, "--role", "reviewer", "--round", String(round), "--orchestrator", "claude-opus-5-5"], `review brief for task ${task}\n`);
 
 // What a devcycle:implementer leaves behind: the edit, both evidence captures and the report.
 function implement(fx, task, file) {
@@ -139,7 +140,7 @@ function acceptedTask(fx, task, file) {
   return [
     `task=${task} event=dispatched outcome=model ${DECISION} ref=${implementer.briefPath}`,
     `task=${task} event=report-received outcome=complete ref=${report}`,
-    `task=${task} event=review-round outcome=round 1 ref=${reviewer.briefPath}`,
+    `task=${task} event=review-round outcome=${REVIEW} ref=${reviewer.briefPath}`,
     `task=${task} event=review-verdict outcome=accepted ref=.devcycle/findings/${task}-round-1.md`,
   ];
 }
@@ -185,11 +186,11 @@ test("SC4 replay: a rejected round goes back to the implementer, then the next r
     assert.deepEqual(ledger(fx, "1"), [
       `task=1 event=dispatched outcome=model ${DECISION} ref=${first.briefPath}`,
       `task=1 event=report-received outcome=complete ref=${report}`,
-      `task=1 event=review-round outcome=round 1 ref=${round1.briefPath}`,
+      `task=1 event=review-round outcome=${REVIEW} ref=${round1.briefPath}`,
       "task=1 event=review-verdict outcome=rejected ref=.devcycle/findings/1-round-1.md",
-      `task=1 event=dispatched outcome=model ${DECISION} ref=${fix.briefPath}`,
+      `task=1 event=dispatched outcome=model session (auto: escalated on retry=prior-rejection) ref=${fix.briefPath}`,
       `task=1 event=report-received outcome=complete ref=${report}`,
-      `task=1 event=review-round outcome=round 2 ref=${round2.briefPath}`,
+      `task=1 event=review-round outcome=${REVIEW} ref=${round2.briefPath}`,
       "task=1 event=review-verdict outcome=accepted ref=.devcycle/findings/1-round-2.md",
       `task=1 event=committed outcome=green gate passed ref=${commit.sha}`,
     ]);
@@ -234,11 +235,11 @@ test("SC4 replay: after a green-gate failure the fix's review is the next round,
     assert.equal(commitTask(fx, "1", "true").action, "committed");
     assert.deepEqual(ledger(fx, "1").slice(4).map((l) => l.replace(/ ref=\S+$/, "")), [
       "task=1 event=review-verdict outcome=rejected (green gate: exit 1)",
-      `task=1 event=dispatched outcome=model ${DECISION}`,
+      `task=1 event=dispatched outcome=model session (auto: escalated on retry=prior-rejection)`,
       "task=1 event=report-received outcome=complete",
-      "task=1 event=review-round outcome=round 2",
+      `task=1 event=review-round outcome=${REVIEW}`,
       "task=1 event=review-verdict outcome=rejected (missing findings file)",
-      "task=1 event=review-round outcome=round 2",
+      `task=1 event=review-round outcome=${REVIEW}`,
       "task=1 event=review-verdict outcome=accepted",
       "task=1 event=committed outcome=green gate passed",
     ]);
@@ -298,7 +299,7 @@ test("SC4 replay: a sweep task keeps its own two lines, then review, gate and co
     assert.deepEqual(ledger(fx, "3"), [
       `task=3 event=dispatched outcome=sweep model ${DECISION} ref=.devcycle/sweep-args-3.json`,
       "task=3 event=report-received outcome=complete ref=.devcycle/sweep-report-3.json",
-      `task=3 event=review-round outcome=round 1 ref=${reviewer.briefPath}`,
+      `task=3 event=review-round outcome=${REVIEW} ref=${reviewer.briefPath}`,
       "task=3 event=review-verdict outcome=accepted ref=.devcycle/findings/3-round-1.md",
       `task=3 event=committed outcome=green gate passed ref=${commit.sha}`,
     ]);
@@ -323,9 +324,9 @@ test("SC4 replay: a missing findings file re-dispatches the reviewer — one rev
       `task=1 event=dispatched outcome=model ${DECISION} ref=${implementer.briefPath}`,
       `task=1 event=report-received outcome=complete ref=${report}`,
       // The script path's extra line: the prose path logged review-round only once a findings file existed.
-      `task=1 event=review-round outcome=round 1 ref=${lost.briefPath}`,
+      `task=1 event=review-round outcome=${REVIEW} ref=${lost.briefPath}`,
       "task=1 event=review-verdict outcome=rejected (missing findings file) ref=.devcycle/findings/1-round-1.md",
-      `task=1 event=review-round outcome=round 1 ref=${again.briefPath}`,
+      `task=1 event=review-round outcome=${REVIEW} ref=${again.briefPath}`,
       "task=1 event=review-verdict outcome=accepted ref=.devcycle/findings/1-round-1.md",
       `task=1 event=committed outcome=green gate passed ref=${commit.sha}`,
     ]);
@@ -371,7 +372,7 @@ test("SC4 replay: intake --compose-review writes what intake and the reviewer di
     const report = implement(folded, "1", "src/a.txt");
     const composeReview = () => call(folded, "task-intake", ["--task", "1", "--report", report, "--status", "complete",
       "--agent-type", "devcycle:implementer", "--model", "claude-haiku-4-5", "--model-source", "explicit",
-      "--agent-id", "a10f1e2d3c4b5a697", "--compose-review"]);
+      "--agent-id", "a10f1e2d3c4b5a697", "--compose-review", "--orchestrator", "claude-opus-5-5"]);
     const first = composeReview();
     assert.equal(first.reviewBriefPath, ".devcycle/briefs/1-reviewer-round-1.md");
     const linesOnce = readFileSync(join(folded.dir, ".devcycle/ledger.md"), "utf8");

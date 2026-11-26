@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { appendFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DRIVE_LOCK_REL } from "../../scripts/drive-lock.mjs";
 import { RESULT_REL } from "../../scripts/drive-result.mjs";
+import { WATCHER_FILE } from "../../scripts/drive-watcher.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
 import { createRelay, follow, LOG_TAIL_LINES, reportedLine, statusReport, waitForEnd, WATCH_LEVELS } from "../../scripts/drive-watch.mjs";
 import { makeRepo, writeInto } from "./helpers.mjs";
@@ -134,6 +135,30 @@ test("createRelay at all folds a task's accepted verdict into its commit line, c
     assert.deepEqual(lines.map((message) => filtered.push(STAMP + message)), lines.map(() => null), level);
   }
   assert.throws(() => createRelay("loud"), /unknown watch level "loud": expected one of end, wave, all/);
+});
+
+test("createRelay counts review rounds from a keyed line's round=, whatever its outcome says", () => {
+  const relay = createRelay("all");
+  const lines = [
+    "session 1 · 4 tool calls · task=1 event=review-round round=1 outcome=model fast (auto: lines=40, files=2)",
+    "session 1 · 6 tool calls · task=1 event=review-verdict round=1 outcome=rejected",
+    "session 1 · 8 tool calls · task=1 event=review-round round=2 outcome=model session (auto: escalated on lines=401)",
+    "session 1 · 9 tool calls · task=1 event=review-verdict round=2 outcome=accepted",
+    "session 1 · 11 tool calls · task=1 event=committed round=2 outcome=green gate passed",
+    "session 1 · 12 tool calls · task=2 event=review-round outcome=round 1",
+    "session 1 · 13 tool calls · task=2 event=committed outcome=green gate passed",
+  ];
+  assert.deepEqual(lines.map((message) => relay.push(STAMP + message)), [
+    null,
+    "session 1 · 6 tool calls · task=1 event=review-verdict round=1 outcome=rejected",
+    null,
+    null,
+    "task 1 committed (2 review rounds)",
+    null,
+    "task 2 committed (1 review round)",
+  ]);
+  const bounce = "session 1 · 6 tool calls · task=3 event=report-received round=0 outcome=rejected (intake bounce)";
+  assert.equal(reportedLine(STAMP + bounce), bounce);
 });
 
 test("createRelay prints a wait: line only when it differs from the last one it printed", () => {
@@ -372,3 +397,56 @@ test("drive-execution.mjs forwards --level to the follow, and refuses it without
   for (const args of [["--status", "--level", "end", "--state", statePath], ["--follow", "--level", "loud", "--state", statePath], ["--follow", "--level", "--state", statePath]])
     assert.equal(run(args).status, 2, `expected a usage error for ${JSON.stringify(args)}`);
 });
+
+const WITHOUT_SESSION = Object.fromEntries(Object.entries(process.env).filter(([k]) => k !== "CLAUDE_CODE_SESSION_ID"));
+const watcherFile = (c) => join(c.root, ".devcycle", WATCHER_FILE);
+
+test("waitForEnd registers its caller's session beside the state file while it waits, and removes it when the run ends", async () => {
+  const c = makeCycle();
+  liveLock(c.root);
+  const waiting = waitForEnd({ statePath: c.statePath, pollMs: 20, env: { ...process.env, CLAUDE_CODE_SESSION_ID: "watch-1" } });
+  await pause(100);
+  assert.deepEqual(JSON.parse(readFileSync(watcherFile(c), "utf8")).watchers.map((w) => [w.sessionId, w.pid]), [["watch-1", process.pid]]);
+  writeResult(c.root);
+  releaseLock(c.root);
+  await waiting;
+  assert.equal(existsSync(watcherFile(c)), false);
+});
+
+// A band's registration only feeds a display, so a write that cannot land never costs the run's result.
+test("waitForEnd still reports the run's end when the watcher registration cannot be written", { skip: process.getuid?.() === 0 }, async () => {
+  const c = makeCycle();
+  const devcycle = join(c.root, ".devcycle");
+  const unregistered = await waitForEnd({ statePath: c.statePath, pollMs: 20, env: WITHOUT_SESSION });
+  chmodSync(devcycle, 0o555);
+  try {
+    const registered = await waitForEnd({ statePath: c.statePath, pollMs: 20, env: { ...process.env, CLAUDE_CODE_SESSION_ID: "watch-denied" } });
+    assert.deepEqual(registered, unregistered);
+  } finally {
+    chmodSync(devcycle, 0o755);
+  }
+});
+
+test("waitForEnd with no session id registers nothing", async () => {
+  const c = makeCycle();
+  liveLock(c.root);
+  const waiting = waitForEnd({ statePath: c.statePath, pollMs: 20, env: WITHOUT_SESSION });
+  await pause(100);
+  assert.equal(existsSync(watcherFile(c)), false);
+  writeResult(c.root);
+  releaseLock(c.root);
+  await waiting;
+});
+
+for (const [name, script] of [["drive-watch.mjs", WATCH], ["drive-execution.mjs", DRIVER]])
+  test(`${name} --wait removes its registration on SIGTERM and exits 143`, { skip: process.platform === "win32" && "Windows: child.kill() ends a process without running its signal handlers" }, async () => {
+    const c = makeCycle();
+    liveLock(c.root);
+    const child = spawn(process.execPath, [script, "--wait", "--state", c.statePath], { env: { ...POLL_ENV, CLAUDE_CODE_SESSION_ID: "watch-1" } });
+    const exited = new Promise((done) => child.on("exit", (code, signal) => done({ code, signal })));
+    await waitFor(() => existsSync(watcherFile(c)));
+    child.kill("SIGTERM");
+    assert.deepEqual(await exited, { code: 143, signal: null });
+    assert.equal(existsSync(watcherFile(c)), false);
+    releaseLock(c.root);
+  });

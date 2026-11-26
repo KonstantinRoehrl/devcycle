@@ -4,6 +4,7 @@ import {
   PROFILE, ROLE_PARAMS, PLANNING_RATES, EXECUTION_RATE, CALIBRATION, PLANNING_MODELS, CHECKER_PAIRS_PER_DISPATCH,
   taskWeight, taskTokens, draftTier, isCalibrated, dispatchCost, projectPlanning,
 } from "../../scripts/plan-cost.mjs";
+import { loadPolicy } from "../../scripts/model-policy.mjs";
 
 const task = (num, wave, { deps = [], files = [`f${num}.mjs`, `t${num}.mjs`, `g${num}.mjs`], produces = 2, ...flags } = {}) =>
   ({ num, wave, deps, files, produces, ...flags });
@@ -89,4 +90,14 @@ test("a cheaper session model prices the coordinator lower and dispatches the sa
 
 test("a split has no projection", () => {
   assert.equal(projectPlanning({ strategy: "split", rounds: [] }, cut), null);
+});
+
+test("a drafter's tier comes from the policy's drafter row, not a limit of the cost model's own", () => {
+  const policy = loadPolicy();
+  const wide = { ...policy, roles: { ...policy.roles, drafter: { ...policy.roles.drafter, limits: { maxFiles: 10 } } } };
+  const six = [task(1, 1, { files: ["a", "b", "c", "d", "e", "f"] })];
+  assert.equal(draftTier(six), "session");
+  assert.equal(draftTier(six, wide), "fast");
+  assert.equal(draftTier([task(1, 1, { codePinned: true })], wide), "session");
+  assert.equal(draftTier([], policy), "fast");
 });

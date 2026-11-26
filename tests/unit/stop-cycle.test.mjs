@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { startProcess, readRecord } from "../../scripts/on-device-launch.mjs";
 import { recordProcess, retireProcess } from "../../scripts/process-registry.mjs";
 import { gitToplevel, hashSession, recordPath } from "../../scripts/run-record.mjs";
@@ -11,6 +11,7 @@ import { logStep } from "../../scripts/stage-log.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
 import { finalizeStop, listCandidates, requestStop, resumeStopped, waitForQuiet } from "../../scripts/stop-cycle.mjs";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
+import { commitAll, makeFakeBin, makeRepo, sh, writeInto } from "./helpers.mjs";
 
 process.env.DEVCYCLE_RUNS_DIR = makeTempDir("stop-cycle-runs-");
 const SCRIPT = join(process.cwd(), "scripts/stop-cycle.mjs");
@@ -585,4 +586,26 @@ test("the CLI prints exactly one JSON object for each subcommand, driven by the 
   const bad = spawnSync(process.execPath, [SCRIPT, "request"], { cwd: root, env, encoding: "utf8" });
   assert.equal(bad.status, 1);
   assert.match(bad.stderr, /^stop-cycle: request needs --state/m);
+});
+
+test("listing candidates asks only the ownership check: no gh call, even for a branch gh could judge", () => {
+  const repo = realpathSync.native(makeRepo());
+  const cut = sh("git", ["rev-parse", "HEAD"], { cwd: repo }).trim();
+  sh("git", ["checkout", "-qb", "feat/s"], { cwd: repo });
+  writeInto(repo, "s.txt", "s\n");
+  commitAll(repo, "topic work");
+  sh("git", ["checkout", "-q", "main"], { cwd: repo });
+  sh("git", ["remote", "add", "origin", "https://example.invalid/r.git"], { cwd: repo });
+  const state = writeInto(repo, ".devcycle/state.md", ["# devcycle state", `- root: ${repo}`, "- request: guard",
+    `- branch: feat/s (cut from main at ${cut})`, "- stage: execution", "- spec: none", "- plan: none", "- checklist: none", ""].join("\n"));
+  const marker = join(makeTempDir("stop-cycle-gh-"), "called");
+  const bin = makeFakeBin("gh", `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "x"); process.stdout.write("[]");`);
+  const saved = process.env.PATH;
+  process.env.PATH = `${bin}${delimiter}${saved}`;
+  try {
+    assert.equal(listCandidates({ state }).candidates[0].foreign, false);
+  } finally {
+    process.env.PATH = saved;
+  }
+  assert.equal(existsSync(marker), false, "listCandidates reached gh");
 });
