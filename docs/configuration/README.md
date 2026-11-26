@@ -194,8 +194,9 @@ The four **model options** trade cost against capability per role. They default 
 from what the plan makes observable (task size, dependency count, diff size), through the
 one role table in [`references/model-policy.json`](../../references/model-policy.json), and
 records each derivation in the ledger — the session's own model where judgment matters, a fast
-one where the task is narrow and fully specified; the branch review inherits the
-session's model and the walkthrough takes a fast one. Research and exploration dispatches
+one where the task is narrow and fully specified; the branch review and the walkthrough
+inherit the session's model ([`references/model-routing.md`](../../references/model-routing.md)
+§ Roles owns the table). Research and exploration dispatches
 always take the fast tier, whatever the stage: their output is a map rather than a
 judgment, and the roles that must judge — review, diagnosis, design — are the ones that
 keep the session's model. Deriving by tier rather than by

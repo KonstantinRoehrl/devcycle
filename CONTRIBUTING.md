@@ -253,7 +253,10 @@ empirically verified platform behavior, the memos explaining why a devcycle stag
 its superpowers upstream, open defects. Keep run reports, benchmarks, dry runs, on-device checklists and
 results, plans, and specs out of the repository — they are records of one run on one machine,
 they date immediately, and nobody installing the plugin has a use for them. `.devcycle/` is
-gitignored and is where those belong.
+gitignored and is where those belong. The one exception is
+`docs/audits/2026-11-26-unattended-execution.md`: the model policy cites it as the measured basis
+for the coordinator's default tier (`docs/decisions/README.md`, 2026-11-26). The v0.12 disposition
+register is tracked as a ledger the decision log cites, not as a run report.
 
 Three places hold defect state, each for one kind, and this paragraph owns the split.
 `docs/known-issues.md` is the hand-curated store of confirmed defects in devcycle's own engines;

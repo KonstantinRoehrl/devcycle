@@ -53,14 +53,14 @@ model id written here, because ids in playbook prose rot as models change:
   An `auto` or unset knob — every knob's shipped default — is no pool, so the
   implementer default below stays uncovered and closing that case needs a different
   fix. A pool on `walkthroughModel` or `branchReviewModel` saturates the ladder to its top rung
-  with no signal having fired: the saturating `Infinity` the invocation below has
-  them pass is a sentinel, not a counted signal, so nothing climbs.
+  with no signal having fired: the saturating `Infinity` `scripts/model-policy.mjs`
+  passes for them is a sentinel, not a counted signal, so nothing climbs.
   That leaves `implementerModel` and `taskReviewerModel` the only knobs that can reach
   the hatch at all. What it does cover is a pool on one of those two that climbed and
   then fell through to this tier for any reason: the climb is the whole test, so an
   unrankable rung fires it even when a dispatchable lower rung sits in the pool, and
   the orchestrator's own id must itself be rankable, since that id is what the
-  override names. No caller passes it: not the invocation below, not any other file
+  override names. No caller passes it: not `scripts/model-policy.mjs`, not any other file
   in the surface.
 - **fast tier** — the newest fast/small Claude model available to this
   session (the current Sonnet-class generation). If no such id can be
@@ -107,19 +107,15 @@ the orchestrator — resolution dispatches with no model override at all, the on
 form that cannot exceed the orchestrator by construction. A clamp is logged, never
 silent.
 
-**Resolving a configured knob.** When a `*Model` knob resolves to a single id or a
-comma-separated pool — never for `auto`, which this section already treats as unset — run the
-pin, pool, ladder and ceiling arithmetic rather than reasoning it out:
-
-    node "${CLAUDE_PLUGIN_ROOT}/scripts/model-pool.mjs" --value "<the knob's value>" \
-      --orchestrator "<this session's own model id>" --signals <escalation signals fired>
-
-It prints one line of JSON — `{"model": "<id>"|null, "outcome": "<audit string>"}`. Dispatch on
-`model`, with `null` meaning dispatch with no model override at all, and record `outcome` verbatim
-as the ledger event's `outcome=` field: it is already written in every form the Auditability
-paragraph below enumerates. Pass `--signals Infinity` for `walkthroughModel` and
-`branchReviewModel`, which have no complexity predicate and saturate the ladder. `scripts/model-policy.mjs` calls this module for a set knob, and a dispatch through
-`scripts/task-dispatch.mjs` never runs it by hand.
+**Resolving a configured knob.** `scripts/task-dispatch.mjs` resolves `implementerModel` and
+`taskReviewerModel` per dispatch. The branch review and the on-device walkthrough are not dispatched
+through it, so a caller resolves `branchReviewModel` and `walkthroughModel` with § Roles'
+`model-policy.mjs --role branch-review|walkthrough --knob "<the knob's value>"`. It runs the pin,
+pool, ladder and ceiling arithmetic of `scripts/model-pool.mjs`, giving a pool the saturating
+`Infinity` signal, and prints `model`, `dispatch`, `effort` and `outcome`. Dispatch on `model`, with
+`null` meaning dispatch with no model override at all, and record `outcome` verbatim as the ledger
+event's `outcome=` field: it is already written in every form the Auditability paragraph below
+enumerates. Nothing runs `model-pool.mjs` by hand.
 
 Upstream's Model Selection tiers are background only; these predicates
 decide. Auditability: every dispatch's ledger event records the decision and

@@ -90,7 +90,7 @@ carry the same keys; without it the copies drift one release at a time.
 | `implementerModel` | `playbooks/executing-waves.md` | `auto` — `references/model-routing.md` derives it per task |
 | `taskReviewerModel` | `playbooks/executing-waves.md` | `auto` — `references/model-routing.md` derives it per task |
 | `branchReviewModel` | `playbooks/reviewing-the-branch.md` | `auto` — the session's own model |
-| `walkthroughModel` | `playbooks/verifying-on-device.md` | `auto` — a fast model |
+| `walkthroughModel` | `playbooks/verifying-on-device.md` | `auto` — the session's own model, per `references/model-routing.md` § Roles |
 | `planningStrategy` | `playbooks/planning-waves.md` | `auto` — the decision table, `scripts/plan-strategy.mjs` |
 | `planningBudgetUSD` | `playbooks/planning-waves.md` | `0` — no budget |
 | `learnStalenessSessions` | § Learn staleness | `5` |

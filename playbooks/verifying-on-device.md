@@ -56,7 +56,7 @@ the implementation conversation. Its model cannot be routed from inside it, so t
 recommendation travels producer-side: the branch-review handoff carries a `Start the fresh
 session on <model>` line, resolved from `walkthroughModel` per
 `references/model-routing.md`. Where that knob derives rather than pins, the
-walkthrough takes the fast tier per `references/delegation.md`.
+walkthrough takes the session tier (`references/model-routing.md` § Roles).
 
 § The gate decides which of steps 2, 4 and 5 run.
 

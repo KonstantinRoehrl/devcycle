@@ -21,8 +21,10 @@ graphify-out/
 # Audit reports are one-run records of this repo on one machine: written locally, never shipped to
 # installers — the `local` cell in every column of references/config.md § Doc tracking, which owns
 # that call. docs/audits/ is re-included so the directory is visible and docs/audits/* keeps its
-# contents out of every commit. The v0.12 disposition register is a closure ledger
-# docs/decisions/README.md cites, so it is the one exception.
+# contents out of every commit. Two files are re-included by name: the v0.12 disposition register,
+# a closure ledger docs/decisions/README.md cites, and docs/audits/2026-11-26-unattended-execution.md,
+# the one audit tracked as evidence, because the model policy cites it for the coordinator default
+# (CONTRIBUTING.md § What belongs in docs/).
 docs/*
 !docs/*.md
 !docs/comparisons/
