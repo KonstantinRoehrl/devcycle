@@ -13,7 +13,7 @@
 // state's `- stage:` row), `stop` ({ reason, detail } written as drive-stop.json), `rateLimitInSec`
 // (a rejected rate_limit_event resetting that many seconds from now),
 // `rateLimitNoReset` (a rejected rate_limit_event that names no reset time), `result`, `isError`,
-// `costUsd`, `denials`, `usage` (the assistant event's usage block), `messageId` and `repeat` (that
+// `costUsd`, `denials`, `usage` (the assistant event's usage block), `model` (its `message.model`), `messageId` and `repeat` (that
 // event's message id, and how many times it is streamed, as Claude Code streams one event per
 // content block), `toolUseId` (the id of that event's `tool_use` block) and `toolResult` (a main-thread
 // `user` event carrying that call's `tool_result` follows it), `pauseAfterWritesMs` (wait that long
@@ -81,7 +81,7 @@ const emitToolUse = () => {
     emit({
       type: "assistant",
       parent_tool_use_id: null,
-      message: { ...(step.messageId ? { id: step.messageId } : {}), content: [{ type: "tool_use", name: "Bash", ...(step.toolUseId ? { id: step.toolUseId } : {}) }], usage },
+      message: { ...(step.messageId ? { id: step.messageId } : {}), ...(step.model ? { model: step.model } : {}), content: [{ type: "tool_use", name: "Bash", ...(step.toolUseId ? { id: step.toolUseId } : {}) }], usage },
     });
 };
 if (step.toolUseId) emitToolUse();

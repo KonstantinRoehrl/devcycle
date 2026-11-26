@@ -21,6 +21,7 @@ import { SYNTHETIC_MODEL } from "./depth-probe.mjs";
 import { DISPATCH_ENDED, dispatchHealth, recordDeath, sessionSlugDir } from "./dispatch-health.mjs";
 import { acquireDriveLock, DRIVE_LOCK_REL, driveLockUnavailable, driveTokenHash, lockNamesState, readDriveLockHolder, readLiveDriveLock, releaseDriveLock } from "./drive-lock.mjs";
 import { buildProgress, removeProgress, writeProgress } from "./drive-progress.mjs";
+import { driverTier } from "./drive-watcher.mjs";
 import { holderLiveness, LOG_REL, markResultHandled, noProgressEndsAfter, RESULT_REL, STOP_REQUEST_REL, writeCrashedResult, writeDriveResult } from "./drive-result.mjs";
 import { readPluginList, surfaceArgs } from "./drive-surface.mjs";
 import { stopWindowOpen } from "./stop-files.mjs";
@@ -533,7 +534,7 @@ function markProgressed(ctx) {
 }
 
 function runSession(ctx, bin, args, log, n) {
-  const s = { sessionId: null, environment: null, result: null, limit: null, silent: false, tools: 0, depthTokens: null, requests: new Map(),
+  const s = { sessionId: null, environment: null, result: null, limit: null, silent: false, tools: 0, depthTokens: null, model: null, requests: new Map(),
     pending: new Set(), deadDispatch: null };
   let seen = ledgerEntries(ctx.root, ctx.plan).length;
   return new Promise((settle, fail) => {
@@ -565,7 +566,10 @@ function runSession(ctx, bin, args, log, n) {
         if (!e.parent_tool_use_id) {
           s.tools += (e.message?.content ?? []).filter((c) => c?.type === "tool_use").length;
           // A <synthetic> turn (an API error) carries an all-zero usage block, which is no depth.
-          if (e.message?.model !== SYNTHETIC_MODEL) s.depthTokens = contextDepth(e.message?.usage) ?? s.depthTokens;
+          if (e.message?.model !== SYNTHETIC_MODEL) {
+            s.depthTokens = contextDepth(e.message?.usage) ?? s.depthTokens;
+            if (typeof e.message?.model === "string" && e.message.model) s.model = e.message.model;
+          }
           for (const c of e.message?.content ?? []) if (c?.type === "tool_use" && typeof c.id === "string") s.pending.add(c.id);
         }
       } else if (e.type === "user" && !e.parent_tool_use_id) {
@@ -897,7 +901,8 @@ function watchdogBeat(ctx, log) {
   const live = ctx.live;
   if (!live?.s.sessionId || live.s.deadDispatch) return null;
   const dispatches = dispatchHealth({ root: ctx.root, sessionId: live.s.sessionId, now: clockNow() }).filter((d) => d.kind === "task");
-  const health = new Map(dispatches.map((d) => [d.task, { state: d.state, elapsedMs: d.elapsedMs, toolUses: d.toolUses, sinceActivityMs: d.sinceActivityMs }]));
+  const health = new Map(dispatches.map((d) => [d.task, { state: d.state, elapsedMs: d.elapsedMs, toolUses: d.toolUses, sinceActivityMs: d.sinceActivityMs,
+    role: d.role, model: d.model, effort: d.effort, tokens: d.tokens }]));
   const dead = dispatches.filter((d) => DEAD_STATES.has(d.state));
   if (!dead.length || dispatches.some((d) => d.state === "running") || live.s.pending.size) {
     live.deadSince = null;
@@ -916,14 +921,27 @@ function watchdogBeat(ctx, log) {
 
 // The drive band's data (scripts/drive-progress.mjs), rewritten before every log line and on a
 // heartbeat. The band is a view of the run: a write that fails never stops it, and the next line or
-// beat writes it again.
+// beat writes it again. The driver session's tier is read on the heartbeat only, the driven session's
+// comes from the stream the driver already parses.
 function trackProgress(ctx, beat = () => null) {
-  const run = { state: "running", session: 0, model: ctx.model, effort: ctx.effort, startedAt: ctx.startedAt,
+  const run = { state: "running", session: 0, model: ctx.model, effort: ctx.effort, startedAt: ctx.startedAt, sessionStartedAt: null,
     waitUntil: null, waitWhat: null, stopDetail: null, outcome: null };
   let health = null;
-  const write = () => {
+  const readDriver = () => {
     try {
-      writeProgress(ctx.root, buildProgress({ run, plan: planProgress({ root: ctx.root, statePath: ctx.statePath }), health }));
+      return driverTier({ statePath: ctx.statePath });
+    } catch {
+      return null;
+    }
+  };
+  let driver;
+  const write = () => {
+    if (driver === undefined) driver = readDriver();
+    const session = run.state === "running" && run.sessionStartedAt
+      ? { startedAt: run.sessionStartedAt, model: ctx.live?.s.model ?? ctx.model, effort: ctx.effort, tokens: ctx.live?.s.depthTokens ?? null }
+      : null;
+    try {
+      writeProgress(ctx.root, buildProgress({ run, plan: planProgress({ root: ctx.root, statePath: ctx.statePath }), health, tiers: { driver, session } }));
     } catch {
       // Left as it was.
     }
@@ -934,6 +952,7 @@ function trackProgress(ctx, beat = () => null) {
     } catch {
       health = null;
     }
+    driver = readDriver();
     write();
   }, HEARTBEAT_MS);
   heartbeat.unref();
@@ -990,10 +1009,11 @@ async function walk(ctx, opts, log, trap, runState) {
     const before = progressOf(entriesBefore);
     const waveAtStart = inFlightFiles(ctx.planText, entriesBefore).wave;
     const startedAt = now();
-    Object.assign(runState, { state: "running", session: n, waitUntil: null, waitWhat: null });
+    Object.assign(runState, { state: "running", session: n, sessionStartedAt: startedAt, waitUntil: null, waitWhat: null });
     if (n === 1 && ctx.surface.note) log(ctx.surface.note);
     log(`session ${n} starts — wave ${waveAtStart ?? "?"}, model ${ctx.model}, effort ${ctx.effort}, plugins ${ctx.surface.plugins}, mcp ${ctx.surface.mcp}`);
     const s = await runSession(ctx, opts.bin, sessionArgs(ctx, opts, spent), log, n);
+    runState.sessionStartedAt = null;
     const entriesAfter = ledgerEntries(ctx.root, ctx.plan);
     const after = progressOf(entriesAfter);
     if (after.advanced > before.advanced) {

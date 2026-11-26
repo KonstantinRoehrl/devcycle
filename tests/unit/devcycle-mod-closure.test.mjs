@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { STEP_ROLE } from "../../scripts/drive-progress.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const ENTRY = join(ROOT, "hooks", "devcycle-mod.mjs");
@@ -24,7 +25,7 @@ function closureOf(entry) {
 
 test("the hooks module's import closure is the node-free leaves and nothing else", () => {
   assert.deepEqual(closureOf(ENTRY).map((f) => relative(ROOT, f)).sort(), [
-    "hooks/devcycle-mod.mjs", "hooks/lib/run-scope.mjs", "scripts/depth-bands.mjs", "scripts/md-field-core.mjs", "scripts/pricing.mjs",
+    "hooks/devcycle-mod.mjs", "hooks/lib/row-format.mjs", "hooks/lib/run-scope.mjs", "scripts/depth-bands.mjs", "scripts/md-field-core.mjs", "scripts/pricing.mjs",
   ]);
 });
 
@@ -38,4 +39,12 @@ test("no file in that closure imports a node: or bare specifier, calls require, 
     assert.doesNotMatch(text, /\bimport\s*\(/, `${at} imports dynamically`);
     assert.doesNotMatch(text, /(?<![\w.$])process\./, `${at} reads the Node process global`);
   }
+});
+
+// The module may import no node: module, so it repeats the writer's step-to-role map; this pins the two equal.
+test("the hooks module's STEP_ROLE equals the one scripts/drive-progress.mjs writes the band with", () => {
+  const literal = /^const STEP_ROLE = \{([^}]*)\};$/m.exec(readFileSync(ENTRY, "utf8"));
+  assert.ok(literal, "hooks/devcycle-mod.mjs declares no single-line `const STEP_ROLE = { … };`");
+  const copy = Object.fromEntries([...literal[1].matchAll(/(\w+):\s*"([^"]+)"/g)].map((m) => [m[1], m[2]]));
+  assert.deepEqual(copy, STEP_ROLE);
 });

@@ -11,6 +11,8 @@ import { readSection } from "../../scripts/read-section.mjs";
 import { UNREADABLE_PLUGIN_VERSION, installedVersion } from "../../scripts/verification.mjs";
 import { DRIVE_LOCK_REL, readDriveLockHolder } from "../../scripts/drive-lock.mjs";
 import { processStartTime } from "../../scripts/file-lock.mjs";
+import { WATCHER_FILE } from "../../scripts/drive-watcher.mjs";
+import { windowFor } from "../../scripts/depth-bands.mjs";
 import { childEnv, classifyTrackedChanges, inFlightFiles, SESSION_START_TOKENS, stopDriver } from "../../scripts/drive-execution.mjs";
 import { classifyDrive, HANDLED_REL, readDriveResult, readHandledResult, RESULT_REL, STOP_REQUEST_REL } from "../../scripts/drive-result.mjs";
 import { commitAll, makeFakeBin, makeRepo, sh, writeInto } from "./helpers.mjs";
@@ -1389,7 +1391,7 @@ test("the driver keeps .devcycle/drive-progress.json on the run: running per ses
     await waitFor(() => driveLogOf(root).includes("] wait: "));
     const waiting = readProgress(root);
     assert.equal(waiting?.state, "waiting", JSON.stringify(waiting));
-    assert.equal(waiting.session, 1);
+    assert.equal(waiting.session, null, "a waiting run has no live driven session");
     assert.equal(waiting.waitWhat, "usage limit until its reset");
     assert.equal(waiting.waitUntil, driveLogOf(root).match(/wait: usage limit until its reset — resuming at (\S+)/)[1]);
     assert.equal(Date.parse(waiting.waitUntil), t0 + 120_000, "the deadline is the limit's reset plus the driver's one-minute margin");
@@ -1413,17 +1415,21 @@ test("the driver keeps .devcycle/drive-progress.json on the run: running per ses
     const effort = log.match(/\] session 1 starts — .*, effort ([^,]+),/)[1];
     const [atSession1, atSession2, ...more] = readFileSync(snaps, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
     assert.deepEqual(more, [], "a fake claude ran more than twice");
-    const pending = { v: 1, state: "running", model: MODEL, effort, waitUntil: null, waitWhat: null, stopDetail: null, outcome: null, total: 2 };
-    assert.deepEqual(timeless(atSession1), { ...pending, session: 1, currentWave: 1, committed: 0, waves: [
+    const driverRow = { model: MODEL, ...(effort === "default" ? {} : { effort }), watcher: false };
+    const pending = { v: 2, state: "running", driver: driverRow, session: null, waitUntil: null, waitWhat: null, stopDetail: null, outcome: null, total: 2 };
+    const sessionRow = (n) => ({ n, model: MODEL, ...(effort === "default" ? {} : { effort }) });
+    const untimed = (p) => ({ ...timeless(p), session: p.session && (({ startedAt: _t, ...rest }) => rest)(p.session) });
+    for (const snap of [atSession1, atSession2]) assert.match(snap.session?.startedAt ?? "", PROGRESS_ISO, "a running session's row has its start stamp");
+    assert.deepEqual(untimed(atSession1), { ...pending, session: sessionRow(1), currentWave: 1, committed: 0, waves: [
       { wave: 1, committed: 0, tasks: [{ task: "1", step: "pending", round: 0, rejections: 0 }] },
       { wave: 2, committed: 0, tasks: [{ task: "2", step: "pending", round: 0, rejections: 0 }] },
     ] });
-    assert.deepEqual(timeless(atSession2), { ...pending, session: 2, currentWave: 1, committed: 0, waves: [
+    assert.deepEqual(untimed(atSession2), { ...pending, session: sessionRow(2), currentWave: 1, committed: 0, waves: [
       { wave: 1, committed: 0, tasks: [{ task: "1", step: "implementing", round: 0, rejections: 0 }] },
       { wave: 2, committed: 0, tasks: [{ task: "2", step: "pending", round: 0, rejections: 0 }] },
     ] });
     const final = readProgress(root);
-    assert.deepEqual(timeless(final), { ...pending, state: "ended", outcome: "complete", session: 2, currentWave: null, committed: 2, waves: [
+    assert.deepEqual(timeless(final), { ...pending, state: "ended", outcome: "complete", currentWave: null, committed: 2, waves: [
       { wave: 1, committed: 1, tasks: [{ task: "1", step: "committed", round: 0, rejections: 0 }] },
       { wave: 2, committed: 1, tasks: [{ task: "2", step: "committed", round: 0, rejections: 0 }] },
     ] });
@@ -1494,7 +1500,7 @@ test("a stop for the user leaves the progress file stopped with the stop's reaso
   assert.equal(p.stopDetail, "needs-user: task 1: a decision");
   assert.match(driveLogOf(root), /stopped for you — needs-user: task 1: a decision\n/);
   assert.equal(p.outcome, null);
-  assert.equal(p.session, 1);
+  assert.equal(p.session, null, "a stopped run has no live driven session");
   assert.equal(p.currentWave, 1);
   assert.deepEqual(p.waves[0].tasks, [{ task: "1", step: "reviewing", round: 2, rejections: 2 }]);
 });
@@ -1635,5 +1641,70 @@ test("a --stop delivered by signal while the driver waits between sessions appen
     assert.match(stops[0].ts, STAMP);
   } finally {
     if (d.child.exitCode === null) d.child.kill("SIGKILL");
+  }
+});
+
+const OPUS = "claude-opus-5-5";
+// A watching session behind the cycle's live --wait: its registration beside the state file, and its main
+// transcript under the harness's HOME, holding one usage record.
+function seedWatcher(root, home, pid) {
+  writeFileSync(join(root, ".devcycle", WATCHER_FILE),
+    JSON.stringify({ v: 1, watchers: [{ sessionId: "watch-1", pid, startedAt: "2026-11-25T10:00:00.000Z" }] }) + "\n");
+  mkdirSync(join(home, ".claude", "projects", "-w"), { recursive: true });
+  writeFileSync(join(home, ".claude", "projects", "-w", "watch-1.jsonl"), JSON.stringify({ type: "assistant", timestamp: "2026-11-25T10:00:00.000Z",
+    effort: "xhigh", message: { role: "assistant", model: OPUS, content: [], usage: { input_tokens: 230_100 } } }) + "\n");
+}
+const deadPidOf = () => Number(spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"], { encoding: "utf8" }).stdout);
+
+test("the driver row is the live watcher's session: its model, effort and depth; with its pid dead, the drive row's model and no watcher", async () => {
+  const live = makeCycle({ drive: effortRow("high") });
+  const r = await drive(live, [{ ledger: DONE, stage: "branch-review" }], { beforeStart: (h) => seedWatcher(live, h.env.HOME, process.pid) });
+  assert.equal(r.code, 0, r.out);
+  assert.deepEqual(readProgress(live).driver, { model: OPUS, effort: "xhigh", tokens: 230_100, window: windowFor(OPUS).window, watcher: true });
+  const dead = makeCycle({ drive: effortRow("high") });
+  const d = await drive(dead, [{ ledger: DONE, stage: "branch-review" }], { beforeStart: (h) => seedWatcher(dead, h.env.HOME, deadPidOf()) });
+  assert.equal(d.code, 0, d.out);
+  assert.deepEqual(readProgress(dead).driver, { model: MODEL, effort: "high", watcher: false });
+});
+
+test("while a driven session runs, its row carries the model and depth its stream reports", async () => {
+  const root = makeCycle({ drive: effortRow("high") });
+  const h = harness([
+    { ledger: [line(1, "dispatched")], model: "claude-haiku-5-5", hangMs: 1_500 },
+    { ledger: DONE, stage: "branch-review" },
+  ], { DEVCYCLE_DRIVE_HEARTBEAT_MS: "50" });
+  const driver = startDriver(root, h);
+  try {
+    await waitFor(() => readProgress(root)?.session?.model === "claude-haiku-5-5");
+    const { startedAt: _t, ...session } = readProgress(root).session;
+    assert.deepEqual(session, { n: 1, model: "claude-haiku-5-5", effort: "high", tokens: 60_010, window: windowFor("claude-haiku-5-5").window });
+    const r = await driver.result();
+    assert.equal(r.code, 0, r.out);
+    assert.equal(readProgress(root).session, null, "an ended run has no live session");
+  } finally {
+    driver.child.kill("SIGKILL");
+  }
+});
+
+test("a running dispatch's row carries its transcript's model, effort and depth and the routing its ledger line records", async () => {
+  const root = makeCycle();
+  mkdirSync(join(root, ".devcycle/dispatch"), { recursive: true });
+  const routed = "task=1 event=dispatched outcome=model fast:claude-haiku-5-5 (auto: lines=40, files=2) ref=.devcycle/briefs/1-implementer.md key=1/dispatched/0/0";
+  const h = harness([
+    { ledger: [routed], toolUseId: "toolu_1", toolResult: true, hangMs: 1_500 },
+    { ledger: [DONE[0], DONE[1]], stage: "branch-review" },
+  ], { DEVCYCLE_DRIVE_HEARTBEAT_MS: "50" });
+  seedDispatch(root, h.env.HOME, "usage");
+  const driver = startDriver(root, h);
+  try {
+    await waitFor(() => readProgress(root)?.waves?.[0]?.tasks?.[0]?.dispatch !== undefined);
+    const [task1] = readProgress(root).waves[0].tasks;
+    assert.equal(task1.health.state, "running");
+    assert.deepEqual(task1.dispatch, { role: "implementer", model: "claude-sonnet-5-5", effort: "medium", tokens: 36_012,
+      window: windowFor("claude-sonnet-5-5").window, routing: "fast" });
+    const r = await driver.result();
+    assert.equal(r.code, 0, r.out);
+  } finally {
+    driver.child.kill("SIGKILL");
   }
 });

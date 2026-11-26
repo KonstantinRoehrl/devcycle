@@ -15,7 +15,7 @@
 //
 // `lineFilter(line) → boolean` skips a line before it is parsed, and a skipped line is not counted
 // in `records`.
-import { openSync, readSync, closeSync } from "node:fs";
+import { openSync, readSync, closeSync, fstatSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 
 // Exported for the boundary tests alone: a fixture that has to straddle a chunk boundary can only
@@ -87,4 +87,61 @@ export function eachRecord(file, visit, { onChunk, lineFilter } = {}) {
   }
 
   return { records, bytes, stopped };
+}
+
+// One value from the END of a file too large to read whole on every heartbeat: the first non-null
+// pick(record) counting back from the last line. The file is read backward in chunks and split on
+// "\n" BYTES before any decoding, because a chunk boundary can land inside a multi-byte character
+// and only a whole line is safe to decode. A torn or unparseable line is skipped. `capBytes` bounds
+// how far back it looks: past it the answer is null rather than a read of the whole file.
+export const TAIL_CAP = 8 * 1024 * 1024;
+
+const pickFromLine = (bytes, pick) => {
+  const line = bytes.toString("utf8").trim();
+  if (!line) return null;
+  try {
+    return pick(JSON.parse(line)) ?? null;
+  } catch {
+    return null;
+  }
+};
+
+export function lastRecord(file, pick, { chunkBytes = CHUNK, capBytes = TAIL_CAP } = {}) {
+  let fd;
+  try {
+    fd = openSync(file, "r");
+  } catch (err) {
+    if (err.code === "ENOENT") return null;
+    throw err;
+  }
+  try {
+    let pos = fstatSync(fd).size;
+    let read = 0;
+    // The bytes before a chunk's first newline: the end of a line whose start is not read yet.
+    let head = Buffer.alloc(0);
+    while (pos > 0 && read < capBytes) {
+      const n = Math.min(chunkBytes, pos, capBytes - read);
+      const chunk = Buffer.alloc(n);
+      pos -= n;
+      readSync(fd, chunk, 0, n, pos);
+      read += n;
+      const buf = Buffer.concat([chunk, head]);
+      const firstNl = pos > 0 ? buf.indexOf(0x0a) : -1;
+      if (pos > 0 && firstNl === -1) {
+        head = buf;
+        continue;
+      }
+      head = pos > 0 ? buf.subarray(0, firstNl) : Buffer.alloc(0);
+      const lines = pos > 0 ? buf.subarray(firstNl + 1) : buf;
+      for (let end = lines.length; end >= 0; ) {
+        const start = end === 0 ? 0 : lines.lastIndexOf(0x0a, end - 1) + 1;
+        const found = pickFromLine(lines.subarray(start, end), pick);
+        if (found !== null) return found;
+        end = start - 1;
+      }
+    }
+    return null;
+  } finally {
+    closeSync(fd);
+  }
 }

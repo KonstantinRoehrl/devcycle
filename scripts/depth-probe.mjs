@@ -42,7 +42,8 @@ export function findTranscriptFiles(dir) {
   return files;
 }
 
-const lastUsageOf = (r) => (r.message?.usage && r.message.model && r.message.model !== SYNTHETIC_MODEL ? r.message : null);
+// The one last-usage rule the depth probe, the dispatch watchdog and the driver session's tail read share.
+export const lastUsageOf = (r) => (r.message?.usage && r.message.model && r.message.model !== SYNTHETIC_MODEL ? r.message : null);
 
 export function transcriptStats(file) {
   let last = null;

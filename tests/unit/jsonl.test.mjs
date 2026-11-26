@@ -4,7 +4,7 @@ import { writeFileSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { eachRecord, CHUNK } from "../../scripts/jsonl.mjs";
+import { eachRecord, lastRecord, CHUNK } from "../../scripts/jsonl.mjs";
 import { readRecords } from "../../scripts/doctor.mjs";
 
 const write = (name, text) => {
@@ -169,4 +169,25 @@ test("readRecords still returns every record, now through the streaming reader",
     "the delegation must keep readRecords' skip-malformed and no-trailing-newline tolerance");
   assert.deepEqual(readRecords(join(makeTempDir("jsonl-test-"), "nope.jsonl")), [],
     "a missing transcript is an empty session, not a throw");
+});
+
+test("lastRecord returns the last record pick accepts, reading backward across chunk boundaries", () => {
+  const file = join(makeTempDir("jsonl-last-"), "t.jsonl");
+  const rows = Array.from({ length: 50 }, (_, i) => JSON.stringify({ i, pad: "é".repeat(i % 7), keep: i % 10 === 3 }));
+  writeFileSync(file, rows.join("\n") + "\n");
+  for (const chunkBytes of [7, 64, 1000, CHUNK]) assert.equal(lastRecord(file, (r) => (r.keep ? r.i : null), { chunkBytes }), 43, `chunk ${chunkBytes}`);
+  assert.equal(lastRecord(file, (r) => (r.i === 0 ? "first" : null), { chunkBytes: 7 }), "first", "the file's first line is read whole");
+});
+
+test("lastRecord skips a torn trailing line and an unparseable one, and is null with no match, no file, or past its cap", () => {
+  const dir = makeTempDir("jsonl-last-");
+  const file = join(dir, "t.jsonl");
+  writeFileSync(file, `${JSON.stringify({ ok: 1 })}\nnot json\n${JSON.stringify({ ok: 2 })}\n{"ok": 3, "torn`);
+  assert.equal(lastRecord(file, (r) => r.ok ?? null, { chunkBytes: 5 }), 2);
+  assert.equal(lastRecord(file, () => null), null);
+  assert.equal(lastRecord(join(dir, "absent.jsonl"), () => 1), null);
+  const big = join(dir, "big.jsonl");
+  writeFileSync(big, JSON.stringify({ ok: "early" }) + "\n" + "x".repeat(4096) + "\n");
+  assert.equal(lastRecord(big, (r) => r.ok ?? null, { chunkBytes: 512, capBytes: 1024 }), null, "gave up before reaching the match");
+  assert.equal(lastRecord(big, (r) => r.ok ?? null, { chunkBytes: 512 }), "early");
 });

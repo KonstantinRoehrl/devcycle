@@ -431,3 +431,26 @@ test("recordRunning: only an open record bound to an agent transcript that reads
   assert.equal(recordRunning({ agentId: "zz9", sessionId: SID }, at), false, "no transcript for the agent");
   assert.equal(recordRunning(null, at), false);
 });
+
+test("readTranscript keeps the last usage record's model, effort and depth, skipping a synthetic record", () => {
+  assert.deepEqual(readTranscript(FIX("usage")).usage, { model: "claude-sonnet-5-5", effort: "medium", tokens: 36_012 });
+  assert.equal(readTranscript(FIX("pending-tool")).usage, null, "no record carries usage");
+  const bare = join(makeTempDir("dispatch-health-usage-"), "agent-u1.jsonl");
+  writeFileSync(bare, JSON.stringify({ type: "assistant", timestamp: "2026-10-28T08:00:05.000Z",
+    message: { role: "assistant", model: "claude-haiku-5-5", content: [], usage: { input_tokens: 7 } } }) + "\n");
+  assert.deepEqual(readTranscript(bare).usage, { model: "claude-haiku-5-5", effort: null, tokens: 7 }, "a record with no effort field");
+  const empty = join(makeTempDir("dispatch-health-usage-"), "agent-u2.jsonl");
+  writeFileSync(empty, "");
+  assert.equal(readTranscript(empty).usage, null, "a transcript with no message record");
+});
+
+test("a bound dispatch carries its transcript's model, effort and depth; an unbound one carries nulls", () => {
+  const [d] = health(world({ agents: { a1: "usage" } }), { now: T0 + 3 * 60_000 });
+  assert.deepEqual([d.state, d.model, d.effort, d.tokens], ["running", "claude-sonnet-5-5", "medium", 36_012]);
+  const [bound] = health(world({ agents: { a1: "pending-tool" } }), { now: T0 + 3 * 60_000 });
+  assert.deepEqual([bound.model, bound.effort, bound.tokens], [null, null, null], "a transcript with no usage record");
+  const w = world({ agents: { a2: "usage" } });
+  unrelate(w, "a2");
+  const [unbound] = health(w, { now: T0 + 60_000 });
+  assert.deepEqual([unbound.state, unbound.model, unbound.effort, unbound.tokens], ["unbound", null, null, null]);
+});

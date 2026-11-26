@@ -203,22 +203,21 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
 
 - **Watch:** during a run, and until `/devcycle:continue` handles its end, devcycle's hooks module
   draws a band above the prompt of an interactive Claude Code session in that checkout, at no model
-  turn. Its header names the session, model, effort and elapsed time; a strip shows each wave's
+  turn. Its header names the driver session — the session whose `--wait` is live, which registers itself in `.devcycle/drive-watcher.json` — with its model, effort, context use (`ctx NN%`), the run's elapsed time and its tokens, or `no watcher` and the drive row's model when no live wait is registered; while a driven session runs, a `session <n>` row below it shows that session the same way, with its own elapsed time; a strip shows each wave's
   committed count (`✓` done, `●` current, `○` pending) and the total; one row per task of the
   current wave shows its step — pending, implementing, reviewing, fixing, committing or
-  needs-user, with the review round and any rejections — or `✓ committed`. A running task's row adds its elapsed
-  time and tool count; a quiet one shows `? … silent <m>` and one that ended without its output
+  needs-user, with the review round and any rejections — or `✓ committed`. A running task's row adds the model its dispatch runs on, its effort and `ctx`, the routing outcome that picked the model (`fast`, `esc <signals>`, `session`, `pinned`, `pool <n>/<len>` or `ceiling`), its elapsed time, tool count and tokens; on a narrow terminal a row drops its tokens, then its `ctx`, before it cuts its step, round or rejection warning, and a band taller than the prompt area allows folds the wave's committed and pending rows into one; a quiet one shows `? … silent <m>` and one that ended without its output
   `↻ … ended before reporting — redispatching`, both in warning. A wait shows `⏸ <what> — resumes <time>`, a stop for you
   `✖ stopped for you — <detail>`, and the end `✓ run complete` or `✖ run ended: <outcome>`, each
   pointing at `/devcycle:continue`; a driver silent for two minutes shows
-  `? driver silent since <time>`. The band reads only `.devcycle/drive-progress.json`, which the
+  `? drive silent since <time>`. The band reads only `.devcycle/drive-progress.json`, which the
   driver rewrites on every log line and every 30 seconds and `--mark-handled` removes. The
   `/devcycle:continue` session that started or attached to the driver relays what `driveWatch` asks
   for. From anywhere, `node <plugin root>/scripts/drive-execution.mjs --status --state
   .devcycle/state.md` prints whether it runs, how its last run ended and the log's last 40 lines;
   `--follow` streams the reported lines (`--level` picks which), and `tail -f .devcycle/drive.log`
   shows everything.
-- **Stop:** ask the watching session to stop it, or run
+- **Stop:** ask the driver session to stop it, or run
   `node <plugin root>/scripts/drive-execution.mjs --stop --state .devcycle/state.md`. The driver
   stops the running session's whole process group, writes that session's record and its result
   (`stopped`), releases the lock and exits 130; `/devcycle:continue` asks before resuming it. A
