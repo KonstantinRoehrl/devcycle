@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.35.0 — 2026-11-26
+
+- feat(models): one model-selection policy, drive band tiers, resume checkout gates and self-maintaining CI pins (#456, #429, #495)
+
 ## 0.34.0 — 2026-11-22
 
 - feat(maintain): verified hygiene sweep, write-issue and triage-issues skills, and shared issue folding (#478, #485, #489)
