@@ -11,6 +11,7 @@ import { DECISIONS_DOC } from "../../scripts/doc-paths.mjs";
 import { makePluginFixture as makeBaseFixture, writeInto, runValidate, recordBudgets, rebaseline, FIXTURE_PLAYBOOK_HEAD } from "./helpers.mjs";
 import { recordStoreTrackingErrors, docsSubdirTrackingErrors } from "../../scripts/validate.mjs";
 import { closure } from "../../scripts/context-closure.mjs";
+import { ROLES_TABLE_HEAD, rolesTableRows } from "../../scripts/model-policy.mjs";
 
 const REPO_ROOT = new URL("../..", import.meta.url).pathname;
 
@@ -1144,8 +1145,12 @@ test("check 13 rule 2 fails when no surface instruction names --knob for the kno
   // (--knobs, wave-setup.mjs's flag) must not be waved through. Same byte count, so no budget trips.
   const failDir = makeTempDir("validate13e-fail-");
   cpSync(REPO_ROOT, failDir, { recursive: true, filter: (s) => !s.includes("/.git/") });
-  const cyclePath = join(failDir, "commands/cycle.md");
-  writeFileSync(cyclePath, readFileSync(cyclePath, "utf8").replaceAll("--knob ", "--knobs"));
+  // references/model-routing.md § Roles shows model-policy.mjs's `[--knob <value>]` flag, which names
+  // --knob too, so it is rewritten with cycle.md.
+  for (const rel of ["commands/cycle.md", "references/model-routing.md"]) {
+    const path = join(failDir, rel);
+    writeFileSync(path, readFileSync(path, "utf8").replaceAll("--knob ", "--knobs"));
+  }
   const rFail = spawnSync(process.execPath, [join(failDir, "scripts/validate.mjs")], { cwd: failDir, encoding: "utf8" });
   assert.notStrictEqual(rFail.status, 0);
   assert.match(rFail.stdout + rFail.stderr, /knobs/);
@@ -2904,4 +2909,41 @@ test("floor check: an owner file that does not parse fails, naming it", () => {
   const dir = withFloor(makePluginFixture());
   writeInto(dir, ".github/claude-code/package.json", "{");
   failsWith(runValidate(dir), /\.github\/claude-code\/package\.json/);
+});
+
+// --- check 32: the role table ---
+
+// The policy file needs a script that names it (check 11) and model-routing.md a prefixed read.
+const ROLE_POLICY = {
+  dispatchForm: "alias", fastFamily: "sonnet",
+  roles: {
+    driver: { layer: "Node script", default: "none: model-free", tier: "none", knob: null, effort: null },
+    implementer: { layer: "subagent", default: "fast; session tier on a signal", tier: "auto", knob: "implementerModel", effort: "inherit", limits: { maxFiles: 5 } },
+  },
+};
+const withRoles = (dir, rows = rolesTableRows(ROLE_POLICY)) => {
+  writeInto(dir, "references/model-policy.json", JSON.stringify(ROLE_POLICY, null, 2) + "\n");
+  writeInto(dir, "scripts/reads-policy.mjs", 'export const POLICY = "references/model-policy.json";\n');
+  writeInto(dir, "references/model-routing.md", `# Model routing\n\n## Roles\n\n${ROLES_TABLE_HEAD}\n${rows.join("\n")}\n`);
+  playbook(dir, readSection("model-routing.md"));
+  rebaseline(dir);
+  return dir;
+};
+
+test("role table check: rows rendered from the policy pass, and a drifted cell fails naming the role", () => {
+  ok(runValidate(withRoles(makePluginFixture())));
+  const [driver, implementer] = rolesTableRows(ROLE_POLICY);
+  failsWith(runValidate(withRoles(makePluginFixture(), [driver, implementer.replace("fast;", "session;")])),
+    /references\/model-routing\.md § Roles: the implementer row differs from references\/model-policy\.json/);
+});
+
+test("role table check: an unparseable policy fails, and a tree without the policy file is not checked", () => {
+  const dir = withRoles(makePluginFixture());
+  writeInto(dir, "references/model-policy.json", "{ not json\n");
+  failsWith(runValidate(dir), /references\/model-policy\.json: not valid JSON/);
+  const plain = makePluginFixture();
+  writeInto(plain, "references/model-routing.md", "# Model routing\n\n## Roles\n\n| `oracle` | x | y | none |\n");
+  playbook(plain, readSection("model-routing.md"));
+  rebaseline(plain);
+  ok(runValidate(plain));
 });

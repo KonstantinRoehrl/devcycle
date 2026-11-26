@@ -14,7 +14,7 @@ Planning always ends with `Clear + /devcycle:continue`. When that `/devcycle:con
 
 - **Start unattended** — the session records
   `- drive: auto model=<id> effort=<level|default> opted=<stamp> via=answer` in `.devcycle/state.md`
-  (the model and effort it runs on, as the depth probe reads them), starts the driver and watches it.
+  (the model you opted in on, which becomes the cycle's ceiling, and the effort, as the depth probe reads them), starts the driver and watches it.
   Both are fixed for the cycle: a later `/model` or `/effort` does not reach the run.
 - **Walk the waves manually** — it records `- drive: manual chosen=<stamp> via=answer` and walks
   the waves in that session, as before.
@@ -74,7 +74,7 @@ attaches or picks up the end.
    to a file a task neither in flight nor committed will write, listing every such path with its
    task (`commit, stash or revert it — task <n> writes this file`), and logs the tracked changes no
    remaining task writes as left alone (untracked files and `.devcycle/` are ignored, and a crashed
-   session's edits in an in-flight task's files are admitted); it refuses a model whose context
+   session's edits in an in-flight task's files are admitted); it refuses a coordinator, then the ceiling it falls back to, whose context
    window is unknown or would put a fresh session (~55k tokens) in the over-budget band or past it;
    and it refuses to run inside a Claude Code Bash sandbox. Every refusal names its remedy. Only
    then does it take the lock `.devcycle/drive.lock` (pid, process start time, host, hashes of the
@@ -84,15 +84,22 @@ attaches or picks up the end.
    `.devcycle/drive-result.json` to `.devcycle/drive-result.handled.json` and remove a leftover stop
    request. A refused start, like `--dry-run`, leaves both where they are.
 2. **One session per wave.** While the state is at `stage: execution` it starts
-   `claude -p "/devcycle:continue --drive .devcycle/state.md"` with `--model <id>`, `--effort <level>`
+   `claude -p "/devcycle:continue --drive .devcycle/state.md"` with `--model <coordinator>`, `--effort <level>`
    (left out at `default`, with `CLAUDE_CODE_EFFORT_LEVEL` set to the same level or removed),
    `--permission-mode auto`, `--output-format stream-json`, `--verbose` and the lean surface below
-   (plus `--max-budget-usd` when you set `--max-usd`), with `DEVCYCLE_NESTED_RUN` and `CLAUDECODE` removed
-   from the session's environment so devcycle's hooks module stays active, and this run's token in
+   (plus `--max-budget-usd` when you set `--max-usd`), with `DEVCYCLE_NESTED_RUN`, `CLAUDECODE`, `CLAUDE_CODE_SUBAGENT_MODEL`,
+   `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and `CLAUDE_CODE_SUBAGENT_EFFORT` removed
+   from the session's environment so devcycle's hooks module stays active and no configured default
+   reroutes a dispatch the scripts resolved, and this run's token in
    `DEVCYCLE_DRIVE_TOKEN`, and `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`, so headless mode never stops its
    running subagents 10 minutes after a turn ends. The session resumes from the files
    under `.devcycle/`, runs the wave, emits its handoff and ends — ending a print-mode session is the
-   clear.
+   clear. The coordinator is the policy's `coordinator` role under the `drive:` row's `model=`. On an
+   Opus-class ceiling that is the newest priced Sonnet, and on a Sonnet-class, Haiku-class or
+   unrankable ceiling it is the ceiling itself. It is resolved at every start, never written to the
+   row, and a coordinator the pre-flight refuses falls back to the ceiling. Why the coordinator takes
+   the fast tier, and what it cost before, is measured in
+   [the unattended-execution audit](../../audits/2026-11-26-unattended-execution.md).
 3. **One record per session.** As each session ends the driver appends a `drive` row to the cycle's
    run record: ledger and commit counts before and after, cost, last context depth, guard denials,
    and why the session ended. `/devcycle:doctor` reports driven and manual runs as separate cohorts.
@@ -125,7 +132,7 @@ off for that session alone. `drivePlugins: all` restores the full surface, MCP s
 When the plugin list cannot be read, the session keeps every plugin, still without MCP servers, and
 the log says `plugin list unavailable — full plugin surface`; the run never refuses over it. Your
 settings files, permissions and hooks stay as they are, and devcycle's hooks module stays loaded.
-Each `session <n> starts` line names the model, effort, plugins and MCP servers it got.
+Each `session <n> starts` line names the coordinator and the ceiling it runs under, the effort, plugins and MCP servers it got: `session <n> starts — wave <w>, model <coordinator> (ceiling <ceiling>), effort <e>, plugins …`.
 
 The effort is the `drive:` row's `effort=` (`references/drive.md` owns the row); a row written
 before effort was recorded is resolved at each start from `CLAUDE_EFFORT` and your settings' effort
@@ -206,8 +213,9 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
   turn. Its header names the driver session — the session whose `--wait` is live, which registers itself in `.devcycle/drive-watcher.json` — with its model, effort, context use (`ctx NN%`), the run's elapsed time and its tokens, or `no watcher` and the drive row's model when no live wait is registered; while a driven session runs, a `session <n>` row below it shows that session the same way, with its own elapsed time; a strip shows each wave's
   committed count (`✓` done, `●` current, `○` pending) and the total; one row per task of the
   current wave shows its step — pending, implementing, reviewing, fixing, committing or
-  needs-user, with the review round and any rejections — or `✓ committed`. A running task's row adds the model its dispatch runs on, its effort and `ctx`, the routing outcome that picked the model (`fast`, `esc <signals>`, `session`, `pinned`, `pool <n>/<len>` or `ceiling`), its elapsed time, tool count and tokens; on a narrow terminal a row drops its tokens, then its `ctx`, before it cuts its step, round or rejection warning, and a band taller than the prompt area allows folds the wave's committed and pending rows into one; a quiet one shows `? … silent <m>` and one that ended without its output
-  `↻ … ended before reporting — redispatching`, both in warning. A wait shows `⏸ <what> — resumes <time>`, a stop for you
+  needs-user, with the review round and any rejections — or `✓ committed`. A running task's row adds the model its dispatch runs on, its effort and `ctx`, the routing outcome that picked the model (`fast`, `esc <signals>`, `session`, `ceiling`, `pinned`, `pinned, clamped`, `pool <n>/<len>` or `pool <n>/<len> + clamped`), its elapsed time, tool count and tokens; on a narrow terminal a row drops its tokens, then its `ctx`, before it cuts its step, round or rejection warning, and a band taller than the prompt area allows folds the wave's committed and pending rows into one; a quiet one shows `? … silent <m>` and one that ended without its output
+  `↻ … ended before reporting — redispatching`, both in warning. A driven dispatch that names the
+  cycle's ceiling reads with the same routing labels. A wait shows `⏸ <what> — resumes <time>`, a stop for you
   `✖ stopped for you — <detail>`, and the end `✓ run complete` or `✖ run ended: <outcome>`, each
   pointing at `/devcycle:continue`; a driver silent for two minutes shows
   `? drive silent since <time>`. The band reads only `.devcycle/drive-progress.json`, which the
@@ -242,7 +250,7 @@ Your own terminal is not guarded. To work on something else meanwhile, use anoth
 | Flag | Default | What it does |
 | --- | --- | --- |
 | `--state <path>` | required | The cycle's `.devcycle/state.md`. |
-| `--model <id>` | the `drive:` row's model | Runs every session on this model instead. |
+| `--model <id>` | the coordinator under the `drive:` row's model | Runs every session's coordinator on this model instead. The ceiling, which every dispatch the scripts resolve stays under, is still the `drive:` row's model. |
 | `--effort <level>` | the `drive:` row's effort | Runs every session at `low`, `medium`, `high`, `xhigh` or `max` instead; `default` passes no `--effort` and removes `CLAUDE_CODE_EFFORT_LEVEL`. |
 | `--plugins <names>` | `none` | The plugins a session keeps beside devcycle and superpowers: `none`, a comma-separated list of names, or `all` for the full surface with MCP servers. `/devcycle:continue` passes the `drivePlugins` setting. |
 | `--max-usd <n>` | none | Total dollar cap across sessions; each session gets the remainder as `--max-budget-usd`. On a subscription plan the cost is an estimate; a session that reports no cost is charged one priced from its streamed usage and its transcripts. |

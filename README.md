@@ -121,7 +121,7 @@ a `.devcycle/state.md`, checks the one file `.devcycle/drive-progress.json` besi
 ms (reading it only when it changed) to draw the drive band above the prompt while an unattended run's
 driver is running or an ended run awaits `/devcycle:continue`; that file is written by the
 unattended-run driver, and the band spends no model turn. The band shows the driver session (the
-session whose `--wait` is live), the live driven session and each running dispatch, each with its
+session whose `--wait` is live), the live driven session, which runs on the coordinator model under the cycle's ceiling, and each running dispatch, each with its
 model, effort and context use; to know the driver session, each `--wait` writes its session id,
 pid and process start time to `.devcycle/drive-watcher.json` beside the state file and removes
 them when it exits.

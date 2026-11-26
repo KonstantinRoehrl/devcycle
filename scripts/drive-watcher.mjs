@@ -1,8 +1,8 @@
-// Which session is watching an unattended run, and that session's last usage record. Every watching
-// session waits through `--wait` (references/drive.md), and its `--wait` registers it here; the band's
-// heartbeat takes the latest live registration. A `--detach` driver outlives the session that started
-// it, which is why the session id is not captured once at start. The file sits beside the state file
-// and its readers are the driver's heartbeat and the watching sessions' own `--wait`.
+// Which session is the driver session of an unattended run, and that session's last usage record. Every
+// driver session waits through `--wait` (references/drive.md), and its `--wait` registers it here; the
+// band's heartbeat takes the latest live registration. A `--detach` driver outlives the session that
+// started it, which is why the session id is not captured once at start. The file sits beside the state
+// file and its readers are the driver's heartbeat and the driver sessions' own `--wait`.
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { atomicWrite } from "./atomic-write.mjs";

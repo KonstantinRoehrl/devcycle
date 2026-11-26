@@ -1,0 +1,100 @@
+{
+  "dispatchForm": "alias",
+  "fastFamily": "sonnet",
+  "roles": {
+    "starter": {
+      "layer": "interactive session that starts the driver",
+      "default": "the user's own model; hands off, no relayed turns at driveWatch=end",
+      "tier": "user",
+      "knob": null,
+      "effort": null
+    },
+    "driver": {
+      "layer": "Node script",
+      "default": "none: model-free",
+      "tier": "none",
+      "knob": null,
+      "effort": null
+    },
+    "coordinator": {
+      "layer": "driven claude -p, one per wave",
+      "default": "fast tier, capped at the ceiling",
+      "tier": "coordinator",
+      "knob": null,
+      "effort": "inherit"
+    },
+    "implementer": {
+      "layer": "subagent",
+      "default": "fast tier; session tier on the existing signals",
+      "tier": "auto",
+      "knob": "implementerModel",
+      "effort": "inherit",
+      "limits": { "maxFiles": 5 }
+    },
+    "task-reviewer": {
+      "layer": "subagent",
+      "default": "fast tier within the line and file limits, else session tier",
+      "tier": "auto",
+      "knob": "taskReviewerModel",
+      "effort": "inherit",
+      "limits": { "maxLines": 400, "maxFiles": 5 }
+    },
+    "branch-review": {
+      "layer": "subagent",
+      "default": "session tier",
+      "tier": "session",
+      "knob": "branchReviewModel",
+      "effort": "inherit"
+    },
+    "walkthrough": {
+      "layer": "subagent",
+      "default": "session tier",
+      "tier": "session",
+      "knob": "walkthroughModel",
+      "effort": "inherit"
+    },
+    "planning-session": {
+      "layer": "session or a later driven session",
+      "default": "session tier",
+      "tier": "session",
+      "knob": null,
+      "effort": "inherit"
+    },
+    "research": {
+      "layer": "planning subagent",
+      "default": "fast tier",
+      "tier": "fast",
+      "knob": null,
+      "effort": "inherit"
+    },
+    "spike": {
+      "layer": "planning subagent",
+      "default": "fast tier",
+      "tier": "fast",
+      "knob": null,
+      "effort": "inherit"
+    },
+    "checker": {
+      "layer": "planning subagent",
+      "default": "fast tier",
+      "tier": "fast",
+      "knob": null,
+      "effort": "inherit"
+    },
+    "drafter": {
+      "layer": "planning subagent",
+      "default": "fast tier; session tier on a code-pinned task, a new abstraction, too many files or cross-package scope",
+      "tier": "auto",
+      "knob": null,
+      "effort": "inherit",
+      "limits": { "maxFiles": 5 }
+    },
+    "repair": {
+      "layer": "planning subagent",
+      "default": "the tier of the drafter it repairs",
+      "tier": "drafter-tier",
+      "knob": null,
+      "effort": "inherit"
+    }
+  }
+}

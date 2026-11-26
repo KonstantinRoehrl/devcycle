@@ -5,6 +5,127 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-26 — The unattended-execution audit stays tracked as the one audit kept as evidence (#456 slice 2)
+
+**Decision:** `docs/audits/2026-11-26-unattended-execution.md` stays tracked, re-included by name in
+`.gitignore`, although `CONTRIBUTING.md` § What belongs in docs/ keeps run reports and benchmarks out of
+the repository. It is the one audit kept that way: the model policy and the docs hub cite it as the
+measured basis for the coordinator's fast-tier default, and a shipped default should link the evidence
+it rests on. `CONTRIBUTING.md` and the `.gitignore` comment both name it as the exception.
+
+**Why:** its figures come from the run records of one machine, which an installer cannot reproduce,
+so it is a dated record of why the default was chosen, not a benchmark to re-run. The v0.12
+disposition register is tracked on a different ground, as a closure ledger this log cites.
+
+**Also in this change:** the same round corrected prose that still disagreed with the policy. The
+walkthrough takes the session tier, as `references/model-routing.md` § Roles renders it, where
+`references/config.md`, `playbooks/verifying-on-device.md` and `docs/configuration/README.md` said a
+fast model. The branch review and the walkthrough resolve their knobs through
+`model-policy.mjs --role`, not a hand call of `model-pool.mjs`. A driven session-tier dispatch names the
+ceiling in `references/delegation.md`, and four knob descriptions in `.claude-plugin/plugin.json` no
+longer say the coordinator derives per task.
+
+**Budgets:** the prose edits moved these closure figures (old to new, in bytes; the `surfaceTotal` in lines):
+
+```text
+commands/continue.md 81950 -> 81860
+commands/cycle.md 95775 -> 95601
+commands/learn.md 17884 -> 17939
+commands/maintain.md 19121 -> 19176
+commands/onboard.md 18172 -> 18227
+commands/reconcile.md 25609 -> 25664
+commands/review.md 26239 -> 26288
+commands/verify.md 25337 -> 25392
+playbooks/executing-waves.md 126801 -> 126798
+playbooks/finishing-the-cycle.md 54753 -> 54808
+playbooks/learning-from-sessions.md 66856 -> 67020
+playbooks/maintaining-the-repo.md 82712 -> 82709
+playbooks/onboarding-a-repo.md 31715 -> 31770
+playbooks/planning-waves.md 74483 -> 74606
+playbooks/receiving-review.md 132918 -> 132915
+playbooks/reviewing-code.md 109206 -> 109203
+playbooks/reviewing-the-branch.md 65605 -> 65479
+playbooks/scoping-the-request.md 38199 -> 38308
+playbooks/sweeping-mechanical-changes.md 103270 -> 103212
+playbooks/taking-the-fast-path.md 58087 -> 57906
+playbooks/triaging-issues.md 21401 -> 21510
+playbooks/verifying-on-device.md 68258 -> 68326
+references/config.md 15242 -> 15297
+references/delegation.md 12832 -> 12937
+references/model-routing.md 13235 -> 13054
+surfaceTotal (surface-budget.json) 7665 -> 7662
+```
+
+and the fixtures now read:
+
+```text
+budget: context-budget.json commands/continue.md 81860
+budget: context-budget.json commands/cycle.md 95601
+budget: context-budget.json commands/learn.md 17939
+budget: context-budget.json commands/maintain.md 19176
+budget: context-budget.json commands/onboard.md 18227
+budget: context-budget.json commands/reconcile.md 25664
+budget: context-budget.json commands/review.md 26288
+budget: context-budget.json commands/verify.md 25392
+budget: context-budget.json playbooks/executing-waves.md 126798
+budget: context-budget.json playbooks/finishing-the-cycle.md 54808
+budget: context-budget.json playbooks/learning-from-sessions.md 67020
+budget: context-budget.json playbooks/maintaining-the-repo.md 82709
+budget: context-budget.json playbooks/onboarding-a-repo.md 31770
+budget: context-budget.json playbooks/planning-waves.md 74606
+budget: context-budget.json playbooks/receiving-review.md 132915
+budget: context-budget.json playbooks/reviewing-code.md 109203
+budget: context-budget.json playbooks/reviewing-the-branch.md 65479
+budget: context-budget.json playbooks/scoping-the-request.md 38308
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 103212
+budget: context-budget.json playbooks/taking-the-fast-path.md 57906
+budget: context-budget.json playbooks/triaging-issues.md 21510
+budget: context-budget.json playbooks/verifying-on-device.md 68326
+budget: context-budget.json references/config.md 15297
+budget: context-budget.json references/delegation.md 12937
+budget: context-budget.json references/model-routing.md 13054
+budget: surface-budget.json surfaceTotal 7662
+```
+
+## 2026-11-26 — One model-selection policy owns every role's model (#456 slice 2, #494)
+
+**Decision:** `references/model-policy.json` and `scripts/model-policy.mjs` own the role table: which
+model each devcycle role runs on, the limits that escalate a tier, and the audit string every
+resolution records. `references/model-routing.md` keeps the knob arithmetic (pins, pools, the ladder,
+the ceiling) and the derivation predicates as prose, and renders the table in § Roles, which
+`scripts/validate.mjs` check 32 holds to the JSON. The driven coordinator runs the fast tier under the
+opt-in model, which is now the **ceiling**: the model the cycle was opted in on, not the one the
+coordinator runs. Dispatch decisions are made by the scripts (`scripts/task-dispatch.mjs` for
+implementers and task reviewers, `scripts/drive-execution.mjs` for the coordinator), and the playbooks
+dispatch on what those scripts print instead of applying the predicates by hand.
+
+**Why:** each layer's model was chosen in a different place: the coordinator copied whatever the
+opting-in session ran, subagent tiers came from prose predicates the coordinator applied by hand,
+planning dispatches came from a second table, and effort was set once per cycle. #456 asks what that
+costs and what interrupts a run, and #494 needs the same choice made for an unattended planning stage.
+One policy that every layer reads removes the second table and the hand-applied predicates.
+
+**Supersedes:** the § Planning dispatches table in `references/model-routing.md` and the
+`--model-decision` flag of `scripts/task-dispatch.mjs`.
+
+**Budgets:** `references/model-routing.md` grows by the rendered role table and the driven-run
+wording, which moves the closure of every entry point that reads it: the seven playbooks below.
+`playbooks/planning-waves.md` falls, because it no longer reads a section of that file. The runtime
+surface grows by the lines those edits add.
+
+```text
+budget: context-budget.json playbooks/executing-waves.md 126801
+budget: context-budget.json playbooks/maintaining-the-repo.md 82712
+budget: context-budget.json playbooks/planning-waves.md 74483
+budget: context-budget.json playbooks/receiving-review.md 132918
+budget: context-budget.json playbooks/reviewing-code.md 109206
+budget: context-budget.json playbooks/reviewing-the-branch.md 65605
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 103270
+budget: context-budget.json playbooks/taking-the-fast-path.md 58087
+budget: context-budget.json references/model-routing.md 13235
+budget: surface-budget.json surfaceTotal 7665
+```
+
 ## 2026-11-25 — The drive band shows each tier's model, effort and context (#456 slice 1)
 
 **Decision:** `.devcycle/drive-progress.json` moves to schema v2. It carries three tiers of its own:

@@ -3,6 +3,7 @@
 // loaded and returns one object, never a file, a clock or the environment.
 import { usd, markdownTable } from "./doctor-format.mjs";
 import { rank } from "./model-pool.mjs";
+import { loadPolicy } from "./model-policy.mjs";
 
 /**
  * One run's planning rows and dollars, joined across the run's sessions by planningBreakdowns.
@@ -34,13 +35,10 @@ import { rank } from "./model-pool.mjs";
  * @property {number|null} p6 re-read tokens over planning dispatch input (see sharedContext), or null
  * @property {{agentId: string, model: string, turns: number}[]} drafterTurns per drafter, first-seen order
  * @property {number|null} sourcePrints Bash source-file prints of the planning dispatches, null unless every one recorded them
- * @property {{role: string, agentId: string, model: string}[]} tierFit always-fast dispatches that ran above the fast tier
+ * @property {{role: string, agentId: string, model: string}[]} tierFit dispatches of the roles references/model-policy.json puts on the fast tier that ran above it
  */
 
 const ROLES = ["spike", "research", "drafter", "checker", "repair"];
-// Roles that always run at the fast tier, and that tier's highest rank in references/model-tiers.json.
-const FAST_ROLES = new Set(["spike", "research", "checker"]);
-const FAST_RANK = 2;
 // Reads every planning dispatch is meant to share (the pack, spikes, the interface lock): never duplication.
 const SANCTIONED_SHARED = /(^|\/)\.devcycle\/plan-work\//;
 
@@ -82,10 +80,12 @@ function drafterTurns(rolled) {
   return [...byAgent.values()];
 }
 
-function tierFit(rolled, tierTable) {
+function tierFit(rolled, tierTable, policy) {
+  const fastRank = rank(policy.fastFamily, tierTable);
+  if (fastRank === null) return [];
   const flagged = new Map();
   for (const c of rolled)
-    if (FAST_ROLES.has(c.role) && !flagged.has(c.agentId) && (rank(c.model, tierTable) ?? 0) > FAST_RANK)
+    if (policy.roles[c.role]?.tier === "fast" && !flagged.has(c.agentId) && (rank(c.model, tierTable) ?? 0) > fastRank)
       flagged.set(c.agentId, { role: c.role, agentId: c.agentId, model: c.model });
   return [...flagged.values()];
 }
@@ -128,7 +128,7 @@ export function reworkFails(events) {
  *   which doctor.mjs loads; an empty table ranks no model, so nothing is flagged for tier fit.
  * @returns {PlanningBreakdown}
  */
-export function planningBreakdown(run, { tierTable = [] } = {}) {
+export function planningBreakdown(run, { tierTable = [], policy = loadPolicy() } = {}) {
   const costs = inPlanning(run.agentCosts);
   const depths = inPlanning(run.agentDepths);
   const stats = run.planStats ?? null;
@@ -234,7 +234,7 @@ export function planningBreakdown(run, { tierTable = [] } = {}) {
     drafterTurns: drafterTurns(rolled),
     sourcePrints: rolled.length && rolled.every((c) => Number.isInteger(c.sourcePrints))
       ? rolled.reduce((n, c) => n + c.sourcePrints, 0) : null,
-    tierFit: tierFit(rolled, tierTable),
+    tierFit: tierFit(rolled, tierTable, policy),
   };
 }
 
@@ -247,7 +247,7 @@ export const sumKnown = (values) => (values.some((v) => v !== null && v !== unde
  * @param {{tierTable?: object[]}} [options] passed to planningBreakdown
  * @returns {{runId: string, breakdown: PlanningBreakdown}[]}
  */
-export function planningBreakdowns(summaries, { tierTable = [] } = {}) {
+export function planningBreakdowns(summaries, { tierTable = [], policy = loadPolicy() } = {}) {
   const byRun = new Map();
   for (const s of summaries)
     if (s.runId && s.planningRows) byRun.set(s.runId, [...(byRun.get(s.runId) ?? []), s]);
@@ -265,7 +265,7 @@ export function planningBreakdowns(summaries, { tierTable = [] } = {}) {
       planningMinutes: minutes === null || minutes === 0 ? null : minutes / 60000,
       blocked: sumKnown(members.map((m) => m.planningRows.blocked)),
       retried: sumKnown(members.map((m) => m.planningRows.retried)),
-    }, { tierTable }) });
+    }, { tierTable, policy }) });
   }
   return out.sort((a, b) => a.runId.localeCompare(b.runId));
 }

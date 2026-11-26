@@ -686,3 +686,32 @@ The raw output stayed outside version control.
 `pluginConfigs` override, answers each gate from the entry's answer file by resuming the session,
 and scores what it collected with doctor's own rubric (`docs/playbooks/planning-waves/README.md`
 § Benchmarking planning strategies).
+
+## (s) Subagent model and effort under a driven session
+
+**What was tried.** A probe on 2026-11-26 against Claude Code 2.1.332 (#456), coordinator
+`--model claude-sonnet-5-5`, in a scratch directory outside this checkout holding one project agent
+with `effort: low` and no `model:`, under `--setting-sources project --strict-mcp-config --permission-mode auto`.
+Three runs: `CLAUDE_CODE_EFFORT_LEVEL=high` with `--effort high`; `--effort high` alone; and `--effort`
+at `low`, `medium`, `xhigh` and `max` with no tools. Each dispatched that agent, a `general-purpose`
+agent with `model: "haiku"` and no effort key, and an Agent call naming a full model id. Effort was read
+from each assistant record's `effort` field. Total cost $0.25.
+
+**Exact result.**
+
+- The Agent tool's `model` takes a family alias only (`sonnet`, `opus`, `haiku`, `fable`); a full id is
+  an `InputValidationError`.
+- With `CLAUDE_CODE_EFFORT_LEVEL` exported, every subagent ran at that level, its `effort:` frontmatter
+  included.
+- Without it, the `effort: low` frontmatter held, and a subagent with no effort key ran at `medium`
+  under a `high` coordinator (assumption: the model's default), not at the session's `--effort`.
+- The coordinator's own effort held from `--effort` alone, and a Sonnet coordinator accepted every
+  level a `drive:` row can carry.
+
+**Consequence.** `scripts/model-policy.mjs` hands the Agent tool the family alias and keeps each
+dispatch under the ceiling by family rank, so an opt-in on an id older than its family's newest is
+a known limit. The driver keeps exporting `CLAUDE_CODE_EFFORT_LEVEL`: no devcycle agent carries an
+effort key, so dropping it would move every subagent to the model default. It removes
+`CLAUDE_CODE_SUBAGENT_MODEL`, `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and `CLAUDE_CODE_SUBAGENT_EFFORT` from a
+driven session's environment, so a configured default cannot reroute a resolved dispatch
+(`docs/playbooks/executing-waves/unattended.md` § What the driver does).

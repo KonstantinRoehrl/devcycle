@@ -6,7 +6,7 @@ import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { parseLedgerLine } from "../../scripts/task-ledger.mjs";
-import { buildProgress, PROGRESS_REL, removeProgress, routingLabel, writeProgress } from "../../scripts/drive-progress.mjs";
+import { buildProgress, PRODUCIBLE_ROUTING_LABELS, PROGRESS_REL, removeProgress, ROUTING_FORMS, routingLabel, writeProgress } from "../../scripts/drive-progress.mjs";
 import { windowFor } from "../../scripts/depth-bands.mjs";
 import { planProgress, taskPosition } from "../../scripts/wave-setup.mjs";
 import { writeInto } from "./helpers.mjs";
@@ -294,4 +294,21 @@ test("a dispatch is carried only while the task's step is its role's: implementi
   assert.deepEqual([fix.step, "dispatch" in fix], ["fixing", true]);
   const waiting = taskOf([dispatched, received, round], "reviewer", { position: "exhausted-unresolved", next: "ask-user" });
   assert.deepEqual([waiting.step, "dispatch" in waiting], ["needs-user", false]);
+});
+
+test("a driven dispatch's session forms, which name the ceiling, read as their interactive labels", () => {
+  assert.equal(routingLabel("model session:claude-opus-5-5 (auto: escalated on files=6)"), "esc files=6");
+  assert.equal(routingLabel("model session:claude-opus-5-5 (auto)"), "session");
+  assert.equal(routingLabel("model session:claude-opus-5-5 (auto: no file list)"), "session");
+  assert.equal(routingLabel("model fast:claude-sonnet-5-5 (auto: session tier is the fast tier; signals files=9)"), "fast");
+  assert.equal(routingLabel("model session:claude-opus-5-5 (escalated, unreachable and unranked)"), null);
+});
+
+test("the documented routing vocabulary is exactly the band's producible labels", () => {
+  const doc = readFileSync(new URL("../../docs/playbooks/executing-waves/unattended.md", import.meta.url), "utf8");
+  const list = doc.match(/the routing outcome that picked the model \(([^)]*)\)/)?.[1] ?? "";
+  const documented = [...list.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  assert.deepEqual([...documented].sort(), [...PRODUCIBLE_ROUTING_LABELS].sort());
+  assert.equal(PRODUCIBLE_ROUTING_LABELS.length, ROUTING_FORMS.length);
+  assert.deepEqual(PRODUCIBLE_ROUTING_LABELS, ["fast", "esc <signals>", "session", "ceiling", "pinned", "pinned, clamped", "pool <n>/<len>", "pool <n>/<len> + clamped"]);
 });

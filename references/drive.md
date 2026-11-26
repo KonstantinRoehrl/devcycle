@@ -36,7 +36,7 @@ load each only when its action needs it.
 - `- drive: manual chosen=<stamp> via=<answer|knob>` — they are walked in an interactive session.
 
 `<id>` and `<level>` are the `model` and `effort` that
-`node "${CLAUDE_PLUGIN_ROOT}/scripts/depth-probe.mjs" --json` prints, never self-report. An `effort`
+`node "${CLAUDE_PLUGIN_ROOT}/scripts/depth-probe.mjs" --json` prints, never self-report. `model=` is the cycle's **ceiling**, the model it was opted in on. Each session's coordinator runs the policy's `coordinator` role under it (`references/model-routing.md` § Roles), resolved at every start and never written here. An `effort`
 of `null` stops the start: write no row, and tell the user the `effortProblem` it prints beside it.
 A row without `effort=` stays valid: the driver resolves it at each start and never writes it back.
 `<stamp>` is `node "${CLAUDE_PLUGIN_ROOT}/scripts/stamp.mjs" now`. `via=answer` records the user's answer; `via=knob` records that the `executionMode` knob wrote the

@@ -29,6 +29,7 @@ import { follow, statusReport, WATCH_LEVELS, waitForEnd } from "./drive-watch.mj
 import { atomicWrite } from "./atomic-write.mjs";
 import { rejectedLimit, resetWaitMs, textLimit } from "./usage-limit.mjs";
 import { isMain } from "./is-main.mjs";
+import { resolveRole } from "./model-policy.mjs";
 import { UNREADABLE_PLUGIN_VERSION, installedVersion } from "./verification.mjs";
 import { field } from "./md-field.mjs";
 import { gitToplevel, hashSession } from "./run-record.mjs";
@@ -280,6 +281,18 @@ function sandboxed() {
   }
 }
 
+// The variables a driven session's env never carries over from the driver's.
+export const SCRUBBED_ENV = Object.freeze(["CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "CLAUDE_CODE_SUBAGENT_EFFORT"]);
+
+// The coordinator is the model a driven session runs on. The ceiling is the model the user opted in on;
+// the policy keeps the coordinator on the fast tier beneath it, unless that tier has no known window.
+export function pickCoordinator({ ceiling, override, refuse = modelRefusal }) {
+  if (override) return { model: override, refusal: refuse(override) };
+  const { model } = resolveRole("coordinator", { ceiling, driven: true });
+  if (model !== ceiling && refuse(model) === null) return { model, refusal: null };
+  return { model: ceiling, refusal: refuse(ceiling) };
+}
+
 function modelRefusal(model) {
   const w = windowFor(model);
   if (!w) return `no context window is known for ${model} — add it to scripts/pricing.mjs`;
@@ -316,8 +329,7 @@ function checkEnvironment(root, state, opts) {
     throw new Exit(3, "the state file has no `drive: auto` row — run /devcycle:continue and answer Start unattended");
   if (state.stage !== "execution") throw new Exit(3, `the state is at stage ${state.stage}, not execution`);
   if (!RUN_ID.test(state.run ?? "")) throw new Exit(3, "the state file names no run id, so no drive record could be written");
-  const model = opts.model ?? state.model;
-  if (!model) throw new Exit(3, "no model: the drive row records none and --model is absent");
+  if (!state.model && !opts.model) throw new Exit(3, "no model: the drive row records none and --model is absent");
   const current = git(root, ["rev-parse", "--abbrev-ref", "HEAD"]);
   if (current !== state.branch) throw new Exit(3, `the checkout is on ${current}, but the state records ${state.branch}`);
   if (!defaultBranches(root).length)
@@ -335,13 +347,14 @@ function checkEnvironment(root, state, opts) {
     const each = refused.map(({ path, task }) => `${path}: commit, stash or revert it — task ${task} writes this file`);
     throw new Exit(3, `tracked changes a remaining task would overwrite: ${each.join("; ")}`);
   }
-  const refusal = modelRefusal(model);
+  const ceiling = state.model ?? opts.model;
+  const { model, refusal } = pickCoordinator({ ceiling, override: opts.model });
   if (refusal) throw new Exit(3, refusal);
   const effort = driveEffort(root, state, opts, model);
   const unavailable = driveLockUnavailable();
   if (unavailable) throw new Exit(3, unavailable);
   if (sandboxed()) throw new Exit(3, SANDBOX_REFUSAL);
-  return { model, effort, planText, plan: state.plan, run: state.run, leftAlone };
+  return { ceiling, model, effort, planText, plan: state.plan, run: state.run, leftAlone };
 }
 
 function release(ctx) {
@@ -411,6 +424,9 @@ export function childEnv(ctx, pluginVersion = DRIVER_PLUGIN_VERSION) {
   if (ctx.effort === "default") delete env.CLAUDE_CODE_EFFORT_LEVEL;
   else env.CLAUDE_CODE_EFFORT_LEVEL = ctx.effort;
   delete env.CLAUDE_EFFORT;
+  // Claude Code reads these to override a subagent's model and effort, which would bypass the policy's
+  // dispatch choice (references/model-routing.md).
+  for (const name of SCRUBBED_ENV) delete env[name];
   // Headless -p stops background subagents 10 minutes after the last turn (docs/platform-notes.md § (p)).
   env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS = "0";
   return env;
@@ -924,7 +940,7 @@ function watchdogBeat(ctx, log) {
 // beat writes it again. The driver session's tier is read on the heartbeat only, the driven session's
 // comes from the stream the driver already parses.
 function trackProgress(ctx, beat = () => null) {
-  const run = { state: "running", session: 0, model: ctx.model, effort: ctx.effort, startedAt: ctx.startedAt, sessionStartedAt: null,
+  const run = { state: "running", session: 0, model: ctx.ceiling, effort: ctx.effort, startedAt: ctx.startedAt, sessionStartedAt: null,
     waitUntil: null, waitWhat: null, stopDetail: null, outcome: null };
   let health = null;
   const readDriver = () => {
@@ -1011,7 +1027,7 @@ async function walk(ctx, opts, log, trap, runState) {
     const startedAt = now();
     Object.assign(runState, { state: "running", session: n, sessionStartedAt: startedAt, waitUntil: null, waitWhat: null });
     if (n === 1 && ctx.surface.note) log(ctx.surface.note);
-    log(`session ${n} starts — wave ${waveAtStart ?? "?"}, model ${ctx.model}, effort ${ctx.effort}, plugins ${ctx.surface.plugins}, mcp ${ctx.surface.mcp}`);
+    log(`session ${n} starts — wave ${waveAtStart ?? "?"}, model ${ctx.model} (ceiling ${ctx.ceiling}), effort ${ctx.effort}, plugins ${ctx.surface.plugins}, mcp ${ctx.surface.mcp}`);
     const s = await runSession(ctx, opts.bin, sessionArgs(ctx, opts, spent), log, n);
     runState.sessionStartedAt = null;
     const entriesAfter = ledgerEntries(ctx.root, ctx.plan);

@@ -95,7 +95,7 @@ and silently runs every knob at its fallback. [`docs/platform-notes.md`](../plat
 | `implementerModel` | Model for implementer subagents | `auto` / model id / comma-separated pool | `auto` (derived per task; set a model id to pin) |
 | `taskReviewerModel` | Model for per-task reviewers | `auto` / model id / comma-separated pool | `auto` (derived per task; set a model id to pin) |
 | `branchReviewModel` | Model for the whole-branch review | `auto` / model id / comma-separated pool | `auto` (inherits your session's model; set a model id to pin) |
-| `walkthroughModel` | Model for the on-device walkthrough session | `auto` / model id / comma-separated pool | `auto` (a fast model; set a model id to pin) |
+| `walkthroughModel` | Model for the on-device walkthrough session | `auto` / model id / comma-separated pool | `auto` (inherits your session's model; set a model id to pin) |
 | `planningStrategy` | How the planning stage drafts a plan | `auto` / `status-quo` / `inline` / `grouped` / `checkpointed` | `auto` (the decision table: inline up to `12` tasks, otherwise checkpointed or grouped by the cut's coupling and width; `status-quo` keeps per-task drafters from `5` tasks) |
 | `planningBudgetUSD` | A dollar ceiling on planning's projected cost: above it, planning asks before drafting | `0` or more, at most two decimals (`0` sets no budget) | `0` |
 | `learnStalenessSessions` | Unmined sessions since the last `/devcycle:learn` before the finish stage nudges you to run it again | integer `0` or more (`0` nudges every cycle) | `5` |
@@ -190,11 +190,13 @@ owns the tiers and verdicts, [`playbooks/verifying-on-device.md`](../../playbook
 review, so this option never comes into play there.
 
 The four **model options** trade cost against capability per role. They default to
-`auto`: for implementers and task reviewers the coordinator derives the model per task
-from what the plan makes observable (task size, dependency count, diff size) and records
-each derivation in the ledger — the session's own model where judgment matters, a fast
-one where the task is narrow and fully specified; the branch review inherits the
-session's model and the walkthrough takes a fast one. Research and exploration dispatches
+`auto`: for implementers and task reviewers devcycle's dispatch script derives the model per task
+from what the plan makes observable (task size, dependency count, diff size), through the
+one role table in [`references/model-policy.json`](../../references/model-policy.json), and
+records each derivation in the ledger — the session's own model where judgment matters, a fast
+one where the task is narrow and fully specified; the branch review and the walkthrough
+inherit the session's model ([`references/model-routing.md`](../../references/model-routing.md)
+§ Roles owns the table). Research and exploration dispatches
 always take the fast tier, whatever the stage: their output is a map rather than a
 judgment, and the roles that must judge — review, diagnosis, design — are the ones that
 keep the session's model. Deriving by tier rather than by
@@ -204,8 +206,12 @@ never second-guessed.
 
 One caveat bounds "the session's own model": devcycle gets it by dispatching with no
 model override, and a dispatch with no override resolves to Claude Code's *default
-subagent model* whenever you have configured one — not to your session's model. If you
-have set one, expect every role that would take the session tier to run at that default
+subagent model* whenever you have configured one — not to your session's model. In an
+unattended run it does not apply: the driver removes `CLAUDE_CODE_SUBAGENT_MODEL`,
+`CLAUDE_CODE_SUBAGENT_MODEL_FORCE` and `CLAUDE_CODE_SUBAGENT_EFFORT` from each session's
+environment, and every session-tier dispatch there names the cycle's ceiling — the model you
+opted in on — explicitly. If you
+have set one, expect every role in an interactive run that would take the session tier to run at that default
 instead: the resolver can name the coordinator's own model id explicitly rather than
 inherit, but nothing in the pipeline asks it to yet, so the caveat stands. That escape
 hatch is also narrower than the caveat: it reaches only a role you set to a pool, never one
