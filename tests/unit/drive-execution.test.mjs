@@ -13,7 +13,7 @@ import { DRIVE_LOCK_REL, readDriveLockHolder } from "../../scripts/drive-lock.mj
 import { processStartTime } from "../../scripts/file-lock.mjs";
 import { WATCHER_FILE } from "../../scripts/drive-watcher.mjs";
 import { windowFor } from "../../scripts/depth-bands.mjs";
-import { childEnv, classifyTrackedChanges, inFlightFiles, SESSION_START_TOKENS, stopDriver } from "../../scripts/drive-execution.mjs";
+import { childEnv, classifyTrackedChanges, inFlightFiles, pickCoordinator, SCRUBBED_ENV, SESSION_START_TOKENS, stopDriver } from "../../scripts/drive-execution.mjs";
 import { classifyDrive, HANDLED_REL, readDriveResult, readHandledResult, RESULT_REL, STOP_REQUEST_REL } from "../../scripts/drive-result.mjs";
 import { commitAll, makeFakeBin, makeRepo, sh, writeInto } from "./helpers.mjs";
 
@@ -203,7 +203,7 @@ test("a driven session starts with no MCP servers and only the kept plugins, and
   assert.equal(surface.length, 5);
   assert.deepEqual(r.calls[1].argv.slice(argv.indexOf("--verbose") + 1, argv.indexOf("--max-budget-usd")), surface, "the list is read once and every session gets the same surface");
   const log = readFileSync(join(root, ".devcycle", "drive.log"), "utf8");
-  assert.match(startLine(log), new RegExp(`session 1 starts — wave 1, model ${MODEL}, effort \\S+, plugins devcycle,impeccable,superpowers, mcp none$`));
+  assert.match(startLine(log), new RegExp(`session 1 starts — wave 1, model ${MODEL} \\(ceiling ${MODEL}\\), effort \\S+, plugins devcycle,impeccable,superpowers, mcp none$`));
   assert.doesNotMatch(log, /plugin list unavailable/);
 });
 
@@ -259,7 +259,7 @@ test("effort comes from --effort, else the drive row's effort=, else the setting
   assert.equal(resolved.code, 0, resolved.out);
   assert.deepEqual(resolved.calls[0].argv.slice(4, 6), ["--effort", "xhigh"]);
   assert.equal(resolved.calls[0].effort, "xhigh", "the session's CLAUDE_CODE_EFFORT_LEVEL disagrees with its --effort");
-  assert.match(startsLine(legacy), new RegExp(`session 1 starts — wave 1, model ${MODEL}, effort xhigh`));
+  assert.match(startsLine(legacy), new RegExp(`session 1 starts — wave 1, model ${MODEL} \\(ceiling ${MODEL}\\), effort xhigh`));
   assert.doesNotMatch(readFileSync(join(legacy, ".devcycle", "state.md"), "utf8"), /effort=/, "the resolved effort was written back to the row");
 
   const inherited = await drive(makeCycle(), [{ ledger: DONE, stage: "branch-review" }], { env: { CLAUDE_EFFORT: "low" } });
@@ -1645,7 +1645,7 @@ test("a --stop delivered by signal while the driver waits between sessions appen
 });
 
 const OPUS = "claude-opus-5-5";
-// A watching session behind the cycle's live --wait: its registration beside the state file, and its main
+// A driver session behind the cycle's live --wait: its registration beside the state file, and its main
 // transcript under the harness's HOME, holding one usage record.
 function seedWatcher(root, home, pid) {
   writeFileSync(join(root, ".devcycle", WATCHER_FILE),
@@ -1706,5 +1706,50 @@ test("a running dispatch's row carries its transcript's model, effort and depth 
     assert.equal(r.code, 0, r.out);
   } finally {
     driver.child.kill("SIGKILL");
+  }
+});
+
+const opusRow = `- drive: auto model=claude-opus-5-5 effort=high opted=2026-11-26T00:00:00Z via=answer`;
+
+test("an Opus opt-in runs its coordinator on the fast tier: spawn, record and start line; the ceiling stays the run's model", async () => {
+  const root = makeCycle({ drive: opusRow });
+  const r = await drive(root, [{ ledger: DONE, stage: "branch-review" }]);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.calls[0].argv[r.calls[0].argv.indexOf("--model") + 1], "claude-sonnet-5-5");
+  assert.equal(r.calls[0].argv[r.calls[0].argv.indexOf("--effort") + 1], "high");
+  assert.equal(r.records[0].model, "claude-sonnet-5-5");
+  assert.equal(readProgress(root).driver.model, "claude-opus-5-5");
+  assert.match(startLine(readFileSync(join(root, ".devcycle", "drive.log"), "utf8")),
+    /session 1 starts — wave 1, model claude-sonnet-5-5 \(ceiling claude-opus-5-5\), effort high, plugins /);
+});
+
+test("--model overrides the coordinator only; a Sonnet or Haiku opt-in keeps its own model", async () => {
+  const pinned = await drive(makeCycle({ drive: opusRow }), [{ ledger: DONE, stage: "branch-review" }], { flags: ["--model", "claude-haiku-5-5"] });
+  assert.equal(pinned.code, 0, pinned.out);
+  assert.equal(pinned.calls[0].argv[pinned.calls[0].argv.indexOf("--model") + 1], "claude-haiku-5-5");
+  const haikuRoot = makeCycle({ drive: "- drive: auto model=claude-haiku-5-5 opted=2026-11-26T00:00:00Z via=answer" });
+  const haiku = await drive(haikuRoot, [{ ledger: DONE, stage: "branch-review" }]);
+  assert.equal(haiku.calls[0].argv[haiku.calls[0].argv.indexOf("--model") + 1], "claude-haiku-5-5");
+});
+
+test("pickCoordinator falls back to the ceiling when the fast tier is refused, and reports a refused ceiling", () => {
+  assert.deepEqual(pickCoordinator({ ceiling: "claude-opus-5-5", refuse: () => null }), { model: "claude-sonnet-5-5", refusal: null });
+  assert.deepEqual(pickCoordinator({ ceiling: "claude-opus-5-5", refuse: (m) => (m === "claude-sonnet-5-5" ? "no window" : null) }),
+    { model: "claude-opus-5-5", refusal: null });
+  assert.deepEqual(pickCoordinator({ ceiling: "claude-opus-5-5", refuse: () => "no window" }), { model: "claude-opus-5-5", refusal: "no window" });
+  assert.deepEqual(pickCoordinator({ ceiling: "claude-opus-5-5", override: "claude-haiku-5-5", refuse: () => null }), { model: "claude-haiku-5-5", refusal: null });
+  assert.deepEqual(pickCoordinator({ ceiling: "claude-fable-5-2", refuse: () => null }), { model: "claude-fable-5-2", refusal: null });
+});
+
+test("a driven session's env holds none of the subagent model or effort overrides, whatever the driver's env held", () => {
+  assert.deepEqual([...SCRUBBED_ENV], ["CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_SUBAGENT_MODEL_FORCE", "CLAUDE_CODE_SUBAGENT_EFFORT"]);
+  const saved = Object.fromEntries(SCRUBBED_ENV.map((k) => [k, process.env[k]]));
+  for (const k of SCRUBBED_ENV) process.env[k] = "claude-haiku-5-5";
+  try {
+    const env = childEnv({ token: "t", effort: "high" });
+    for (const k of SCRUBBED_ENV) assert.equal(k in env, false, k);
+    assert.equal(env.CLAUDE_CODE_EFFORT_LEVEL, "high");
+  } finally {
+    for (const [k, v] of Object.entries(saved)) if (v === undefined) delete process.env[k]; else process.env[k] = v;
   }
 });
