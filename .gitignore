@@ -36,6 +36,7 @@ docs/*
 !docs/playbooks/
 docs/audits/*
 !docs/audits/2026-08-06-disposition-register.md
+!docs/audits/2026-11-26-unattended-execution.md
 # docs/devcycle/ tracks only devcycle's own record stores, each re-included by name, so per-run
 # output written beside them (reports/, advisories) stays local — the same shape as docs/audits/
 # above: the directory is re-included so its named children can be, and docs/devcycle/* re-ignores
