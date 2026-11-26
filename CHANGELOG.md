@@ -1,9 +1,5 @@
 # Changelog
 
-## 0.36.0 — 2026-11-26
-
-- feat(models): one model-selection policy, drive band tiers, resume checkout gates and self-maintaining CI pins (#456, #429, #495)
-
 ## 0.35.0 — 2026-11-26
 
 - feat(models): one model-selection policy, drive band tiers, resume checkout gates and self-maintaining CI pins (#456, #429, #495)
