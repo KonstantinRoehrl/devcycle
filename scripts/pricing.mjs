@@ -58,7 +58,7 @@ export function parseModelId(id) {
   return { family: m[1], version };
 }
 
-function compareSegments(a, b) {
+export function compareSegments(a, b) {
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
     const x = a[i] ?? 0, y = b[i] ?? 0;
     if (x !== y) return x - y;

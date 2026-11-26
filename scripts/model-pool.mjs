@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Resolves a *Model knob to a concrete dispatch model, under the orchestrator-tier ceiling.
-// references/model-routing.md states the policy for the coordinator that reads it and names this
-// file as the policy's single implementation; this file owns the arithmetic and nothing else.
+// Resolves a set *Model knob's pin, pool, ladder and ceiling arithmetic to a concrete dispatch model.
+// scripts/model-policy.mjs owns which model each role gets and calls this file for a set knob;
+// references/model-routing.md states the policy in prose.
 //
 // `model: null` means "dispatch with no model override" — the session tier, which inherits the
 // orchestrator's own model and therefore cannot exceed it. Every unresolvable case converges on

@@ -26,6 +26,7 @@ one line per entry; the hub (`README.md`) mirrors this roster in its surface tab
 | `loops.md` | What every bounded loop does when it runs out of rounds — the cap, the exhaustion statuses, and how each outcome is reported. |
 | `model-routing.md` | How a `*Model` knob's value becomes a dispatch model — the session and fast tiers, the ladder, and the ceiling. |
 | `model-tiers.json` | The model-tier table — each model family with its escalation rank and name-match pattern. |
+| `model-policy.json` | The model-selection policy — each devcycle role's layer, default tier, override knob, effort and limits; `scripts/model-policy.mjs` resolves it. Resolve a role with `node "${CLAUDE_PLUGIN_ROOT}/scripts/model-policy.mjs" --role <role> --ceiling <id>`. |
 | `output.md` | How every devcycle agent and playbook reports. |
 | `plan-task-format.md` | How one plan task is written — the task block, the three per-task declaration lines, Files derivation, No placeholders and the per-task checks; read by whoever drafts a task. |
 | `quality-criteria.md` | What any devcycle review or plan measures against — the criteria catalog, sourcing precedence, seed best-practice index, and how the catalog reaches planning and execution. |
