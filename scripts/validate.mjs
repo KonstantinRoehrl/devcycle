@@ -25,6 +25,7 @@ import { sectionText } from "./md-sections.mjs";
 import { loadStages } from "./stage-entry.mjs";
 import { budgetDecisionErrors, recordedBudgets, newestRecorded } from "./budget-decisions.mjs";
 import { DECISIONS_DOC } from "./doc-paths.mjs";
+import { GATE_RULES_PATH, loadGateRules } from "./gate-rules-check.mjs";
 import { floorErrors } from "./claude-code-floor.mjs";
 import { OWNER_FILE, readVersions } from "./claude-code-versions.mjs";
 import { validateRegistry } from "./hygiene-registry.mjs";
@@ -875,6 +876,8 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   //     above its measured bytes fails until it is lowered. Citations are followed by
   //     scripts/context-closure.mjs, which context-report.mjs shares.
   const CONTEXT_BUDGET_PATH = "tests/fixtures/context-budget.json";
+  // The directories whose top-level markdown files are entry points; skills add skills/<id>/SKILL.md.
+  const ENTRY_POINT_DIRS = ["commands", "playbooks"];
   const contextFile = join(root, CONTEXT_BUDGET_PATH);
   // `contextParsed` tracks whether a usable baseline survived, for check 14's reason: a
   // `contextBaseline === null` sentinel cannot tell "parse failed" from a file whose whole
@@ -910,7 +913,7 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
         );
         ratchetTrips.push({ key, bytes });
       };
-      const entryPoints = [...["commands", "playbooks"].flatMap((d) => namesIn(d).map((f) => `${d}/${f}`)), ...skillIds.map(skillPath)];
+      const entryPoints = [...ENTRY_POINT_DIRS.flatMap((d) => namesIn(d).map((f) => `${d}/${f}`)), ...skillIds.map(skillPath)];
       for (const p of entryPoints) {
         const { bytes } = closure(p, { follow: "refs", root });
         if (!(p in contextBaseline)) {
@@ -1435,6 +1438,33 @@ if (import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
       const routingFile = join(root, "references/model-routing.md");
       const routingText = existsSync(routingFile) ? readFileSync(routingFile, "utf8") : "";
       for (const message of rolesTableErrors(rolePolicy, routingText)) fail(message);
+    }
+  }
+
+  // 33. tests/fixtures/gate-rules.json declares as globs the sets checks 9 and 15 own, so the plan
+  //     gate asks for the fixtures these checks enforce: its surface-budget rule fires on check 9's
+  //     SURFACE markdown, its context-budget rule on check 15's entry points and references and on
+  //     the agents check 15 counts as a reference's readers. This file owns the sets; the rules file
+  //     is a checked declaration of them. A tree without the rules file, a fixture plugin, has
+  //     nothing to hold.
+  if (existsSync(join(root, GATE_RULES_PATH))) {
+    const { rules, error } = loadGateRules(root);
+    if (error) fail(error);
+    else {
+      const declared = {
+        "surface-budget": { touches: SURFACE.map((d) => `${d}/**/*.md`), require: [BUDGET_PATH] },
+        "context-budget": {
+          touches: [...ENTRY_POINT_DIRS.map((d) => `${d}/*.md`), skillPath("*"), "references/*.md", "agents/**/*.md"],
+          require: [CONTEXT_BUDGET_PATH],
+        },
+      };
+      const sameSet = (a = [], b) => a.length === b.length && b.every((g) => a.includes(g));
+      for (const [id, want] of Object.entries(declared)) {
+        const rule = rules.find((r) => r.id === id);
+        if (!rule) fail(`${GATE_RULES_PATH}: no "${id}" rule — validate.mjs checks 9 and 15 budget these files, so the plan gate must ask for them`);
+        else if (!sameSet(rule.when.touches, want.touches) || rule.when.creates || !sameSet(rule.require, want.require))
+          fail(`${GATE_RULES_PATH}: rule "${id}" must fire on exactly ${want.touches.join(", ")} and require ${want.require.join(", ")}, the sets validate.mjs checks 9 and 15 define`);
+      }
     }
   }
 
