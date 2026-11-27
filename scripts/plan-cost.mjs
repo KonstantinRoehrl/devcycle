@@ -36,9 +36,13 @@ export const EXECUTION_RATE = 2.5;
 // A pass entry is { id, errorPct }: the projection's error against what that benchmark pass spent.
 export const CALIBRATION = Object.freeze({ passes: Object.freeze([]), maxErrorPct: 35 });
 
-// The session model prices the coordinator. references/model-policy.json routes a drafter or an edge
-// checker to the fast tier; "fast" here is the id the projection prices that tier at.
-export const PLANNING_MODELS = Object.freeze({ session: "claude-opus-5-5", fast: "claude-haiku-5-5" });
+// The session model prices the coordinator. The fast id is whatever references/model-policy.json resolves
+// a fast-tier checker to under that session (a drafter resolves through the same fast-tier branch), so
+// this file names no fast model.
+export function planningModels(session) {
+  return { session, fast: resolveRole("checker", { ceiling: session }).model };
+}
+export const PLANNING_MODELS = Object.freeze(planningModels("claude-opus-5-5"));
 
 // One edge-checker dispatch checks this many consumer/producer pairs (references/delegated-planning.md § Edge checker).
 export const CHECKER_PAIRS_PER_DISPATCH = 8;

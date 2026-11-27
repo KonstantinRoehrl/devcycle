@@ -143,15 +143,20 @@ before any drafter runs: dispatches, tokens and dollars, by role. The projection
 [`scripts/plan-cost.mjs`](../../../scripts/plan-cost.mjs) and is recorded as `est` on the
 `drafting-plan` row of the stage log, beside `spent`, the planning dollars so far
 (`plan-stats.mjs spent --state <state.md>` prints it). `plan-strategy.mjs --sessionModel <id>` prices
-the session on the model the run uses.
+the session on the model the run uses, and every fast-tier drafter and edge checker on the model
+[`references/model-policy.json`](../../../references/model-policy.json) resolves the fast tier to under that
+session.
 
 The `planningBudgetUSD` knob ([`docs/configuration/README.md`](../../configuration/README.md))
 sets a dollar ceiling, and its default of `0` sets none. When the projection exceeds the ceiling,
 planning asks one question with three answers: **proceed**, **switch strategy** or **reduce
 scope**. While the estimate is uncalibrated, the question labels the figure as such. Whether it is
 calibrated is decided by the passes recorded in [`scripts/plan-cost.mjs`](../../../scripts/plan-cost.mjs)
-(`CALIBRATION`, `isCalibrated`). It records none yet: the benchmark's large-entry projections missed by
-+428.7% and −64.6%, so the estimate stays advisory (decision log, 2026-11-22).
+(`CALIBRATION`, `isCalibrated`). It records none yet. `scripts/cost-model-fit.mjs` reads each replay's
+recorded estimate, so it still reports 0 of 2 passes within ±35%. Re-projected offline with fast dispatches
+priced as the policy runs them, over the replays whose old figure reproduced, the `phase3` pass's worst miss
+is +28.1%, but the large-entry pass's is still +428.7%, so the estimate stays advisory (decision log,
+2026-11-27, which holds the method and the replays left out).
 
 A depth probe runs after each `plan-group-<k>` under `checkpointed`, or once under `inline`. At
 `over-budget` or `hard-stop`, planning logs `plan-checkpoint-<k>`, marks the state file `handoff: ready`
