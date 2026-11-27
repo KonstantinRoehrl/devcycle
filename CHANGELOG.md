@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.35.1 — 2026-11-27
+
+- fix: repair the Canary report, blast-radius gate reach and fast-tier planning prices
+
+The daily Canary no longer fails when the bump-PR listing grows: it lists open PRs by number and branch only, then reads each Canary or Dependabot PR on its own, instead of one query that asked for every PR's comments and commits and exceeded GitHub's GraphQL node limit (run 46036526078).
+
+The blast-radius gate now reaches the files a task's own gate reads or ratchets, so a task whose gate checks a file outside its Files block is no longer missed (#505).
+
+Planning's projected cost now prices each fast-tier drafter and edge checker on the model the model policy runs it on, which is Sonnet 5.5 under an Opus or Sonnet session rather than Haiku 5.5. Projections of grouped and delegated planning rise (the benchmark's large delegated cut from $13.54 to $20.21), while inline and checkpointed projections do not move. `plan-strategy.mjs --sessionModel` now sets the fast-tier price too, so a Haiku session prices its fast dispatches at Haiku. The estimate stays uncalibrated (#504).
+
 ## 0.35.0 — 2026-11-26
 
 - feat(models): one model-selection policy, drive band tiers, resume checkout gates and self-maintaining CI pins (#456, #429, #495)

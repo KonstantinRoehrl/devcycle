@@ -49,7 +49,7 @@ test("auto checkpoints a coupled or narrow cut above the inline range", () => {
 
 test("auto groups a wide, loosely coupled cut", () => {
   const r = chooseStrategy(wideCut([9, 6]));
-  assert.deepEqual([r.strategy, r.groups, r.drafters, r.est], ["grouped", 5, 5, 2.63]);
+  assert.deepEqual([r.strategy, r.groups, r.drafters, r.est], ["grouped", 5, 5, 10.12]);
 });
 
 test("auto falls back to checkpointed when grouping would need more than ceil(N/3) drafters", () => {
@@ -150,7 +150,7 @@ test("the CLI prints the decision as JSON and refuses a malformed cut", () => {
   const ok = spawnSync("node", [SCRIPT, good, "--planningStrategy", "auto"], { encoding: "utf8" });
   assert.equal(ok.status, 0, ok.stderr);
   const out = JSON.parse(ok.stdout);
-  assert.deepEqual([out.strategy, out.groups, out.drafters, out.est], ["grouped", 5, 5, 2.63]);
+  assert.deepEqual([out.strategy, out.groups, out.drafters, out.est], ["grouped", 5, 5, 10.12]);
   assert.equal("fork" in out, false, "the printed decision carries no fork flag");
   assert.deepEqual([out.projection.dispatches, out.projection.calibrated], [6, false]);
   const bad = spawnSync("node", [SCRIPT, writeInto(dir, "bad.json", "{}")], { encoding: "utf8" });
@@ -175,6 +175,23 @@ test("the CLI prices the coordinator on --sessionModel, and falls back with a wa
   assert.equal(unknown.est, base.est, "the default session model prices it");
   assert.equal(unknown.warnings.length, 1);
   assert.match(unknown.warnings[0], /claude-nope-9/);
+});
+
+test("the CLI prices the fast tier on --sessionModel too: a Haiku session prices its drafters and checkers at Haiku", () => {
+  const dir = makeTempDir("plan-strategy-");
+  const cut = writeInto(dir, "cut.json", JSON.stringify(wideCut([9, 6])));
+  const run = (...extra) => {
+    const r = spawnSync("node", [SCRIPT, cut, "--planningStrategy", "grouped", ...extra], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    return JSON.parse(r.stdout);
+  };
+  const base = run();
+  const haiku = run("--sessionModel", "claude-haiku-4-5-20251001");
+  for (const role of ["drafter", "checker"]) {
+    assert.equal(haiku.projection.byRole[role].count, base.projection.byRole[role].count, role);
+    assert.ok(haiku.projection.byRole[role].usd < base.projection.byRole[role].usd, `${role}: ${haiku.projection.byRole[role].usd} vs ${base.projection.byRole[role].usd}`);
+  }
+  assert.deepEqual(haiku.warnings, []);
 });
 
 test("the CLI prices a host-wrapped --sessionModel id like its bare id, and warns only on an id still unpriced after canonicalizing", () => {

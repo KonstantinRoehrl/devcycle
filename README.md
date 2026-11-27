@@ -233,7 +233,8 @@ plugin ships. Start there.
   ([`docs/playbooks/planning-waves/README.md`](docs/playbooks/planning-waves/README.md) § Benchmarking
   planning strategies).
   At the task cut planning also prints a projected dispatch, token and dollar figure
-  (`scripts/plan-cost.mjs`), asks whether to proceed, switch strategy or reduce scope when an optional
+  (`scripts/plan-cost.mjs`, which prices each fast-tier dispatch on the model the model policy runs it on),
+  asks whether to proceed, switch strategy or reduce scope when an optional
   `planningBudgetUSD` is exceeded, and can clear and resume mid-planning from disk, past the
   drafting too, since the assembly, the checker and repair rounds and the plan gate are logged as each
   finishes (`scripts/plan-resume.mjs`); the figure is labelled uncalibrated until a benchmark pass calibrates it
@@ -259,10 +260,13 @@ plugin ships. Start there.
   candidate before it ranks. A tool that can run repo code runs only on that pass's consent. The
   plugin-only checks run only in devcycle's own source (`self-dev-check.mjs --is-source`).
 - The evidence-and-verification contract's gates: planning runs `scripts/plan-check.mjs` in its
-  self-review — one fail-closed gate over ten legs, including the budget-fixture and
+  self-review — one fail-closed gate over ten legs, including the gate-rules and
   authored-claims checks, which also runs on each drafted task and on the plan assembled from them — and `/devcycle:cycle` runs
   `scripts/contract-staleness-check.mjs` as an advisory preflight that warns when a cached plugin's
-  contract predates the target repo's. A host repo can declare its whole-gate checks in the
+  contract predates the target repo's. A host repo can declare plan-time gate rules in
+  `tests/fixtures/gate-rules.json` (files a task that touches or creates matching paths must also
+  list), which the `gateRules` leg holds every task to; without the file the leg passes with a
+  note. A host repo can declare its whole-gate checks in the
   required-checks manifest `tests/fixtures/required-gate-checks.json` — a committed JSON array of
   substrings every convention whole-gate command must contain, enforced by plan-check against the
   plan's gate commands and by `scripts/evidence-completeness-check.mjs` against each capture's

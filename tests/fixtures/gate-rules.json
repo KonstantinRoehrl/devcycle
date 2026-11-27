@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "surface-budget",
+      "when": { "touches": ["playbooks/**/*.md", "commands/**/*.md", "agents/**/*.md", "references/**/*.md", "skills/**/*.md"] },
+      "require": ["tests/fixtures/surface-budget.json"],
+      "why": "growth needs a baseline bump"
+    },
+    {
+      "id": "context-budget",
+      "when": { "touches": ["commands/*.md", "playbooks/*.md", "skills/*/SKILL.md", "references/*.md", "agents/**/*.md"] },
+      "require": ["tests/fixtures/context-budget.json"],
+      "why": "growth needs a baseline bump"
+    },
+    {
+      "id": "budget-decision",
+      "when": { "touches": ["tests/fixtures/surface-budget.json", "tests/fixtures/context-budget.json"] },
+      "require": ["docs/decisions/README.md"],
+      "oncePerTask": true,
+      "why": "every fixture change needs a budget: line there"
+    },
+    {
+      "id": "created-script-needs-surface-caller",
+      "when": { "creates": ["scripts/*.mjs"] },
+      "requireOneOf": ["commands/*.md", "playbooks/*.md", "references/*.md", "agents/*.md", "skills/*/SKILL.md", ".github/workflows/*", "CONTRIBUTING.md"],
+      "why": "golden-path C3 leg 3: a new CLI must be invoked from the surface; a module-only script overrides this naming its importer"
+    }
+  ]
+}

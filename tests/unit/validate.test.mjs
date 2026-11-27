@@ -2947,3 +2947,34 @@ test("role table check: an unparseable policy fails, and a tree without the poli
   rebaseline(plain);
   ok(runValidate(plain));
 });
+
+// --- check 33: the gate-rules file declares checks 9 and 15's sets ---
+
+const REAL_GATE_RULES = readFileSync(join(REPO_ROOT, "tests/fixtures/gate-rules.json"), "utf8");
+const withGateRules = (text) => {
+  const dir = makePluginFixture();
+  writeInto(dir, "tests/fixtures/gate-rules.json", text);
+  return dir;
+};
+
+test("gate-rules check: devcycle's own rules file matches checks 9 and 15, and a tree without one is not checked", () => {
+  ok(runValidate(withGateRules(REAL_GATE_RULES)));
+  ok(runValidate(makePluginFixture()));
+});
+
+test("gate-rules check: a surface glob that drifts from check 9's SURFACE fails, naming the rule", () => {
+  const drifted = REAL_GATE_RULES.replace('"skills/**/*.md"]', '"skills/*.md"]');
+  failsWith(runValidate(withGateRules(drifted)), /tests\/fixtures\/gate-rules\.json: rule "surface-budget" must fire on exactly playbooks\/\*\*\/\*\.md/);
+});
+
+test("gate-rules check: a context-budget rule that misses the entry points, or is gone, fails", () => {
+  const narrowed = REAL_GATE_RULES.replace('"commands/*.md", "playbooks/*.md", ', "");
+  failsWith(runValidate(withGateRules(narrowed)), /rule "context-budget" must fire on exactly commands\/\*\.md, playbooks\/\*\.md, skills\/\*\/SKILL\.md/);
+  const rules = JSON.parse(REAL_GATE_RULES);
+  rules.rules = rules.rules.filter((r) => r.id !== "context-budget");
+  failsWith(runValidate(withGateRules(JSON.stringify(rules))), /no "context-budget" rule/);
+});
+
+test("gate-rules check: a malformed rules file fails with the rules leg's own message", () => {
+  failsWith(runValidate(withGateRules("{ not json")), /tests\/fixtures\/gate-rules\.json is not valid JSON/);
+});

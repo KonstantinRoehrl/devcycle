@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, realpathSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
@@ -9,15 +9,20 @@ import { guardDenialNotes } from "../../scripts/brief-completeness-check.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/brief-completeness-check.mjs");
 
-// Runs from a scratch work tree, so the real repo's required-checks manifest never applies; `manifest`
-// writes one at that tree's root. Both streams are kept on success too: notes go to stderr.
-function run(planText, { manifest } = {}) {
+// Runs from a scratch work tree, so the real repo's required-checks manifest and gate rules never
+// apply; `manifest` and `rules` write one at that tree's root. Both streams are kept on success too:
+// notes go to stderr.
+function run(planText, { manifest, rules } = {}) {
   const dir = realpathSync(makeTempDir("bcc-"));
   const plan = join(dir, "plan.md");
   writeFileSync(plan, planText);
   if (manifest) {
     mkdirSync(join(dir, "tests/fixtures"), { recursive: true });
     writeFileSync(join(dir, "tests/fixtures/required-gate-checks.json"), manifest);
+  }
+  if (rules) {
+    mkdirSync(join(dir, "tests/fixtures"), { recursive: true });
+    writeFileSync(join(dir, "tests/fixtures/gate-rules.json"), rules);
   }
   const r = spawnSync("node", [SCRIPT, plan], { encoding: "utf8", cwd: dir });
   return { code: r.status, out: `${r.stdout}${r.stderr}` };
@@ -166,15 +171,16 @@ test("a mid-line mention of the Files label is not a Files field -- the shared-o
   assert.match(r.out, /Task 1: missing \*\*Files:\*\* field/);
 });
 
-// The budget-fixture join: a brief that mandates doc growth but never lists the baseline that
+// The gate-rules join: a brief that mandates doc growth but never lists the baseline that
 // growth trips sends the implementer into a validate.mjs failure the brief itself caused.
-// The join is owned by budget-fixture-check.mjs; this gate runs it as a leg so the first
-// scripted check a planner runs already names the missing fixture.
+// The join is owned by gate-rules-check.mjs and read from the repo's rules file, here devcycle's
+// own; this gate runs it so the first scripted check a planner runs already names the missing fixture.
+const RULES = readFileSync(new URL("../fixtures/gate-rules.json", import.meta.url), "utf8");
 
 const SURFACE_EDIT = COMPLETE.replace("- Create: \`a.mjs\`", "- Modify: \`playbooks/planning-waves.md\`");
 
 test("fails when a task edits a budgeted surface file but omits the baseline fixtures that edit trips", () => {
-  const r = run(SURFACE_EDIT);
+  const r = run(SURFACE_EDIT, { rules: RULES });
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /Task 1: .*playbooks\/planning-waves\.md.*tests\/fixtures\/surface-budget\.json/);
   assert.match(r.out, /Task 1: .*playbooks\/planning-waves\.md.*tests\/fixtures\/context-budget\.json/);
@@ -186,6 +192,7 @@ test("fails when a task edits a command but omits the context baseline every ent
       "- Create: \`a.mjs\`",
       "- Modify: \`commands/continue.md\`\n- Modify: \`tests/fixtures/surface-budget.json\`\n- Modify: \`docs/decisions/README.md\`",
     ),
+    { rules: RULES },
   );
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /Task 1: .*commands\/continue\.md.*tests\/fixtures\/context-budget\.json/);
@@ -197,27 +204,35 @@ test("passes once the surface edit lists both baseline fixtures and the decision
       "- Modify: \`playbooks/planning-waves.md\`",
       "- Modify: \`playbooks/planning-waves.md\`\n- Modify: \`tests/fixtures/surface-budget.json\`\n- Modify: \`tests/fixtures/context-budget.json\`\n- Modify: \`docs/decisions/README.md\`",
     ),
+    { rules: RULES },
   );
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /ok/);
 });
 
-test("honours the same Budget-fixture override grammar the standalone gate reads", () => {
+test("passes the same surface edit in a repo with no rules file", () => {
+  const r = run(SURFACE_EDIT);
+  assert.equal(r.code, 0, r.out);
+});
+
+test("honours the same Gate-rule override grammar the plan gate reads", () => {
   const r = run(
     SURFACE_EDIT.replace(
       "- Modify: \`playbooks/planning-waves.md\`",
-      "- Modify: \`playbooks/planning-waves.md\`\n- Budget-fixture override: playbooks/planning-waves.md — copy-only, no growth",
+      "- Modify: \`playbooks/planning-waves.md\`\n- Gate-rule override: playbooks/planning-waves.md — copy-only, no growth",
     ),
+    { rules: RULES },
   );
   assert.equal(r.code, 0, r.out);
 });
 
-test("reports a reasonless Budget-fixture override as malformed rather than silently ignoring it", () => {
+test("reports a reasonless Gate-rule override as malformed rather than silently ignoring it", () => {
   const r = run(
     SURFACE_EDIT.replace(
       "- Modify: \`playbooks/planning-waves.md\`",
-      "- Modify: \`playbooks/planning-waves.md\`\n- Budget-fixture override: playbooks/planning-waves.md",
+      "- Modify: \`playbooks/planning-waves.md\`\n- Gate-rule override: playbooks/planning-waves.md",
     ),
+    { rules: RULES },
   );
   assert.equal(r.code, 1, r.out);
   assert.match(r.out, /malformed override/i);
@@ -229,11 +244,12 @@ test("names the missing file's own reason and keys the suggested override on it,
       "- Modify: \`playbooks/planning-waves.md\`",
       "- Modify: \`playbooks/planning-waves.md\`\n- Modify: \`tests/fixtures/surface-budget.json\`\n- Modify: \`tests/fixtures/context-budget.json\`",
     ),
+    { rules: RULES },
   );
   assert.equal(r.code, 1, r.out);
   assert.match(
     r.out,
-    /Task 1: \*\*Files:\*\* edits playbooks\/planning-waves\.md but omits docs\/decisions\/README\.md — add it \(every fixture change needs a budget: line there\) or record a "- Budget-fixture override: docs\/decisions\/README\.md — <reason>"/,
+    /Task 1: \*\*Files:\*\* edits playbooks\/planning-waves\.md but its Files omit docs\/decisions\/README\.md — add it \(every fixture change needs a budget: line there\) or record a "- Gate-rule override: docs\/decisions\/README\.md — <reason>"/,
   );
   assert.doesNotMatch(r.out, /size baseline|override: playbooks\//);
 });

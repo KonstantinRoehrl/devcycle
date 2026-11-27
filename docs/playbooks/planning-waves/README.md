@@ -34,7 +34,7 @@ Three rules hold under both engines. A planner derives each task's `Files` block
 `scripts/blast-radius-check.mjs --scan` on the files the task modifies: an advisory pass over every
 text code file, not only JS/TS/Python, that matches the symbols each file declares (plus any
 `--symbol` given) and its basename with or without the extension, and tags each referencer `test`,
-`subclass` or `consumer`, and prints which extensions it read and which files are not on disk. A `red-green` task
+`subclass` or `consumer`, lists under each non-test referencer the tests named after it that name it (its paired tests), and prints which extensions it read and which files are not on disk. A `red-green` task
 pins its interfaces, its complete failing test code and its gate commands verbatim and describes its
 implementation in prose: a plan is contract-only by default, and `**Detail:** code-pinned — <reason>`
 opts one task into a full implementation body. And a large plan is delegated: 3+ independent feasibility
@@ -77,10 +77,8 @@ blocks parse), `briefCompleteness` (every task carries its required fields, a `r
 that creates a non-test source file mentions a stub and pins its failing test in a fenced block, a
 `**Detail:**` line gives a reason, and the Dispatch Map lists every task; it also notes, without
 failing, each prescribed git command the dispatch guard would deny an implementer), `blastRadius` (every JS/TS/Python file naming a changed file's basename (a changed non-code file's `<parent>/<basename>`), test or
-not, sits in some Files block; each finding opens with the task that declares the changed file), `contentCoupling` (no same-wave task's brief names a file another same-wave task
-edits), `budgetFixtures` (a task touching a budgeted surface — `playbooks/`, `commands/`,
-`agents/`, `references/` markdown — also touches its budget fixtures and
-`docs/decisions/README.md`, whose `budget:` lines `validate.mjs` holds the fixtures to),
+not, sits in some Files block; each finding opens with the task that declares the changed file. A file importing a changed code file by its extensionless path, and a paired test of a referencer an override cleared, are notes, never findings: measured on recent plans, both flagged far more files than any task changed), `contentCoupling` (no same-wave task's brief names a file another same-wave task
+edits), `gateRules` (each task's Files meet the repo's own `tests/fixtures/gate-rules.json`; devcycle's file says a surface markdown edit also touches its budget fixtures and `docs/decisions/README.md`, whose `budget:` lines `validate.mjs` holds the fixtures to, and a created `scripts/*.mjs` lists a surface file that invokes it; a repo without the file gets a note, never a finding),
 `waveDisjointness` (no two same-wave tasks list the same file), `authoredClaims` (the
 factual-claim item's backstop: an unguarded `path.ext:line` reference or bare count claim,
 cleared by a `(verified: <cmd>)` or `(assumption)` marker), `briefFacts` (every path a brief
@@ -92,7 +90,7 @@ placeholder or a "similar to Task N" back-reference). `--draft` runs five of the
 task file. `node scripts/plan-check.mjs --help` prints the same legs and override forms. It fails closed: a plan with no
 `## Dispatch Map` is a finding before any leg runs. Five findings clear by an explicit override
 line instead of a fix — `- Blast-radius override:`, `- Content-coupling override:`,
-`- Budget-fixture override:`, `- Citation override:` and `- Proportion override:`, each with a reason. A non-zero exit is a hard stop, resolved by
+`- Gate-rule override:`, `- Citation override:` and `- Proportion override:`, each with a reason. A non-zero exit is a hard stop, resolved by
 fixing the plan or recording an override, never by handing off around it. On success the gate
 prints one ok line, with each leg's notes (such as cleared overrides) reduced to a count unless
 `--verbose` lists them; a failing run always lists them. A run in progress records a `gate-ran`
@@ -143,15 +141,20 @@ before any drafter runs: dispatches, tokens and dollars, by role. The projection
 [`scripts/plan-cost.mjs`](../../../scripts/plan-cost.mjs) and is recorded as `est` on the
 `drafting-plan` row of the stage log, beside `spent`, the planning dollars so far
 (`plan-stats.mjs spent --state <state.md>` prints it). `plan-strategy.mjs --sessionModel <id>` prices
-the session on the model the run uses.
+the session on the model the run uses, and every fast-tier drafter and edge checker on the model
+[`references/model-policy.json`](../../../references/model-policy.json) resolves the fast tier to under that
+session.
 
 The `planningBudgetUSD` knob ([`docs/configuration/README.md`](../../configuration/README.md))
 sets a dollar ceiling, and its default of `0` sets none. When the projection exceeds the ceiling,
 planning asks one question with three answers: **proceed**, **switch strategy** or **reduce
 scope**. While the estimate is uncalibrated, the question labels the figure as such. Whether it is
 calibrated is decided by the passes recorded in [`scripts/plan-cost.mjs`](../../../scripts/plan-cost.mjs)
-(`CALIBRATION`, `isCalibrated`). It records none yet: the benchmark's large-entry projections missed by
-+428.7% and −64.6%, so the estimate stays advisory (decision log, 2026-11-22).
+(`CALIBRATION`, `isCalibrated`). It records none yet. `scripts/cost-model-fit.mjs` reads each replay's
+recorded estimate, so it still reports 0 of 2 passes within ±35%. Re-projected offline with fast dispatches
+priced as the policy runs them, over the replays whose old figure reproduced, the `phase3` pass's worst miss
+is +28.1%, but the large-entry pass's is still +428.7%, so the estimate stays advisory (decision log,
+2026-11-27, which holds the method and the replays left out).
 
 A depth probe runs after each `plan-group-<k>` under `checkpointed`, or once under `inline`. At
 `over-budget` or `hard-stop`, planning logs `plan-checkpoint-<k>`, marks the state file `handoff: ready`

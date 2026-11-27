@@ -34,7 +34,13 @@ function run(planText, { repo = realpathSync(makeTempDir("plan-check-repo")), ar
 test("a clean plan prints one ok line naming all ten legs", () => {
   const r = run(plan(task(1, ["src/a.txt"]) + task(2, ["src/b.txt"])));
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout.trim(), "plan-check: ok — 10 leg(s): codeBlocks, briefCompleteness, blastRadius, contentCoupling, budgetFixtures, waveDisjointness, authoredClaims, briefFacts, proportion, crossTask");
+  assert.equal(r.stdout.trim(), "plan-check: ok — 10 leg(s): codeBlocks, briefCompleteness, blastRadius, contentCoupling, gateRules, waveDisjointness, authoredClaims, briefFacts, proportion, crossTask");
+});
+
+test("the same surface edit passes the gateRules leg in a repo with no rules file, with a note", () => {
+  const r = run(plan(task(1, ["playbooks/x.md"]) + task(2, ["src/b.txt"])), { args: ["--only", "gateRules", "--verbose"] });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, /^plan-check: gateRules: no tests\/fixtures\/gate-rules\.json in this repo -- no gate rules to check$/m);
 });
 
 test("no Dispatch Map fails closed before any leg runs (M16)", () => {
@@ -54,10 +60,18 @@ test("a same-wave overlap is a waveDisjointness finding, matching the standalone
   assert.equal(spawnSync(process.execPath, [WAVE, join(dir, "plan.md")], { encoding: "utf8" }).status, 1);
 });
 
-test("a budget-fixture gap is reported once, by the budgetFixtures leg", () => {
-  const r = run(plan(task(1, ["playbooks/x.md"]) + task(2, ["src/b.txt"])));
+// A fixture repo carrying devcycle's own rules file, so the gateRules leg has rules to hold a plan to.
+const RULES = readFileSync(new URL("../fixtures/gate-rules.json", import.meta.url), "utf8");
+function rulesRepo() {
+  const repo = realpathSync(makeTempDir("plan-check-repo"));
+  writeInto(repo, "tests/fixtures/gate-rules.json", RULES);
+  return repo;
+}
+
+test("a gate-rule gap is reported once, by the gateRules leg", () => {
+  const r = run(plan(task(1, ["playbooks/x.md"]) + task(2, ["src/b.txt"])), { repo: rulesRepo() });
   assert.equal(r.status, 1);
-  assert.match(r.stderr, /^plan-check: budgetFixtures: .*surface-budget\.json/m);
+  assert.match(r.stderr, /^plan-check: gateRules: .*surface-budget\.json/m);
   assert.doesNotMatch(r.stderr, /^plan-check: briefCompleteness: .*surface-budget\.json/m);
 });
 
@@ -176,9 +190,11 @@ test("a valueless --only names itself rather than taking the next flag as a leg"
   assert.match(r.stderr, /^plan-check: --only requires a value — usage: /);
 });
 
-// The leg names on every "plan-check: <leg>: …" line a failing run printed, bar the proportion leg's
-// standing note that no spec was given: a fixture repo has none, so every failing run prints it.
-const reportingLegs = (stderr) => new Set([...stderr.matchAll(/^plan-check: (\w+): (?!no spec — proportion not measured)/gm)].map((m) => m[1]));
+// The leg names on every "plan-check: <leg>: …" line a failing run printed, bar two standing notes a
+// fixture repo always earns: the proportion leg's that no spec was given and the gateRules leg's that
+// the repo has no rules file.
+const reportingLegs = (stderr) =>
+  new Set([...stderr.matchAll(/^plan-check: (\w+): (?!no spec — proportion not measured|no tests\/fixtures\/gate-rules\.json in this repo)/gm)].map((m) => m[1]));
 
 const withProse = (n, files, prose) => task(n, files).replace("- [ ] step", `- [ ] ${prose}`);
 
@@ -188,7 +204,7 @@ const TRIPS = {
   briefCompleteness: () => run(plan(task(1, ["src/a.txt"]).replace("**Quality constraints:** none\n", "") + task(2, ["src/b.txt"]))),
   blastRadius: () => run(plan(task(1, ["src/a.txt"]) + task(2, ["src/b.txt"])), { repo: referencerRepo() }),
   contentCoupling: () => run(plan(task(1, ["src/a.txt"]) + withProse(2, ["src/b.txt"], "copy the header out of src/a.txt"))),
-  budgetFixtures: () => run(plan(task(1, ["playbooks/x.md"]) + task(2, ["src/b.txt"]))),
+  gateRules: () => run(plan(task(1, ["playbooks/x.md"]) + task(2, ["src/b.txt"])), { repo: rulesRepo() }),
   waveDisjointness: () => run(plan(task(1, ["src/a.txt"]) + task(2, ["src/a.txt"]))),
   authoredClaims: () => run(plan(task(1, ["src/a.txt"]) + withProse(2, ["src/b.txt"], "touch 3 files"))),
   briefFacts: () => run(plan(task(1, ["src/a.txt"]) + task(2, ["src/gone.txt"]))),
@@ -302,12 +318,12 @@ test("--help prints every leg's check in LEGS order and the five override forms,
   assert.match(lines[0], /^usage: plan-check\.mjs .*\[--help\]$/);
   assert.equal(lines[1], "");
   assert.deepEqual(lines.slice(2, 12).map((l) => l.split(":")[0]), Object.keys(planCheck.LEGS));
-  assert.match(r.stdout, /^budgetFixtures: .*docs\/decisions\/README\.md/m);
-  assert.equal(lines[12], "--draft: the path is one drafted task file; runs codeBlocks, briefCompleteness, budgetFixtures, authoredClaims, briefFacts and records nothing.");
+  assert.match(r.stdout, /^gateRules: .*tests\/fixtures\/gate-rules\.json/m);
+  assert.equal(lines[12], "--draft: the path is one drafted task file; runs codeBlocks, briefCompleteness, gateRules, authoredClaims, briefFacts and records nothing.");
   assert.deepEqual(lines.slice(13, 20), ["", "Overrides (each needs a reason):",
     "- Blast-radius override: <changed-file> [→ <referencer>[, <referencer>…]] — <reason>",
     "- Content-coupling override: Task B → <file> (Task A) — <reason>",
-    "- Budget-fixture override: <surface-or-fixture> — <reason>",
+    "- Gate-rule override: <trigger-file | required-file | rule-id> — <reason>",
     "- Citation override: <path> — <reason>",
     "- Proportion override: <reason>"]);
 });
@@ -338,11 +354,11 @@ test("--draft gates one task file with the per-task legs, needs no Dispatch Map 
   const r = spawnSync(process.execPath, [SCRIPT, "--draft", join(repo, "tasks/task-1.md"), repo],
     { encoding: "utf8", cwd: repo, env: { ...process.env, DEVCYCLE_RUNS_DIR: runs } });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout.trim(), "plan-check: ok — draft, 5 leg(s): codeBlocks, briefCompleteness, budgetFixtures, authoredClaims, briefFacts");
+  assert.equal(r.stdout.trim(), "plan-check: ok — draft, 5 leg(s): codeBlocks, briefCompleteness, gateRules, authoredClaims, briefFacts");
   assert.deepEqual(readdirSync(runs, { recursive: true }), [], "a draft run records no gate-ran event");
   const bad = draftRun(repo, join(repo, "tasks/task-1.md"), ["--only", "proportion"]);
   assert.equal(bad.status, 1);
-  assert.match(bad.stderr, /plan-check: --draft runs only codeBlocks, briefCompleteness, budgetFixtures, authoredClaims, briefFacts/);
+  assert.match(bad.stderr, /plan-check: --draft runs only codeBlocks, briefCompleteness, gateRules, authoredClaims, briefFacts/);
 });
 
 test("--draft still fails a task missing a field", () => {
