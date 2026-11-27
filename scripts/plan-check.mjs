@@ -14,7 +14,7 @@ import { codeBlocksLeg } from "./lint-plan-code-blocks.mjs";
 import { briefCompletenessLeg } from "./brief-completeness-check.mjs";
 import { blastRadiusLeg } from "./blast-radius-check.mjs";
 import { contentCouplingLeg } from "./content-coupling-check.mjs";
-import { budgetFixturesLeg } from "./budget-fixture-check.mjs";
+import { gateRulesLeg } from "./gate-rules-check.mjs";
 import { waveDisjointnessLeg } from "./wave-disjointness-check.mjs";
 import { authoredClaimsLeg } from "./authored-claims-check.mjs";
 import { briefFactsLeg } from "./brief-facts-check.mjs";
@@ -27,11 +27,11 @@ const STAGES = new Set(["scoping", "audit", "diagnosis", "brainstorm", "planning
 
 export const LEGS = {
   codeBlocks: codeBlocksLeg,
-  // budgetFixtures is its own leg below; the standalone brief-completeness CLI keeps its join.
+  // gateRules is its own leg below; the standalone brief-completeness CLI keeps its join.
   briefCompleteness: (text, ctx) => briefCompletenessLeg(text, ctx, { includeBudgetFixtures: false }),
   blastRadius: blastRadiusLeg,
   contentCoupling: contentCouplingLeg,
-  budgetFixtures: budgetFixturesLeg,
+  gateRules: gateRulesLeg,
   waveDisjointness: waveDisjointnessLeg,
   authoredClaims: authoredClaimsLeg,
   briefFacts: briefFactsLeg,
@@ -40,7 +40,7 @@ export const LEGS = {
 };
 
 // The legs that read one task's own brief, the ones `--draft` runs on a task file before the plan exists.
-export const DRAFT_LEGS = Object.freeze(["codeBlocks", "briefCompleteness", "budgetFixtures", "authoredClaims", "briefFacts"]);
+export const DRAFT_LEGS = Object.freeze(["codeBlocks", "briefCompleteness", "gateRules", "authoredClaims", "briefFacts"]);
 
 // What each leg checks, in LEGS order: `plan-check --help` prints it, so the playbook need only say
 // "run it; fix or override".
@@ -49,7 +49,7 @@ export const LEG_HELP = Object.freeze({
   briefCompleteness: "every task carries Files / Interfaces / Dependencies / a valid Evidence class / Quality constraints, a `red-green` task pins its failing test code in a fenced block and mentions a stub when it creates a non-test source file, and a `**Detail:**` line reads `code-pinned — <reason>` (or the older `interface-pinned — <reason>`, `red-green` only); outside `--draft`, the header carries one `**Verification gate:**` code span, pinned gates run every required-checks manifest entry, and the Dispatch Map lists every task. It also notes, never failing, each prescribed git command the dispatch guard denies.",
   blastRadius: "every JS/TS/Python file naming a changed file's basename, test or not, sits in some Files block, each finding opening with the task that declares the changed file.",
   contentCoupling: "no same-wave task's brief names a file another same-wave task edits.",
-  budgetFixtures: "a task touching a budgeted surface (`playbooks/`, `commands/`, `agents/`, `references/` markdown) also touches its budget fixtures and `docs/decisions/README.md`; `references/` and `agents/` markdown match the context budget too: every entry point pays for the references it cites, and agents count toward a reference's fan-in.",
+  gateRules: "each task's Files meet the repo's own `tests/fixtures/gate-rules.json`: every file a `require` rule names is listed, a `requireOneOf` rule finds another listed file matching one of its globs, and a required file that matches a rule pulls that rule in too. With no rules file it passes with a note; a malformed one is a finding.",
   waveDisjointness: "no two same-wave tasks list the same file.",
   authoredClaims: "every load-bearing plan-authored claim (a file or section target, a count, \"X already does Y\") carries `(verified: <cmd>)` or `(assumption)`.",
   briefFacts: "every path a brief cites resolves and every cited line is within its file; under `--draft`, a path a sibling task file creates or the draft's own Consumes (Task N) line names counts as created. It also notes, never failing, a call-shaped span nothing defines.",
@@ -60,7 +60,7 @@ export const LEG_HELP = Object.freeze({
 const OVERRIDE_FORMS = [
   "- Blast-radius override: <changed-file> [→ <referencer>[, <referencer>…]] — <reason>",
   "- Content-coupling override: Task B → <file> (Task A) — <reason>",
-  "- Budget-fixture override: <surface-or-fixture> — <reason>",
+  "- Gate-rule override: <trigger-file | required-file | rule-id> — <reason>",
   "- Citation override: <path> — <reason>",
   "- Proportion override: <reason>",
 ];
