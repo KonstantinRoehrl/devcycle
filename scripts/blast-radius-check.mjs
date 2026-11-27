@@ -4,7 +4,8 @@
 // referencer -- test or non-test -- is a hard failure (it almost certainly needs updating), cleared
 // only by adding it to a Files block or recording an override. The gate walks only JS/TS/Python
 // files (CODE_EXT) and matches a changed code file by its basename with its extension, so a referencer
-// in any other language, or one that imports `./foo` without the extension, is never seen. A changed
+// in any other language is never seen; one that imports `./foo` without the extension only earns a
+// note, never a finding. A changed
 // non-code file is matched by its written-out `<parent>/<basename>` path behind a path character, so a
 // script that builds that path in pieces (`join(root, "docs", "guide", "README.md")`) or names it
 // relatively (`"./ledger.md"`) is not flagged: a deliberate trade of false positives for false
@@ -51,6 +52,16 @@ export function referenceToken(changedFile) {
   if (CODE_EXT.has(extname(changedFile))) return basename(changedFile);
   return changedFile.split("/").slice(-2).join("/");
 }
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// The gate and --scan share these matchers. `namesByStem` (a quoted extensionless path, `from './foo'`)
+// never fails the gate: measured on 12 TS plans it flagged about 15 referencers per plan that no task
+// changed (docs/decisions/README.md), so it only adds a note.
+export const stemOf = (path) => basename(path, extname(path));
+export const namesFile = (content, file) => new RegExp(`[/.'"\`]${escapeRe(referenceToken(file))}\\b`).test(content);
+export const quotedPathStemRe = (stem) => new RegExp(`/${escapeRe(stem)}['"\`]`);
+export const namesByStem = (content, file) => CODE_EXT.has(extname(file)) && quotedPathStemRe(stemOf(file)).test(content);
 
 const failed = (finding) => ({ findings: [finding], ok: "", notes: [] });
 
@@ -109,7 +120,6 @@ export function blastRadiusLeg(planText, { planPath, repoRoot }) {
   const findings = [];
   const notes = [];
   for (const chg of changed) {
-    const tokenRe = new RegExp(`[/.'"\`]${referenceToken(chg).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
     for (const cand of codeFiles) {
       if (cand === chg || declared.has(cand)) continue;
       let content;
@@ -118,10 +128,15 @@ export function blastRadiusLeg(planText, { planPath, repoRoot }) {
       } catch {
         continue;
       }
-      if (!tokenRe.test(content)) continue;
+      const named = namesFile(content, chg);
+      if (!named && !namesByStem(content, chg)) continue;
       const ov = overrides.find((o) => o.file === chg && (o.tests === null || o.tests.includes(cand)));
       if (ov) {
         notes.push(`override -- ${cand} references ${chg}, cleared: ${ov.reason}`);
+      } else if (!named) {
+        notes.push(
+          `stem -- ${cand} imports ${chg} by its extensionless path (…/${stemOf(chg)}); a note, not a finding -- list it if this task breaks it`
+        );
       } else {
         const kind = isTestFile(cand) ? "test" : "non-test";
         findings.push(
@@ -193,7 +208,6 @@ export function extractSymbols(text) {
   return [...names];
 }
 
-const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const symbolRe = (name) => new RegExp(`(?<![\\w$])${escapeRe(name)}(?![\\w$])`);
 // An inheritance marker right after a declared type's name -- `extends`/`implements`/`inherits`, a
 // C#/Kotlin/Swift/C++ `:`, a Python `(` or a Ruby `<` -- with the name before the body opens, so a
@@ -210,7 +224,7 @@ const inheritsRe = (name) =>
 const IMPORT_KEYWORDS = "import|from|require_relative|require|include|load|use|using";
 const stemRe = (stem) =>
   new RegExp(
-    `/${escapeRe(stem)}['"\`]|^[ \\t]*(?:${IMPORT_KEYWORDS})\\b[^\\n]*?(?<![\\w$])${escapeRe(stem)}(?![\\w$])`,
+    `${quotedPathStemRe(stem).source}|^[ \\t]*(?:${IMPORT_KEYWORDS})\\b[^\\n]*?(?<![\\w$])${escapeRe(stem)}(?![\\w$])`,
     "m"
   );
 
@@ -247,7 +261,7 @@ export function scanReferencers({ changed, symbols = [], repoRoot }) {
     const skipped = [...new Set(own.filter(isStoplisted))];
     const names = [...new Set([...own.filter((n) => !isStoplisted(n)), ...symbols])];
     const base = basename(file);
-    const stem = base.slice(0, base.length - extname(base).length);
+    const stem = stemOf(file);
     const matchers = names.map((name) => ({ match: name, re: symbolRe(name), inherits: inheritsRe(name) }));
     // The gate's basename match, plus the stem two ways: as the last segment of a quoted path
     // (`from './foo'` names foo.ts), and as an identifier or path segment on a line that opens with an

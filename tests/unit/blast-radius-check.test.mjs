@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync, realpathSync, symlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { referenceToken } from "../../scripts/blast-radius-check.mjs";
+import { referenceToken, stemOf, namesFile, namesByStem, quotedPathStemRe } from "../../scripts/blast-radius-check.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/blast-radius-check.mjs");
 
@@ -360,6 +360,52 @@ test("the ok line states the gate's real coverage", () => {
   const r = run(PLAN, repo);
   assert.equal(r.code, 0);
   assert.match(r.out, /ok -- every JS\/TS\/Python referencer of a changed file is in a Files block or overridden/);
+});
+
+// --- the stem note: a referencer that names a changed code file only without its extension ---
+
+const GLYPH_PLAN = PLAN.replace("src/widget.mjs", "src/m/glyph-bar.ts");
+
+test("an extensionless import of a changed code file is a stem note, not a finding", () => {
+  const repo = makeRepo({
+    "src/m/glyph-bar.ts": "export const g = 1;\n",
+    "src/m/use.ts": "import { g } from './glyph-bar';\n",
+    "src/m/paint.ts": "import { p } from './glyph-bar-paint';\n",
+    "src/m/dir.ts": "import { q } from './glyph-bar/index';\n",
+  });
+  const r = run(GLYPH_PLAN, repo);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /blast-radius-check: stem -- src\/m\/use\.ts imports src\/m\/glyph-bar\.ts by its extensionless path \(…\/glyph-bar\); a note, not a finding/);
+  assert.doesNotMatch(r.out, /paint\.ts|dir\.ts/);
+});
+
+test("a stem-only referencer an override names gets the override note instead", () => {
+  const repo = makeRepo({ "src/m/glyph-bar.ts": "export const g = 1;\n", "src/m/use.ts": 'import { g } from "../m/glyph-bar";\n' });
+  // Under a field after Files, as a real plan writes it: inside the Files block the arrow's path would be declared.
+  const plan = GLYPH_PLAN.replace("## Dispatch Map", "**Dependencies:** none (completely independent)\n- Blast-radius override: src/m/glyph-bar.ts → src/m/use.ts — reads only g\n## Dispatch Map");
+  const r = run(plan, repo);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /override -- src\/m\/use\.ts references src\/m\/glyph-bar\.ts, cleared: reads only g/);
+  assert.doesNotMatch(r.out, /stem --/);
+});
+
+test("an import written with the extension is still a finding", () => {
+  const repo = makeRepo({ "src/m/glyph-bar.ts": "export const g = 1;\n", "src/m/use.ts": "import { g } from './glyph-bar.ts';\n" });
+  const r = run(GLYPH_PLAN, repo);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /Task 1: src\/m\/use\.ts \(non-test\) references src\/m\/glyph-bar\.ts/);
+});
+
+test("the shared matchers: a quoted path's last segment, never a sibling or a directory, and only for code files", () => {
+  assert.equal(stemOf("src/m/glyph-bar.ts"), "glyph-bar");
+  assert.ok(quotedPathStemRe("glyph-bar").test("from '../../models/glyph-bar'"));
+  assert.ok(quotedPathStemRe("glyph-bar").test("import(`./glyph-bar`)"));
+  assert.ok(!quotedPathStemRe("glyph-bar").test("from './glyph-bar-paint'"));
+  assert.ok(!quotedPathStemRe("glyph-bar").test("from './glyph-bar/index'"));
+  assert.ok(namesFile("import './widget.mjs'", "src/widget.mjs"));
+  assert.ok(!namesFile("import './widget'", "src/widget.mjs"));
+  assert.ok(namesByStem("import './widget'", "src/widget.mjs"));
+  assert.ok(!namesByStem("see './guide'", "docs/guide.md"));
 });
 
 // --- --scan: the planner's advisory pass while deriving a Files block ---
