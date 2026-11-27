@@ -438,6 +438,32 @@ test("documented miss: a test of a cleared referencer not named after it, and a 
   assert.doesNotMatch(r.out, /other\.test\.mjs|outer\.test\.mjs/);
 });
 
+test("a same-stem test that never names the cleared referencer gets no second-hop note", () => {
+  const r = run(HOP_PLAN, makeRepo({ ...HOP_REPO, "tests/e2e/dream.test.mjs": "export const unrelated = 1;\n" }));
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /tests\/e2e\/dream\.test\.mjs/);
+});
+
+test("a non-test file sharing the referencer's stem and naming it gets no second-hop note", () => {
+  const r = run(HOP_PLAN, makeRepo({ ...HOP_REPO, "src/dream.mjs": 'import "../scripts/dream.mjs";\n' }));
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /src\/dream\.mjs/);
+});
+
+test("a cleared referencer that is itself a test starts no second hop", () => {
+  const r = run(
+    HOP_PLAN,
+    makeRepo({
+      ...HOP_REPO,
+      "tests/unit/probe.mjs": 'import "../../scripts/git-identity.mjs";\n',
+      "tests/e2e/probe.test.mjs": 'import "../unit/probe.mjs";\n',
+    })
+  );
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /override -- tests\/unit\/probe\.mjs references scripts\/git-identity\.mjs, cleared/);
+  assert.doesNotMatch(r.out, /probe\.test\.mjs/);
+});
+
 test("the pair override turns a second-hop note into an override note; a listed test gets none", () => {
   const cleared = HOP_PLAN.replace("## Dispatch Map", "- Blast-radius override: scripts/dream.mjs → tests/unit/dream.test.mjs — fakes no worktree paths\n## Dispatch Map");
   const r = run(cleared, makeRepo(HOP_REPO));
