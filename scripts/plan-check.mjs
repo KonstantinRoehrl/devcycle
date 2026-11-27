@@ -28,7 +28,7 @@ const STAGES = new Set(["scoping", "audit", "diagnosis", "brainstorm", "planning
 export const LEGS = {
   codeBlocks: codeBlocksLeg,
   // gateRules is its own leg below; the standalone brief-completeness CLI keeps its join.
-  briefCompleteness: (text, ctx) => briefCompletenessLeg(text, ctx, { includeBudgetFixtures: false }),
+  briefCompleteness: (text, ctx) => briefCompletenessLeg(text, ctx, { includeGateRules: false }),
   blastRadius: blastRadiusLeg,
   contentCoupling: contentCouplingLeg,
   gateRules: gateRulesLeg,
