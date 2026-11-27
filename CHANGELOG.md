@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.35.1 — 2026-11-27
+
+- fix: repair the Canary report, blast-radius gate reach and fast-tier planning prices
+
 The daily Canary no longer fails when the bump-PR listing grows: it lists open PRs by number and branch only, then reads each Canary or Dependabot PR on its own, instead of one query that asked for every PR's comments and commits and exceeded GitHub's GraphQL node limit (run 46036526078).
 
 The blast-radius gate now reaches the files a task's own gate reads or ratchets, so a task whose gate checks a file outside its Files block is no longer missed (#505).
