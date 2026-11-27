@@ -147,7 +147,12 @@ function fakes({ prs = [], heads = {}, devPin = "2.1.332", remoteBranches = [] }
   const calls = [];
   const gh = (a) => {
     calls.push(["gh", ...a]);
-    if (a[0] === "pr" && a[1] === "list") return JSON.stringify(prs);
+    if (a[0] === "pr" && a[1] === "list") {
+      // The real list query must stay shallow: comments and commits per PR exceed GitHub's GraphQL node limit.
+      assert.equal(a[a.indexOf("--json") + 1], "number,headRefName");
+      return JSON.stringify(prs.map(({ number, headRefName }) => ({ number, headRefName })));
+    }
+    if (a[0] === "pr" && a[1] === "view") return JSON.stringify(prs.find((p) => String(p.number) === a[2]));
     if (a[0] === "api") {
       const head = decodeURIComponent(a.at(-1).split("?ref=")[1]);
       if (!(head in heads)) throw new Error(`gh: Not Found (HTTP 404) for ${head}`);

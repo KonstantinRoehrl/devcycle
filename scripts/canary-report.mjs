@@ -82,14 +82,17 @@ function versionAtHead(gh, repo, head) {
   }
 }
 
+// One list query that also asks for every PR's comments and commits multiplies out past GitHub's GraphQL node limit
+// once enough PRs are open, so the list names only the PRs and each bump PR is read on its own.
 function listBumpPrs(gh, repo, readTargets) {
-  const listed = JSON.parse(gh(["pr", "list", "--base", BASE, "--state", "open", "--limit", "100", "--json", "number,headRefName,body,comments,commits"]) || "[]");
-  return listed.flatMap((item) => {
-    const kind = kindOf(item.headRefName);
+  const listed = JSON.parse(gh(["pr", "list", "--base", BASE, "--state", "open", "--limit", "100", "--json", "number,headRefName"]) || "[]");
+  return listed.flatMap((entry) => {
+    const kind = kindOf(entry.headRefName);
     if (!kind) return [];
+    const item = JSON.parse(gh(["pr", "view", String(entry.number), "--json", "body,comments,commits"]));
     const ownOnly = kind === "canary" && item.commits.length === 1 && item.commits[0].messageHeadline.startsWith(OWN_COMMIT_PREFIX);
-    const to = readTargets ? versionAtHead(gh, repo, item.headRefName) : null;
-    return [{ number: item.number, kind, to, ownOnly, marker: readMarker(item) }];
+    const to = readTargets ? versionAtHead(gh, repo, entry.headRefName) : null;
+    return [{ number: entry.number, kind, to, ownOnly, marker: readMarker(item) }];
   });
 }
 
