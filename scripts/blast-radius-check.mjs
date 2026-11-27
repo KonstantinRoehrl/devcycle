@@ -1,15 +1,20 @@
 #!/usr/bin/env node
-// Pre-flight check for a devcycle plan: for each non-test file a task modifies, find repo code
-// files that reference it (by module basename, or `<parent>/<basename>` for a file outside CODE_EXT) but appear in no task's Files block. Any such
-// referencer -- test or non-test -- is a hard failure (it almost certainly needs updating), cleared
-// only by adding it to a Files block or recording an override. The gate walks only JS/TS/Python
-// files (CODE_EXT) and matches a changed code file by its basename with its extension, so a referencer
-// in any other language, or one that imports `./foo` without the extension, is never seen. A changed
-// non-code file is matched by its written-out `<parent>/<basename>` path behind a path character, so a
-// script that builds that path in pieces (`join(root, "docs", "guide", "README.md")`) or names it
-// relatively (`"./ledger.md"`) is not flagged: a deliberate trade of false positives for false
-// negatives. `--scan` is the planner's wider, advisory pass over the same walk and still matches by
-// basename. See playbooks/planning-waves.md.
+// Pre-flight check for a devcycle plan: for each non-test file a task modifies, find repo code files
+// that name it but appear in no task's Files block. Such a referencer -- test or non-test -- is a hard
+// failure (it almost certainly needs updating), cleared only by adding it to a Files block or recording
+// an override. The gate walks only JS/TS/Python files (CODE_EXT) and matches a changed code file by its
+// basename with its extension, and a changed non-code file by its written-out `<parent>/<basename>`
+// behind a path character.
+// Two relations only ever add a note, never a finding, because measured on recent plans each flagged far
+// more files than any task changed (docs/decisions/README.md, 2026-11-27): a quoted extensionless import
+// of a changed code file (`from './foo'`), and a second hop -- a test named after a cleared referencer
+// that names it, and is in no Files block.
+// What the gate never sees, each pinned by a test:
+//   - shape coupling with no shared name, in any language (a SQL test of a replaced function);
+//   - a path built in pieces (`join(root, "docs", "guide", "README.md")`) or named relatively (`"./ledger.md"`);
+//   - a referencer outside CODE_EXT, and a stem on an import line with no quoted path -- `--scan` reports both;
+//   - a test of a cleared referencer that is not named after it, and any third hop.
+// `--scan` is the planner's wider, advisory pass over the same walk. See playbooks/planning-waves.md.
 import { readFileSync, existsSync, readdirSync, statSync, realpathSync } from "node:fs";
 import { join, basename, dirname, extname, relative, resolve, isAbsolute, sep, posix } from "node:path";
 import { taskBlocks, taskFileMap, TEST_FILE_SUFFIXES, normalizeFileToken, isTestPath } from "./task-files.mjs";
@@ -50,6 +55,51 @@ const MALFORMED_OVERRIDE =
 export function referenceToken(changedFile) {
   if (CODE_EXT.has(extname(changedFile))) return basename(changedFile);
   return changedFile.split("/").slice(-2).join("/");
+}
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// The gate and --scan share these matchers. `namesByStem` (a quoted extensionless path, `from './foo'`)
+// never fails the gate: measured on 12 TS plans it flagged about 15 referencers per plan that no task
+// changed (docs/decisions/README.md), so it only adds a note.
+export const stemOf = (path) => basename(path, extname(path));
+export const namesFile = (content, file) => new RegExp(`[/.'"\`]${escapeRe(referenceToken(file))}\\b`).test(content);
+export const quotedPathStemRe = (stem) => new RegExp(`/${escapeRe(stem)}['"\`]`);
+export const namesByStem = (content, file) => CODE_EXT.has(extname(file)) && quotedPathStemRe(stemOf(file)).test(content);
+
+
+// The stem of the file a test is named after: its suffix stripped per language; a suffix-less test pairs by its own stem.
+const TEST_SUFFIX_RES = [/^test_(.+)\.py$/, /^(.+)_test\.(?:py|go)$/, /^(.+)\.(?:test|spec)\.[A-Za-z0-9]+$/, /^(.+)_spec\.rb$/];
+export function pairedStem(testPath) {
+  const name = basename(testPath);
+  for (const re of TEST_SUFFIX_RES) {
+    const m = name.match(re);
+    if (m) return m[1];
+  }
+  return stemOf(testPath);
+}
+
+// The tests among `files` named after `ref` that also name it.
+export const pairedTestsOf = (ref, files, read) =>
+  files.filter((path) => {
+    if (path === ref || !isTestPath(path) || pairedStem(path) !== stemOf(ref)) return false;
+    const text = read(path);
+    return text !== null && (namesFile(text, ref) || namesByStem(text, ref));
+  });
+
+// A reader that reads each file once for the gate or --scan's whole walk; null when unreadable.
+function cachedReader(repoRoot) {
+  const contents = new Map();
+  return (path) => {
+    if (!contents.has(path)) {
+      let text = null;
+      try {
+        text = readFileSync(join(repoRoot, path), "utf8");
+      } catch {}
+      contents.set(path, text);
+    }
+    return contents.get(path);
+  };
 }
 
 const failed = (finding) => ({ findings: [finding], ok: "", notes: [] });
@@ -108,26 +158,41 @@ export function blastRadiusLeg(planText, { planPath, repoRoot }) {
 
   const findings = [];
   const notes = [];
+  const read = cachedReader(repoRoot);
+  const cleared = [];
   for (const chg of changed) {
-    const tokenRe = new RegExp(`[/.'"\`]${referenceToken(chg).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`);
     for (const cand of codeFiles) {
       if (cand === chg || declared.has(cand)) continue;
-      let content;
-      try {
-        content = readFileSync(join(repoRoot, cand), "utf8");
-      } catch {
-        continue;
-      }
-      if (!tokenRe.test(content)) continue;
+      const content = read(cand);
+      if (content === null) continue;
+      const named = namesFile(content, chg);
+      if (!named && !namesByStem(content, chg)) continue;
       const ov = overrides.find((o) => o.file === chg && (o.tests === null || o.tests.includes(cand)));
       if (ov) {
         notes.push(`override -- ${cand} references ${chg}, cleared: ${ov.reason}`);
+        if (!isTestPath(cand)) cleared.push({ chg, ref: cand });
+      } else if (!named) {
+        notes.push(
+          `stem -- ${cand} imports ${chg} by its extensionless path (…/${stemOf(chg)}); a note, not a finding -- list it if this task breaks it`
+        );
       } else {
         const kind = isTestFile(cand) ? "test" : "non-test";
         findings.push(
           `${taskLabel(owningTasks(filesByTask, chg))}: ${cand} (${kind}) references ${chg} but is in no task's Files block -- add it or record an override`
         );
       }
+    }
+  }
+
+  for (const { chg, ref } of cleared) {
+    for (const test of pairedTestsOf(ref, codeFiles, read)) {
+      if (declared.has(test)) continue;
+      const ov = overrides.find((o) => o.file === ref && (o.tests === null || o.tests.includes(test)));
+      notes.push(
+        ov
+          ? `override -- ${test} tests ${ref}, cleared: ${ov.reason}`
+          : `second hop -- ${test} tests ${ref}, a cleared referencer of ${chg}, and is in no Files block; a note, not a finding -- list it if this task breaks it, or record "- Blast-radius override: ${ref} → ${test} — <reason>"`
+      );
     }
   }
 
@@ -193,7 +258,6 @@ export function extractSymbols(text) {
   return [...names];
 }
 
-const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const symbolRe = (name) => new RegExp(`(?<![\\w$])${escapeRe(name)}(?![\\w$])`);
 // An inheritance marker right after a declared type's name -- `extends`/`implements`/`inherits`, a
 // C#/Kotlin/Swift/C++ `:`, a Python `(` or a Ruby `<` -- with the name before the body opens, so a
@@ -210,7 +274,7 @@ const inheritsRe = (name) =>
 const IMPORT_KEYWORDS = "import|from|require_relative|require|include|load|use|using";
 const stemRe = (stem) =>
   new RegExp(
-    `/${escapeRe(stem)}['"\`]|^[ \\t]*(?:${IMPORT_KEYWORDS})\\b[^\\n]*?(?<![\\w$])${escapeRe(stem)}(?![\\w$])`,
+    `${quotedPathStemRe(stem).source}|^[ \\t]*(?:${IMPORT_KEYWORDS})\\b[^\\n]*?(?<![\\w$])${escapeRe(stem)}(?![\\w$])`,
     "m"
   );
 
@@ -222,24 +286,15 @@ function classify(path, content, inherits) {
 
 // One entry per changed file, in argument order: whether it is on disk and whether symbols could be
 // extracted from its type, the names searched, the auto-extracted names skipped, and per name or
-// basename the referencers that matched it, each tagged test, subclass or consumer. A changed file
+// basename the referencers that matched it, each tagged test, subclass or consumer; a non-test
+// referencer also lists the tests named after it that name it (`paired`). A changed file
 // that does not exist yet (a task creates it) is matched by name only.
 export function scanReferencers({ changed, symbols = [], repoRoot }) {
   const codeFiles = walk(repoRoot)
     .map((p) => relative(repoRoot, p).split(sep).join("/"))
     .filter((p) => SCAN_CODE_EXT.has(extname(p)))
     .sort();
-  const contents = new Map();
-  const read = (path) => {
-    if (!contents.has(path)) {
-      let text = null;
-      try {
-        text = readFileSync(join(repoRoot, path), "utf8");
-      } catch {}
-      contents.set(path, text);
-    }
-    return contents.get(path);
-  };
+  const read = cachedReader(repoRoot);
   return changed.map((file) => {
     const onDisk = existsSync(join(repoRoot, file));
     const parsed = SCAN_CODE_EXT.has(extname(file));
@@ -247,7 +302,7 @@ export function scanReferencers({ changed, symbols = [], repoRoot }) {
     const skipped = [...new Set(own.filter(isStoplisted))];
     const names = [...new Set([...own.filter((n) => !isStoplisted(n)), ...symbols])];
     const base = basename(file);
-    const stem = base.slice(0, base.length - extname(base).length);
+    const stem = stemOf(file);
     const matchers = names.map((name) => ({ match: name, re: symbolRe(name), inherits: inheritsRe(name) }));
     // The gate's basename match, plus the stem two ways: as the last segment of a quoted path
     // (`from './foo'` names foo.ts), and as an identifier or path segment on a line that opens with an
@@ -261,7 +316,9 @@ export function scanReferencers({ changed, symbols = [], repoRoot }) {
       for (const path of codeFiles) {
         if (path === file) continue;
         const content = read(path);
-        if (content !== null && re.test(content)) referencers.push({ path, kind: classify(path, content, inherits) });
+        if (content === null || !re.test(content)) continue;
+        const kind = classify(path, content, inherits);
+        referencers.push({ path, kind, paired: kind === "test" ? [] : pairedTestsOf(path, codeFiles, read) });
       }
       if (referencers.length) groups.push({ match, referencers });
     }
@@ -292,7 +349,10 @@ export function formatScan(results) {
     }
     for (const { match, referencers } of groups) {
       lines.push(`  ${match}`);
-      for (const { path, kind } of referencers) lines.push(`    ${path} (${kind})`);
+      for (const { path, kind, paired } of referencers) {
+        lines.push(`    ${path} (${kind})`);
+        for (const test of paired) lines.push(`      paired test: ${test}`);
+      }
     }
   }
   return lines.join("\n");

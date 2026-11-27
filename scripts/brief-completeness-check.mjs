@@ -3,8 +3,8 @@
 // dispatch fields, the Evidence value must name a valid class, a red-green task that creates a
 // non-test source file must carry a stub step, a red-green task must pin its failing test code in a
 // fenced block, a Detail line must say why, "## Dispatch Map" must list every task (outside a draft), every
-// pinned gate command must run the repo's required checks, and a Files block that edits a budgeted file must list the size baselines that edit trips and the decisions log
-// that holds them, and a git command a step prescribes that the dispatch guard denies an
+// pinned gate command must run the repo's required checks, and a Files block must meet the repo's gate rules (devcycle's own: an edited budgeted file lists the size baselines it trips and the decisions log
+// that holds them), and a git command a step prescribes that the dispatch guard denies an
 // implementer is reported as a note, never a failure. Modeled on wave-disjointness-check.mjs; a
 // brief missing a field makes the implementer guess. See references/evidence.md and playbooks/planning-waves.md.
 import { readFileSync, existsSync } from "node:fs";
@@ -15,7 +15,7 @@ import {
   taskBlocks, parseDispatchMap, filesFieldValue, fieldValue, verificationGate, verificationGateField, conventionCommand,
   createdFiles, isTestPath, lineFences, fencedBlocks, isRedGreen,
 } from "./task-files.mjs";
-import { budgetFixtureGaps, gapRemedy } from "./budget-fixture-check.mjs";
+import { gateRuleGaps, gapRemedy, gapSubject, loadGateRules } from "./gate-rules-check.mjs";
 import { isMain } from "./is-main.mjs";
 
 const REQUIRED_FIELDS = ["Files", "Interfaces", "Dependencies", "Evidence", "Quality constraints"];
@@ -270,7 +270,7 @@ function fenceErrors(num, block) {
 
 // repoRoot is the work tree whose required-checks manifest applies; plan-check passes its own. A `draft` is
 // one task file: the plan-level header gate, required-checks and Dispatch Map checks wait for the assembled plan.
-export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cwd(), draft = false }, { includeBudgetFixtures = true } = {}) {
+export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cwd(), draft = false }, { includeGateRules = true } = {}) {
   const errors = [];
   const blocks = taskBlocks(planText);
   if (blocks.length === 0) {
@@ -304,15 +304,22 @@ export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cw
 
   // An incomplete Files block is not only a missing field: a brief that mandates doc growth but
   // never lists the baseline fixture that growth trips hands the implementer a validate.mjs
-  // failure the brief itself caused. budget-fixture-check.mjs owns which baselines a path sits
-  // under -- deciding it here too is the drift duplication-check.mjs exists to stop.
-  if (includeBudgetFixtures) {
-    try {
-      for (const { task, file, fixture } of budgetFixtureGaps(planText)) {
-        errors.push(`Task ${task}: **Files:** edits ${file} but omits ${fixture} — ${gapRemedy(fixture)}`);
+  // failure the brief itself caused. gate-rules-check.mjs owns the join and the repo's own rules
+  // file (tests/fixtures/gate-rules.json) owns what it requires -- deciding it here too is the
+  // drift duplication-check.mjs exists to stop. A repo with no rules file is not checked.
+  const gateNotes = [];
+  if (includeGateRules) {
+    const { rules, error } = loadGateRules(repoRoot);
+    if (error) {
+      errors.push(error);
+    } else if (rules) {
+      try {
+        const { gaps, notes } = gateRuleGaps(planText, rules);
+        for (const gap of gaps) errors.push(`Task ${gap.task}: **Files:** ${gapSubject(gap)} — ${gapRemedy(gap)}`);
+        gateNotes.push(...notes);
+      } catch (e) {
+        errors.push(e.message);
       }
-    } catch (e) {
-      errors.push(e.message);
     }
   }
 
@@ -329,7 +336,7 @@ export function briefCompletenessLeg(planText, { planPath, repoRoot = process.cw
   return {
     findings: errors,
     ok: `ok -- ${blocks.length} task(s), all required fields present`,
-    notes: guardDenialNotes(ownBriefs, { repoRoot }),
+    notes: [...guardDenialNotes(ownBriefs, { repoRoot }), ...gateNotes],
   };
 }
 

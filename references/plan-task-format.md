@@ -22,8 +22,7 @@ planning and filled with the task's matched lessons by `task-dispatch.mjs` at di
 `node "${CLAUDE_PLUGIN_ROOT}/scripts/blast-radius-check.mjs" --scan <changed-file…> [--symbol <name>…]`
 on the files it modifies. It walks every text code file and matches each declared symbol and the
 basename, with or without its extension; `--symbol` adds a name it misses. Every consumer, subclass
-and test it lists goes into the block, or gets a `Blast-radius override` line with a reason. Advisory:
-`plan-check.mjs` still checks the block.
+and test it lists, and each paired test it lists under a referencer, goes into the block, or gets a `Blast-radius override` line with a reason. Advisory: `plan-check.mjs` still checks the block, and its `gateRules` leg adds the files the repo's own `tests/fixtures/gate-rules.json` requires.
 
 **No placeholders.** None of these may appear: "TBD", "TODO", "implement later", "fill in details";
 "add appropriate error handling" / "add validation" / "handle edge cases"; "write tests for the above"
