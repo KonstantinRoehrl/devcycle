@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync, realpathSync, symlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { referenceToken, stemOf, namesFile, namesByStem, quotedPathStemRe } from "../../scripts/blast-radius-check.mjs";
+import { referenceToken, stemOf, namesFile, namesByStem, quotedPathStemRe, pairedStem } from "../../scripts/blast-radius-check.mjs";
 
 const SCRIPT = join(process.cwd(), "scripts/blast-radius-check.mjs");
 
@@ -408,6 +408,112 @@ test("the shared matchers: a quoted path's last segment, never a sibling or a di
   assert.ok(!namesByStem("see './guide'", "docs/guide.md"));
 });
 
+// --- the second-hop note: a cleared referencer's own tests ---
+
+const HOP_PLAN = PLAN.replace("src/widget.mjs", "scripts/git-identity.mjs").replace(
+  "## Dispatch Map",
+  "**Dependencies:** none (completely independent)\n- Blast-radius override: scripts/git-identity.mjs — callers keep the same signature\n## Dispatch Map"
+);
+const HOP_REPO = {
+  "scripts/git-identity.mjs": "export const id = 1;\n",
+  "scripts/dream.mjs": 'import { id } from "./git-identity.mjs";\n',
+  "tests/unit/dream.test.mjs": 'import "../../scripts/dream.mjs";\n',
+  "tests/unit/other.test.mjs": 'import "../../scripts/dream.mjs";\n',
+  "scripts/outer.mjs": 'import "./dream.mjs";\n',
+  "tests/unit/outer.test.mjs": 'import "../../scripts/outer.mjs";\n',
+};
+
+test("a test named after a cleared referencer that names it is a second-hop note, not a finding", () => {
+  const r = run(HOP_PLAN, makeRepo(HOP_REPO));
+  assert.equal(r.code, 0, r.out);
+  assert.match(
+    r.out,
+    /blast-radius-check: second hop -- tests\/unit\/dream\.test\.mjs tests scripts\/dream\.mjs, a cleared referencer of scripts\/git-identity\.mjs, and is in no Files block; a note, not a finding -- list it if this task breaks it, or record "- Blast-radius override: scripts\/dream\.mjs → tests\/unit\/dream\.test\.mjs — <reason>"/
+  );
+});
+
+test("documented miss: a test of a cleared referencer not named after it, and a third hop, get no note", () => {
+  const r = run(HOP_PLAN, makeRepo(HOP_REPO));
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /other\.test\.mjs|outer\.test\.mjs/);
+});
+
+test("the pair override turns a second-hop note into an override note; a listed test gets none", () => {
+  const cleared = HOP_PLAN.replace("## Dispatch Map", "- Blast-radius override: scripts/dream.mjs → tests/unit/dream.test.mjs — fakes no worktree paths\n## Dispatch Map");
+  const r = run(cleared, makeRepo(HOP_REPO));
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /override -- tests\/unit\/dream\.test\.mjs tests scripts\/dream\.mjs, cleared: fakes no worktree paths/);
+  assert.doesNotMatch(r.out, /second hop/);
+  const listed = HOP_PLAN.replace("- Modify: `scripts/git-identity.mjs`", "- Modify: `scripts/git-identity.mjs`\n- Test: `tests/unit/dream.test.mjs`");
+  assert.doesNotMatch(run(listed, makeRepo(HOP_REPO)).out, /dream\.test\.mjs/);
+});
+
+test("a TS spec importing its referencer without the extension still pairs", () => {
+  const repo = makeRepo({
+    "src/glyph-bar.ts": "export const g = 1;\n",
+    "src/spot-map.component.ts": "import { g } from './glyph-bar.ts';\n",
+    "src/spot-map.component.spec.ts": "import { SpotMap } from './spot-map.component';\n",
+  });
+  const plan = PLAN.replace("src/widget.mjs", "src/glyph-bar.ts").replace(
+    "## Dispatch Map",
+    "**Dependencies:** none (completely independent)\n- Blast-radius override: src/glyph-bar.ts — comment-only change\n## Dispatch Map"
+  );
+  const r = run(plan, repo);
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /second hop -- src\/spot-map\.component\.spec\.ts tests src\/spot-map\.component\.ts/);
+});
+
+test("pairedStem strips each language's test suffix, and a suffix-less test pairs by its stem", () => {
+  assert.equal(pairedStem("tests/unit/dream.test.mjs"), "dream");
+  assert.equal(pairedStem("src/spot-map.component.spec.ts"), "spot-map.component");
+  assert.equal(pairedStem("tests/test_widget.py"), "widget");
+  assert.equal(pairedStem("pkg/widget_test.go"), "widget");
+  assert.equal(pairedStem("spec/widget_spec.rb"), "widget");
+  assert.equal(pairedStem("tests/widget.mjs"), "widget");
+});
+
+// --- documented misses: what the gate never sees, each pinned so a change to it is deliberate ---
+
+const planChangingFile = (file) => PLAN.replace("src/widget.mjs", file);
+
+test("documented miss: shape coupling with no shared name (a SQL test of a replaced function) passes", () => {
+  const repo = makeRepo({
+    "db/migrations/002_spot_json.sql": "create or replace function public.admin_spot_json() returns json as $$ select 1 $$;\n",
+    "db/tests/save_test.sql": "select admin_get_spot(1);\n",
+    "db/tests/admin_test.mjs": "// runs admin_spot_json through admin_get_spot\n",
+  });
+  const r = run(planChangingFile("db/migrations/002_spot_json.sql"), repo);
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /save_test|admin_test/);
+});
+
+test("documented miss: a path built in pieces, or named relatively, passes", () => {
+  const repo = makeRepo({
+    "docs/guide/README.md": "# guide\n",
+    "scripts/pieces.mjs": 'const p = join(root, "docs", "guide", "README.md");\n',
+    "references/ledger.md": "# ledger\n",
+    "references/reader.mjs": 'readFileSync(new URL("./ledger.md", import.meta.url));\n',
+  });
+  assert.equal(run(planChangingFile("docs/guide/README.md"), repo).code, 0);
+  assert.equal(run(planChangingFile("references/ledger.md"), repo).code, 0);
+});
+
+test("documented miss: a referencer outside CODE_EXT passes the gate, and --scan reports it", () => {
+  const repo = makeRepo({ "src/widget.mjs": "export function widget() {}\n", "cmd/main.go": 'const path = "src/widget.mjs"\n' });
+  const r = run(PLAN, repo);
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /main\.go/);
+  assert.match(scan(repo, "src/widget.mjs").out, /cmd\/main\.go \(consumer\)/);
+});
+
+test("documented miss: a stem on an import line with no quoted path passes, and --scan reports it", () => {
+  const repo = makeRepo({ "pkg/widget.py": "def make():\n    pass\n", "pkg/use.py": "from pkg import widget\n" });
+  const r = run(planChangingFile("pkg/widget.py"), repo);
+  assert.equal(r.code, 0, r.out);
+  assert.doesNotMatch(r.out, /use\.py/);
+  assert.match(scan(repo, "pkg/widget.py").out, /pkg\/use\.py \(consumer\)/);
+});
+
 // --- --scan: the planner's advisory pass while deriving a Files block ---
 
 function scan(repo, ...args) {
@@ -756,4 +862,17 @@ test("a malformed override names the form with an example", () => {
   const { code, out } = run(planOf("references/ledger.md", "- Blast-radius override: references/ledger.md → scripts/a.mjs, ,  — why"), repo);
   assert.equal(code, 1);
   assert.match(out, /malformed override \(needs "<changed-file> \[→ <referencer>\[, <referencer>…\]\] — <reason>", e\.g\. "- Blast-radius override: scripts\/a\.mjs → tests\/unit\/a\.test\.mjs — only a comment names it"\)/);
+});
+
+test("--scan lists each non-test referencer's paired tests under it", () => {
+  const repo = makeRepo({
+    "scripts/git-identity.mjs": "export const id = 1;\n",
+    "scripts/dream.mjs": 'import { id } from "./git-identity.mjs";\n',
+    "tests/unit/dream.test.mjs": 'import "../../scripts/dream.mjs";\n',
+    "tests/unit/other.test.mjs": 'import "../../scripts/dream.mjs";\n',
+  });
+  const r = scan(repo, "scripts/git-identity.mjs");
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /\n {4}scripts\/dream\.mjs \(consumer\)\n {6}paired test: tests\/unit\/dream\.test\.mjs\n/);
+  assert.doesNotMatch(r.out, /paired test: tests\/unit\/other\.test\.mjs/);
 });
