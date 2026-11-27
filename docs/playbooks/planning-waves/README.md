@@ -152,9 +152,11 @@ sets a dollar ceiling, and its default of `0` sets none. When the projection exc
 planning asks one question with three answers: **proceed**, **switch strategy** or **reduce
 scope**. While the estimate is uncalibrated, the question labels the figure as such. Whether it is
 calibrated is decided by the passes recorded in [`scripts/plan-cost.mjs`](../../../scripts/plan-cost.mjs)
-(`CALIBRATION`, `isCalibrated`). It records none yet: re-projected with fast dispatches priced as the
-policy runs them, the `phase3` pass's worst miss is +28.1%, but the large-entry pass's is still +428.7%, so
-the estimate stays advisory (decision log, 2026-11-27).
+(`CALIBRATION`, `isCalibrated`). It records none yet. `scripts/cost-model-fit.mjs` reads each replay's
+recorded estimate, so it still reports 0 of 2 passes within ±35%. Re-projected offline with fast dispatches
+priced as the policy runs them, over the replays whose old figure reproduced, the `phase3` pass's worst miss
+is +28.1%, but the large-entry pass's is still +428.7%, so the estimate stays advisory (decision log,
+2026-11-27, which holds the method and the replays left out).
 
 A depth probe runs after each `plan-group-<k>` under `checkpointed`, or once under `inline`. At
 `over-budget` or `hard-stop`, planning logs `plan-checkpoint-<k>`, marks the state file `handoff: ready`

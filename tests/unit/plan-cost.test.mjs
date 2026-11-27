@@ -98,9 +98,12 @@ test("the projection prices the fast tier at the model the policy resolves it to
   assert.equal(dispatchAlias(PLANNING_MODELS.fast), loadPolicy().fastFamily);
 });
 
-test("planningModels caps the fast tier at the session model, and falls back to the session without one", () => {
-  for (const session of ["claude-opus-5-5", "claude-sonnet-5-5"])
-    assert.deepEqual(planningModels(session), { session, fast: resolveRole("checker", { ceiling: session }).model });
+test("planningModels follows the session as the policy does: the fast family under an Opus or Sonnet session, the session itself under a Haiku or unranked one", () => {
+  for (const session of ["claude-opus-5-5", "claude-sonnet-5-5"]) {
+    const pair = planningModels(session);
+    assert.equal(pair.session, session);
+    assert.equal(dispatchAlias(pair.fast), loadPolicy().fastFamily, `${session} prices its fast tier at the policy's fast family`);
+  }
   assert.equal(planningModels("claude-haiku-4-5-20251001").fast, "claude-haiku-4-5-20251001", "a Haiku session prices its fast tier at itself");
   assert.equal(planningModels("claude-nope-9").fast, "claude-nope-9", "no fast tier under an unranked session");
 });
