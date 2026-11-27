@@ -233,7 +233,8 @@ plugin ships. Start there.
   ([`docs/playbooks/planning-waves/README.md`](docs/playbooks/planning-waves/README.md) § Benchmarking
   planning strategies).
   At the task cut planning also prints a projected dispatch, token and dollar figure
-  (`scripts/plan-cost.mjs`), asks whether to proceed, switch strategy or reduce scope when an optional
+  (`scripts/plan-cost.mjs`, which prices each fast-tier dispatch on the model the model policy runs it on),
+  asks whether to proceed, switch strategy or reduce scope when an optional
   `planningBudgetUSD` is exceeded, and can clear and resume mid-planning from disk, past the
   drafting too, since the assembly, the checker and repair rounds and the plan gate are logged as each
   finishes (`scripts/plan-resume.mjs`); the figure is labelled uncalibrated until a benchmark pass calibrates it

@@ -1,5 +1,7 @@
 # Changelog
 
+Planning's projected cost now prices each fast-tier drafter and edge checker on the model the model policy runs it on, which is Sonnet 5.5 under an Opus or Sonnet session rather than Haiku 5.5. Projections of grouped and delegated planning rise (the benchmark's large delegated cut from $13.54 to $20.21), while inline and checkpointed projections do not move. `plan-strategy.mjs --sessionModel` now sets the fast-tier price too, so a Haiku session prices its fast dispatches at Haiku. The estimate stays uncalibrated (#504).
+
 ## 0.35.0 — 2026-11-26
 
 - feat(models): one model-selection policy, drive band tiers, resume checkout gates and self-maintaining CI pins (#456, #429, #495)

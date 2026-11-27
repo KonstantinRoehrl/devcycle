@@ -47,6 +47,56 @@ budget: context-budget.json playbooks/writing-the-findings-document.md 69230
 budget: context-budget.json references/evidence.md 14673
 ```
 
+## 2026-11-27 — The planning projection prices a fast-tier dispatch as the policy runs it (#504)
+
+**Decision:** `scripts/plan-cost.mjs` names no fast-tier model. `planningModels(session)` derives the pair a
+projection prices at, the fast id being what `resolveRole` in `scripts/model-policy.mjs` resolves a checker
+to under that session, and `PLANNING_MODELS` is the pair under the default Opus session. `scripts/plan-strategy.mjs
+--sessionModel` re-derives both, so a Haiku session prices its fast dispatches at Haiku. A unit test fails
+when the projection's fast id and the policy's resolution diverge. `CALIBRATION.passes` stays empty.
+
+**Why:** the projection priced every fast-tier drafter and edge checker at Haiku 5.5, while
+`references/model-policy.json` runs the fast tier on the Sonnet family: $0.10 and $0.50 per million input and
+output tokens against $2 and $10, about 20× under. The large `status-quo` benchmark replay ran on Opus and
+Sonnet only, with no Haiku turn. The `planningBudgetUSD` question and the calibration verdict read these
+figures. The gap is follow-up 3 of `docs/audits/2026-11-26-unattended-execution.md` § Follow-up issues
+(drafted, not filed).
+
+**Re-projection** (offline, $0). For each replay `node scripts/cost-model-fit.mjs --rates
+.devcycle/plan-bench/passes` scores, the task cut as written before the replay's first `drafting-plan` row
+and the `spent` of its last row were recovered from the replay's transcript and re-projected with
+`chooseStrategy` under the replay's arm (`grouped` for `grouped-fork`), the fast id old (Haiku 5.5) and new
+(the policy's, Sonnet 5.5 under the Opus session every replay ran). A replay counts only if its old
+re-projection reproduces its recorded estimate within ±5%. Estimates and actuals are planning dollars.
+
+| Pass | Replay | Est. (recorded) | Actual | Est. (new) | Error (old → new) |
+| --- | --- | --- | --- | --- | --- |
+| `phase3` | implementer-stop-hold, `grouped` | 3.27 | 5.16 | 6.61 | −36.6% → +28.1% |
+| `phase3` | implementer-stop-hold, `status-quo` | 4.25 | 9.40 | 7.05 | −54.8% → −25.0% |
+| `phase3` | on-device-browser-selection, `checkpointed` | 3.73 | 3.28 | 3.73 | +13.7% → +13.7% |
+| `phase3` | on-device-browser-selection, `grouped` | 2.75 | 4.43 | 3.34 | −38.0% → −24.7% |
+| `phase3` | on-device-browser-selection, `inline` | 3.21 | 3.10 | 3.21 | +3.7% → +3.7% |
+| `phase3` | on-device-browser-selection, `status-quo` | 3.37 | 2.94 | 3.37 | +14.4% → +14.4% |
+| `phase3-p2-large` | instruction-economy, `inline` | 29.27 | 5.54 | 29.27 | +428.7% → +428.7% |
+| `phase3-p2-large` | instruction-economy, `status-quo` | 13.54 | 38.21 | 20.21 | −64.6% → −47.1% |
+
+The two `grouped-fork` replays of `phase3` do not reproduce (9.19 and 2.71 re-projected, against 9.95 and
+3.39 recorded): the dropped fork arm was priced by code that no longer exists, so they are reported, not
+re-priced. Estimates that drafted on the session alone (`inline`, `checkpointed`, and the small
+`status-quo` replay the table sent inline) do not move. Each pass's worst miss over its reproduced
+replays: `phase3` −54.8% → +28.1%, within ±35%; `phase3-p2-large` +428.7% → +428.7%, the `inline` replay.
+Calibration needs two passes within bound and one is, so the projection stays advisory.
+
+**Supersedes:** the projection figures of "Phase 3 closes on partial benchmark data: the rates are refit,
+the calibration and thresholds stay" and of "The planning overhaul closes out on the data in hand: the ship
+gate is accepted as unmet, #443 and #442 stay open": the large `status-quo` replay's estimate is $20.21, not
+$13.54, and its error −47.1%, not −64.6%; `phase3`'s worst miss is +28.1%, not −54.8%. The large `inline`
+miss (+428.7%) stands. Neither entry is rewritten.
+
+**How to apply:** grouped and delegated projections rise and inline and checkpointed ones do not. A change
+of fast family in the policy moves the projection with it and needs no edit in `scripts/plan-cost.mjs`.
+`PLANNING_RATES` and `EXECUTION_RATE` are measured spend per task, not projection prices, and stay.
+
 ## 2026-11-26 — The unattended-execution audit stays tracked as the one audit kept as evidence (#456 slice 2)
 
 **Decision:** `docs/audits/2026-11-26-unattended-execution.md` stays tracked, re-included by name in

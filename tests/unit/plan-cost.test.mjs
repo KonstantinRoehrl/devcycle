@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   PROFILE, ROLE_PARAMS, PLANNING_RATES, EXECUTION_RATE, CALIBRATION, PLANNING_MODELS, CHECKER_PAIRS_PER_DISPATCH,
-  taskWeight, taskTokens, draftTier, isCalibrated, dispatchCost, projectPlanning,
+  taskWeight, taskTokens, draftTier, isCalibrated, dispatchCost, projectPlanning, planningModels,
 } from "../../scripts/plan-cost.mjs";
-import { loadPolicy } from "../../scripts/model-policy.mjs";
+import { dispatchAlias, loadPolicy, resolveRole } from "../../scripts/model-policy.mjs";
 
 const task = (num, wave, { deps = [], files = [`f${num}.mjs`, `t${num}.mjs`, `g${num}.mjs`], produces = 2, ...flags } = {}) =>
   ({ num, wave, deps, files, produces, ...flags });
@@ -25,7 +25,8 @@ test("the profile, the fitted role parameters, the rates and the calibration rec
   assert.deepEqual(PLANNING_RATES, { "status-quo": 1.34, inline: 0.97, grouped: 1.11, checkpointed: 1.4 });
   assert.equal(EXECUTION_RATE, 2.5);
   assert.deepEqual(CALIBRATION, { passes: [], maxErrorPct: 35 });
-  assert.deepEqual(PLANNING_MODELS, { session: "claude-opus-5-5", fast: "claude-haiku-5-5" });
+  assert.equal(PLANNING_MODELS.session, "claude-opus-5-5");
+  assert.ok(Object.isFrozen(PLANNING_MODELS));
   assert.equal(CHECKER_PAIRS_PER_DISPATCH, 8);
 });
 
@@ -68,11 +69,11 @@ test("inline is one coordinator segment, checkpointed one per wave", () => {
 test("grouped prices a drafter per group on its tier, a merge segment and one checker per 8 pairs", () => {
   const grouped = projectPlanning({ strategy: "grouped", rounds: [oneRound] }, cut);
   assert.deepEqual(grouped, {
-    dispatches: 3, tokens: 242373, usd: 0.44, calibrated: false,
+    dispatches: 3, tokens: 242373, usd: 1.69, calibrated: false,
     byRole: {
       coordinator: { count: 1, tokens: 65440, usd: 0.36 },
-      drafter: { count: 2, tokens: 120000, usd: 0.08 },
-      checker: { count: 1, tokens: 56933, usd: 0.01 },
+      drafter: { count: 2, tokens: 120000, usd: 1.1 },
+      checker: { count: 1, tokens: 56933, usd: 0.24 },
     },
   });
   const delegated = projectPlanning({ strategy: "delegated", rounds: [] }, cut);
@@ -81,11 +82,30 @@ test("grouped prices a drafter per group on its tier, a merge segment and one ch
 
 test("a cheaper session model prices the coordinator lower and dispatches the same", () => {
   const choice = { strategy: "grouped", rounds: [oneRound] };
-  const sonnet = projectPlanning(choice, cut, { ...PLANNING_MODELS, session: "claude-sonnet-5-5" });
-  const opus = projectPlanning(choice, cut);
+  const sonnet = projectPlanning(choice, cut, planningModels("claude-sonnet-5-5"));
+  const opus = projectPlanning(choice, cut, planningModels("claude-opus-5-5"));
   assert.ok(sonnet.byRole.coordinator.usd < opus.byRole.coordinator.usd, `${sonnet.byRole.coordinator.usd} vs ${opus.byRole.coordinator.usd}`);
   assert.equal(sonnet.dispatches, opus.dispatches);
-  assert.equal(sonnet.byRole.drafter.usd, opus.byRole.drafter.usd, "a fast-tier drafter does not follow the session model");
+  assert.equal(sonnet.byRole.drafter.usd, opus.byRole.drafter.usd, "Opus and Sonnet sessions resolve the same fast-tier id, so their fast drafters price the same");
+});
+
+test("the projection prices the fast tier at the model the policy resolves it to", () => {
+  const ceiling = PLANNING_MODELS.session;
+  assert.equal(PLANNING_MODELS.fast, resolveRole("checker", { ceiling }).model);
+  const drafter = resolveRole("drafter", { ceiling });
+  assert.equal(drafter.tier, "fast", "an unescalated drafter resolves to the fast tier");
+  assert.equal(PLANNING_MODELS.fast, drafter.model);
+  assert.equal(dispatchAlias(PLANNING_MODELS.fast), loadPolicy().fastFamily);
+});
+
+test("planningModels follows the session as the policy does: the fast family under an Opus or Sonnet session, the session itself under a Haiku or unranked one", () => {
+  for (const session of ["claude-opus-5-5", "claude-sonnet-5-5"]) {
+    const pair = planningModels(session);
+    assert.equal(pair.session, session);
+    assert.equal(dispatchAlias(pair.fast), loadPolicy().fastFamily, `${session} prices its fast tier at the policy's fast family`);
+  }
+  assert.equal(planningModels("claude-haiku-4-5-20251001").fast, "claude-haiku-4-5-20251001", "a Haiku session prices its fast tier at itself");
+  assert.equal(planningModels("claude-nope-9").fast, "claude-nope-9", "no fast tier under an unranked session");
 });
 
 test("a split has no projection", () => {

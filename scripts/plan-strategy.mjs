@@ -9,7 +9,7 @@
 import { readFileSync } from "node:fs";
 import { isMain } from "./is-main.mjs";
 import { parseFlags } from "./cli-flags.mjs";
-import { PLANNING_MODELS, PROFILE, draftTier, projectPlanning, taskTokens, taskWeight } from "./plan-cost.mjs";
+import { PLANNING_MODELS, PROFILE, draftTier, planningModels, projectPlanning, taskTokens, taskWeight } from "./plan-cost.mjs";
 import { canonicalModelId } from "./depth-bands.mjs";
 import { parseModelId, priceFor } from "./pricing.mjs";
 
@@ -225,7 +225,7 @@ function main(argv) {
   // the default and says so, because a guessed price would be presented as a measured one. An omitted flag
   // says so too: the default is Opus, so a Sonnet session would otherwise be silently overpriced.
   const warnings = [];
-  const models = { ...PLANNING_MODELS };
+  let models = PLANNING_MODELS;
   const sessionModel = flags["--sessionModel"];
   if (sessionModel === undefined) {
     warnings.push(`no --sessionModel given; priced the session as ${PLANNING_MODELS.session}`);
@@ -234,7 +234,7 @@ function main(argv) {
     const parsed = parseModelId(canonical);
     const undated = parsed && /-\d{8}$/.test(canonical) ? `claude-${parsed.family}-${parsed.version.join("-")}` : null;
     const priced = [canonical, undated].find((id) => id && priceFor(id));
-    if (priced) models.session = priced;
+    if (priced) models = planningModels(priced);
     else {
       const named = canonical === sessionModel ? sessionModel : `${sessionModel} (${canonical})`;
       warnings.push(`--sessionModel ${named} has no price in scripts/pricing.mjs; priced the session as ${PLANNING_MODELS.session}`);
