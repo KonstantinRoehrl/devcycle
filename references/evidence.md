@@ -116,6 +116,7 @@ content cannot. Evidence is never profile-conditional; only `<N>` varies.
   array of substrings that every whole-gate `cmd:` must contain, enforced by
   `evidence-completeness-check.mjs` (overridable via `--required-checks <path>`) and, on a plan's
   pinned gates, by `plan-check.mjs`. Absent, it is a no-op, keeping the plugin repo-agnostic.
+- Its gate rules sit beside it at `tests/fixtures/gate-rules.json`: the files a task that touches or creates matching paths must also list, enforced on the plan by `plan-check.mjs`'s `gateRules` leg. Absent, the leg passes with a note; malformed, it is a finding.
 - **Scope every capture to the task's own `**Files:**` list**, as a pathspec — `git diff -- <the
   task's files>`, never a bare `git diff`. Concurrent implementers share one checkout, and wave
   formation guarantees no two of them touch the same file, so a file-scoped capture sees exactly

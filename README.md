@@ -259,10 +259,13 @@ plugin ships. Start there.
   candidate before it ranks. A tool that can run repo code runs only on that pass's consent. The
   plugin-only checks run only in devcycle's own source (`self-dev-check.mjs --is-source`).
 - The evidence-and-verification contract's gates: planning runs `scripts/plan-check.mjs` in its
-  self-review — one fail-closed gate over ten legs, including the budget-fixture and
+  self-review — one fail-closed gate over ten legs, including the gate-rules and
   authored-claims checks, which also runs on each drafted task and on the plan assembled from them — and `/devcycle:cycle` runs
   `scripts/contract-staleness-check.mjs` as an advisory preflight that warns when a cached plugin's
-  contract predates the target repo's. A host repo can declare its whole-gate checks in the
+  contract predates the target repo's. A host repo can declare plan-time gate rules in
+  `tests/fixtures/gate-rules.json` (files a task that touches or creates matching paths must also
+  list), which the `gateRules` leg holds every task to; without the file the leg passes with a
+  note. A host repo can declare its whole-gate checks in the
   required-checks manifest `tests/fixtures/required-gate-checks.json` — a committed JSON array of
   substrings every convention whole-gate command must contain, enforced by plan-check against the
   plan's gate commands and by `scripts/evidence-completeness-check.mjs` against each capture's

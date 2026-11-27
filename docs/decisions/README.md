@@ -5,6 +5,48 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-27 — The plan gate's repo rules come from the repo, and two blast-radius relations are notes (#505)
+
+**Decision:** the `gateRules` leg reads the target repo's `tests/fixtures/gate-rules.json`. devcycle's
+own chain moved there, plus the created-script rule. `budget-fixture-check.mjs` is gone. Check 33 holds
+the file to checks 9 and 15. The stem and second-hop relations are notes, never findings.
+
+**Why:** most driven-run stops were Files-too-narrow, and the move-cycle stop was a repo rule. Stem
+matching and the second hop were measured over 23 recent plans at their branch-cut bases against each
+task's committed files: stem added 184 findings, the hop 393, and the created-script rule 4, with 0 true
+positives. The spec's threshold is two false findings per plan. The old leg also fired in every host
+repo.
+
+**Supersedes:** the `budgetFixtures` leg; `- Budget-fixture override:` stays an alias for one release.
+
+**Budgets:** the prose edits moved these closure figures (old to new, in bytes):
+
+```text
+playbooks/executing-waves.md 126798 -> 127062
+playbooks/planning-waves.md 74606 -> 74754
+playbooks/profiling-sessions.md 44309 -> 44573
+playbooks/receiving-review.md 132915 -> 133179
+playbooks/reviewing-code.md 109203 -> 109467
+playbooks/sweeping-mechanical-changes.md 103212 -> 103476
+playbooks/taking-the-fast-path.md 57906 -> 58170
+playbooks/writing-the-findings-document.md 68966 -> 69230
+references/evidence.md 14642 -> 14673
+```
+
+and the fixtures now read:
+
+```text
+budget: context-budget.json playbooks/executing-waves.md 127062
+budget: context-budget.json playbooks/planning-waves.md 74754
+budget: context-budget.json playbooks/profiling-sessions.md 44573
+budget: context-budget.json playbooks/receiving-review.md 133179
+budget: context-budget.json playbooks/reviewing-code.md 109467
+budget: context-budget.json playbooks/sweeping-mechanical-changes.md 103476
+budget: context-budget.json playbooks/taking-the-fast-path.md 58170
+budget: context-budget.json playbooks/writing-the-findings-document.md 69230
+budget: context-budget.json references/evidence.md 14673
+```
+
 ## 2026-11-26 — The unattended-execution audit stays tracked as the one audit kept as evidence (#456 slice 2)
 
 **Decision:** `docs/audits/2026-11-26-unattended-execution.md` stays tracked, re-included by name in
