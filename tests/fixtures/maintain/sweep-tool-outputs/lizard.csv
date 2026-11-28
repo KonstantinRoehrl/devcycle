@@ -1,0 +1,5 @@
+17,10,122,2,17,"flagGeneratedOrders@2-18@./src/generated-client.js","./src/generated-client.js","flagGeneratedOrders","flagGeneratedOrders ( orders , limits )",2,18,24,6
+17,10,120,2,17,"flagHeldOrders@1-17@./src/hot.js","./src/hot.js","flagHeldOrders","flagHeldOrders ( orders , limits )",1,17,24,6
+54,25,160,1,54,"describeCode@1-54@./src/table.js","./src/table.js","describeCode","describeCode ( code )",1,54,1,1
+17,10,120,2,17,"summarizeLedger@1-17@./src/stable.js","./src/stable.js","summarizeLedger","summarizeLedger ( entries , rules )",1,17,24,6
+3,1,10,1,3,"double@1-3@./src/small.js","./src/small.js","double","double ( value )",1,3,0,0

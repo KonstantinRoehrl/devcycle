@@ -259,8 +259,12 @@ plugin ships. Start there.
   `.devcycle/maintain/`, fetching a
   pinned tool through `npx` when the repo has none, one verification dispatch confirms each
   candidate before it ranks, and one judgment dispatch reviews the judgment-routed kinds. The dead-code
-  and duplication sweeps ship in it; its coverage statement names, per scanner, the source files that scanner does not read, and `run --ref` reads the findings store for the judgment at that ref. A tool that can run repo code runs only on that pass's consent. The
-  plugin-only checks run only in devcycle's own source (`self-dev-check.mjs --is-source`).
+  and duplication sweeps ship in it; its coverage statement names, per scanner, the source files that scanner does not read, and `run --ref` reads the findings store for the judgment at that ref. A tool that can run repo code runs only on that pass's consent. Beside
+  them, the complexity sweep measures every function with lizard (radon as its Python
+  fallback) against the repo's own linter thresholds and ranks files by complexity × churn; a
+  complex but stable file goes on a watch list rather than being verified, and at `thorough` the
+  history inspector's churn table (`finalize --history`) re-ranks the hotspots and raises those with
+  fix commits. The plugin-only checks run only in devcycle's own source (`self-dev-check.mjs --is-source`).
 - The evidence-and-verification contract's gates: planning runs `scripts/plan-check.mjs` in its
   self-review — one fail-closed gate over ten legs, including the gate-rules and
   authored-claims checks, which also runs on each drafted task and on the plan assembled from them — and `/devcycle:cycle` runs

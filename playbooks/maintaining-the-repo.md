@@ -63,8 +63,8 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
    line, to `.devcycle/maintain/sweep-<date>/hotspots.txt` before step 4, the file `run --hotspots` reads.
 4. **Deterministic-facts pre-pass.** Gather what tooling establishes exactly — dependency audit,
    lint, the hygiene sweep — and hand the lenses those facts as evidence.
-   The hygiene sweep runs first, covering every sweep `${CLAUDE_PLUGIN_ROOT}/references/hygiene-sweeps.json` registers in one pass: `node "${CLAUDE_PLUGIN_ROOT}/scripts/hygiene-sweep.mjs" run --out .devcycle/maintain/sweep-<date> --hotspots .devcycle/maintain/sweep-<date>/hotspots.txt`
-   writes candidate clusters and coverage rows — tooling facts like the others. Its contract is `${CLAUDE_PLUGIN_ROOT}/references/hygiene-sweeps.md`.
+   The hygiene sweep runs first, covering every sweep `${CLAUDE_PLUGIN_ROOT}/references/hygiene-sweeps.json` registers (dead code, duplication and complexity) in one pass: `node "${CLAUDE_PLUGIN_ROOT}/scripts/hygiene-sweep.mjs" run --out .devcycle/maintain/sweep-<date> --hotspots .devcycle/maintain/sweep-<date>/hotspots.txt`
+   writes candidate clusters and coverage rows — tooling facts like the others — and its `finalize` (step 8) writes one section per registered sweep. Its contract is `${CLAUDE_PLUGIN_ROOT}/references/hygiene-sweeps.md`.
    Add `--consent-executing` and `--consent-coverage` for each step 2 yes, `--ref "$base"` whenever
    step 8's doc-tracking veto does not apply, and omit `--hotspots` when step 3 yields no list. It runs at every depth,
    and a `<concern>` narrows the lens criteria, never the sweep. `<dir>` below is its `--out`.
@@ -92,7 +92,8 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
 5. **History (thorough only).** Dispatch `devcycle:history-inspector` at the **fast tier** within its
    bounded traversal window (the smaller of the last 500 commits or 6 months, owned by the agent).
    Fold its churn/convergence signal into the Abstraction charter's historical-convergence input and
-   keep its own findings.
+   keep its own findings. Save the fenced JSON churn table its report carries, verbatim, as
+   `<dir>/history.json`, the file step 8's `finalize --history` reads.
 6. **Depth-gated criteria → the engine.** Confirmed criteria = existing criteria always; **standard**
    adds **abstraction** — read `${CLAUDE_PLUGIN_ROOT}/references/abstraction-and-strengths.md` for
    its method; **thorough** additionally carries **history** evidence. Follow
@@ -102,8 +103,10 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
    dispatch and dedup-and-rank; `playbooks/writing-the-findings-document.md` writes the ranked
    `docs/audits/` document.
    The lenses do not re-sweep step 4's ground: they get the verified clusters (`<dir>/candidates.json`
-   with `<dir>/verdicts.json`) as tooling facts, not the **dead or unreachable code** criterion. A lens
-   finding on a cluster's anchor merges by step 8's merge rule.
+   with `<dir>/verdicts.json`) as tooling facts, the complexity hotspots among them, in place of the
+   **dead or unreachable code** criterion and the measured part of the **complexity** criterion. Only
+   its "needless layers, options or generality" judgment stays with the lenses. A lens finding on a
+   cluster's anchor, or on a hotspot's file, merges by step 8's merge rule.
 7. **GitHub issues as a second input source — read-only, all depths.** Unless the scoping gate
    excluded it, fold in the target repo's own open issues alongside the lens findings; this runs at
    every profile depth (lean, standard, thorough), since it is a separate input source, not a
@@ -132,8 +135,10 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
    `Origin:` line in the pass document.
    - **Fold in the sweep.** Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/hygiene-sweep.mjs" finalize --dir <dir> --verdicts <dir>/verdicts.json --run <runId> --depth <depth>`
      (this pass's maintenance depth from step 1), adding `--judgments <dir>/judgments.json` when step 4
-     judged, and `--lcov <file>` when step 4's coverage run produced one. Each `<dir>/section-<sweep>.md` becomes its own section of the findings document,
-     under the heading it carries, and `<dir>/entries.json`'s entries join the pass file.
+     judged, `--lcov <file>` when step 4's coverage run produced one and, at `thorough`,
+     `--history <dir>/history.json` from step 5. Each `<dir>/section-<sweep>.md` becomes its own section
+     of the findings document, under the heading it carries (**Dead code**, **Duplication / single source of truth**,
+     **Complexity hotspots**), and `<dir>/entries.json`'s entries join the pass file.
    - **Write the pass file.** Write `.devcycle/maintain/pass-<date>.json`, `<date>` the pass
      document's own: a JSON array with one `{ culpritKind, canonicalLocation, title, severity,
      confidence, affectedFiles, verify? }` entry per ranked finding except an `Origin: github-issue`

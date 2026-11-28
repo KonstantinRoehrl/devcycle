@@ -9,6 +9,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { complexityResult } from "./hygiene-complexity.mjs";
 
 const LOCATION = /^(.+?)[:(](\d+)/;
 const PATH_TOKEN = /[^\s"'`()[\]<>:,;]+/g;
@@ -279,4 +280,84 @@ export const jscpd = {
   },
 };
 
-export const ADAPTERS = { raw, knip, tsc, jscpd };
+// lizard's `--csv` output has no header and quotes its text fields; `""` inside one is a quote.
+const LIZARD_COLUMNS = 13;
+const LIZARD_NUMERIC = [0, 1, 2, 3, 4, 9, 10, 11, 12];
+const LIZARD_NOTE = "lizard skips a file byte-identical to one it already read (MD5), so a copied file is measured once";
+
+function csvFields(line) {
+  const fields = [];
+  let i = 0;
+  while (i <= line.length) {
+    if (line[i] === '"') {
+      let value = "";
+      for (i += 1; i < line.length; i += 1) {
+        if (line[i] === '"' && line[i + 1] === '"') { value += '"'; i += 1; }
+        else if (line[i] === '"') break;
+        else value += line[i];
+      }
+      fields.push(value);
+      i += 2;
+    } else {
+      const end = line.indexOf(",", i);
+      fields.push(line.slice(i, end < 0 ? undefined : end));
+      i = end < 0 ? line.length + 1 : end + 1;
+    }
+  }
+  return fields;
+}
+
+function lizardRows(stdout, repoRoot) {
+  const rows = [];
+  for (const line of stdout.split("\n")) {
+    const f = csvFields(line.trim());
+    if (f.length !== LIZARD_COLUMNS || !LIZARD_NUMERIC.every((n) => /^\d+$/.test(f[n]))) continue;
+    rows.push({ file: relativize(f[6], repoRoot), name: f[7], line: Number(f[9]), ccn: Number(f[1]), cognitive: Number(f[11]),
+      nloc: Number(f[0]), params: Number(f[3]), nesting: Number(f[12]) });
+  }
+  return rows;
+}
+
+export const lizard = {
+  normalize(runs, ctx) {
+    const stdout = runs[0]?.stdout ?? "";
+    const rows = lizardRows(stdout, ctx.repoRoot);
+    if (stdout.trim() && !rows.length) return { ok: false, candidates: [], note: `lizard output held no CSV rows: ${firstLine(stdout)}` };
+    return complexityResult(rows, ctx, { notes: [LIZARD_NOTE] });
+  },
+};
+
+function radonRows(parsed, repoRoot) {
+  const rows = [];
+  const errors = [];
+  for (const [path, blocks] of Object.entries(parsed)) {
+    const file = relativize(path, repoRoot);
+    if (!Array.isArray(blocks)) { errors.push(`radon could not parse ${file}: ${blocks?.error ?? "unknown error"}`); continue; }
+    const seen = new Set();
+    const add = (block, name) => {
+      if (seen.has(block.lineno)) return;
+      seen.add(block.lineno);
+      rows.push({ file, name, line: block.lineno, ccn: block.complexity, cognitive: null, nloc: null, params: null, nesting: null });
+    };
+    for (const block of blocks) {
+      if (block.type === "function") add(block, block.name);
+      if (block.type === "method") add(block, `${block.classname}.${block.name}`);
+      for (const method of block.type === "class" ? block.methods ?? [] : []) add(method, `${method.classname ?? block.name}.${method.name}`);
+    }
+  }
+  return { rows, errors };
+}
+
+export const radon = {
+  normalize(runs, ctx) {
+    const stdout = (runs[0]?.stdout ?? "").trim() || "{}";
+    let parsed;
+    try { parsed = JSON.parse(stdout); } catch { parsed = null; }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))
+      return { ok: false, candidates: [], note: `radon output is not JSON: ${firstLine(stdout)}` };
+    const { rows, errors } = radonRows(parsed, ctx.repoRoot);
+    return complexityResult(rows, ctx, { notes: [...errors, "radon measures CCN only; cognitive, nesting, params and nloc not measured"] });
+  },
+};
+
+export const ADAPTERS = { raw, knip, tsc, jscpd, lizard, radon };

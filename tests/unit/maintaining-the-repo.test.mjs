@@ -108,3 +108,9 @@ test("the pre-pass also runs the dead-export and xref checks, as advisory facts"
   assert.match(pb, /xref-check\.mjs/);
   assert.match(pb, /advisory/i);
 });
+
+test("the history inspector's churn table is saved as history.json and handed to finalize --history", () => {
+  assert.match(pb, /history\.json/);
+  assert.match(pb, /--history/);
+  assert.match(pb, /Complexity hotspots/);
+});

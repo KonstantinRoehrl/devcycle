@@ -20,18 +20,20 @@ playbook closure and the runtime surface.
 **Why:** the round-1 fix widened what duplication detection never sees without saying so, and a coverage
 note that implies a complete kind where a scanner leaves languages unread misleads the reader.
 
-**Budgets:** the prose edits moved these figures (old to new), each the measured value:
+**Budgets:** the prose edits moved these figures (old to new), each the measured value. The three duplication
+entries chain from the complexity entry's figures, since #481 landed first; the last figure is measured on the
+merged tree, so it also carries the two sweeps' shared doc edits:
 
 ```text
-playbooks/maintaining-the-repo.md 91310 -> 92358
-surfaceTotal (surface-budget.json) 7762 -> 7770
+playbooks/maintaining-the-repo.md 95657 -> 96748
+surfaceTotal (surface-budget.json) 7820 -> 7829
 ```
 
 and the fixtures now read:
 
 ```text
-budget: context-budget.json playbooks/maintaining-the-repo.md 92358
-budget: surface-budget.json surfaceTotal 7770
+budget: context-budget.json playbooks/maintaining-the-repo.md 96748
+budget: surface-budget.json surfaceTotal 7829
 ```
 
 ## 2026-11-28 — the duplication sweep's coverage, floors and verification rules are documented (#478)
@@ -50,15 +52,15 @@ owner in the method prose drifts.
 **Budgets:** the prose edits moved these figures (old to new):
 
 ```text
-playbooks/maintaining-the-repo.md 88934 -> 91310
-surfaceTotal (surface-budget.json) 7736 -> 7762
+playbooks/maintaining-the-repo.md 93281 -> 95657
+surfaceTotal (surface-budget.json) 7794 -> 7820
 ```
 
 and the fixtures now read:
 
 ```text
-budget: context-budget.json playbooks/maintaining-the-repo.md 91310
-budget: surface-budget.json surfaceTotal 7762
+budget: context-budget.json playbooks/maintaining-the-repo.md 95657
+budget: surface-budget.json surfaceTotal 7820
 ```
 
 ## 2026-11-28 — maintain judges its hygiene sweeps in a tenth dispatch (#478)
@@ -76,15 +78,48 @@ later sweep shares these two dispatches, so this is the last raise the sweep fam
 figures (old to new):
 
 ```text
-playbooks/maintaining-the-repo.md 84269 -> 88934
-surfaceTotal (surface-budget.json) 7675 -> 7736
+playbooks/maintaining-the-repo.md 88616 -> 93281
+surfaceTotal (surface-budget.json) 7733 -> 7794
 ```
 
 and the fixtures now read:
 
 ```text
-budget: context-budget.json playbooks/maintaining-the-repo.md 88934
-budget: surface-budget.json surfaceTotal 7736
+budget: context-budget.json playbooks/maintaining-the-repo.md 93281
+budget: surface-budget.json surfaceTotal 7794
+```
+
+## 2026-11-28 — Complexity replaces bloat as a quality criterion and joins the hygiene sweeps (#481)
+
+**Decision:** `references/quality-criteria.md`'s **bloat** bullet becomes **complexity**: a function or
+file harder to change than its job needs, measured against the repo's linter config, else the stack
+linter's documented default, with no number in the criterion. `references/hygiene-sweeps.md` gains a
+`## Complexity` method (lizard, radon as the Python fallback, the complexity × churn rank, hot versus
+watch, thresholds read from linter config) and its report, store and coverage sections gain the
+`watch` route, evidence lines, coverage notes and the thorough-only `--history` re-rank. The
+maintain playbook has the coordinator save the history inspector's churn table as `history.json` and
+pass it to `finalize --history`; the lenses get the hotspots as tooling facts and keep only the
+"needless layers, options or generality" judgment.
+
+**Why:** the measured half of bloat is deterministic and a tool states it exactly; spending a lens
+on it re-derives a tooling fact. The judgment half stays with the lenses.
+
+**Budgets:** the prose edits moved these figures (old to new):
+
+```text
+playbooks/maintaining-the-repo.md 84269 -> 88616
+playbooks/planning-waves.md 74754 -> 75152
+playbooks/reviewing-code.md 109467 -> 109865
+surfaceTotal (surface-budget.json) 7675 -> 7733
+```
+
+and the fixtures now read:
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 88616
+budget: context-budget.json playbooks/planning-waves.md 75152
+budget: context-budget.json playbooks/reviewing-code.md 109865
+budget: surface-budget.json surfaceTotal 7733
 ```
 
 ## 2026-11-28 — maintain's hygiene sweep runs every registered sweep in one pass (#478)

@@ -23,3 +23,8 @@ test("it carries an explicit, bounded traversal window", () => {
   assert.match(agent, /500 commits|last 500/i);
   assert.match(agent, /6 months/i);
 });
+
+test("it reports a churn table carrying fixCommits for the sweep's --history re-rank", () => {
+  assert.match(agent, /fixCommits/);
+  assert.match(agent, /"commits"/);
+});

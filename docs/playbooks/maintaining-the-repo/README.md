@@ -34,6 +34,7 @@ playbook's step 8) — which is the only write this otherwise read-only playbook
 Each pass mints its own run record and asks, every time, whether the sweep may run repo code: its
 executing-class tools and, separately, a coverage run. The answers go on that record, with the
 sweep's per-kind counts, which **Trending** compares against the latest earlier pass on this machine.
+The hygiene sweeps are dead code, duplication and complexity: the complexity sweep measures functions with lizard (radon is its Python fallback) against the repo's own linter thresholds, ranks files by complexity × churn, and lists complex but stable files on a watch list that is never verified or stored. At `thorough`, the history inspector's churn table is saved as `history.json` and passed to `finalize --history`, which re-ranks the hotspots and raises those with fix commits.
 A hygiene-sweep finding resolves out of the store only when every source behind its kind ran in full and the pass finalized its sweeps, each with its own section in the findings document. A heuristic scanner that leaves tracked source files of other languages unread is named in the coverage statement and keeps its kinds partial. Tests, docs and test-named files are out of scope for duplication detection, and the statement names those globs with a file count.
 
 A fan-out ceiling bounds the whole pass: at most 5 concurrent panel lenses and 10 total LLM

@@ -31,8 +31,12 @@ Apply regardless of stack:
 - **dead or unreachable code** — code with no production caller; code reachable only from its own
   tests counts as dead (measured against: the repo's convention, else the stack's unused-code
   diagnostics, e.g. TypeScript `noUnusedLocals`, ESLint `no-unused-vars`);
-- **bloat** — code larger than its job: needless layers, options or generality (Fowler's
-  *Refactoring*: Speculative Generality);
+- **complexity** — a function or file harder to change than its job needs: a function high on
+  cognitive complexity, length, parameter count or nesting depth, a file high on size or number of
+  responsibilities, or either carrying needless layers, options or generality (Fowler's
+  *Refactoring*: Speculative Generality); a table, data literal or exhaustive enum switch is not
+  complexity (measured against: the repo's linter config, else the stack linter's documented
+  default, which `references/hygiene-sweeps.json` names);
 - **undocumented code** — code that fails the Documentation standard below (measured against: its sources);
 - docs-vs-reality drift — documentation that exists and is wrong: a README flag, endpoint,
   or setup step the code no longer honours (distinct from undocumented code above, which is

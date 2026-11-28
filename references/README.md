@@ -18,8 +18,8 @@ one line per entry; the hub (`README.md`) mirrors this roster in its surface tab
 | `findings.md` | How a finding is expressed — the four-value severity vocabulary with blocking derived, the core and document field sets, the evidence discipline, and the panel's machine shape. |
 | `first-run-config.md` | devcycle's first-run configuration dialogue. |
 | `handoff.md` | What happens at a stage boundary — the handoff block, the three-value context action, the one-block-per-stage rule, and the await gate. |
-| `hygiene-sweeps.json` | The hygiene-sweep registry — each stack's signals, each sweep's culprit kinds with default severities and routes, the dead-code and duplication sweeps, the built-in scanners, and every tool's pinned version, class and read-only invocation, loaded by `scripts/hygiene-registry.mjs`. |
-| `hygiene-sweeps.md` | The hygiene-sweep contract — flow, tool classes and consent, the verification and judgment dispatches and their files, report, store and ratchet, coverage statement, safety, and the dead-code and duplication methods. Audit-only: cited by the maintain playbook. |
+| `hygiene-sweeps.json` | The hygiene-sweep registry — each stack's signals, each sweep's culprit kinds with default severities and routes, the dead-code, duplication and complexity sweeps, the built-in scanners, and every tool's pinned version, class and read-only invocation, loaded by `scripts/hygiene-registry.mjs`. |
+| `hygiene-sweeps.md` | The hygiene-sweep contract — flow, tool classes and consent, the verification and judgment dispatches and their files, report, store and ratchet, coverage statement, safety, and the dead-code, duplication and complexity methods. Audit-only: cited by the maintain playbook. |
 | `impact-scoring.md` | How devcycle quantifies what a culprit cost. |
 | `issue-folding.md` | How a caller folds a repo's open GitHub issues into ranked, verified claims — fetch and screen, decompose, classify, verify, rank and cluster — with each step's maintain and triage switch. |
 | `ledger.md` | The ledger's own write format — its preamble records and its per-event line. |

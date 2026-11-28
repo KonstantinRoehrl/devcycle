@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { loadRegistry } from "../../scripts/hygiene-registry.mjs";
 import { SCANNERS } from "../../scripts/hygiene-scanners.mjs";
-import { clusterCandidates, detectStacks, finalizeSweep, resolveCommand, runSweep, selectTools } from "../../scripts/hygiene-sweep.mjs";
+import { CHURN_WINDOW, churnByFile, clusterCandidates, detectStacks, finalizeSweep, resolveCommand, runSweep, selectTools } from "../../scripts/hygiene-sweep.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/hygiene-sweep.mjs", import.meta.url));
 const registry = () => structuredClone(loadRegistry());
@@ -434,4 +434,32 @@ test("the duplication scanners skip the paths jscpd excludes, the statement name
   assert.match(statement, /^- excluded from the heuristic scanners: 2 tracked files matching \*\*\/node_modules\/\*\*, .*\*\*\/tests\/\*\*.*\*\*\/docs\/\*\*/m);
   assert.doesNotMatch(statement, /docs\/demo\.rb/);
   assert.ok(coverage.fullKinds.includes("duplicate-constant"));
+});
+
+test("churnByFile counts commits and lines changed per file inside the one window", () => {
+  assert.deepEqual(CHURN_WINDOW, ["--since=6 months ago", "-n", "500"]);
+  const repo = repoWith({ "a.js": "one\ntwo\nthree\n", "b.png": "\u0000\u0001" });
+  const g = (...a) => execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...a]);
+  g("init", "-q"); g("add", "."); g("commit", "-q", "-m", "init");
+  writeFileSync(join(repo, "a.js"), "one\n2\nthree\n");
+  g("commit", "-q", "-am", "edit");
+  const { churn, lines, commits, error } = churnByFile(repo);
+  assert.equal(error, null);
+  assert.deepEqual(Object.fromEntries(churn), { "a.js": 2, "b.png": 1 });
+  assert.deepEqual(Object.fromEntries(lines), { "a.js": 5, "b.png": 0 });
+  assert.deepEqual(commits.map((c) => [...c].sort()), [["a.js"], ["a.js", "b.png"]]);
+});
+
+test("sweepConfig reads a hotCommits override beside staleTodoDays, each judged on its own", () => {
+  const reg = registry();
+  reg.config.hotCommits = 4;
+  const config = (body) => {
+    const repo = repoWith({ "a.txt": "x\n", ...(body === null ? {} : { ".devcycle-hygiene.json": JSON.stringify(body) }) });
+    return runSweep({ repoRoot: repo, outDir: join(makeTempDir("hyg-out-"), "s"), registry: reg, files: ["a.txt"], churn: new Map(),
+      runTool: () => ok(), onPath: () => false }).coverage.config;
+  };
+  assert.deepEqual(config(null), { staleTodoDays: reg.config.staleTodoDays, hotCommits: 4, source: "registry" });
+  assert.deepEqual(config({ hotCommits: 7 }), { staleTodoDays: reg.config.staleTodoDays, hotCommits: 7, source: ".devcycle-hygiene.json" });
+  assert.deepEqual(config({ staleTodoDays: 9, hotCommits: 0 }),
+    { staleTodoDays: 9, hotCommits: 4, source: "registry (invalid .devcycle-hygiene.json ignored)" });
 });

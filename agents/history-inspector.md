@@ -32,6 +32,10 @@ history, say so in your report rather than implying you read all of it.
 - **Bug-fix clusters:** files recurring in `fix`-typed commit subjects carry defect pressure.
 - **Co-change coupling:** files that change together, evidence of a hidden seam.
 - **Long-lived debt:** TODO/FIXME/HACK that has survived many commits.
+- **Churn table:** for every file changed in the window, its commit count and how many of those
+  commits are `fix`-typed. Report it as one fenced `json` block, `{ "files": [ { "file", "commits",
+  "fixCommits" } ] }`, with non-negative integer counts and repo-relative paths: the coordinator
+  saves it verbatim, and the hygiene sweep's `finalize --history` re-ranks by it.
 
 Report per `${CLAUDE_PLUGIN_ROOT}/references/output.md`; every load-bearing claim carries the
 command that produced it (`${CLAUDE_PLUGIN_ROOT}/references/evidence.md` § Authored claims), and

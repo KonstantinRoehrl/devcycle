@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { finalizeSweep } from "../../scripts/hygiene-sweep.mjs";
+import { finalizeSweep, historyIndex } from "../../scripts/hygiene-sweep.mjs";
 import { loadRegistry } from "../../scripts/hygiene-registry.mjs";
 import { gitToplevel, runsDirForRepo } from "../../scripts/run-record.mjs";
 
@@ -13,7 +13,7 @@ const SCRIPT = fileURLToPath(new URL("../../scripts/hygiene-sweep.mjs", import.m
 const registry = loadRegistry();
 const KINDS = Object.keys(registry.sweeps["dead-code"].kinds);
 const OTHER_SWEEPS = Object.fromEntries(Object.entries(registry.sweeps).filter(([id]) => id !== "dead-code").map(([id, s]) =>
-  [id, { title: s.title, noun: s.noun, noToolStacks: [], notCovered: s.notCovered, sweepKinds: Object.keys(s.kinds), sourcedKinds: Object.keys(s.kinds), fullKinds: [] }]));
+  [id, { title: s.title, noun: s.noun, noToolStacks: [], notCovered: s.notCovered, sweepKinds: Object.keys(s.kinds), sourcedKinds: Object.keys(s.kinds), fullKinds: [], notes: [] }]));
 
 const cand = (source, file, line, symbol, kind, extra = {}) => ({
   id: `${source}:${file}:${line ?? 0}:${symbol ?? ""}`, sweep: "dead-code", kind, source, file, line, symbol,
@@ -219,4 +219,85 @@ test("finalize: Trending says not comparable, never a direction, when either pas
 test("finalize: the Trending baseline is strictly earlier than the pass being finalized", () => {
   const section = trendingWith({ fullKinds: KINDS, earlier: [["a".repeat(16), "2026-01-01T00:00:00Z", true], ["b".repeat(16), "2026-12-01T00:00:00Z", true, 5]] });
   assert.ok(section.includes("- dead-code 0 → 3"), `a later pass must not be the baseline:\n${section}`);
+});
+
+// A complexity-shaped second sweep: a scored, history-ranked kind and a section-only watch kind.
+function cxRegistry() {
+  const reg = structuredClone(registry);
+  reg.sweeps.cx = { title: "Cx", noun: "cx", notCovered: ["css"],
+    kinds: { "cx-hot": { severity: "medium", history: true }, "cx-watch": { severity: "low", route: "watch" } } };
+  return reg;
+}
+const cx = (kind, file, score, evidence) => ({ id: `lizard:${file}:0:`, sweep: "cx", kind, source: "lizard", file, line: null, symbol: null,
+  detail: `score ${score}`, noisy: false, cleared: null, clusterKey: file, anchor: file, score, evidence });
+const X1 = cx("cx-hot", "src/a.js", 30, ["`hot` L1: ccn 25 > 20 (ESLint complexity)", "churn: 4 commits, 90 lines"]);
+const X2 = cx("cx-hot", "src/b.js", 10, ["`mid` L3: ccn 22 > 20 (ESLint complexity)", "churn: 9 commits, 40 lines"]);
+const W1 = cx("cx-watch", "src/c.js", 8, ["`w` L1: ccn 21 > 20 (ESLint complexity)", "churn: 1 commits, 2 lines"]);
+const W2 = cx("cx-watch", "src/d.js", 12, ["`v` L1: ccn 23 > 20 (ESLint complexity)", "churn: 0 commits, 0 lines"]);
+const cxCluster = (c, blastRadius) => ({ clusterId: `cx-hot:${c.file}`, sweep: "cx", kind: "cx-hot", route: "verification", anchor: c.file,
+  files: [c.file], candidates: [c.id], blastRadius, coChange: 0 });
+const CX_VERDICTS = [{ candidateId: X1.id, outcome: "verified", note: "read hot()" }, { candidateId: X2.id, outcome: "verified", note: "read mid()" }];
+function cxDir() {
+  const dir = makeTempDir("hygiene-finalize-cx-");
+  writeFileSync(join(dir, "candidates.json"), JSON.stringify({ candidates: [X1, X2, W1, W2],
+    clusters: [cxCluster(X1, 150), cxCluster(X2, 100)], churn: { "src/a.js": 4, "src/b.js": 9, "src/c.js": 1 } }));
+  writeFileSync(join(dir, "coverage.json"), JSON.stringify({ ...COVERAGE,
+    rows: [...COVERAGE.rows, row("lizard", ["cx-hot", "cx-watch"], "ran", "tool", { sweep: "cx" })],
+    sweeps: { ...COVERAGE.sweeps, cx: { title: "Cx", noun: "cx", noToolStacks: ["web"], notCovered: ["css"], sweepKinds: ["cx-hot", "cx-watch"],
+      sourcedKinds: ["cx-hot", "cx-watch"], fullKinds: ["cx-hot", "cx-watch"], notes: ["lizard: lizard skips a byte-identical file"] } } }));
+  writeFileSync(join(dir, "judgment-inputs.json"), JSON.stringify({ items: [] }));
+  return dir;
+}
+const cxFinalize = (extra = {}) => finalizeSweep({ outDir: cxDir(), verdicts: CX_VERDICTS, repoRoot: "/r", registry: cxRegistry(), previousCounts: null, ...extra });
+const HISTORY = { files: [{ file: "src/b.js", commits: 20, fixCommits: 2 }, { file: "src/a.js", commits: 1, fixCommits: 0 }] };
+
+test("finalize: watch candidates are counted and listed, never entries, and their evidence and notes render", () => {
+  const { entries, counts, sections } = cxFinalize();
+  assert.deepEqual(entries.map((e) => [e.culpritKind, e.canonicalLocation, e.severity]), [["cx-hot", "src/a.js", "medium"], ["cx-hot", "src/b.js", "medium"]]);
+  assert.deepEqual(counts.sweeps.cx.categories["cx-watch"], { verified: 0, suspected: 2, cleared: 0, complete: true });
+  const s = sections.cx;
+  assert.match(s, /^## Cx\n\nFindings: 2, in blast-radius order\. Cleared: none\.\n/);
+  assert.ok(s.includes("- `src/a.js`: verified (read hot())\n  - `hot` L1: ccn 25 > 20 (ESLint complexity)\n  - churn: 4 commits, 90 lines"), s);
+  assert.ok(s.includes("### Watch\n\n- `src/d.js`: score 12, 0 commits\n- `src/c.js`: score 8, 1 commits\n\n### Coverage"), s);
+  assert.ok(s.includes("- lizard: lizard skips a byte-identical file\n- not covered: css"), s);
+  assert.ok(s.includes("- web: no cx tool for this stack; not measured"), s);
+  assert.match(sections["dead-code"], /- python: no dead-code tool for this stack; heuristic scan only/);
+  assert.ok(!s.includes("watch: complex but stable"), "watch candidates have no finding bullet");
+  assert.doesNotMatch(sections["dead-code"], /### Watch/);
+  assert.throws(() => cxFinalize({ verdicts: [...CX_VERDICTS, { candidateId: W1.id, outcome: "verified", note: "x" }] }), /routes to watch/);
+});
+
+test("finalize --history at thorough reorders history kinds by commits and raises fix-commit files", () => {
+  const plain = cxFinalize({ depth: "thorough" });
+  assert.deepEqual(plain.entries.map((e) => e.canonicalLocation), ["src/a.js", "src/b.js"]);
+  const ranked = cxFinalize({ depth: "thorough", history: HISTORY });
+  assert.deepEqual(ranked.entries.map((e) => [e.canonicalLocation, e.severity]), [["src/b.js", "high"], ["src/a.js", "medium"]]);
+  assert.match(ranked.sections.cx, /Findings: 2, in history then co-change then blast-radius order\./);
+  assert.ok(ranked.sections.cx.includes("- `src/b.js`: verified (read mid(); fix commits: 2)"), ranked.sections.cx);
+  const standard = cxFinalize({ depth: "standard", history: HISTORY });
+  assert.deepEqual(standard.entries.map((e) => [e.canonicalLocation, e.severity]), [["src/a.js", "medium"], ["src/b.js", "medium"]],
+    "history acts only at thorough");
+  const deadPlain = finalize(sweepDir(), { depth: "thorough" });
+  const deadHistory = finalize(sweepDir(), { depth: "thorough", history: { files: [{ file: "src/widget.ts", commits: 50, fixCommits: 3 }] } });
+  assert.deepEqual(deadHistory.entries, deadPlain.entries, "a sweep without a history kind is unchanged");
+  assert.equal(deadHistory.sections["dead-code"], deadPlain.sections["dead-code"]);
+});
+
+test("historyIndex validates the inspector table, and the CLI refuses a bad --history file", () => {
+  assert.deepEqual([...historyIndex(HISTORY)], [["src/b.js", { commits: 20, fixCommits: 2 }], ["src/a.js", { commits: 1, fixCommits: 0 }]]);
+  for (const bad of [null, {}, { files: {} }, { files: [{ file: "a", commits: -1, fixCommits: 0 }] }, { files: [{ file: 3, commits: 1, fixCommits: 0 }] }])
+    assert.throws(() => historyIndex(bad), /history must be \{ files: \[\{ file, commits, fixCommits \}\] \}/);
+  const dir = sweepDir();
+  const verdicts = join(dir, "verdicts.json");
+  writeFileSync(verdicts, JSON.stringify(VERDICTS));
+  const badFile = join(dir, "history.json");
+  writeFileSync(badFile, JSON.stringify({ files: "nope" }));
+  const r = spawnSync(process.execPath, [SCRIPT, "finalize", "--dir", dir, "--verdicts", verdicts, "--depth", "thorough", "--history", badFile, "--repo", dir],
+    { encoding: "utf8" });
+  assert.equal(r.status, 1);
+  assert.match(r.stderr, /^hygiene-sweep: .*history\.json: history must be/);
+  writeFileSync(badFile, JSON.stringify(HISTORY));
+  const ok = spawnSync(process.execPath, [SCRIPT, "finalize", "--dir", dir, "--verdicts", verdicts, "--depth", "thorough", "--history", badFile, "--repo", dir],
+    { encoding: "utf8" });
+  assert.equal(ok.status, 0, ok.stderr);
 });

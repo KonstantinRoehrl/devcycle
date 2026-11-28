@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { REGISTRY_PATH, kindIndex, loadRegistry, validateRegistry } from "../../scripts/hygiene-registry.mjs";
+import { METRICS, REGISTRY_PATH, kindIndex, loadRegistry, validateRegistry } from "../../scripts/hygiene-registry.mjs";
 
 const fresh = () => structuredClone(loadRegistry());
 const tool = (reg, id) => reg.tools.find((t) => t.id === id);
@@ -120,9 +120,9 @@ test("a kind routes to verification by default or to judgment, and kindIndex lis
   const ok = fresh();
   ok.sweeps["dead-code"].kinds["stale-todo"].route = "judgment";
   assert.deepEqual(validateRegistry(ok), []);
-  expectError((r) => { r.sweeps["dead-code"].kinds["stale-todo"].route = "lens"; }, /kinds\.stale-todo\.route: must be verification or judgment/);
+  expectError((r) => { r.sweeps["dead-code"].kinds["stale-todo"].route = "lens"; }, /kinds\.stale-todo\.route: must be one of verification, judgment, watch/);
   assert.deepEqual(kindIndex(ok).get("stale-todo"),
-    { sweep: "dead-code", severity: "low", maxSeverity: null, raiseBeyondCapWhen: [], route: "judgment" });
+    { sweep: "dead-code", severity: "low", maxSeverity: null, raiseBeyondCapWhen: [], route: "judgment", history: false });
   const shipped = loadRegistry();
   assert.equal(kindIndex(shipped).get("dead-code").route, "verification");
   assert.deepEqual([...kindIndex(shipped).keys()], Object.values(shipped.sweeps).flatMap((s) => Object.keys(s.kinds)));
@@ -181,4 +181,67 @@ test("the duplication sweep carries its kinds, default severities, routes and sc
     "semantic duplicates outside the hotspot files"]);
   assert.deepEqual(reg.scanners["duplicate-constants"], { sweep: "duplication", kinds: ["duplicate-constant", "restated-literal", "missing-owner"], stacks: null, excludePathsOf: "jscpd" });
   assert.deepEqual(reg.scanners["scattered-env-reads"], { sweep: "duplication", kinds: ["scattered-env-read"], stacks: null, excludePathsOf: "jscpd" });
+});
+
+const METRIC_DEFAULT = (value) => ({ value, source: "ESLint", url: "https://eslint.org/docs/latest/rules/complexity" });
+const fullDefaults = () => Object.fromEntries(["ccn", "cognitive", "nesting", "params", "nloc", "fileLines"].map((m) => [m, METRIC_DEFAULT(10)]));
+const withComplexity = (reg) => {
+  reg.complexity = {
+    defaults: { "js-ts": fullDefaults(), other: fullDefaults() },
+    configKeys: {
+      eslint: { stack: "js-ts", files: "eslint-row", keys: { complexity: "ccn", "max-depth": "nesting" } },
+      python: { stack: "other", files: ["setup.cfg"], keys: { "max-complexity": "ccn" } },
+    },
+  };
+  return reg;
+};
+
+test("the watch route, history kinds and kindIndex's history field", () => {
+  assert.deepEqual(METRICS, ["ccn", "cognitive", "nesting", "params", "nloc", "fileLines"]);
+  const ok = fresh();
+  Object.assign(ok.sweeps["dead-code"].kinds["stale-todo"], { route: "watch", history: true });
+  assert.deepEqual(validateRegistry(ok), []);
+  assert.deepEqual(kindIndex(ok).get("stale-todo"),
+    { sweep: "dead-code", severity: "low", maxSeverity: null, raiseBeyondCapWhen: [], route: "watch", history: true });
+  assert.equal(kindIndex(loadRegistry()).get("dead-code").history, false);
+  expectError((r) => { r.sweeps["dead-code"].kinds["stale-todo"].history = "yes"; }, /kinds\.stale-todo\.history: must be a boolean/);
+});
+
+test("a fallback tool names another tool of its sweep that shares a stack", () => {
+  const ok = fresh();
+  tool(ok, "tsc").fallbackFor = "knip";
+  assert.deepEqual(validateRegistry(ok), []);
+  const bad = /tools\[tsc\]\.fallbackFor: must name another tool of sweep dead-code that shares a stack/;
+  expectError((r) => { tool(r, "tsc").fallbackFor = "tsc"; }, bad);
+  expectError((r) => { tool(r, "tsc").fallbackFor = "vulture"; }, bad);
+  expectError((r) => { tool(r, "tsc").fallbackFor = "nope"; }, bad);
+});
+
+test("lizard's write flags are forbidden, and the adapter list comes from the adapters module", () => {
+  const args = (r) => tool(r, "vulture").modes.static.invocations[0].args;
+  expectError((r) => { args(r).push("-o", "report.csv"); }, /forbidden arg -o/);
+  expectError((r) => { args(r).push("--output_file"); }, /forbidden arg --output_file/);
+  expectError((r) => { tool(r, "vulture").adapter = "magic"; }, /tools\[vulture\]\.adapter: must be one of raw, knip, tsc/);
+});
+
+test("config.hotCommits ships as 3 and must be a positive integer", () => {
+  assert.equal(loadRegistry().config.hotCommits, 3);
+  expectError((r) => { r.config.hotCommits = 0; }, /config\.hotCommits: must be a positive integer/);
+  expectError((r) => { delete r.config.hotCommits; }, /config\.hotCommits: must be a positive integer/);
+});
+
+test("the complexity block validates its defaults and config key map", () => {
+  assert.deepEqual(validateRegistry(withComplexity(fresh())), []);
+  const expectComplexity = (mutate, pattern) => expectError((r) => mutate(withComplexity(r)), pattern);
+  expectComplexity((r) => { r.complexity = []; }, /complexity: must be an object/);
+  expectComplexity((r) => { delete r.complexity.defaults.other; }, /complexity\.defaults: must be an object with an "other" entry/);
+  expectComplexity((r) => { r.complexity.defaults.cobol = fullDefaults(); }, /complexity\.defaults\.cobol: not a stack/);
+  expectComplexity((r) => { r.complexity.defaults.other.depth = METRIC_DEFAULT(3); }, /complexity\.defaults\.other\.depth: not a metric/);
+  expectComplexity((r) => { delete r.complexity.defaults["js-ts"].nloc; }, /complexity\.defaults\.js-ts\.nloc: must be \{ value: a positive integer/);
+  expectComplexity((r) => { r.complexity.defaults.other.ccn.value = 1.5; }, /complexity\.defaults\.other\.ccn: must be/);
+  expectComplexity((r) => { r.complexity.defaults.other.ccn.url = "http://x"; }, /complexity\.defaults\.other\.ccn: must be/);
+  expectComplexity((r) => { r.complexity.configKeys.eslint.stack = "go"; }, /complexity\.configKeys\.eslint\.stack: must be a stack with defaults/);
+  expectComplexity((r) => { r.complexity.configKeys.python.files = []; }, /complexity\.configKeys\.python\.files: must be a non-empty array/);
+  expectComplexity((r) => { delete tool(r, "eslint").when; }, /complexity\.configKeys\.eslint\.files: "eslint-row" needs an eslint tool with when\.anyFile/);
+  expectComplexity((r) => { r.complexity.configKeys.python.keys = { "max-complexity": "depth" }; }, /complexity\.configKeys\.python\.keys: must map config keys to metrics/);
 });
