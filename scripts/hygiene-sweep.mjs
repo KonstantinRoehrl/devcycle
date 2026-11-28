@@ -579,7 +579,7 @@ function lcovRow(lcovFiles, consent) {
 }
 
 // One sweep's coverage statement, from that sweep's rows and its own block of coverage.json.
-function coverageStatement(coverage, sweep, kinds) {
+function coverageStatement(coverage, sweep, kinds, registry) {
   const block = coverage.sweeps[sweep];
   const rows = coverage.rows.filter((r) => r.sweep === sweep);
   const ranBy = (kind, methods) => rows
@@ -598,7 +598,10 @@ function coverageStatement(coverage, sweep, kinds) {
     if (r.status !== "ran" && r.status !== "partial" && r.status !== "not-applicable") lines.push(`- not run: ${r.source} (${r.status}${r.note ? `: ${r.note}` : ""})`);
   for (const r of rows) if (r.downloaded) lines.push(`- downloaded: ${r.source} ${r.version}`);
   for (const r of rows) if (r.scope === "hotspots" && (r.status === "ran" || r.status === "partial")) lines.push(`- hotspot-only: ${r.source} (${r.note})`);
-  for (const s of block.noToolStacks) lines.push(`- ${s}: no ${block.noun} tool for this stack; heuristic scan only`);
+  const scanned = Object.values(registry.scanners ?? {}).some((sc) => sc.sweep === sweep);
+  for (const s of block.noToolStacks)
+    lines.push(`- ${s}: no ${block.noun} tool for this stack; ${scanned ? "heuristic scan only" : "not measured"}`);
+  for (const note of block.notes ?? []) lines.push(`- ${note}`);
   lines.push(`- not covered: ${block.notCovered.join("; ")}`);
   return lines.join("\n");
 }
@@ -614,6 +617,7 @@ function severityOf(kind, v) {
 function outcomeOf(c, v, kind) {
   const severity = severityOf(kind, v);
   if (c.cleared) return { outcome: "cleared", note: c.cleared, severity };
+  if (kind.route === "watch") return { outcome: "suspected", note: "watch: complex but stable", severity };
   if (!v) return { outcome: "suspected", note: kind.route === "judgment" ? "not judged: budget" : "not verified: budget", severity };
   if (v.outcome === "verified" && c.noisy) return { outcome: "suspected", note: `${v.note ?? ""} (known-noisy class)`.trim(), severity };
   return { outcome: v.outcome, note: v.note ?? "", severity };
@@ -674,12 +678,31 @@ function withAddedClusters(clusters, candidates, added, churn) {
   return [...clusters.filter((cl) => !fresh.has(cl.clusterId)), ...fresh.values()];
 }
 
+const HISTORY_SHAPE = "history must be { files: [{ file, commits, fixCommits }] } with non-negative integer counts";
+
+// The history inspector's table, as a file -> { commits, fixCommits } lookup.
+export function historyIndex(history) {
+  const count = (n) => Number.isInteger(n) && n >= 0;
+  if (!Array.isArray(history?.files) || !history.files.every((f) => hasText(f?.file) && count(f.commits) && count(f.fixCommits)))
+    throw new Error(HISTORY_SHAPE);
+  return new Map(history.files.map((f) => [f.file, { commits: f.commits, fixCommits: f.fixCommits }]));
+}
+
+// A history kind's candidate in a file with fix commits is raised one level, held at the kind's cap unless the kind lets `fix-commits` through.
+function raisedByFixCommits(o, kind, fixCommits) {
+  const next = SEVERITY_ORDER[Math.min(SEVERITY_ORDER.indexOf(o.severity) + 1, SEVERITY_ORDER.length - 1)];
+  const severity = kind.raiseBeyondCapWhen.includes("fix-commits") ? next : capSeverity(next, kind.maxSeverity);
+  return { ...o, severity, note: [o.note, `fix commits: ${fixCommits}`].filter(Boolean).join("; ") };
+}
+
 const DEPTHS = ["lean", "standard", "thorough"];
 const ascending = (a, b) => (a < b ? -1 : 1);
 
 export function finalizeSweep({ outDir, verdicts, judgments = null, depth = "standard", lcov = null, runId = null, repoRoot,
-  registry = loadRegistry(), previousCounts }) {
+  registry = loadRegistry(), previousCounts, history = null }) {
   if (!DEPTHS.includes(depth)) throw new Error("--depth must be lean, standard or thorough");
+  const historyByFile = history === null ? null : historyIndex(history);
+  const byHistory = depth === "thorough" ? historyByFile : null;
   const found = readJson(join(outDir, "candidates.json"));
   const coverage = readJson(join(outDir, "coverage.json"));
   const inputs = readJson(join(outDir, "judgment-inputs.json")).items;
@@ -699,11 +722,15 @@ export function finalizeSweep({ outDir, verdicts, judgments = null, depth = "sta
   const verdictById = indexAnswers(verdicts, { byId, kinds, route: "verification", noun: "verdict" });
   const judgedById = indexAnswers([...(judgments?.verdicts ?? []), ...added.answers], { byId, kinds, route: "judgment", noun: "judgment" });
   const lcovFiles = lcov === null ? null : parseLcov(lcov, repoRoot);
+  const anchorOf = new Map(clusters.flatMap((cl) => cl.candidates.map((id) => [id, cl.anchor])));
+  const historyRank = (cl) => !byHistory || !kinds.get(cl.kind).history ? 0
+    : cl.candidates.reduce((n, id) => n + (byId.get(id).score ?? 0), 0) * (1 + (byHistory.get(cl.anchor)?.commits ?? 0));
   const outcomes = new Map();
   for (const c of candidates) {
     const kind = kinds.get(c.kind);
     const o = outcomeOf(c, kind.route === "judgment" ? judgedById.get(c.id) : verdictById.get(c.id), kind);
-    outcomes.set(c.id, { ...o, uncovered: lcovFiles !== null && isUncovered(lcovFiles, c) });
+    const fixCommits = byHistory && kind.history && o.outcome !== "cleared" ? byHistory.get(anchorOf.get(c.id))?.fixCommits ?? 0 : 0;
+    outcomes.set(c.id, { ...(fixCommits > 0 ? raisedByFixCommits(o, kind, fixCommits) : o), uncovered: lcovFiles !== null && isUncovered(lcovFiles, c) });
   }
   coverage.rows = [...coverage.rows.filter((r) => r.source !== "coverage-run"), lcovRow(lcovFiles, coverage.consent)];
 
@@ -719,9 +746,11 @@ export function finalizeSweep({ outDir, verdicts, judgments = null, depth = "sta
     for (const c of candidates.filter((x) => kinds.get(x.kind).sweep === sweep)) categories[c.kind][outcomes.get(c.id).outcome] += 1;
     counts.sweeps[sweep] = { categories };
     const ranked = clusters.filter((cl) => kinds.get(cl.kind).sweep === sweep).sort((a, b) =>
-      (depth === "thorough" ? b.coChange - a.coChange : 0) || b.blastRadius - a.blastRadius || ascending(a.clusterId, b.clusterId));
+      historyRank(b) - historyRank(a) || (depth === "thorough" ? b.coChange - a.coChange : 0) || b.blastRadius - a.blastRadius ||
+      ascending(a.clusterId, b.clusterId));
     const blocks = [], own = [];
     for (const cl of ranked) {
+      if (kinds.get(cl.kind).route === "watch") continue;
       const live = cl.candidates.map((id) => byId.get(id)).filter((c) => outcomes.get(c.id).outcome !== "cleared");
       if (!live.length) continue;
       const severity = live.map((c) => outcomes.get(c.id).severity).reduce(higher);
@@ -732,7 +761,8 @@ export function finalizeSweep({ outDir, verdicts, judgments = null, depth = "sta
       blocks.push(`### ${title}\n\n${severity}, ${confidence}; blast radius ${cl.blastRadius}\n\n` + live.map((c) => {
         const o = outcomes.get(c.id);
         const where = `\`${c.file}${c.line === null ? "" : `:${c.line}`}\`${c.symbol === null ? "" : ` \`${c.symbol}\``}`;
-        return `- ${where}: ${o.outcome}${o.note ? ` (${o.note})` : ""}${o.uncovered ? ", uncovered" : ""}`;
+        return [`- ${where}: ${o.outcome}${o.note ? ` (${o.note})` : ""}${o.uncovered ? ", uncovered" : ""}`,
+          ...(c.evidence ?? []).map((line) => `  - ${line}`)].join("\n");
       }).join("\n"));
     }
     entries.push(...own);
@@ -751,9 +781,14 @@ export function finalizeSweep({ outDir, verdicts, judgments = null, depth = "sta
         return `${k} ${before.count} → ${c.verified + c.suspected}`;
       })
       : ["no earlier counted pass on this machine"];
-    const order = depth === "thorough" ? "co-change then blast-radius order" : "blast-radius order";
+    const ranksHistory = byHistory !== null && Object.keys(def.kinds).some((k) => kinds.get(k).history);
+    const order = `${ranksHistory ? "history then " : ""}${depth === "thorough" ? "co-change then blast-radius order" : "blast-radius order"}`;
+    const watch = candidates.filter((c) => kinds.get(c.kind).sweep === sweep && kinds.get(c.kind).route === "watch" && outcomes.get(c.id).outcome !== "cleared")
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || ascending(a.anchor ?? a.file, b.anchor ?? b.file))
+      .map((c) => `- \`${c.anchor ?? c.file}\`: score ${c.score ?? 0}, ${found.churn?.[c.file] ?? 0} commits`);
     sections[sweep] = [`## ${block.title}`, `Findings: ${own.length}, in ${order}. Cleared: ${cleared}.`, ...blocks,
-      "### Coverage", coverageStatement(coverage, sweep, def.kinds), "### Trending", trending[sweep].map((t) => `- ${t}`).join("\n")].join("\n\n") + "\n";
+      ...(watch.length ? ["### Watch", watch.join("\n")] : []),
+      "### Coverage", coverageStatement(coverage, sweep, def.kinds, registry), "### Trending", trending[sweep].map((t) => `- ${t}`).join("\n")].join("\n\n") + "\n";
   }
   coverage.fullKinds = Object.values(coverage.sweeps).flatMap((b) => b.fullKinds);
 
@@ -767,10 +802,10 @@ export function finalizeSweep({ outDir, verdicts, judgments = null, depth = "sta
 }
 
 const USAGE = "usage: hygiene-sweep.mjs run --out <dir> [--repo <root>] [--consent-executing] [--consent-coverage] [--hotspots <file>]\n" +
-  "       hygiene-sweep.mjs finalize --dir <dir> --verdicts <file> [--judgments <file>] [--depth lean|standard|thorough] [--lcov <file>] [--run <runId>] [--repo <root>]";
+  "       hygiene-sweep.mjs finalize --dir <dir> --verdicts <file> [--judgments <file>] [--depth lean|standard|thorough] [--lcov <file>] [--history <file>] [--run <runId>] [--repo <root>]";
 
 function mainFinalize(rest) {
-  const { flags } = parseFlags(rest, { "--dir": "value", "--verdicts": "value", "--judgments": "value", "--depth": "value", "--lcov": "value",
+  const { flags } = parseFlags(rest, { "--dir": "value", "--verdicts": "value", "--judgments": "value", "--depth": "value", "--lcov": "value", "--history": "value",
     "--run": "value", "--repo": "value" }, { requireValues: "nonEmpty" });
   for (const f of ["--dir", "--verdicts"]) if (!flags[f]) throw new Error(`${f} is required; ${USAGE}`);
   const verdicts = readJson(flags["--verdicts"]);
@@ -786,7 +821,13 @@ function mainFinalize(rest) {
     try { lcov = readFileSync(flags["--lcov"], "utf8"); }
     catch (err) { throw new Error(`cannot read ${flags["--lcov"]}: ${err.message}`); }
   }
-  const { entries, counts, ratchet } = finalizeSweep({ outDir: flags["--dir"], verdicts, judgments, depth: flags["--depth"] ?? "standard", lcov,
+  let history = null;
+  if (flags["--history"]) {
+    history = readJson(flags["--history"]);
+    try { historyIndex(history); }
+    catch (err) { throw new Error(`${flags["--history"]}: ${err.message}`); }
+  }
+  const { entries, counts, ratchet } = finalizeSweep({ outDir: flags["--dir"], verdicts, judgments, depth: flags["--depth"] ?? "standard", lcov, history,
     runId: flags["--run"] ?? null, repoRoot: resolve(flags["--repo"] ?? process.cwd()) });
   const total = (o) => Object.values(counts.sweeps).flatMap((s) => Object.values(s.categories)).reduce((n, c) => n + c[o], 0);
   process.stdout.write(JSON.stringify({ dir: resolve(flags["--dir"]), entries: entries.length,
