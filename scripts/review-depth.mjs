@@ -8,24 +8,14 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { atomicWrite } from "./atomic-write.mjs";
 import { parseFlags } from "./cli-flags.mjs";
+import { isExcluded } from "./generated-paths.mjs";
 import { isMain } from "./is-main.mjs";
 import { BUILTIN_SIGNALS } from "./risk-signals.mjs";
 
-const LOCKFILES = new Set([
-  "package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml", "bun.lockb", "Cargo.lock",
-  "Gemfile.lock", "poetry.lock", "Pipfile.lock", "composer.lock", "go.sum", "flake.lock",
-]);
-const GENERATED_DIRS = new Set(["dist", "build", "vendor", "node_modules"]);
-const GENERATED_NAME = /\.min\.(?:js|css)$|\.map$|\.generated\./;
+export { isExcluded } from "./generated-paths.mjs";
 // git accepts these in a ref name and a shell does not (references/branch.md § Deriving a branch's
 // file set); refused here too, so a name this script accepts is one a playbook can quote safely.
 const SHELL_UNSAFE = /[$`'"\\;&|<>\n]/;
-
-export function isExcluded(path) {
-  const segments = path.split("/");
-  const name = segments.pop();
-  return LOCKFILES.has(name) || GENERATED_NAME.test(name) || segments.some((s) => GENERATED_DIRS.has(s));
-}
 
 const run = (args, cwd, options = {}) => spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8", ...options });
 
