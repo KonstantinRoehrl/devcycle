@@ -57,7 +57,9 @@
     "angular-io": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": ["angular"] },
     "static-assets": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": null },
     "duplicate-constants": { "sweep": "duplication", "kinds": ["duplicate-constant", "restated-literal", "missing-owner"], "stacks": null },
-    "scattered-env-reads": { "sweep": "duplication", "kinds": ["scattered-env-read"], "stacks": null }
+    "scattered-env-reads": { "sweep": "duplication", "kinds": ["scattered-env-read"], "stacks": null },
+    "same-body-helpers": { "sweep": "duplication", "kinds": ["duplicate-logic"], "stacks": null },
+    "semantic-index": { "sweep": "duplication", "kinds": ["semantic-duplicate"], "stacks": null, "scope": "hotspots" }
   },
   "config": { "staleTodoDays": 365, "configFile": ".devcycle-hygiene.json", "hotspotCap": 30 },
   "tools": [

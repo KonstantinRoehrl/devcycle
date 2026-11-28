@@ -4,6 +4,7 @@
 // detection rules.
 import { basename, extname } from "node:path";
 import { duplicateConstants, scatteredEnvReads } from "./hygiene-scanners-duplication.mjs";
+import { sameBodyHelpers, semanticIndex } from "./hygiene-scanners-clones.mjs";
 
 const SLASH_COMMENT_EXTS = new Set([".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".go", ".rs", ".cs", ".java"]);
 const HASH_COMMENT_EXTS = new Set([".py", ".rb", ".sh"]);
@@ -270,4 +271,4 @@ export const staticAssets = {
   },
 };
 
-export const SCANNERS = [commentedOutCode, staleTodo, unusedEnvVar, cssCustomProperties, cssClassesKeyframes, angularIo, staticAssets, duplicateConstants, scatteredEnvReads];
+export const SCANNERS = [commentedOutCode, staleTodo, unusedEnvVar, cssCustomProperties, cssClassesKeyframes, angularIo, staticAssets, duplicateConstants, scatteredEnvReads, sameBodyHelpers, semanticIndex];
