@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { clusterCandidates, finalizeSweep, orderForVerification, runSweep, selectTools } from "../../scripts/hygiene-sweep.mjs";
+import { ADAPTERS } from "../../scripts/hygiene-adapters.mjs";
 import { loadRegistry } from "../../scripts/hygiene-registry.mjs";
 import { SCANNERS } from "../../scripts/hygiene-scanners.mjs";
 import { findingId, recordMaintenanceFinding } from "../../scripts/maintenance-findings.mjs";
@@ -282,4 +283,63 @@ test("finalize --run appends one set of sweep-count rows per sweep, once", () =>
   } finally {
     if (saved === undefined) delete process.env.DEVCYCLE_RUNS_DIR; else process.env.DEVCYCLE_RUNS_DIR = saved;
   }
+});
+
+// A complexity-shaped sweep: a scored verification kind, a watch kind, a primary tool and its fallback.
+function scoredSweeps() {
+  const reg = twoSweeps();
+  reg.config.hotCommits = 4;
+  reg.sweeps.cx = { title: "Cx", noun: "cx", notCovered: [],
+    kinds: { "cx-hot": { severity: "medium", history: true }, "cx-watch": { severity: "low", route: "watch" } } };
+  const cxTool = (id, extra) => ({ id, sweep: "cx", stacks: ["js-ts"], kinds: ["cx-hot", "cx-watch"], adapter: "cx", version: "1.0.0",
+    command: { path: id }, modes: { static: { invocations: [{ id: "main", args: ["."] }] } }, ...extra });
+  reg.tools.push(cxTool("cx-fallback", { fallbackFor: "cx-primary" }), cxTool("cx-primary", {}));
+  return reg;
+}
+const cxSeen = { ctx: null, argv: [] };
+const cxAdapter = { normalize(runs, ctx) {
+  cxSeen.ctx = ctx;
+  const c = (kind, file, score) => ({ kind, file, line: null, symbol: null, clusterKey: file, anchor: file, score, detail: "", evidence: ["e"] });
+  return { ok: true, candidates: [c("cx-hot", "src/a.js", 7), c("cx-watch", "src/b.js", 2)], note: null, coverage: ["measured 2 files"] };
+} };
+const cxSweep = (over = {}) => sweep({ registry: scoredSweeps(), lines: new Map([["src/a.js", 40]]),
+  adapters: { ...ADAPTERS, cx: cxAdapter }, runTool: ({ argv }) => { cxSeen.argv.push(argv[0]); return { status: 0, stdout: "", stderr: "", error: null }; },
+  ...over });
+
+test("a fallback tool is superseded while its primary ran, and runs when the primary could not", () => {
+  cxSeen.argv = [];
+  const ran = cxSweep();
+  const fallbackRow = ran.coverage.rows.find((r) => r.source === "cx-fallback");
+  assert.deepEqual([fallbackRow.status, fallbackRow.note], ["not-applicable", "superseded by cx-primary"]);
+  assert.equal(ran.coverage.rows.find((r) => r.source === "cx-primary").status, "ran");
+  assert.ok(!cxSeen.argv.includes("cx-fallback"), "a superseded fallback never spawns");
+  assert.ok(ran.coverage.sweeps.cx.fullKinds.includes("cx-hot"), "a superseded fallback never blocks completeness");
+  const fell = cxSweep({ onPath: (name) => name !== "cx-primary" });
+  assert.equal(fell.coverage.rows.find((r) => r.source === "cx-primary").status, "unavailable");
+  assert.equal(fell.coverage.rows.find((r) => r.source === "cx-fallback").status, "ran");
+});
+
+test("adapters get churn, lines, config, registry and stacks, and their coverage notes land on their sweep", () => {
+  const reg = scoredSweeps();
+  const { coverage } = cxSweep({ registry: reg });
+  assert.equal(cxSeen.ctx.churn.get("src/a.js"), 3);
+  assert.equal(cxSeen.ctx.lines.get("src/a.js"), 40);
+  assert.equal(cxSeen.ctx.config.hotCommits, 4);
+  assert.equal(cxSeen.ctx.registry, reg);
+  assert.deepEqual(cxSeen.ctx.stacks, ["js-ts"]);
+  assert.deepEqual(coverage.sweeps.cx.notes, ["cx-primary: measured 2 files"]);
+  assert.deepEqual(coverage.sweeps["dead-code"].notes, []);
+});
+
+test("scored candidates weight their cluster, and watch clusters are never sent to verification", () => {
+  const out = join(makeTempDir("hyg-multi-out-"), "sweep");
+  const { candidates, clusters } = cxSweep({ outDir: out });
+  const hot = clusters.find((c) => c.kind === "cx-hot");
+  assert.equal(hot.anchor, "src/a.js");
+  assert.equal(hot.blastRadius, 7 * (1 + 3));
+  assert.ok(candidates.some((c) => c.kind === "cx-watch"), "the watch candidate is kept");
+  assert.ok(!clusters.some((c) => c.kind === "cx-watch"));
+  assert.ok(!read(out, "candidates.json").clusters.some((c) => c.kind === "cx-watch"));
+  const plain = clusterCandidates([{ id: "a", sweep: "dead-code", kind: "dead-code", file: "a.ts", line: 1, symbol: "x", cleared: null }], new Map([["a.ts", 2]]));
+  assert.equal(plain[0].blastRadius, 1 * (1 + 2), "an unscored cluster still weighs its file count");
 });
