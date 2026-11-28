@@ -143,13 +143,13 @@ test("coverage names the stacks with no tool, the kinds left open, and missing d
   const runTool = ({ argv }) => (argv.includes("--version") ? ok("v\n") : ok("a.py:1: unused variable 'x'\n"));
   const { candidates, coverage } = runSweep({ repoRoot: repo, outDir: join(makeTempDir("hyg-out-"), "s"), registry: reg, runTool,
     files: ["pyproject.toml", "angular.json", "a.py"], churn: new Map(), onPath: () => true });
-  assert.deepEqual(coverage.noToolStacks, ["angular"]);
+  assert.deepEqual(coverage.sweeps["dead-code"].noToolStacks, ["angular"]);
   assert.equal(coverage.dependenciesInstalled, false);
   assert.match(row(coverage, "needy").note, /dependencies not installed/);
   assert.ok(candidates.filter((c) => c.source === "needy").every((c) => c.noisy));
   assert.ok(coverage.fullKinds.includes("commented-out-code"), "a scanner that ran makes its kind full");
   assert.ok(!coverage.fullKinds.includes("test-coverage-gap"), "a kind with no source is never full");
-  assert.deepEqual(coverage.notCovered, reg.sweeps["dead-code"].notCovered);
+  assert.deepEqual(coverage.sweeps["dead-code"].notCovered, reg.sweeps["dead-code"].notCovered);
 });
 
 test("commented-out-code flags three or more code-like comment lines, not prose or two lines", () => {

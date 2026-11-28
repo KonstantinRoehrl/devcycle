@@ -127,6 +127,9 @@ test("step 4 runs the sweep at every depth, by consent, and verifies it in one d
   assert.match(step4, /references\/hygiene-sweeps\.md` § Verification/);
   assert.match(step4, /<dir>\/verdicts\.json/);
   assert.match(step4, /every depth/);
+  assert.match(step4, /--hotspots \.devcycle\/maintain\/sweep-<date>\/hotspots\.txt/);
+  assert.match(step4, /names every pre-pass source that did not run/);
+  assert.match(step4, /every area or kind a source that did run left unchecked/);
 });
 
 test("the plugin-only checks run only in devcycle's own source", () => {
@@ -146,7 +149,8 @@ test("lenses get the verified clusters instead of the dead-code criterion", () =
 
 test("step 8 folds the sweep in and resolves a sweep kind only when its sources all ran", () => {
   assert.match(step8, /hygiene-sweep\.mjs" finalize --dir <dir> --verdicts <dir>\/verdicts\.json --run <runId>/);
-  assert.match(step8, /<dir>\/section\.md/);
+  assert.match(step8, /--depth <depth>/);
+  assert.match(step8, /<dir>\/section-<sweep>\.md/);
   assert.match(step8, /<dir>\/entries\.json/);
   assert.match(step8, /--sweep-coverage <dir>\/coverage\.json/);
   assert.match(step8, /fullKinds/);

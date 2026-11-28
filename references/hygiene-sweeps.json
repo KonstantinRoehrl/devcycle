@@ -11,6 +11,8 @@
   },
   "sweeps": {
     "dead-code": {
+      "title": "Dead code",
+      "noun": "dead-code",
       "kinds": {
         "dead-code": { "severity": "medium" },
         "test-only-code": { "severity": "medium" },
@@ -37,7 +39,7 @@
     "angular-io": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": ["angular"] },
     "static-assets": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": null }
   },
-  "config": { "staleTodoDays": 365, "configFile": ".devcycle-hygiene.json" },
+  "config": { "staleTodoDays": 365, "configFile": ".devcycle-hygiene.json", "hotspotCap": 30 },
   "tools": [
     {
       "id": "knip", "sweep": "dead-code", "stacks": ["js-ts"], "kinds": ["dead-code", "test-only-code", "over-exported"],

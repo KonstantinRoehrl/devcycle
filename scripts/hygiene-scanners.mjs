@@ -51,6 +51,7 @@ export const commentedOutCode = {
 
 export const staleTodo = {
   id: "stale-todo",
+  blameUnit: ["file with a TODO was", "files with a TODO were"],
   scan({ files, read, blame, now, config }) {
     const out = [];
     for (const file of files.filter((f) => CODE_EXTS.has(extname(f)))) {
