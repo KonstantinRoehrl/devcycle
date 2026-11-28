@@ -13,8 +13,13 @@ a stable culprit kind in the store. Tool output is evidence, never a finding. `h
 detects stacks, selects and class-gates tools, runs each pinned invocation with all output under its
 `--out` directory, normalizes it, runs the built-in scanners, and writes `candidates.json` (clusters
 per file or directory, ordered by blast radius: files × (1 + churn over the smaller of 500 commits
-or 6 months)) and `coverage.json`. `hygiene-sweep.mjs finalize` turns verdicts into pass-file
-entries, counts and the section.
+or 6 months)) and `coverage.json`. `run` covers every registered sweep in one pass and tags each
+candidate, row and cluster with its sweep; a candidate's `clusterKey` and `anchor` (stable, no line
+number) group a cluster. It persists per-file churn and each cluster's `coChange`, takes
+`--hotspots <file>` (one repo-relative path per line, the hotspot scope for scanners that scope to
+it), and writes `judgment-inputs.json` for the judgment-routed kinds. `hygiene-sweep.mjs finalize`
+turns verdicts (`--judgments` for judgment-routed kinds) into pass-file entries, counts and one
+`section-<sweep>.md` per sweep; `--depth thorough` orders a section by co-change first.
 
 ## Classes and consent
 
@@ -28,8 +33,9 @@ downloaded.
 
 ## Verification
 
-One session-tier, read-only `Explore` dispatch per pass serves every sweep. It takes the clusters in
-`candidates.json` order, one batched search per cluster, within the per-dispatch budget
+One session-tier, read-only `Explore` dispatch per pass serves every sweep. It takes only the clusters
+whose `route` is `verification`, listed round-robin across sweeps and each sweep's in blast-radius
+order, so every sweep shares the one budget, one batched search per cluster, within the per-dispatch budget
 `references/delegation.md` sets, and writes a verdicts file
 `[{ "candidateId", "outcome", "note", "severity"? }]`:
 
@@ -39,15 +45,17 @@ One session-tier, read-only `Explore` dispatch per pass serves every sweep. It t
 - `cleared` — a false positive, the note its reason: dynamic name, framework-owned token, routed or
   lazily loaded, host binding, decorator alias, public entry point. Counted by reason, never a finding.
 
-`severity` raises the kind's default with a reason, never lowers it. A noisy candidate (knip in static
+`severity` raises the kind's default with a reason, never lowers it. A verdict may carry `raiseReason`;
+a raise never passes the kind's `maxSeverity` unless that reason is one of the kind's `raiseBeyondCapWhen`. A noisy candidate (knip in static
 mode, any tool without installed dependencies) never ranks as verified.
 
 ## Report, store and ratchet
 
 One finding per cluster, its `canonicalLocation` the cluster anchor with no line, so the store's
 persistence works unchanged. The section orders clusters by blast radius; the document's
-severity-first rank is unchanged. `finalize --run <id>` appends one `sweep-count` row per kind
-(`sweep`, `category`, `verified`, `suspected`, `cleared`, `complete`) to the pass's run record, once.
+severity-first rank is unchanged. `finalize --run <id>` appends one set of `sweep-count` rows per
+sweep, one row per kind (`sweep`, `category`, `verified`, `suspected`, `cleared`, `complete`), to the
+pass's run record, once.
 Trending compares against the latest counted pass that started strictly earlier on this machine (run
 records are per machine), says so when there is none, and says "not comparable" for a kind either pass
 did not sweep completely. A sweep kind's stored record may resolve only when every source behind it
@@ -57,10 +65,12 @@ omits it) keeps the lens kinds' resolution rules.
 
 ## Coverage statement
 
-Per kind: tool-checked, heuristic-only or not covered; every failed, unavailable, unconsented or
+One statement per sweep. Per kind: tool-checked, heuristic-only or not covered; every failed, unavailable, unconsented or
 partial source (a capped or size-skipped scan, a solution tsconfig's unchecked projects) and every
-degraded git source by name, each keeping its kind out of `fullKinds`; "dependencies not installed" without `node_modules`; "no dead-code tool for this stack;
-heuristic scan only" for a stack no registry tool names; and the registry's `notCovered` list. The
+degraded git source by name, each keeping its kind out of `fullKinds`, each blame-using scanner
+reporting its own sweep's blame budget; "dependencies not installed" without `node_modules`; "no
+<noun> tool for this stack; heuristic scan only" for a stack where none of that sweep's tools
+applies, `<noun>` the sweep's registry noun; and the registry's `notCovered` list. The
 sweep runs in every pass and at every depth (`lean`, `standard`, `thorough`), whatever the
 `<concern>`; the statement says when it was partial.
 

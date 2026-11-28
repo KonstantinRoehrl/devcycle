@@ -59,15 +59,16 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
    path dispatch the Research procedure (`${CLAUDE_PLUGIN_ROOT}/references/delegation.md`
    § Research dispatches) to read the report and query for high-centrality/high-churn nodes, else a
    bounded read-only `Explore` dispatch. Produce one compact **repo digest** and a **hotspot file
-   list** handed to every lens.
+   list** handed to every lens. The coordinator writes the hotspot list, one repo-relative path per
+   line, to `.devcycle/maintain/sweep-<date>/hotspots.txt` before step 4, the file `run --hotspots` reads.
 4. **Deterministic-facts pre-pass.** Gather what tooling establishes exactly — dependency audit,
    lint, the hygiene sweep — and hand the lenses those facts as evidence.
-   The dead-code sweep runs first: `node "${CLAUDE_PLUGIN_ROOT}/scripts/hygiene-sweep.mjs" run --out .devcycle/maintain/sweep-<date>`
+   The hygiene sweep runs first, covering every sweep `${CLAUDE_PLUGIN_ROOT}/references/hygiene-sweeps.json` registers in one pass: `node "${CLAUDE_PLUGIN_ROOT}/scripts/hygiene-sweep.mjs" run --out .devcycle/maintain/sweep-<date> --hotspots .devcycle/maintain/sweep-<date>/hotspots.txt`
    writes candidate clusters and coverage rows — tooling facts like the others. Its contract is `${CLAUDE_PLUGIN_ROOT}/references/hygiene-sweeps.md`.
    Add `--consent-executing` and `--consent-coverage` for each step 2 yes. It runs at every depth,
    and a `<concern>` narrows the lens criteria, never the sweep. `<dir>` below is its `--out`.
    - **Verify the sweep.** One dispatch per `references/hygiene-sweeps.md` § Verification reads
-     `<dir>/candidates.json`; save the verdicts array it returns as `<dir>/verdicts.json`. On the
+     `<dir>/candidates.json` and verifies the clusters whose `route` is `verification`; save the verdicts array it returns as `<dir>/verdicts.json`. On the
      coverage yes, run the repo's documented test command with coverage, writing under `<dir>/`, and
      keep its lcov path for step 8; a failed run or a non-lcov report is named in the coverage
      statement instead.
@@ -81,8 +82,9 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
      with findings, so only a non-zero (`abort`) exit — the tool could not run — omits the fact. A
      `not covered:` line from dead-export detection goes into the coverage statement.
 
-   Never spend an LLM lens re-deriving a tooling fact; a tool that is unreachable has its fact
-   omitted and named in the coverage statement.
+   Never spend an LLM lens re-deriving a tooling fact. The coverage statement
+   names every pre-pass source that did not run, with why, and
+   every area or kind a source that did run left unchecked; an unreachable tool's fact is omitted.
 5. **History (thorough only).** Dispatch `devcycle:history-inspector` at the **fast tier** within its
    bounded traversal window (the smaller of the last 500 commits or 6 months, owned by the agent).
    Fold its churn/convergence signal into the Abstraction charter's historical-convergence input and
@@ -124,9 +126,10 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
    record by hand. The store holds no issue records — `${CLAUDE_PLUGIN_ROOT}/CONTRIBUTING.md`
    § What belongs in `docs/` owns the defect-state split — so a folded issue's number stays on its
    `Origin:` line in the pass document.
-   - **Fold in the sweep.** Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/hygiene-sweep.mjs" finalize --dir <dir> --verdicts <dir>/verdicts.json --run <runId>`,
-     adding `--lcov <file>` when step 4's coverage run produced one. `<dir>/section.md` becomes the
-     findings document's **Dead code** section, and `<dir>/entries.json`'s entries join the pass file.
+   - **Fold in the sweep.** Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/hygiene-sweep.mjs" finalize --dir <dir> --verdicts <dir>/verdicts.json --run <runId> --depth <depth>`
+     (this pass's maintenance depth from step 1), adding `--lcov <file>` when step 4's coverage run
+     produced one. Each `<dir>/section-<sweep>.md` becomes its own section of the findings document,
+     under the heading it carries, and `<dir>/entries.json`'s entries join the pass file.
    - **Write the pass file.** Write `.devcycle/maintain/pass-<date>.json`, `<date>` the pass
      document's own: a JSON array with one `{ culpritKind, canonicalLocation, title, severity,
      confidence, affectedFiles, verify? }` entry per ranked finding except an `Origin: github-issue`

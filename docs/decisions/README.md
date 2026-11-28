@@ -5,6 +5,32 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-28 — maintain's hygiene sweep runs every registered sweep in one pass (#478)
+
+**Decision:** `hygiene-sweep.mjs run` covers every sweep `references/hygiene-sweeps.json` registers in
+one run, and `finalize` writes one `section-<sweep>.md`, one set of `sweep-count` rows, one ratchet
+and one blame budget per sweep. The kind lists stay a union, so `apply-pass` is unchanged.
+Verification lists clusters round-robin across sweeps, each in blast-radius order. Step 4's coverage
+rule now names every pre-pass source that did not run and every area or kind a source that did run
+left unchecked.
+
+**Why:** a later sweep, #481's among them, adds registry entries and a scanner or tool, never a second
+spine.
+
+**Budgets:** the prose edits moved these figures (old to new):
+
+```text
+playbooks/maintaining-the-repo.md 82709 -> 84269
+surfaceTotal (surface-budget.json) 7662 -> 7675
+```
+
+and the fixtures now read:
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 84269
+budget: surface-budget.json surfaceTotal 7675
+```
+
 ## 2026-11-27 — The plan gate's repo rules come from the repo, and two blast-radius relations are notes (#505)
 
 **Decision:** the `gateRules` leg reads the target repo's `tests/fixtures/gate-rules.json`. devcycle's

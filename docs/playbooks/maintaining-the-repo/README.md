@@ -10,7 +10,7 @@ that hand-off — a box pointing at another box would say nothing a sentence doe
 What this playbook contributes on top of the engine: it resolves a maintenance depth (`lean` /
 `standard` / `thorough`) that gates which criteria apply, orients the pass graph-first (an
 availability probe picks a graph-backed research dispatch over a bounded `Explore` fallback),
-and runs a deterministic-facts pre-pass — dependency audit, lint, a dead-code hygiene sweep whose candidates one verification dispatch confirms, and the duplication, dead-export and cross-reference checks only when the repo is devcycle's own source — so the engine's lenses receive tooling facts instead of
+and runs a deterministic-facts pre-pass — dependency audit, lint, the hygiene sweeps, whose candidates one verification dispatch confirms, and the duplication, dead-export and cross-reference checks only when the repo is devcycle's own source — so the engine's lenses receive tooling facts instead of
 re-deriving them. The confirmed criteria (plus **Abstraction** at `standard`, plus a history
 inspector's signal at `thorough`) are then handed to `reviewing-code.md` at `repo` scope, which
 owns the panel dispatch and dedup-and-rank, then hands off to
@@ -34,7 +34,7 @@ playbook's step 8) — which is the only write this otherwise read-only playbook
 Each pass mints its own run record and asks, every time, whether the sweep may run repo code: its
 executing-class tools and, separately, a coverage run. The answers go on that record, with the
 sweep's per-kind counts, which **Trending** compares against the latest earlier pass on this machine.
-A dead-code finding resolves out of the store only when every source behind its kind ran in full and the pass finalized its sweep.
+A hygiene-sweep finding resolves out of the store only when every source behind its kind ran in full and the pass finalized its sweeps, each with its own section in the findings document.
 
 A fan-out ceiling bounds the whole pass: at most 5 concurrent panel lenses and 9 total LLM
 dispatches, with a hard stop at the ≥20% context-depth band. The playbook mutates no code and no
