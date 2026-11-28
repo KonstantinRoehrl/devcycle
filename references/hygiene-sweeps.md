@@ -46,6 +46,8 @@ order, so every sweep shares the one budget, one batched search per cluster, wit
   becomes `suspected (not verified: budget)`: ranked below verified, never dropped.
 - `cleared` — a false positive, the note its reason: dynamic name, framework-owned token, routed or
   lazily loaded, host binding, decorator alias, public entry point. Counted by reason, never a finding.
+  A complexity candidate in a generated file, data table or exhaustive enum switch, which the
+  criterion does not count, is cleared `cohesive: generated`, `table` or `switch`.
 
 `severity` raises the kind's default with a reason, never lowers it. A verdict may carry `raiseReason`;
 a raise never passes the kind's `maxSeverity` unless that reason is one of the kind's `raiseBeyondCapWhen`. A noisy candidate (knip in static
@@ -132,6 +134,4 @@ vendored or test-fixture are excluded before scoring and counted by category in 
 lizard skips a file byte-identical to one it already read, so a copied file is measured once, which
 the coverage notes also state.
 
-Verification reads the file and answers `verified` when the complexity is real, `cleared` with the
-note `cohesive: generated`, `cohesive: table` or `cohesive: switch` when the file is generated, a
-data table or an exhaustive enum switch, which the complexity criterion does not count.
+Verification reads the file: `verified` if the complexity is real, else a `cohesive` clear.
