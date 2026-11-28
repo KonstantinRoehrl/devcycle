@@ -137,6 +137,18 @@ test("a scanner may be scoped to the hotspot files, and the hotspot cap is confi
   expectError((r) => { r.config.hotspotCap = 0; }, /config\.hotspotCap: must be a positive integer/);
 });
 
+test("a scanner that shares a tool's excluded paths must name a registered tool whose invocation passes --ignore", () => {
+  assert.equal(loadRegistry().scanners["duplicate-constants"].excludePathsOf, "jscpd");
+  assert.deepEqual(validateRegistry(fresh()), []);
+  expectError((r) => { r.scanners["duplicate-constants"].excludePathsOf = "jscdp"; },
+    /^scanners\.duplicate-constants\.excludePathsOf: must name a registered tool whose invocation passes --ignore/);
+  expectError((r) => { r.scanners["duplicate-constants"].excludePathsOf = "knip"; },
+    /^scanners\.duplicate-constants\.excludePathsOf: must name a registered tool whose invocation passes --ignore/);
+  const ok = fresh();
+  ok.scanners["stale-todo"].excludePathsOf = "jscpd";
+  assert.deepEqual(validateRegistry(ok), []);
+});
+
 test("a tool may be gated on a repo-root package.json dependency", () => {
   const ok = fresh();
   tool(ok, "eslint").when.packageDependency = ["eslint-plugin-jsdoc"];

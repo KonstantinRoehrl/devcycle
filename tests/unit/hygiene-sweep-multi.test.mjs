@@ -271,6 +271,25 @@ test("judgment-added candidates cluster and rank, and one that names no comparis
     /added judgment needs file, clusterKey and anchor/);
 });
 
+const judged = (over) => ({ sweep: "twins", kind: "judged-twin", file: "src/a.js", line: 1, symbol: "f", clusterKey: "semantic f,g",
+  anchor: "semantic f,g", detail: "f and g parse dates", outcome: "verified", note: "bodies compared", ...over });
+
+test("judgment-added candidates sharing file, line and symbol keep distinct ids when their clusters differ", () => {
+  const { counts, entries } = finalized({ judgments: { reached: [], verdicts: [],
+    added: [judged({}), judged({ clusterKey: "semantic f,h", anchor: "semantic f,h" })] } });
+  assert.equal(counts.sweeps.twins.categories["judged-twin"].verified, 2);
+  assert.deepEqual(entries.filter((e) => e.culpritKind === "judged-twin").map((e) => e.canonicalLocation).sort(), ["semantic f,g", "semantic f,h"]);
+});
+
+test("judgment-added candidates identical in file, line, symbol and cluster keep distinct ids when their kinds differ", () => {
+  const registry = twoSweeps();
+  registry.sweeps.twins.kinds["judged-sibling"] = { severity: "low", route: "judgment" };
+  const { counts } = finalized({ registry, judgments: { reached: [], verdicts: [], added: [judged({}), judged({ kind: "judged-sibling" })] } });
+  assert.equal(counts.sweeps.twins.categories["judged-twin"].verified, 1);
+  assert.equal(counts.sweeps.twins.categories["judged-sibling"].verified, 1);
+  assert.throws(() => finalized({ judgments: { reached: [], verdicts: [], added: [judged({}), judged({})] } }), /two added judgments for /);
+});
+
 test("a verdict answers only verification-routed candidates and a judgment only judgment-routed ones", () => {
   const judgedScan = { id: "twin-index", scan: ({ files }) => files.map((file) => ({ kind: "judged-twin", file, line: 2, symbol: "g", detail: "g looks like f" })) };
   const run = { scanners: [...SCANNERS, twinScan, judgedScan] };

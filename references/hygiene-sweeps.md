@@ -52,7 +52,8 @@ order, so every sweep shares the one budget, one batched search per cluster, wit
   A duplication candidate is `verified` only when its instances mean the same thing, one fact that would
   have to change together. Equal values or similar bodies that mean different things are `cleared` with
   the reason `coincidental equality` (`100` as a percentage and `100` as a page size) or `deliberate
-  divergence` (two similar functions that differ on purpose), the note naming what each instance is for.
+  divergence` (two similar functions that differ on purpose), the note naming what each instance is for. A verifier that clears one instance of a cluster clears every
+  instance of it, so a cleared two-member cluster leaves no one-item finding behind.
 
 `severity` raises the kind's default with a reason, never lowers it. A verdict may carry `raiseReason`;
 a raise never passes the kind's `maxSeverity` unless that reason is one of the kind's `raiseBeyondCapWhen`. A noisy candidate (knip in static
@@ -105,7 +106,10 @@ the tracked source files outside them (§ Duplication); "dependencies not instal
 <noun> tool for this stack; heuristic scan only" for a stack where none of that sweep's tools
 applies, `<noun>` the sweep's registry noun; and the registry's `notCovered` list. The
 sweep runs in every pass and at every depth (`lean`, `standard`, `thorough`), whatever the
-`<concern>`; the statement says when it was partial.
+`<concern>`; the statement says when it was partial. A partial row's note says its kinds stay unresolved
+until the languages it lists are covered or excluded. A repo that tracks one shell or PowerShell script
+therefore sees the constant and env-read kinds stay unresolved: that is by design, so a gap is never read as
+a clean pass. It clears by covering the language with a registered tool or by excluding the path.
 
 ## Safety
 
@@ -158,16 +162,20 @@ caps are the registry's; its method is:
   signatures and bodies across files; a semantic duplicate's anchor is given under § Judgment.
 
 Each of these scanners skips the paths of the `--ignore` list of the jscpd invocation (its registry field
-`excludePathsOf` names the tool whose list it shares), for declarations, sites and reads alike; the
-statement says so with a count of the tracked files that matched, and those files count as excluded,
-never as unread.
+`excludePathsOf` names the tool whose list it shares, matched with `path.matchesGlob`), for declarations,
+sites and reads alike. The list drops tests, docs and test-named files, so they are out of scope for
+duplication detection, for jscpd and the heuristic scanners both; the statement names the globs with a
+count of the tracked files that matched, and those files count as excluded, never as unread.
 
-Each scanner also declares the extensions it `reads`. `SOURCE_EXTENSIONS` in `scripts/hygiene-scanners.mjs`
+Each scanner also declares the extensions it `reads`; `duplicate-constants` declares as `reads` only the
+extensions it parses declarations from. `.vue`, `.svelte` and `.html` are scanned for restated literals but their
+script-block declarations are not, so such a file reads as unread for the declaration kinds. `SOURCE_EXTENSIONS` in `scripts/hygiene-scanners.mjs`
 is the one set of code extensions; a scanner that leaves tracked files of those extensions outside its
 `reads` is partial, so its kinds stay out of `fullKinds` and nothing stored on them resolves. Its note
-names the unread extensions with their counts and the first three files. A kind a tool already ran for is
-not held back (jscpd answers for `duplicate-logic`), and with no stack detected the statement still names
-this gap.
+names the unread extensions with their counts and the first three files. When a tool ran for a scanner's kinds,
+the unread languages are a note on the scanner's row and the kind still counts complete, because the tool
+answers for it (jscpd answers for `duplicate-logic`); with no stack detected the statement still names this
+gap.
 
 Coverage per kind in the statement: tool-checked (`duplicate-logic`, by jscpd), heuristic-only (the
 scanners' kinds, and `duplicate-logic` where jscpd did not run), judgment (`semantic-duplicate`, over

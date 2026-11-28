@@ -4,6 +4,7 @@
 // scripts/validate.mjs (check 30) runs validateRegistry on it at every gate.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { ignoreGlobs } from "./hygiene-adapters.mjs";
 
 export const REGISTRY_PATH = fileURLToPath(new URL("../references/hygiene-sweeps.json", import.meta.url));
 
@@ -200,7 +201,9 @@ function sweepErrors(sweeps) {
   return errors;
 }
 
-function scannerErrors(scanners, stackKeys, sweeps) {
+const sharesIgnoreList = (tool) => isObject(tool) && Array.isArray(tool.modes?.static?.invocations?.[0]?.args) && ignoreGlobs(tool, "static").length > 0;
+
+function scannerErrors(scanners, stackKeys, sweeps, tools) {
   const errors = [];
   for (const [name, scanner] of Object.entries(scanners)) {
     const path = `scanners.${name}`;
@@ -210,6 +213,8 @@ function scannerErrors(scanners, stackKeys, sweeps) {
     if (!isNonEmptyStringArray(scanner.kinds) || (sweepKinds && !subsetOf(scanner.kinds, sweepKinds))) errors.push(`${path}.kinds: must be a non-empty subset of its sweep's kinds`);
     if (scanner.stacks !== null && (!isStringArray(scanner.stacks) || !subsetOf(scanner.stacks, stackKeys))) errors.push(`${path}.stacks: must be null or a subset of the stacks`);
     if (scanner.scope !== undefined && scanner.scope !== "hotspots") errors.push(`${path}.scope: must be "hotspots" when set`);
+    if (scanner.excludePathsOf !== undefined && !tools.some((t) => isObject(t) && t.id === scanner.excludePathsOf && sharesIgnoreList(t)))
+      errors.push(`${path}.excludePathsOf: must name a registered tool whose invocation passes --ignore`);
   }
   return errors;
 }
@@ -230,7 +235,7 @@ export function validateRegistry(registry) {
   }
   errors.push(...sweepErrors(sweeps));
   const stackKeys = Object.keys(stacks);
-  if (isObject(registry.scanners)) errors.push(...scannerErrors(registry.scanners, stackKeys, sweeps));
+  if (isObject(registry.scanners)) errors.push(...scannerErrors(registry.scanners, stackKeys, sweeps, Array.isArray(registry.tools) ? registry.tools : []));
   const config = registry.config;
   if (!isObject(config) || !Number.isInteger(config.staleTodoDays) || config.staleTodoDays <= 0) errors.push("config.staleTodoDays: must be a positive integer");
   if (!isObject(config) || typeof config.configFile !== "string" || !config.configFile) errors.push("config.configFile: must be a non-empty string");

@@ -5,6 +5,35 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-28 — the duplication sweep's exclusions, scanner coverage and clearing rules are stated (#478)
+
+**Decision:** `references/hygiene-sweeps.md` now states that the shared jscpd `--ignore` list excludes
+tests, docs and test-named files for both jscpd and the four heuristic scanners, so they are out of scope
+for duplication detection and the coverage statement names the globs with a file count. It also states that
+`duplicate-constants` reads only declaring extensions, that a tool answering for a kind keeps it complete
+whatever its scanner leaves unread, that a partial row's kinds stay unresolved until its languages are
+covered or excluded, and that clearing one instance of a cluster clears all of them.
+
+**Supersedes:** the previous entry's omission of the shared exclusion list, and its figures for the
+playbook closure and the runtime surface.
+
+**Why:** the round-1 fix widened what duplication detection never sees without saying so, and a coverage
+note that implies a complete kind where a scanner leaves languages unread misleads the reader.
+
+**Budgets:** the prose edits moved these figures (old to new), each the measured value:
+
+```text
+playbooks/maintaining-the-repo.md 91310 -> 92358
+surfaceTotal (surface-budget.json) 7762 -> 7770
+```
+
+and the fixtures now read:
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 92358
+budget: surface-budget.json surfaceTotal 7770
+```
+
 ## 2026-11-28 — the duplication sweep's coverage, floors and verification rules are documented (#478)
 
 **Decision:** `references/hygiene-sweeps.md` now states the heuristic-gap coverage line, the shared

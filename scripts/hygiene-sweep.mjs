@@ -9,7 +9,7 @@
 // `references/hygiene-sweeps.json` owns every pin, invocation, kind and severity read here.
 import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { basename, delimiter, dirname, extname, join, normalize, relative, resolve } from "node:path";
+import { basename, delimiter, dirname, extname, join, matchesGlob, normalize, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseFlags } from "./cli-flags.mjs";
 import { kindIndex, loadRegistry, sourcedKinds } from "./hygiene-registry.mjs";
@@ -295,6 +295,9 @@ function runOneTool({ tool, mode }, { repoRoot, outDir, files, read, dependencie
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
+const unreadExtensions = (unread) => [...Map.groupBy(unread, (f) => extname(f))].sort(([a], [b]) => (a < b ? -1 : 1))
+  .map(([ext, list]) => `${ext}: ${list.length}`).join(", ");
+
 // What kept a scanner from seeing everything, or null when it saw it all.
 function scannerGap(impl, blame, oversize, blameCap, unread) {
   const gaps = [];
@@ -302,10 +305,7 @@ function scannerGap(impl, blame, oversize, blameCap, unread) {
   const [one, many] = impl.blameUnit ?? ["file was", "files were"];
   if (blame.capped) gaps.push(`git blame capped at ${blameCap} files; ${plural(blame.skipped, one, many)} not aged`);
   if (blame.failed.length) gaps.push(`git blame failed for ${plural(blame.failed.length, "file", "files")}: ${blame.failed[0]}`);
-  if (unread.length) {
-    const exts = [...Map.groupBy(unread, (f) => extname(f))].sort(([a], [b]) => (a < b ? -1 : 1)).map(([ext, list]) => `${ext}: ${list.length}`).join(", ");
-    gaps.push(`${plural(unread.length, "source file", "source files")} not scanned, their language is not read (${exts}; ${unread.slice(0, 3).join(", ")})`);
-  }
+  if (unread.length) gaps.push(`${plural(unread.length, "source file", "source files")} not scanned, their language is not read (${unreadExtensions(unread)}; ${unread.slice(0, 3).join(", ")})`);
   return gaps.length ? gaps.join("; ") : null;
 }
 
@@ -324,18 +324,10 @@ function ignoredGlobs(registry, toolId) {
   return globs;
 }
 
-// `**/` spans any directories, `**` anything, `*` anything within one path segment.
-function globMatcher(globs) {
-  const sources = globs.map((glob) => glob.split("**/").map((part) =>
-    part.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*\*|\*/g, (m) => (m === "**" ? ".*" : "[^/]*"))).join("(?:.*/)?"));
-  const re = new RegExp(`^(?:${sources.join("|")})$`);
-  return (file) => re.test(file);
-}
-
 function runScanners(registry, stacks, ctx, { scanners, hotspots, blameCap, toolRows }) {
   const rows = [], candidates = [], material = [];
   const excluded = new Map();
-  const toolRan = (kind) => toolRows.some((r) => r.method !== "heuristic" && r.status === "ran" && r.kinds.includes(kind));
+  const toolFor = (kind) => toolRows.find((r) => r.method !== "heuristic" && r.status === "ran" && r.kinds.includes(kind));
   const blames = new Map(Object.keys(registry.sweeps).map((sweep) => [sweep, makeBlame(ctx.repoRoot, blameCap)]));
   const hotspotNote = hotspots.source === "list" ? `${hotspots.files.length} from the step 3 list`
     : `the ${hotspots.files.length} highest-churn files (no --hotspots list)`;
@@ -350,13 +342,13 @@ function runScanners(registry, stacks, ctx, { scanners, hotspots, blameCap, tool
       let files = def.scope === "hotspots" ? hotspots.files : ctx.files;
       if (def.excludePathsOf) {
         const globs = ignoredGlobs(registry, def.excludePathsOf);
-        const skip = globMatcher(globs);
+        const skip = (file) => globs.some((glob) => matchesGlob(file, glob));
         files = files.filter((f) => !skip(f));
         excluded.set(def.sweep, { globs, files: ctx.files.filter(skip).length });
       }
       const reads = impl.reads ? new Set(impl.reads) : null;
-      const unread = reads && def.kinds.some((k) => !toolRan(k))
-        ? files.filter((f) => SOURCE_EXTENSIONS.has(extname(f)) && !reads.has(extname(f))) : [];
+      const unread = reads ? files.filter((f) => SOURCE_EXTENSIONS.has(extname(f)) && !reads.has(extname(f))) : [];
+      const unanswered = def.kinds.filter((k) => !toolFor(k));
       const scanCtx = { ...ctx, blame, files };
       ctx.read.scope = new Set();
       const blamed = { failed: blame.failed.length, skipped: blame.skipped };
@@ -365,8 +357,12 @@ function runScanners(registry, stacks, ctx, { scanners, hotspots, blameCap, tool
       candidates.push(...found);
       material.push(...handed.map((m) => ({ id: `material:${id}:${m.key}`, type: "material", sweep: def.sweep, source: id, ...m })));
       const gap = scannerGap(impl, { capped: blame.capped && blame.skipped > blamed.skipped, skipped: blame.skipped - blamed.skipped,
-        failed: blame.failed.slice(blamed.failed) }, ctx.read.scope, blameCap, unread);
-      const note = [def.scope === "hotspots" ? `hotspot files only: ${hotspotNote}` : null, gap].filter(Boolean).join("; ") || null;
+        failed: blame.failed.slice(blamed.failed) }, ctx.read.scope, blameCap, unanswered.length ? unread : []);
+      const unreadNote = unread.length && !unanswered.length
+        ? `${id} did not read ${unreadExtensions(unread)}; ${[...new Set(def.kinds.map((k) => toolFor(k).source))].join(", ")} answers for ${def.kinds.join(", ")}` : null;
+      const consequence = unanswered.length && unread.length
+        ? `kinds ${unanswered.join(", ")} stay unresolved until ${[...new Set(unread.map((f) => extname(f)))].sort().join(", ")} is covered or excluded` : null;
+      const note = [def.scope === "hotspots" ? `hotspot files only: ${hotspotNote}` : null, gap, unreadNote, consequence].filter(Boolean).join("; ") || null;
       rows.push({ ...row, status: gap ? "partial" : "ran", note });
     } catch (err) {
       rows.push({ ...row, status: "failed", note: `scanner error: ${err.message}` });

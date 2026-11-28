@@ -152,7 +152,7 @@ function groupCandidates(kind, decls, clusterKey, detail) {
 
 export const duplicateConstants = {
   id: "duplicate-constants",
-  reads: [...new Set([...DECLARING_EXTS, ...RESTATING_EXTS])],
+  reads: [...DECLARING_EXTS],
   scan({ files, read }) {
     const decls = [];
     const restatingLines = [];

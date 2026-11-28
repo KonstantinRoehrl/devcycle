@@ -165,3 +165,13 @@ test("a pixel length declared in two stylesheets under one name is a duplicate-c
     "duplicate-constant|b.css|1|--gap|constant --gap=16px|null",
   ]);
 });
+
+test("a scanner reads only the extensions whose declarations it parses, though it still scans markup files for restated literals", () => {
+  for (const ext of [".vue", ".svelte", ".html"]) assert.ok(!duplicateConstants.reads.includes(ext), `${ext} is not a declaration-read language`);
+  for (const ext of [".ts", ".py", ".css"]) assert.ok(duplicateConstants.reads.includes(ext), `${ext} declarations are parsed`);
+  const found = scan(duplicateConstants, {
+    "src/limits.ts": "export const BRAND_TIMEOUT_MS = 30000;\n",
+    "src/Panel.vue": "<script>\nsetTimeout(done, 30000);\n</script>\n",
+  });
+  assert.deepEqual(of(found, "restated-literal"), ["restated-literal|src/Panel.vue|2|BRAND_TIMEOUT_MS|src/limits.ts#BRAND_TIMEOUT_MS|null"]);
+});

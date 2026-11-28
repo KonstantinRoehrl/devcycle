@@ -329,7 +329,7 @@ test("coverage names every kind some source produces, so a kind with no source i
 });
 
 // The real scanners and registry over an in-memory tree; every tool answers with nothing unless `report` is the jscpd report to replay.
-function duplicationSweep(tree, { report = null } = {}) {
+function duplicationSweep(tree, { report = null, scanners } = {}) {
   const repo = repoWith(tree);
   const runTool = ({ argv }) => {
     if (report && argv.some((a) => a.startsWith("jscpd@"))) {
@@ -340,7 +340,7 @@ function duplicationSweep(tree, { report = null } = {}) {
     return ok("0.0.0\n");
   };
   const outDir = join(makeTempDir("hyg-dup-out-"), "sweep");
-  return { repo, outDir, ...runSweep({ repoRoot: repo, outDir, runTool, files: Object.keys(tree), churn: new Map(), onPath: () => true, hotspots: [] }) };
+  return { repo, outDir, ...runSweep({ repoRoot: repo, outDir, runTool, files: Object.keys(tree), churn: new Map(), onPath: () => true, hotspots: [], scanners }) };
 }
 
 test("a candidate is identified by its kind and cluster too, so one line feeding two clusters keeps both candidates", () => {
@@ -378,7 +378,7 @@ test("source files in a language no scanner reads are named in the coverage stat
   assert.deepEqual(coverage.stacks, []);
   assert.deepEqual(coverage.sweeps.duplication.noToolStacks, []);
   for (const kind of [...HEURISTIC_KINDS, "duplicate-logic"]) assert.ok(!coverage.fullKinds.includes(kind), `${kind} must not read complete`);
-  assert.match(statement, /^- partial: duplicate-constants \(3 source files not scanned, their language is not read \(\.java: 2, \.rb: 1; a\/A\.java, b\/B\.java, x\.rb\)\)$/m);
+  assert.match(statement, /^- partial: duplicate-constants \(3 source files not scanned, their language is not read \(\.java: 2, \.rb: 1; a\/A\.java, b\/B\.java, x\.rb\); kinds duplicate-constant, restated-literal, missing-owner stay unresolved until \.java, \.rb is covered or excluded\)$/m);
   assert.match(statement, /^- partial: scattered-env-reads \(3 source files not scanned/m);
   assert.match(statement, /^- partial: same-body-helpers \(3 source files not scanned/m);
   assert.doesNotMatch(statement, /README\.md/, "a markdown file is not a source file");
@@ -396,6 +396,35 @@ test("a tool that ran for a kind answers for the languages its heuristic does no
   assert.ok(coverage.fullKinds.includes("duplicate-logic"), "jscpd read the Java file");
   assert.match(statement, /^- partial: duplicate-constants \(1 source file not scanned/m, "no tool covers the constant kinds");
   assert.doesNotMatch(statement, /partial: same-body-helpers/);
+  const answered = row(coverage, "same-body-helpers");
+  assert.equal(answered.status, "ran");
+  assert.equal(answered.note, "same-body-helpers did not read .java: 1; jscpd answers for duplicate-logic");
+});
+
+test("with no tool answering for a kind, the unread language makes the scanner partial and the note ends with the cost", () => {
+  const { coverage } = statementOf({ "package.json": "{}", "src/A.java": "class A {}\n" });
+  assert.ok(!coverage.fullKinds.includes("duplicate-logic"));
+  const unanswered = row(coverage, "same-body-helpers");
+  assert.equal(unanswered.status, "partial");
+  assert.match(unanswered.note, /; kinds duplicate-logic stay unresolved until \.java is covered or excluded$/);
+});
+
+test("a Vue or Svelte file is unread source for the declaration kinds, while its literals are still scanned for restatements", () => {
+  const { coverage, statement } = statementOf({ "package.json": "{}", "a/A.vue": "<script>\nconst MAX_RETRIES = 12;\n</script>\n",
+    "b/B.vue": "<script>\nconst MAX_RETRIES = 12;\n</script>\n", "src/limits.ts": "export const SESSION_LIMIT_MS = 86400000;\n",
+    "src/C.svelte": "<script>const wait = 86400000;</script>\n" });
+  for (const kind of ["duplicate-constant", "restated-literal", "missing-owner"]) assert.ok(!coverage.fullKinds.includes(kind), `${kind} must not read complete`);
+  assert.match(statement, /^- partial: duplicate-constants \(3 source files not scanned, their language is not read \(\.svelte: 1, \.vue: 2; .*\); kinds duplicate-constant, restated-literal, missing-owner stay unresolved until \.svelte, \.vue is covered or excluded\)$/m);
+});
+
+test("the paths jscpd excludes are matched as globs: nested test and spec files go, look-alike directory names stay, and * stays inside one segment", () => {
+  const tree = { "package.json": "{}", "src/foo.test.js": "x\n", "src/foo.spec.ts": "x\n", "test/e.ts": "x\n", "node_modules/p/i.js": "x\n",
+    "src/rebuild/x.js": "x\n", "latest/e.ts": "x\n", "src/a.test.b/c.js": "x\n", "src/keep.js": "x\n" };
+  let seen = null;
+  const spy = { id: "duplicate-constants", reads: [], scan: ({ files }) => { seen = [...files]; return []; } };
+  const { coverage } = duplicationSweep(tree, { scanners: [spy] });
+  assert.deepEqual(seen.sort(), ["latest/e.ts", "package.json", "src/a.test.b/c.js", "src/keep.js", "src/rebuild/x.js"]);
+  assert.equal(coverage.sweeps.duplication.excluded.files, 4);
 });
 
 test("the duplication scanners skip the paths jscpd excludes, the statement names them, and an excluded file is not unread source", () => {

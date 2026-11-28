@@ -187,3 +187,13 @@ test("the documentation criteria name a measuring source beyond the repo's conve
   for (const source of ["PEP 257", "Go doc comments", "TSDoc"]) assert.match(section, new RegExp(source));
   assert.match(between(criteria, "- **undocumented code**", "- docs-vs-reality"), /measured against:/);
 });
+
+const sweeps = read("../../references/hygiene-sweeps.md");
+const verification = between(sweeps, "## Verification", "## Judgment");
+
+test("verification clears coincidental equality and deliberate divergence, one instance clearing its whole cluster", () => {
+  assert.match(verification, /`verified` only when its instances mean the same thing/);
+  assert.match(verification, /`cleared` with\s+the reason `coincidental equality`/);
+  assert.match(verification, /`deliberate\s+divergence`/);
+  assert.match(verification, /clears one instance of a cluster clears every\s+instance of it/);
+});
