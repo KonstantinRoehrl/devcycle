@@ -3,7 +3,9 @@
 // detects the repo's stacks, runs the registry's tools that apply (an executing-class mode only on
 // this pass's consent) into scratch, normalizes their output through an adapter, runs the built-in
 // scanners, and writes candidate clusters, coverage rows and the inputs of judgment-routed kinds.
-// The verification dispatch, not this script, decides what is a finding.
+// The verification dispatch, not this script, decides what is a finding. `finalize` folds that
+// dispatch's verdicts (verification-routed kinds) and the judgment dispatch's judgments
+// (judgment-routed kinds) into one section, entry list and count set per sweep.
 // `references/hygiene-sweeps.json` owns every pin, invocation, kind and severity read here.
 import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
@@ -16,7 +18,8 @@ import { SCANNERS } from "./hygiene-scanners.mjs";
 import { readMaintenanceFindings } from "./maintenance-findings.mjs";
 import { gitToplevel, recordPath, runsDirForRepo, writeLine } from "./run-record.mjs";
 
-const SWEEP = "dead-code";
+// The sweep an lcov report is evidence for: it shows which dead-code candidates no test reaches.
+const LCOV_SWEEP = "dead-code";
 const READ_CAP_BYTES = 1024 * 1024;
 const BLAME_CAP_FILES = 200;
 // A binary file cannot name anything textually, so skipping it for size is not a gap in a scan.
@@ -501,7 +504,7 @@ function isUncovered(lcovFiles, c) {
 // The latest counted pass on this machine that started strictly before `runId`'s: a run file other
 // than its own, holding sweep-count rows for `sweep`, ordered by its `run` line's startedAt, then
 // file name. Each category maps to its count and whether that pass swept it completely.
-export function latestEarlierCounts(repoRoot, runId, sweep = SWEEP) {
+export function latestEarlierCounts(repoRoot, runId, sweep) {
   const dir = runsDirForRepo(gitToplevel(repoRoot));
   let names;
   try { names = readdirSync(dir).filter((n) => n.endsWith(".jsonl") && n !== `${runId}.jsonl`); }
@@ -520,17 +523,17 @@ export function latestEarlierCounts(repoRoot, runId, sweep = SWEEP) {
   return best && Object.fromEntries(best.counts.map((r) => [r.category, { count: r.verified + r.suspected, complete: r.complete === true }]));
 }
 
-function appendCounts(repoRoot, runId, counts) {
+function appendCounts(repoRoot, runId, sweep, categories) {
   const toplevel = gitToplevel(repoRoot);
-  if (readRows(recordPath(toplevel, runId)).some((r) => r.kind === "sweep-count" && r.sweep === counts.sweep))
+  if (readRows(recordPath(toplevel, runId)).some((r) => r.kind === "sweep-count" && r.sweep === sweep))
     return "already-recorded";
-  for (const [category, c] of Object.entries(counts.categories))
-    writeLine(toplevel, runId, { kind: "sweep-count", runId, sweep: counts.sweep, category, ...c });
+  for (const [category, c] of Object.entries(categories))
+    writeLine(toplevel, runId, { kind: "sweep-count", runId, sweep, category, ...c });
   return "appended";
 }
 
 function lcovRow(lcovFiles, consent) {
-  const base = { source: "coverage-run", kinds: [], class: "executing", method: "tool", downloaded: false, version: "repo-toolchain" };
+  const base = { source: "coverage-run", sweep: LCOV_SWEEP, kinds: [], class: "executing", method: "tool", downloaded: false, version: "repo-toolchain" };
   if (lcovFiles) return { ...base, ...(lcovFiles.size
     ? { status: "ran", note: `lcov report covers ${lcovFiles.size} files` }
     : { status: "failed", note: "not an lcov report: no SF records" }) };
@@ -539,8 +542,11 @@ function lcovRow(lcovFiles, consent) {
     : { ...base, status: "needs-consent", note: "the coverage run needs this pass's consent" };
 }
 
-function coverageStatement(coverage, kinds) {
-  const ranBy = (kind, methods) => coverage.rows
+// One sweep's coverage statement, from that sweep's rows and its own block of coverage.json.
+function coverageStatement(coverage, sweep, kinds) {
+  const block = coverage.sweeps[sweep];
+  const rows = coverage.rows.filter((r) => r.sweep === sweep);
+  const ranBy = (kind, methods) => rows
     .filter((r) => (r.status === "ran" || r.status === "partial") && r.kinds.includes(kind) && methods.includes(r.method))
     .map((r) => (r.status === "partial" ? `${r.source} (partial)` : r.source));
   const lines = Object.keys(kinds).map((k) => {
@@ -548,116 +554,205 @@ function coverageStatement(coverage, kinds) {
     const heuristics = ranBy(k, ["heuristic"]);
     const how = [tools.length ? `tool-checked by ${tools.join(", ")}` : null,
       heuristics.length ? `heuristic by ${heuristics.join(", ")}` : null].filter(Boolean).join("; ") || "not checked";
-    return `- \`${k}\`: ${how}; ${coverage.fullKinds.includes(k) ? "complete" : "incomplete"}`;
+    return `- \`${k}\`: ${how}; ${block.fullKinds.includes(k) ? "complete" : "incomplete"}`;
   });
-  for (const r of coverage.rows) if (r.status === "partial") lines.push(`- partial: ${r.source} (${r.note})`);
+  for (const r of rows) if (r.status === "partial") lines.push(`- partial: ${r.source} (${r.note})`);
   for (const d of coverage.degraded ?? []) lines.push(`- degraded: ${d}`);
-  for (const r of coverage.rows)
+  for (const r of rows)
     if (r.status !== "ran" && r.status !== "partial" && r.status !== "not-applicable") lines.push(`- not run: ${r.source} (${r.status}${r.note ? `: ${r.note}` : ""})`);
-  for (const r of coverage.rows) if (r.downloaded) lines.push(`- downloaded: ${r.source} ${r.version}`);
-  const { noToolStacks, notCovered } = coverage.sweeps?.[SWEEP] ?? coverage;
-  for (const s of noToolStacks) lines.push(`- ${s}: no dead-code tool for this stack; heuristic scan only`);
-  lines.push(`- not covered: ${notCovered.join("; ")}`);
+  for (const r of rows) if (r.downloaded) lines.push(`- downloaded: ${r.source} ${r.version}`);
+  for (const r of rows) if (r.scope === "hotspots" && (r.status === "ran" || r.status === "partial")) lines.push(`- hotspot-only: ${r.source} (${r.note})`);
+  for (const s of block.noToolStacks) lines.push(`- ${s}: no ${block.noun} tool for this stack; heuristic scan only`);
+  lines.push(`- not covered: ${block.notCovered.join("; ")}`);
   return lines.join("\n");
 }
 
-function outcomeOf(c, v, kindSeverity) {
-  const severity = v?.severity ? higher(kindSeverity, v.severity) : kindSeverity;
+const capSeverity = (severity, max) => (max && SEVERITY_ORDER.indexOf(severity) > SEVERITY_ORDER.indexOf(max) ? max : severity);
+
+// A kind's default severity, raised by the verdict, then held at the kind's cap unless the verdict names a reason the cap lets through.
+function severityOf(kind, v) {
+  const raised = v?.severity ? higher(kind.severity, v.severity) : kind.severity;
+  return kind.raiseBeyondCapWhen.includes(v?.raiseReason) ? raised : capSeverity(raised, kind.maxSeverity);
+}
+
+function outcomeOf(c, v, kind) {
+  const severity = severityOf(kind, v);
   if (c.cleared) return { outcome: "cleared", note: c.cleared, severity };
-  if (!v) return { outcome: "suspected", note: "not verified: budget", severity };
+  if (!v) return { outcome: "suspected", note: kind.route === "judgment" ? "not judged: budget" : "not verified: budget", severity };
   if (v.outcome === "verified" && c.noisy) return { outcome: "suspected", note: `${v.note ?? ""} (known-noisy class)`.trim(), severity };
   return { outcome: v.outcome, note: v.note ?? "", severity };
 }
 
-export function finalizeSweep({ outDir, verdicts, lcov = null, runId = null, repoRoot, registry = loadRegistry(),
-  previousCounts = latestEarlierCounts(repoRoot, runId) }) {
-  const { candidates, clusters } = readJson(join(outDir, "candidates.json"));
-  const coverage = readJson(join(outDir, "coverage.json"));
-  const kinds = registry.sweeps[SWEEP].kinds;
-  const byId = new Map(candidates.map((c) => [c.id, c]));
-  const verdictById = new Map();
-  for (const v of verdicts) {
+// Both answer lists get one set of checks; `route` is the route the list may answer and `noun` names it in errors.
+function indexAnswers(list, { byId, kinds, route, noun }) {
+  const answered = new Map();
+  for (const v of list) {
     const id = v?.candidateId;
-    if (!byId.has(id)) throw new Error(`verdict for unknown candidate "${id}"`);
-    if (verdictById.has(id)) throw new Error(`two verdicts for "${id}"`);
-    if (!OUTCOMES.has(v.outcome)) throw new Error(`invalid outcome "${v.outcome}" for "${id}"`);
-    if (v.severity !== undefined && !SEVERITY_ORDER.includes(v.severity)) throw new Error(`invalid severity "${v.severity}" for "${id}"`);
-    if (v.outcome === "cleared" && !String(v.note ?? "").trim()) throw new Error(`cleared "${id}" needs its reason as the note`);
-    verdictById.set(id, v);
+    if (!byId.has(id)) throw new Error(`${noun} for unknown candidate "${id}"`);
+    const actual = kinds.get(byId.get(id).kind)?.route;
+    if (actual !== route) throw new Error(`${noun} for "${id}", which routes to ${actual}`);
+    if (answered.has(id)) throw new Error(`two ${noun}s for "${id}"`);
+    checkAnswer(v, id);
+    answered.set(id, v);
   }
+  return answered;
+}
+
+function checkAnswer(v, id) {
+  if (!OUTCOMES.has(v.outcome)) throw new Error(`invalid outcome "${v.outcome}" for "${id}"`);
+  if (v.severity !== undefined && !SEVERITY_ORDER.includes(v.severity)) throw new Error(`invalid severity "${v.severity}" for "${id}"`);
+  if (v.raiseReason !== undefined && (typeof v.raiseReason !== "string" || !v.raiseReason.trim())) throw new Error(`invalid raiseReason for "${id}"`);
+  if (v.outcome === "cleared" && !String(v.note ?? "").trim()) throw new Error(`cleared "${id}" needs its reason as the note`);
+}
+
+const hasText = (x) => typeof x === "string" && x.trim() !== "";
+
+// What the judgment dispatch added beyond the candidates the scan produced, as candidates plus the answers that came with them.
+function addedCandidates(added, kinds) {
+  const candidates = [], answers = [];
+  for (const a of added) {
+    const kind = kinds.get(a?.kind);
+    if (!kind || kind.sweep !== a.sweep || kind.route !== "judgment")
+      throw new Error(`added judgment kind "${a?.kind}" is not a judgment-routed kind of ${a?.sweep}`);
+    if (!hasText(a.file) || !hasText(a.clusterKey) || !hasText(a.anchor)) throw new Error("added judgment needs file, clusterKey and anchor");
+    const id = `judgment:${a.file}:${a.line ?? 0}:${a.symbol ?? ""}`;
+    checkAnswer(a, id);
+    if (candidates.some((c) => c.id === id)) throw new Error(`two added judgments for "${id}"`);
+    candidates.push({ id, sweep: a.sweep, kind: a.kind, source: "judgment", file: a.file, line: a.line ?? null, symbol: a.symbol ?? null,
+      detail: a.detail ?? "", noisy: false, cleared: null, clusterKey: a.clusterKey, anchor: a.anchor });
+    const unnamed = a.outcome === "verified" && !String(a.note ?? "").trim();
+    answers.push({ candidateId: id, outcome: unnamed ? "suspected" : a.outcome, note: unnamed ? "judgment named no comparison" : a.note,
+      severity: a.severity, raiseReason: a.raiseReason });
+  }
+  return { candidates, answers };
+}
+
+// Clusters of the added candidates, joined to a scanned cluster that shares their id; co-change stays the scanned cluster's.
+function withAddedClusters(clusters, candidates, added, churn) {
+  const fresh = new Map(clusterCandidates(added, new Map(Object.entries(churn))).map((cl) => [cl.clusterId, cl]));
+  const byId = new Map(candidates.map((c) => [c.id, c]));
+  for (const hit of clusters.filter((cl) => fresh.has(cl.clusterId))) {
+    const members = [...hit.candidates.map((id) => byId.get(id)), ...added.filter((c) => `${c.kind}:${c.clusterKey}` === hit.clusterId)];
+    fresh.set(hit.clusterId, { ...clusterCandidates(members, new Map(Object.entries(churn)))[0], coChange: hit.coChange });
+  }
+  return [...clusters.filter((cl) => !fresh.has(cl.clusterId)), ...fresh.values()];
+}
+
+const DEPTHS = ["lean", "standard", "thorough"];
+const ascending = (a, b) => (a < b ? -1 : 1);
+
+export function finalizeSweep({ outDir, verdicts, judgments = null, depth = "standard", lcov = null, runId = null, repoRoot,
+  registry = loadRegistry(), previousCounts }) {
+  if (!DEPTHS.includes(depth)) throw new Error("--depth must be lean, standard or thorough");
+  const found = readJson(join(outDir, "candidates.json"));
+  const coverage = readJson(join(outDir, "coverage.json"));
+  const inputs = readJson(join(outDir, "judgment-inputs.json")).items;
+  const inputIds = new Set(inputs.map((i) => i.id));
+  const kinds = kindIndex(registry);
+  const reached = new Set(judgments?.reached ?? []);
+  for (const id of reached) if (!inputIds.has(id)) throw new Error(`judgment reached unknown input "${id}"`);
+  for (const sweep of Object.keys(registry.sweeps))
+    if (!coverage.sweeps?.[sweep]) throw new Error(`coverage.json has no block for sweep "${sweep}"`);
+
+  const added = addedCandidates(judgments?.added ?? [], kinds);
+  const candidates = [...found.candidates, ...added.candidates];
+  for (const c of candidates) if (!kinds.has(c.kind)) throw new Error(`candidate kind "${c.kind}" is not a registered kind`);
+  const clusters = withAddedClusters(found.clusters, found.candidates, added.candidates, found.churn ?? {})
+    .map((cl) => ({ ...cl, route: kinds.get(cl.kind).route }));
+  const byId = new Map(candidates.map((c) => [c.id, c]));
+  const verdictById = indexAnswers(verdicts, { byId, kinds, route: "verification", noun: "verdict" });
+  const judgedById = indexAnswers([...(judgments?.verdicts ?? []), ...added.answers], { byId, kinds, route: "judgment", noun: "judgment" });
   const lcovFiles = lcov === null ? null : parseLcov(lcov, repoRoot);
   const outcomes = new Map();
   for (const c of candidates) {
-    if (!kinds[c.kind]) throw new Error(`candidate kind "${c.kind}" is not a ${SWEEP} kind`);
-    const o = outcomeOf(c, verdictById.get(c.id), kinds[c.kind].severity);
+    const kind = kinds.get(c.kind);
+    const o = outcomeOf(c, kind.route === "judgment" ? judgedById.get(c.id) : verdictById.get(c.id), kind);
     outcomes.set(c.id, { ...o, uncovered: lcovFiles !== null && isUncovered(lcovFiles, c) });
   }
-
-  const categories = Object.fromEntries(Object.keys(kinds).map((k) =>
-    [k, { verified: 0, suspected: 0, cleared: 0, complete: coverage.fullKinds.includes(k) }]));
-  for (const c of candidates) categories[c.kind][outcomes.get(c.id).outcome] += 1;
-  const counts = { sweep: SWEEP, categories };
-
-  const entries = [];
-  const blocks = [];
-  for (const cl of clusters) {
-    const live = cl.candidates.map((id) => byId.get(id)).filter((c) => outcomes.get(c.id).outcome !== "cleared");
-    if (!live.length) continue;
-    const severity = live.map((c) => outcomes.get(c.id).severity).reduce(higher);
-    const confidence = live.some((c) => outcomes.get(c.id).outcome === "verified") ? "verified" : "suspected";
-    const title = `${live.length} ${cl.kind} ${live.length === 1 ? "item" : "items"} in ${cl.anchor}`;
-    entries.push({ culpritKind: cl.kind, canonicalLocation: cl.anchor, title, severity, confidence,
-      affectedFiles: [...new Set(live.map((c) => c.file))].sort() });
-    blocks.push(`### ${title}\n\n${severity}, ${confidence}; blast radius ${cl.blastRadius}\n\n` + live.map((c) => {
-      const o = outcomes.get(c.id);
-      const where = `\`${c.file}${c.line === null ? "" : `:${c.line}`}\`${c.symbol === null ? "" : ` \`${c.symbol}\``}`;
-      return `- ${where}: ${o.outcome}${o.note ? ` (${o.note})` : ""}${o.uncovered ? ", uncovered" : ""}`;
-    }).join("\n"));
-  }
-
-  const reasons = new Map();
-  for (const c of candidates) {
-    const o = outcomes.get(c.id);
-    if (o.outcome === "cleared") reasons.set(o.note, (reasons.get(o.note) ?? 0) + 1);
-  }
-  const cleared = [...reasons].sort(([a], [b]) => (a < b ? -1 : 1)).map(([r, n]) => `${r} ${n}`).join(", ") || "none";
   coverage.rows = [...coverage.rows.filter((r) => r.source !== "coverage-run"), lcovRow(lcovFiles, coverage.consent)];
-  const trending = previousCounts
-    ? Object.entries(categories).map(([k, c]) => {
-      const before = previousCounts[k] ?? { count: 0, complete: false };
-      if (!before.complete) return `${k}: not comparable: earlier pass was incomplete`;
-      if (!c.complete) return `${k}: not comparable: this pass was incomplete`;
-      return `${k} ${before.count} → ${c.verified + c.suspected}`;
-    })
-    : ["no earlier counted pass on this machine"];
-  const section = ["## Dead code", `Findings: ${entries.length}, in blast-radius order. Cleared: ${cleared}.`, ...blocks,
-    "### Coverage", coverageStatement(coverage, kinds), "### Trending", trending.map((t) => `- ${t}`).join("\n")].join("\n\n") + "\n";
+
+  const counts = { sweeps: {} }, sections = {}, trending = {}, ratchet = {};
+  const entries = [];
+  for (const [sweep, def] of Object.entries(registry.sweeps)) {
+    const block = coverage.sweeps[sweep];
+    // A judgment-routed kind is complete only when the judgment reached every input that concerns it.
+    block.fullKinds = block.fullKinds.filter((k) => kinds.get(k)?.route !== "judgment" ||
+      (judgments !== null && inputs.filter((i) => i.kinds.includes(k)).every((i) => reached.has(i.id))));
+    const categories = Object.fromEntries(Object.keys(def.kinds).map((k) =>
+      [k, { verified: 0, suspected: 0, cleared: 0, complete: block.fullKinds.includes(k) }]));
+    for (const c of candidates.filter((x) => kinds.get(x.kind).sweep === sweep)) categories[c.kind][outcomes.get(c.id).outcome] += 1;
+    counts.sweeps[sweep] = { categories };
+    const ranked = clusters.filter((cl) => kinds.get(cl.kind).sweep === sweep).sort((a, b) =>
+      (depth === "thorough" ? b.coChange - a.coChange : 0) || b.blastRadius - a.blastRadius || ascending(a.clusterId, b.clusterId));
+    const blocks = [], own = [];
+    for (const cl of ranked) {
+      const live = cl.candidates.map((id) => byId.get(id)).filter((c) => outcomes.get(c.id).outcome !== "cleared");
+      if (!live.length) continue;
+      const severity = live.map((c) => outcomes.get(c.id).severity).reduce(higher);
+      const confidence = live.some((c) => outcomes.get(c.id).outcome === "verified") ? "verified" : "suspected";
+      const title = `${live.length} ${cl.kind} ${live.length === 1 ? "item" : "items"} in ${cl.anchor}`;
+      own.push({ culpritKind: cl.kind, canonicalLocation: cl.anchor, title, severity, confidence,
+        affectedFiles: [...new Set(live.map((c) => c.file))].sort() });
+      blocks.push(`### ${title}\n\n${severity}, ${confidence}; blast radius ${cl.blastRadius}\n\n` + live.map((c) => {
+        const o = outcomes.get(c.id);
+        const where = `\`${c.file}${c.line === null ? "" : `:${c.line}`}\`${c.symbol === null ? "" : ` \`${c.symbol}\``}`;
+        return `- ${where}: ${o.outcome}${o.note ? ` (${o.note})` : ""}${o.uncovered ? ", uncovered" : ""}`;
+      }).join("\n"));
+    }
+    entries.push(...own);
+    const reasons = new Map();
+    for (const c of candidates.filter((x) => kinds.get(x.kind).sweep === sweep)) {
+      const o = outcomes.get(c.id);
+      if (o.outcome === "cleared") reasons.set(o.note, (reasons.get(o.note) ?? 0) + 1);
+    }
+    const cleared = [...reasons].sort(([a], [b]) => ascending(a, b)).map(([r, n]) => `${r} ${n}`).join(", ") || "none";
+    const earlier = previousCounts === undefined ? latestEarlierCounts(repoRoot, runId, sweep) : previousCounts?.[sweep] ?? null;
+    trending[sweep] = earlier
+      ? Object.entries(categories).map(([k, c]) => {
+        const before = earlier[k] ?? { count: 0, complete: false };
+        if (!before.complete) return `${k}: not comparable: earlier pass was incomplete`;
+        if (!c.complete) return `${k}: not comparable: this pass was incomplete`;
+        return `${k} ${before.count} → ${c.verified + c.suspected}`;
+      })
+      : ["no earlier counted pass on this machine"];
+    const order = depth === "thorough" ? "co-change then blast-radius order" : "blast-radius order";
+    sections[sweep] = [`## ${block.title}`, `Findings: ${own.length}, in ${order}. Cleared: ${cleared}.`, ...blocks,
+      "### Coverage", coverageStatement(coverage, sweep, def.kinds), "### Trending", trending[sweep].map((t) => `- ${t}`).join("\n")].join("\n\n") + "\n";
+  }
+  coverage.fullKinds = Object.values(coverage.sweeps).flatMap((b) => b.fullKinds);
 
   writeFileSync(join(outDir, "coverage.json"), JSON.stringify(coverage, null, 2) + "\n");
   writeFileSync(join(outDir, "entries.json"), JSON.stringify(entries, null, 2) + "\n");
   writeFileSync(join(outDir, "counts.json"), JSON.stringify(counts, null, 2) + "\n");
-  writeFileSync(join(outDir, "section.md"), section);
-  const ratchet = runId === null ? "skipped" : appendCounts(repoRoot, runId, counts);
-  return { entries, counts, section, trending, ratchet };
+  for (const [sweep, section] of Object.entries(sections)) writeFileSync(join(outDir, `section-${sweep}.md`), section);
+  for (const [sweep, { categories }] of Object.entries(counts.sweeps))
+    ratchet[sweep] = runId === null ? "skipped" : appendCounts(repoRoot, runId, sweep, categories);
+  return { entries, counts, sections, trending, ratchet };
 }
 
 const USAGE = "usage: hygiene-sweep.mjs run --out <dir> [--repo <root>] [--consent-executing] [--consent-coverage] [--hotspots <file>]\n" +
-  "       hygiene-sweep.mjs finalize --dir <dir> --verdicts <file> [--lcov <file>] [--run <runId>] [--repo <root>]";
+  "       hygiene-sweep.mjs finalize --dir <dir> --verdicts <file> [--judgments <file>] [--depth lean|standard|thorough] [--lcov <file>] [--run <runId>] [--repo <root>]";
 
 function mainFinalize(rest) {
-  const { flags } = parseFlags(rest, { "--dir": "value", "--verdicts": "value", "--lcov": "value", "--run": "value", "--repo": "value" },
-    { requireValues: "nonEmpty" });
+  const { flags } = parseFlags(rest, { "--dir": "value", "--verdicts": "value", "--judgments": "value", "--depth": "value", "--lcov": "value",
+    "--run": "value", "--repo": "value" }, { requireValues: "nonEmpty" });
   for (const f of ["--dir", "--verdicts"]) if (!flags[f]) throw new Error(`${f} is required; ${USAGE}`);
   const verdicts = readJson(flags["--verdicts"]);
   if (!Array.isArray(verdicts)) throw new Error(`${flags["--verdicts"]} must hold a JSON array of verdicts`);
+  let judgments = null;
+  if (flags["--judgments"]) {
+    judgments = readJson(flags["--judgments"]);
+    if (judgments === null || typeof judgments !== "object" || Array.isArray(judgments))
+      throw new Error(`${flags["--judgments"]} must hold a JSON object of judgments`);
+  }
   let lcov = null;
   if (flags["--lcov"]) {
     try { lcov = readFileSync(flags["--lcov"], "utf8"); }
     catch (err) { throw new Error(`cannot read ${flags["--lcov"]}: ${err.message}`); }
   }
-  const { entries, counts, ratchet } = finalizeSweep({ outDir: flags["--dir"], verdicts, lcov, runId: flags["--run"] ?? null,
-    repoRoot: resolve(flags["--repo"] ?? process.cwd()) });
-  const total = (o) => Object.values(counts.categories).reduce((n, c) => n + c[o], 0);
+  const { entries, counts, ratchet } = finalizeSweep({ outDir: flags["--dir"], verdicts, judgments, depth: flags["--depth"] ?? "standard", lcov,
+    runId: flags["--run"] ?? null, repoRoot: resolve(flags["--repo"] ?? process.cwd()) });
+  const total = (o) => Object.values(counts.sweeps).flatMap((s) => Object.values(s.categories)).reduce((n, c) => n + c[o], 0);
   process.stdout.write(JSON.stringify({ dir: resolve(flags["--dir"]), entries: entries.length,
     verified: total("verified"), suspected: total("suspected"), cleared: total("cleared"), ratchet }) + "\n");
 }

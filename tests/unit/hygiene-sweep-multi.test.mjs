@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { clusterCandidates, orderForVerification, runSweep, selectTools } from "../../scripts/hygiene-sweep.mjs";
+import { clusterCandidates, finalizeSweep, orderForVerification, runSweep, selectTools } from "../../scripts/hygiene-sweep.mjs";
 import { loadRegistry } from "../../scripts/hygiene-registry.mjs";
 import { SCANNERS } from "../../scripts/hygiene-scanners.mjs";
 import { findingId, recordMaintenanceFinding } from "../../scripts/maintenance-findings.mjs";
+import { gitToplevel, runsDirForRepo } from "../../scripts/run-record.mjs";
 
 // A second sweep beside dead code: one verification kind fed by a whole-tree scanner and a raw
 // tool, one judgment kind fed by a hotspot-scoped scanner that also hands the judgment material.
@@ -158,4 +159,127 @@ test("a packageDependency tool applies only when the repo-root package.json decl
   assert.equal(pick({ dependencies: { "twin-plugin": "1.0.0" } }), "run");
   assert.equal(pick({ dependencies: { other: "1" } }), "not-applicable");
   assert.equal(pick(null), "not-applicable");
+});
+
+const VERIFIED_TWINS = (candidates) => candidates.filter((c) => c.kind === "twin")
+  .map((c) => ({ candidateId: c.id, outcome: "verified", note: "same name and value" }));
+function finalized(over = {}) {
+  const out = join(makeTempDir("hyg-multi-out-"), "sweep");
+  const { candidates } = sweep({ outDir: out, ...(over.run ?? {}) });
+  const registry = over.registry ?? twoSweeps();
+  const result = finalizeSweep({ outDir: out, verdicts: over.verdicts?.(candidates) ?? VERIFIED_TWINS(candidates),
+    judgments: over.judgments ?? null, depth: over.depth ?? "standard", repoRoot: out, registry, previousCounts: null });
+  return { out, candidates, ...result };
+}
+
+test("finalize writes one section per sweep under its title, each with its own coverage statement", () => {
+  const { out, entries, counts } = finalized();
+  const dead = readFileSync(join(out, "section-dead-code.md"), "utf8");
+  const twins = readFileSync(join(out, "section-twins.md"), "utf8");
+  assert.match(dead, /^## Dead code\n/);
+  assert.match(twins, /^## Twins\n\nFindings: 1, in blast-radius order\. Cleared: none\.\n/);
+  assert.ok(twins.includes("- js-ts: no twins tool for this stack; heuristic scan only"), twins);
+  assert.ok(twins.includes("- not covered: twins across languages"));
+  assert.ok(twins.includes("- hotspot-only: twin-index (hotspot files only: the 1 highest-churn files (no --hotspots list))"), twins);
+  assert.doesNotMatch(twins, /coverage-run/);
+  assert.match(dead, /- not run: coverage-run/);
+  assert.doesNotMatch(dead, /twin/);
+  assert.equal(existsSync(join(out, "section.md")), false);
+  assert.deepEqual(Object.keys(counts.sweeps), ["dead-code", "twins"]);
+  assert.deepEqual(counts.sweeps.twins.categories.twin, { verified: 2, suspected: 0, cleared: 0, complete: true });
+  assert.deepEqual(entries.find((e) => e.culpritKind === "twin"), { culpritKind: "twin", canonicalLocation: "constant LIMIT=5",
+    title: "2 twin items in constant LIMIT=5", severity: "medium", confidence: "verified", affectedFiles: ["src/a.js", "src/b.js"] });
+  assert.deepEqual(JSON.parse(readFileSync(join(out, "counts.json"), "utf8")), counts);
+});
+
+test("a judgment-routed kind is complete only when the judgment reached every one of its inputs", () => {
+  const without = finalized();
+  const cov = (out) => JSON.parse(readFileSync(join(out, "coverage.json"), "utf8"));
+  assert.ok(!cov(without.out).fullKinds.includes("judged-twin"));
+  assert.ok(!cov(without.out).sweeps.twins.fullKinds.includes("judged-twin"));
+  const reachedAll = finalized({ judgments: { reached: ["material:twin-index:src/a.js"], verdicts: [], added: [] } });
+  assert.ok(cov(reachedAll.out).fullKinds.includes("judged-twin"));
+  assert.ok(cov(reachedAll.out).sweeps.twins.fullKinds.includes("judged-twin"));
+  assert.throws(() => finalized({ judgments: { reached: ["nope"], verdicts: [], added: [] } }), /judgment reached unknown input "nope"/);
+});
+
+test("judgment-added candidates cluster and rank, and one that names no comparison stays suspected", () => {
+  const add = (file, symbol, note) => ({ sweep: "twins", kind: "judged-twin", file, line: 1, symbol, clusterKey: "semantic f,g",
+    anchor: "semantic f,g", detail: "f and g parse dates", outcome: "verified", note });
+  const { out, entries } = finalized({ judgments: { reached: [], verdicts: [],
+    added: [add("src/a.js", "f", "both parse ISO dates; bodies compared"), add("src/b.js", "g", "")] } });
+  assert.deepEqual(entries.find((e) => e.culpritKind === "judged-twin"), { culpritKind: "judged-twin", canonicalLocation: "semantic f,g",
+    title: "2 judged-twin items in semantic f,g", severity: "low", confidence: "verified", affectedFiles: ["src/a.js", "src/b.js"] });
+  assert.ok(readFileSync(join(out, "section-twins.md"), "utf8").includes("- `src/b.js:1` `g`: suspected (judgment named no comparison)"));
+  assert.throws(() => finalized({ judgments: { reached: [], verdicts: [], added: [{ ...add("src/a.js", "f", "x"), kind: "twin" }] } }),
+    /added judgment kind "twin" is not a judgment-routed kind of twins/);
+  assert.throws(() => finalized({ judgments: { reached: [], verdicts: [], added: [{ ...add("src/a.js", "f", "x"), anchor: "" }] } }),
+    /added judgment needs file, clusterKey and anchor/);
+});
+
+test("a verdict answers only verification-routed candidates and a judgment only judgment-routed ones", () => {
+  const judgedScan = { id: "twin-index", scan: ({ files }) => files.map((file) => ({ kind: "judged-twin", file, line: 2, symbol: "g", detail: "g looks like f" })) };
+  const run = { scanners: [...SCANNERS, twinScan, judgedScan] };
+  const { out } = finalized({ run });
+  assert.ok(readFileSync(join(out, "section-twins.md"), "utf8").includes("- `src/a.js:2` `g`: suspected (not judged: budget)"));
+  assert.throws(() => finalized({ run, verdicts: (cs) => cs.filter((c) => c.kind === "judged-twin")
+    .map((c) => ({ candidateId: c.id, outcome: "verified", note: "x" })) }), /verdict for ".*", which routes to judgment/);
+  assert.throws(() => finalized({ run, verdicts: () => [], judgments: { reached: [], added: [],
+    verdicts: [{ candidateId: "twin-scan:src/a.js:1:LIMIT", outcome: "verified", note: "x" }] } }), /judgment for ".*", which routes to verification/);
+});
+
+test("a severity raise stops at the kind's cap unless the verdict names a reason that passes it", () => {
+  const capped = () => { const r = twoSweeps(); Object.assign(r.sweeps.twins.kinds.twin, { maxSeverity: "medium", raiseBeyondCapWhen: ["shared across services"] }); return r; };
+  const raise = (extra) => (cs) => VERIFIED_TWINS(cs).map((v) => ({ ...v, severity: "critical", ...extra }));
+  const severity = (r) => r.entries.find((e) => e.culpritKind === "twin").severity;
+  assert.equal(severity(finalized({ registry: capped(), verdicts: raise({}) })), "medium");
+  assert.equal(severity(finalized({ registry: capped(), verdicts: raise({ raiseReason: "shared across services" }) })), "critical");
+  assert.throws(() => finalized({ verdicts: raise({ raiseReason: "" }) }), /invalid raiseReason for/);
+});
+
+test("at thorough, a sweep's clusters order by co-change first, then blast radius", () => {
+  const out = makeTempDir("hyg-multi-hand-");
+  const cand = (id, file) => ({ id, sweep: "twins", kind: "twin", source: "twin-scan", file, line: 1, symbol: id, detail: "", noisy: false, cleared: null });
+  const cluster = (key, files, ids, blastRadius, coChange) => ({ clusterId: `twin:${key}`, sweep: "twins", kind: "twin", route: "verification",
+    anchor: key, files, candidates: ids, blastRadius, coChange });
+  writeFileSync(join(out, "candidates.json"), JSON.stringify({ candidates: [cand("p", "a.js"), cand("q", "b.js")],
+    clusters: [cluster("wide", ["a.js"], ["p"], 5, 0), cluster("tight", ["b.js"], ["q"], 1, 3)], churn: {} }));
+  const block = (title, noun, kinds) => ({ title, noun, noToolStacks: [], notCovered: [], sweepKinds: kinds, sourcedKinds: kinds, fullKinds: [] });
+  const dead = Object.keys(loadRegistry().sweeps["dead-code"].kinds);
+  writeFileSync(join(out, "coverage.json"), JSON.stringify({ stacks: [], dependenciesInstalled: true, consent: { executing: false, coverage: false },
+    config: { staleTodoDays: 365, source: "registry" }, hotspots: { source: "churn", files: [] }, degraded: [], rows: [],
+    sweeps: { "dead-code": block("Dead code", "dead-code", dead), twins: block("Twins", "twins", ["twin", "judged-twin"]) },
+    sweepKinds: [...dead, "twin", "judged-twin"], sourcedKinds: [], fullKinds: [] }));
+  writeFileSync(join(out, "judgment-inputs.json"), JSON.stringify({ items: [] }));
+  const verdicts = [{ candidateId: "p", outcome: "verified", note: "x" }, { candidateId: "q", outcome: "verified", note: "y" }];
+  const order = (depth) => finalizeSweep({ outDir: out, verdicts, depth, repoRoot: out, registry: twoSweeps(), previousCounts: null })
+    .entries.map((e) => e.canonicalLocation);
+  assert.deepEqual(order("standard"), ["wide", "tight"]);
+  assert.deepEqual(order("thorough"), ["tight", "wide"]);
+  assert.match(readFileSync(join(out, "section-twins.md"), "utf8"), /^## Twins\n\nFindings: 2, in co-change then blast-radius order\./);
+  writeFileSync(join(out, "coverage.json"), JSON.stringify({ ...JSON.parse(readFileSync(join(out, "coverage.json"), "utf8")), sweeps: {} }));
+  assert.throws(() => order("standard"), /coverage.json has no block for sweep "dead-code"/);
+});
+
+test("finalize --run appends one set of sweep-count rows per sweep, once", () => {
+  const runs = makeTempDir("hyg-multi-runs-");
+  const saved = process.env.DEVCYCLE_RUNS_DIR;
+  process.env.DEVCYCLE_RUNS_DIR = runs;
+  try {
+    const out = join(makeTempDir("hyg-multi-out-"), "sweep");
+    const { candidates } = sweep({ outDir: out });
+    const runId = "e".repeat(16);
+    const recordDir = runsDirForRepo(gitToplevel(out));
+    mkdirSync(recordDir, { recursive: true });
+    writeFileSync(join(recordDir, `${runId}.jsonl`), JSON.stringify({ kind: "run", runId, startedAt: "2026-11-28T00:00:00Z" }) + "\n");
+    const go = () => finalizeSweep({ outDir: out, verdicts: VERIFIED_TWINS(candidates), runId, repoRoot: out, registry: twoSweeps() });
+    assert.deepEqual(go().ratchet, { "dead-code": "appended", twins: "appended" });
+    const rows = readFileSync(join(recordDir, `${runId}.jsonl`), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l))
+      .filter((r) => r.kind === "sweep-count");
+    assert.deepEqual(rows.filter((r) => r.sweep === "twins").map((r) => r.category), ["twin", "judged-twin"]);
+    assert.equal(rows.filter((r) => r.sweep === "dead-code").length, Object.keys(loadRegistry().sweeps["dead-code"].kinds).length);
+    assert.deepEqual(go().ratchet, { "dead-code": "already-recorded", twins: "already-recorded" });
+  } finally {
+    if (saved === undefined) delete process.env.DEVCYCLE_RUNS_DIR; else process.env.DEVCYCLE_RUNS_DIR = saved;
+  }
 });
