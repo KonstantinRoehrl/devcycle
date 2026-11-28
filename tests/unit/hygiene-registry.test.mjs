@@ -125,7 +125,7 @@ test("a kind routes to verification by default or to judgment, and kindIndex lis
     { sweep: "dead-code", severity: "low", maxSeverity: null, raiseBeyondCapWhen: [], route: "judgment", history: false });
   const shipped = loadRegistry();
   assert.equal(kindIndex(shipped).get("dead-code").route, "verification");
-  assert.deepEqual([...kindIndex(shipped).keys()], Object.keys(shipped.sweeps["dead-code"].kinds));
+  assert.deepEqual([...kindIndex(shipped).keys()], [...Object.keys(shipped.sweeps["dead-code"].kinds), ...Object.keys(shipped.sweeps.complexity.kinds)]);
 });
 
 test("a scanner may be scoped to the hotspot files, and the hotspot cap is configured", () => {

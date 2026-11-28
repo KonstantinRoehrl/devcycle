@@ -54,10 +54,10 @@ test("one run sweeps every registered sweep and tags candidates, rows and cluste
   assert.ok(coverage.rows.every((r) => typeof r.sweep === "string"));
   assert.equal(coverage.rows.find((r) => r.source === "twin-scan").sweep, "twins");
   assert.equal(coverage.rows.find((r) => r.source === "knip").sweep, "dead-code");
-  assert.deepEqual(Object.keys(coverage.sweeps), ["dead-code", "twins"]);
+  assert.deepEqual(Object.keys(coverage.sweeps), ["dead-code", "complexity", "twins"]);
   assert.deepEqual([coverage.sweeps.twins.title, coverage.sweeps.twins.noun], ["Twins", "twins"]);
   assert.deepEqual(coverage.sweeps.twins.sweepKinds, ["twin", "judged-twin"]);
-  assert.deepEqual(coverage.sweepKinds, [...coverage.sweeps["dead-code"].sweepKinds, "twin", "judged-twin"]);
+  assert.deepEqual(coverage.sweepKinds, [...coverage.sweeps["dead-code"].sweepKinds, ...coverage.sweeps.complexity.sweepKinds, "twin", "judged-twin"]);
   assert.ok(coverage.fullKinds.includes("twin") && coverage.sweeps.twins.fullKinds.includes("twin"));
   assert.equal(clusters.find((c) => c.kind === "twin").route, "verification");
 });
@@ -186,7 +186,7 @@ test("finalize writes one section per sweep under its title, each with its own c
   assert.match(dead, /- not run: coverage-run/);
   assert.doesNotMatch(dead, /twin/);
   assert.equal(existsSync(join(out, "section.md")), false);
-  assert.deepEqual(Object.keys(counts.sweeps), ["dead-code", "twins"]);
+  assert.deepEqual(Object.keys(counts.sweeps), ["dead-code", "complexity", "twins"]);
   assert.deepEqual(counts.sweeps.twins.categories.twin, { verified: 2, suspected: 0, cleared: 0, complete: true });
   assert.deepEqual(entries.find((e) => e.culpritKind === "twin"), { culpritKind: "twin", canonicalLocation: "constant LIMIT=5",
     title: "2 twin items in constant LIMIT=5", severity: "medium", confidence: "verified", affectedFiles: ["src/a.js", "src/b.js"] });
@@ -247,10 +247,13 @@ test("at thorough, a sweep's clusters order by co-change first, then blast radiu
     clusters: [cluster("wide", ["a.js"], ["p"], 5, 0), cluster("tight", ["b.js"], ["q"], 1, 3)], churn: {} }));
   const block = (title, noun, kinds) => ({ title, noun, noToolStacks: [], notCovered: [], sweepKinds: kinds, sourcedKinds: kinds, fullKinds: [] });
   const dead = Object.keys(loadRegistry().sweeps["dead-code"].kinds);
+  const complexity = loadRegistry().sweeps.complexity;
+  const complexityKinds = Object.keys(complexity.kinds);
   writeFileSync(join(out, "coverage.json"), JSON.stringify({ stacks: [], dependenciesInstalled: true, consent: { executing: false, coverage: false },
     config: { staleTodoDays: 365, source: "registry" }, hotspots: { source: "churn", files: [] }, degraded: [], rows: [],
-    sweeps: { "dead-code": block("Dead code", "dead-code", dead), twins: block("Twins", "twins", ["twin", "judged-twin"]) },
-    sweepKinds: [...dead, "twin", "judged-twin"], sourcedKinds: [], fullKinds: [] }));
+    sweeps: { "dead-code": block("Dead code", "dead-code", dead), complexity: { ...block(complexity.title, complexity.noun, complexityKinds),
+      notCovered: complexity.notCovered, notes: [] }, twins: block("Twins", "twins", ["twin", "judged-twin"]) },
+    sweepKinds: [...dead, ...complexityKinds, "twin", "judged-twin"], sourcedKinds: [], fullKinds: [] }));
   writeFileSync(join(out, "judgment-inputs.json"), JSON.stringify({ items: [] }));
   const verdicts = [{ candidateId: "p", outcome: "verified", note: "x" }, { candidateId: "q", outcome: "verified", note: "y" }];
   const order = (depth) => finalizeSweep({ outDir: out, verdicts, depth, repoRoot: out, registry: twoSweeps(), previousCounts: null })
@@ -274,12 +277,12 @@ test("finalize --run appends one set of sweep-count rows per sweep, once", () =>
     mkdirSync(recordDir, { recursive: true });
     writeFileSync(join(recordDir, `${runId}.jsonl`), JSON.stringify({ kind: "run", runId, startedAt: "2026-11-28T00:00:00Z" }) + "\n");
     const go = () => finalizeSweep({ outDir: out, verdicts: VERIFIED_TWINS(candidates), runId, repoRoot: out, registry: twoSweeps() });
-    assert.deepEqual(go().ratchet, { "dead-code": "appended", twins: "appended" });
+    assert.deepEqual(go().ratchet, { "dead-code": "appended", complexity: "appended", twins: "appended" });
     const rows = readFileSync(join(recordDir, `${runId}.jsonl`), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l))
       .filter((r) => r.kind === "sweep-count");
     assert.deepEqual(rows.filter((r) => r.sweep === "twins").map((r) => r.category), ["twin", "judged-twin"]);
     assert.equal(rows.filter((r) => r.sweep === "dead-code").length, Object.keys(loadRegistry().sweeps["dead-code"].kinds).length);
-    assert.deepEqual(go().ratchet, { "dead-code": "already-recorded", twins: "already-recorded" });
+    assert.deepEqual(go().ratchet, { "dead-code": "already-recorded", complexity: "already-recorded", twins: "already-recorded" });
   } finally {
     if (saved === undefined) delete process.env.DEVCYCLE_RUNS_DIR; else process.env.DEVCYCLE_RUNS_DIR = saved;
   }

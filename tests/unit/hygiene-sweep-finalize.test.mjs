@@ -12,6 +12,10 @@ import { gitToplevel, runsDirForRepo } from "../../scripts/run-record.mjs";
 const SCRIPT = fileURLToPath(new URL("../../scripts/hygiene-sweep.mjs", import.meta.url));
 const registry = loadRegistry();
 const KINDS = Object.keys(registry.sweeps["dead-code"].kinds);
+const COMPLEXITY = registry.sweeps.complexity;
+const COMPLEXITY_KINDS = Object.keys(COMPLEXITY.kinds);
+const COMPLEXITY_BLOCK = { title: COMPLEXITY.title, noun: COMPLEXITY.noun, noToolStacks: [], notCovered: COMPLEXITY.notCovered,
+  sweepKinds: COMPLEXITY_KINDS, sourcedKinds: COMPLEXITY_KINDS, fullKinds: [], notes: [] };
 
 const cand = (source, file, line, symbol, kind, extra = {}) => ({
   id: `${source}:${file}:${line ?? 0}:${symbol ?? ""}`, sweep: "dead-code", kind, source, file, line, symbol,
@@ -44,10 +48,11 @@ const COVERAGE = {
     row("stale-todo", ["stale-todo"], "ran", "heuristic"),
   ],
   sweeps: { "dead-code": { title: "Dead code", noun: "dead-code", noToolStacks: ["python"], notCovered: ["unused fonts"],
-    sweepKinds: KINDS, sourcedKinds: KINDS, fullKinds: ["stale-todo"] } },
-  sweepKinds: KINDS, sourcedKinds: KINDS, fullKinds: ["stale-todo"],
+    sweepKinds: KINDS, sourcedKinds: KINDS, fullKinds: ["stale-todo"] },
+  complexity: COMPLEXITY_BLOCK },
+  sweepKinds: [...KINDS, ...COMPLEXITY_KINDS], sourcedKinds: [...KINDS, ...COMPLEXITY_KINDS], fullKinds: ["stale-todo"],
 };
-const withFull = (fullKinds) => ({ ...COVERAGE, fullKinds, sweeps: { "dead-code": { ...COVERAGE.sweeps["dead-code"], fullKinds } } });
+const withFull = (fullKinds) => ({ ...COVERAGE, fullKinds, sweeps: { ...COVERAGE.sweeps, "dead-code": { ...COVERAGE.sweeps["dead-code"], fullKinds } } });
 const VERDICTS = [
   { candidateId: A.id, outcome: "verified", note: "no importer" },
   { candidateId: H.id, outcome: "verified", note: "only the spec calls it", severity: "low" },
@@ -156,9 +161,9 @@ test("finalize --run appends one sweep-count row per kind once and trends agains
     { encoding: "utf8", env });
   const first = cli();
   assert.equal(first.status, 0, first.stderr);
-  assert.deepEqual(JSON.parse(first.stdout), { dir, entries: 4, verified: 3, suspected: 2, cleared: 2, ratchet: { "dead-code": "appended" } });
+  assert.deepEqual(JSON.parse(first.stdout), { dir, entries: 4, verified: 3, suspected: 2, cleared: 2, ratchet: { "dead-code": "appended", complexity: "appended" } });
   const rows = () => readFileSync(join(recordDir, `${current}.jsonl`), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
-  assert.deepEqual(rows().map((r) => r.category), KINDS);
+  assert.deepEqual(rows().map((r) => r.category), [...KINDS, ...COMPLEXITY_KINDS]);
   assert.deepEqual(rows().find((r) => r.category === "dead-code"),
     { kind: "sweep-count", runId: current, sweep: "dead-code", category: "dead-code", verified: 2, suspected: 1, cleared: 2, complete: true });
   const section = readFileSync(join(dir, "section-dead-code.md"), "utf8");
@@ -166,7 +171,7 @@ test("finalize --run appends one sweep-count row per kind once and trends agains
   assert.ok(section.includes("- test-only-code: not comparable: earlier pass was incomplete"), "a kind the earlier pass never counted has no baseline");
   const second = cli();
   assert.equal(JSON.parse(second.stdout).ratchet["dead-code"], "already-recorded");
-  assert.equal(rows().length, KINDS.length);
+  assert.equal(rows().length, KINDS.length + COMPLEXITY_KINDS.length);
 });
 
 test("finalize without --verdicts exits 1 and names the missing flag", () => {
