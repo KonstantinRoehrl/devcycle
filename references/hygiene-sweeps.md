@@ -114,7 +114,7 @@ note says the other metrics were not measured. A stack with neither tool reads `
 Per function the rows carry cyclomatic complexity (`ccn`), cognitive complexity, nesting depth,
 parameter count and `nloc`; per file, its line count. A file with any function over a threshold, or
 over its line threshold, is one candidate. Its score is the sum of the over-threshold functions'
-cognitive complexity (`ccn` where a tool has no cognitive figure) plus the lines above the file
+cognitive complexity (else `ccn`, else 1) plus the lines above the file
 threshold, and its evidence lines name each function with the metrics over and their sources, then
 the file's churn. Candidates rank by complexity × churn: score × (1 + commits in the churn window), which is
 the cluster's blast radius.
@@ -131,7 +131,7 @@ the registry's per-stack defaults apply, each carrying the linter rule and URL i
 config in a subdirectory, and a setting that is off or not statically readable, keep the default and
 say so in the coverage notes. Files `scripts/generated-paths.mjs` classifies as lockfile, generated,
 vendored or test-fixture are excluded before scoring and counted by category in the coverage notes.
-lizard skips a file byte-identical to one it already read, so a copied file is measured once, which
-the coverage notes also state.
+lizard skips a byte-identical copy of a file it read, and a file over the 1 MiB read cap gets only its
+header read and no length; the coverage notes state both.
 
 Verification reads the file: `verified` if the complexity is real, else a `cohesive` clear.
