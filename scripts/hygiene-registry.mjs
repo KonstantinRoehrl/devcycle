@@ -1,5 +1,6 @@
 // The hygiene sweeps' registry loader and structural validator. references/hygiene-sweeps.json is the
-// single owner of the stacks, culprit kinds, scanners, config defaults and tool pins/invocations;
+// single owner of the stacks, culprit kinds, scanners, config defaults and tool pins/invocations, and
+// of each sweep's title and noun and each kind's route and severity cap;
 // scripts/validate.mjs (check 30) runs validateRegistry on it at every gate.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -13,7 +14,11 @@ const SEVERITIES = ["critical", "high", "medium", "low"];
 const ADAPTERS = ["knip", "tsc", "raw"];
 const OUTPUT_FORMATS = ["lines", "cargo-machete", "purgecss-json"];
 const MODES = ["static", "executing"];
-const FORBIDDEN_ARGS = ["--fix", "--write", "--with-metadata", "--output-file"];
+const FORBIDDEN_ARGS = ["--fix", "--write", "--with-metadata", "--output-file", "--generate-badge"];
+// A flag whose value is a location the tool writes to: it must sit under {scratch}/, never in the repo.
+const OUTPUT_ARGS = ["--output", "--output-dir", "--out-dir", "--report-dir", "--target-dir"];
+const ROUTES = ["verification", "judgment"];
+const WHEN_KEYS = ["anyFile", "packageDependency"];
 // `{scratch}` is a placeholder everywhere; `{project}` and `{projectSlug}` only for a tool with `projects`.
 // A brace group with commas is a glob, not a placeholder.
 const PLACEHOLDER_RE = /\{([A-Za-z_][\w-]*)\}/g;
@@ -38,6 +43,10 @@ function argErrors(path, args) {
     if (FORBIDDEN_ARGS.includes(arg)) errors.push(`${path}: forbidden arg ${arg}; an invocation must stay read-only`);
     if (arg === "--cache" && !(args[i + 1] === "--cache-location" && String(args[i + 2]).startsWith("{scratch}/")))
       errors.push(`${path}: --cache must be followed by --cache-location {scratch}/..., or the tool writes its cache into the repo`);
+    for (const flag of OUTPUT_ARGS) {
+      const value = arg === flag ? args[i + 1] : arg.startsWith(`${flag}=`) ? arg.slice(flag.length + 1) : undefined;
+      if (value !== undefined && !String(value).startsWith("{scratch}/")) errors.push(`${path}: ${flag}: an output location must start with {scratch}/`);
+    }
   });
   return errors;
 }
@@ -101,8 +110,15 @@ function commandErrors(path, tool) {
 
 function optionalFieldErrors(path, tool) {
   const errors = [];
-  if (tool.when !== undefined && !(isObject(tool.when) && (tool.when.anyFile === undefined || isStringArray(tool.when.anyFile))))
-    errors.push(`${path}.when.anyFile: must be an array of strings`);
+  if (tool.when !== undefined) {
+    if (!isObject(tool.when)) errors.push(`${path}.when: must be an object`);
+    else {
+      for (const key of Object.keys(tool.when)) if (!WHEN_KEYS.includes(key)) errors.push(`${path}.when: unknown key ${key}`);
+      if (tool.when.anyFile !== undefined && !isStringArray(tool.when.anyFile)) errors.push(`${path}.when.anyFile: must be an array of strings`);
+      if (tool.when.packageDependency !== undefined && !isNonEmptyStringArray(tool.when.packageDependency))
+        errors.push(`${path}.when.packageDependency: must be a non-empty array of strings`);
+    }
+  }
   if (tool.okExit !== undefined && !(Array.isArray(tool.okExit) && tool.okExit.every(Number.isInteger)))
     errors.push(`${path}.okExit: must be an array of integers`);
   if (tool.lineFilter !== undefined) {
@@ -146,16 +162,37 @@ function toolErrors(tool, index, stackKeys, sweeps) {
   return errors;
 }
 
+function kindErrors(path, def) {
+  const errors = [];
+  if (!isObject(def) || !SEVERITIES.includes(def.severity)) return [`${path}.severity: must be one of ${SEVERITIES.join(", ")}`];
+  if (def.maxSeverity !== undefined) {
+    if (!SEVERITIES.includes(def.maxSeverity)) errors.push(`${path}.maxSeverity: must be one of ${SEVERITIES.join(", ")}`);
+    else if (SEVERITIES.indexOf(def.maxSeverity) > SEVERITIES.indexOf(def.severity))
+      errors.push(`${path}.maxSeverity: must not be below its severity ${def.severity}`);
+  }
+  if (def.raiseBeyondCapWhen !== undefined) {
+    if (!isNonEmptyStringArray(def.raiseBeyondCapWhen)) errors.push(`${path}.raiseBeyondCapWhen: must be a non-empty array of strings`);
+    else if (def.maxSeverity === undefined) errors.push(`${path}.raiseBeyondCapWhen: needs a maxSeverity`);
+  }
+  if (def.route !== undefined && !ROUTES.includes(def.route)) errors.push(`${path}.route: must be ${ROUTES.join(" or ")}`);
+  return errors;
+}
+
 function sweepErrors(sweeps) {
   const errors = [];
+  const declaredUnder = new Map();
   for (const [name, sweep] of Object.entries(sweeps)) {
     const path = `sweeps.${name}`;
+    if (typeof sweep?.title !== "string" || !sweep.title) errors.push(`${path}.title: must be a non-empty string`);
+    if (typeof sweep?.noun !== "string" || !SLUG_RE.test(sweep.noun)) errors.push(`${path}.noun: must be a lowercase slug`);
     if (!isObject(sweep) || !isObject(sweep.kinds) || !Object.keys(sweep.kinds).length) {
       errors.push(`${path}.kinds: must be a non-empty object`);
     } else {
       for (const [kind, def] of Object.entries(sweep.kinds)) {
         if (!SLUG_RE.test(kind)) errors.push(`${path}.kinds: ${JSON.stringify(kind)} must be a lowercase slug`);
-        if (!isObject(def) || !SEVERITIES.includes(def.severity)) errors.push(`${path}.kinds.${kind}.severity: must be one of ${SEVERITIES.join(", ")}`);
+        if (declaredUnder.has(kind)) errors.push(`${path}.kinds.${kind}: already declared under sweeps.${declaredUnder.get(kind)}`);
+        else declaredUnder.set(kind, name);
+        errors.push(...kindErrors(`${path}.kinds.${kind}`, def));
       }
     }
     if (!isStringArray(sweep?.notCovered)) errors.push(`${path}.notCovered: must be an array of strings`);
@@ -172,6 +209,7 @@ function scannerErrors(scanners, stackKeys, sweeps) {
     if (!sweepKinds) errors.push(`${path}.sweep: ${JSON.stringify(scanner.sweep)} is not a sweep`);
     if (!isNonEmptyStringArray(scanner.kinds) || (sweepKinds && !subsetOf(scanner.kinds, sweepKinds))) errors.push(`${path}.kinds: must be a non-empty subset of its sweep's kinds`);
     if (scanner.stacks !== null && (!isStringArray(scanner.stacks) || !subsetOf(scanner.stacks, stackKeys))) errors.push(`${path}.stacks: must be null or a subset of the stacks`);
+    if (scanner.scope !== undefined && scanner.scope !== "hotspots") errors.push(`${path}.scope: must be "hotspots" when set`);
   }
   return errors;
 }
@@ -196,6 +234,7 @@ export function validateRegistry(registry) {
   const config = registry.config;
   if (!isObject(config) || !Number.isInteger(config.staleTodoDays) || config.staleTodoDays <= 0) errors.push("config.staleTodoDays: must be a positive integer");
   if (!isObject(config) || typeof config.configFile !== "string" || !config.configFile) errors.push("config.configFile: must be a non-empty string");
+  if (!isObject(config) || !Number.isInteger(config.hotspotCap) || config.hotspotCap <= 0) errors.push("config.hotspotCap: must be a positive integer");
   if (Array.isArray(registry.tools)) {
     const seen = new Set();
     registry.tools.forEach((tool, i) => {
@@ -227,4 +266,19 @@ export function loadRegistry(path = REGISTRY_PATH) {
   const errors = validateRegistry(registry);
   if (errors.length) throw new Error(`invalid hygiene registry: ${errors.join("; ")}`);
   return registry;
+}
+
+// One entry per kind of every sweep, in registry order: the single place a kind's route and severity cap are read.
+export function kindIndex(registry) {
+  const index = new Map();
+  for (const [sweep, { kinds }] of Object.entries(registry.sweeps))
+    for (const [kind, def] of Object.entries(kinds))
+      index.set(kind, {
+        sweep,
+        severity: def.severity,
+        maxSeverity: def.maxSeverity ?? null,
+        raiseBeyondCapWhen: def.raiseBeyondCapWhen ?? [],
+        route: def.route ?? "verification",
+      });
+  return index;
 }

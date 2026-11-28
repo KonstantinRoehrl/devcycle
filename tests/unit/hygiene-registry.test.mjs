@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { REGISTRY_PATH, loadRegistry, validateRegistry } from "../../scripts/hygiene-registry.mjs";
+import { REGISTRY_PATH, kindIndex, loadRegistry, validateRegistry } from "../../scripts/hygiene-registry.mjs";
 
 const fresh = () => structuredClone(loadRegistry());
 const tool = (reg, id) => reg.tools.find((t) => t.id === id);
@@ -89,4 +89,68 @@ test("validateRegistry checks the project expansion fields and the raw output fo
     /^tools\[vulture\]\.modes\.static\.invocations\[main\]\.args: .*\{project\}/);
   expectError((r) => { tool(r, "purgecss").outputFormat = "yaml"; }, /^tools\[purgecss\]\.outputFormat: /);
   expectError((r) => { tool(r, "tsc").outputFormat = "cargo-machete"; }, /^tools\[tsc\]\.outputFormat: .*raw/);
+});
+
+test("each sweep names its section title and its coverage noun", () => {
+  const dead = loadRegistry().sweeps["dead-code"];
+  assert.equal(dead.title, "Dead code");
+  assert.equal(dead.noun, "dead-code");
+  expectError((r) => { delete r.sweeps["dead-code"].title; }, /sweeps\.dead-code\.title: must be a non-empty string/);
+  expectError((r) => { r.sweeps["dead-code"].noun = "Dead Code"; }, /sweeps\.dead-code\.noun: must be a lowercase slug/);
+});
+
+test("a kind declared under two sweeps is rejected", () => {
+  expectError((r) => {
+    r.sweeps.other = { title: "Other", noun: "other", kinds: { "stale-todo": { severity: "low" } }, notCovered: [] };
+  }, /sweeps\.other\.kinds\.stale-todo: already declared under sweeps\.dead-code/);
+});
+
+test("a kind may cap its severity raise and name the reasons that pass the cap", () => {
+  const ok = fresh();
+  ok.sweeps["dead-code"].kinds["stale-todo"] = { severity: "low", maxSeverity: "medium", raiseBeyondCapWhen: ["undocumented non-obvious invariant"] };
+  assert.deepEqual(validateRegistry(ok), []);
+  expectError((r) => { r.sweeps["dead-code"].kinds["stale-todo"].maxSeverity = "urgent"; }, /kinds\.stale-todo\.maxSeverity: must be one of critical, high, medium, low/);
+  expectError((r) => { r.sweeps["dead-code"].kinds["dead-code"].maxSeverity = "low"; }, /kinds\.dead-code\.maxSeverity: must not be below its severity medium/);
+  expectError((r) => { r.sweeps["dead-code"].kinds["stale-todo"].raiseBeyondCapWhen = ["x"]; }, /kinds\.stale-todo\.raiseBeyondCapWhen: needs a maxSeverity/);
+  expectError((r) => { Object.assign(r.sweeps["dead-code"].kinds["stale-todo"], { maxSeverity: "medium", raiseBeyondCapWhen: [] }); },
+    /kinds\.stale-todo\.raiseBeyondCapWhen: must be a non-empty array of strings/);
+});
+
+test("a kind routes to verification by default or to judgment, and kindIndex lists every kind once", () => {
+  const ok = fresh();
+  ok.sweeps["dead-code"].kinds["stale-todo"].route = "judgment";
+  assert.deepEqual(validateRegistry(ok), []);
+  expectError((r) => { r.sweeps["dead-code"].kinds["stale-todo"].route = "lens"; }, /kinds\.stale-todo\.route: must be verification or judgment/);
+  assert.deepEqual(kindIndex(ok).get("stale-todo"),
+    { sweep: "dead-code", severity: "low", maxSeverity: null, raiseBeyondCapWhen: [], route: "judgment" });
+  const shipped = loadRegistry();
+  assert.equal(kindIndex(shipped).get("dead-code").route, "verification");
+  assert.deepEqual([...kindIndex(shipped).keys()], Object.keys(shipped.sweeps["dead-code"].kinds));
+});
+
+test("a scanner may be scoped to the hotspot files, and the hotspot cap is configured", () => {
+  assert.equal(loadRegistry().config.hotspotCap, 30);
+  const ok = fresh();
+  ok.scanners["stale-todo"].scope = "hotspots";
+  assert.deepEqual(validateRegistry(ok), []);
+  expectError((r) => { r.scanners["stale-todo"].scope = "everywhere"; }, /scanners\.stale-todo\.scope: must be "hotspots" when set/);
+  expectError((r) => { r.config.hotspotCap = 0; }, /config\.hotspotCap: must be a positive integer/);
+});
+
+test("a tool may be gated on a repo-root package.json dependency", () => {
+  const ok = fresh();
+  tool(ok, "eslint").when.packageDependency = ["eslint-plugin-jsdoc"];
+  assert.deepEqual(validateRegistry(ok), []);
+  expectError((r) => { tool(r, "eslint").when.packageDependency = []; }, /tools\[eslint\]\.when\.packageDependency: must be a non-empty array of strings/);
+  expectError((r) => { tool(r, "eslint").when.anyFiles = ["x"]; }, /tools\[eslint\]\.when: unknown key anyFiles/);
+});
+
+test("write flags are forbidden and every output location sits under {scratch}/", () => {
+  const args = (r) => tool(r, "vulture").modes.static.invocations[0].args;
+  expectError((r) => { args(r).push("--generate-badge"); }, /forbidden arg --generate-badge/);
+  expectError((r) => { args(r).push("--output", "report"); }, /--output: an output location must start with \{scratch\}\//);
+  expectError((r) => { args(r).push("--output-dir=out"); }, /--output-dir: an output location must start with \{scratch\}\//);
+  const ok = fresh();
+  args(ok).push("--output", "{scratch}/report", "--report-dir={scratch}/r");
+  assert.deepEqual(validateRegistry(ok), []);
 });
