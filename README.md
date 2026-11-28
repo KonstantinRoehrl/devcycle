@@ -257,9 +257,10 @@ plugin ships. Start there.
 - `/devcycle:maintain`'s hygiene sweep: `scripts/hygiene-sweep.mjs` runs every sweep
   `references/hygiene-sweeps.json` names in one pass, its pinned tools and the built-in scanners, into
   `.devcycle/maintain/`, fetching a
-  pinned tool through `npx` when the repo has none, and one verification dispatch confirms each
-  candidate before it ranks. A tool that can run repo code runs only on that pass's consent. Beside
-  dead code, the complexity sweep measures every function with lizard (radon as its Python
+  pinned tool through `npx` when the repo has none, one verification dispatch confirms each
+  candidate before it ranks, and one judgment dispatch reviews the judgment-routed kinds. The dead-code
+  and duplication sweeps ship in it; its coverage statement names, per scanner, the source files that scanner does not read, and `run --ref` reads the findings store for the judgment at that ref. A tool that can run repo code runs only on that pass's consent. Beside
+  them, the complexity sweep measures every function with lizard (radon as its Python
   fallback) against the repo's own linter thresholds and ranks files by complexity × churn; a
   complex but stable file goes on a watch list rather than being verified, and at `thorough` the
   history inspector's churn table (`finalize --history`) re-ranks the hotspots and raises those with

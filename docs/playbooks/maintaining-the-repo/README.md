@@ -10,7 +10,7 @@ that hand-off — a box pointing at another box would say nothing a sentence doe
 What this playbook contributes on top of the engine: it resolves a maintenance depth (`lean` /
 `standard` / `thorough`) that gates which criteria apply, orients the pass graph-first (an
 availability probe picks a graph-backed research dispatch over a bounded `Explore` fallback),
-and runs a deterministic-facts pre-pass — dependency audit, lint, the hygiene sweeps, whose candidates one verification dispatch confirms, and the duplication, dead-export and cross-reference checks only when the repo is devcycle's own source — so the engine's lenses receive tooling facts instead of
+and runs a deterministic-facts pre-pass — dependency audit, lint, the hygiene sweeps (dead code and duplication), whose candidates one verification dispatch confirms and whose judgment-routed kinds one judgment dispatch reviews, and the duplication, dead-export and cross-reference checks only when the repo is devcycle's own source — so the engine's lenses receive tooling facts instead of
 re-deriving them. The confirmed criteria (plus **Abstraction** at `standard`, plus a history
 inspector's signal at `thorough`) are then handed to `reviewing-code.md` at `repo` scope, which
 owns the panel dispatch and dedup-and-rank, then hands off to
@@ -34,10 +34,10 @@ playbook's step 8) — which is the only write this otherwise read-only playbook
 Each pass mints its own run record and asks, every time, whether the sweep may run repo code: its
 executing-class tools and, separately, a coverage run. The answers go on that record, with the
 sweep's per-kind counts, which **Trending** compares against the latest earlier pass on this machine.
-The hygiene sweeps are dead code and complexity: the complexity sweep measures functions with lizard (radon is its Python fallback) against the repo's own linter thresholds, ranks files by complexity × churn, and lists complex but stable files on a watch list that is never verified or stored. At `thorough`, the history inspector's churn table is saved as `history.json` and passed to `finalize --history`, which re-ranks the hotspots and raises those with fix commits.
-A hygiene-sweep finding resolves out of the store only when every source behind its kind ran in full and the pass finalized its sweeps, each with its own section in the findings document.
+The hygiene sweeps are dead code, duplication and complexity: the complexity sweep measures functions with lizard (radon is its Python fallback) against the repo's own linter thresholds, ranks files by complexity × churn, and lists complex but stable files on a watch list that is never verified or stored. At `thorough`, the history inspector's churn table is saved as `history.json` and passed to `finalize --history`, which re-ranks the hotspots and raises those with fix commits.
+A hygiene-sweep finding resolves out of the store only when every source behind its kind ran in full and the pass finalized its sweeps, each with its own section in the findings document. A heuristic scanner that leaves tracked source files of other languages unread is named in the coverage statement and keeps its kinds partial. Tests, docs and test-named files are out of scope for duplication detection, and the statement names those globs with a file count.
 
-A fan-out ceiling bounds the whole pass: at most 5 concurrent panel lenses and 9 total LLM
+A fan-out ceiling bounds the whole pass: at most 5 concurrent panel lenses and 10 total LLM
 dispatches, with a hard stop at the ≥20% context-depth band. The playbook mutates no code and no
 GitHub issue at any depth; selecting a finding to act on starts a separate `/devcycle:cycle`.
 

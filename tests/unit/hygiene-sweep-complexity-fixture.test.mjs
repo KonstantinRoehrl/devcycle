@@ -37,7 +37,7 @@ const byFile = (result, file) => complexity(result).find((c) => c.file === file)
 
 test("the registry ships the complexity sweep, its tools and a sourced default for every metric", () => {
   const reg = loadRegistry();
-  assert.deepEqual(Object.keys(reg.sweeps), ["dead-code", "complexity"]);
+  assert.deepEqual(Object.keys(reg.sweeps), ["dead-code", "duplication", "complexity"]);
   assert.deepEqual(reg.sweeps.complexity.kinds, { "complexity-hotspot": { severity: "medium", history: true }, "complexity-watch": { severity: "low", route: "watch" } });
   const radon = reg.tools.find((t) => t.id === "radon");
   assert.deepEqual([radon.fallbackFor, radon.version, reg.tools.find((t) => t.id === "lizard").version], ["lizard", "6.0.1", "1.26.1"]);

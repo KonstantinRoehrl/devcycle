@@ -1,6 +1,6 @@
 # Hygiene sweeps
 
-The contract every `/devcycle:maintain` hygiene sweep follows, and the dead-code and complexity
+The contract every `/devcycle:maintain` hygiene sweep follows, and the dead-code, duplication and complexity
 sweeps' methods.
 Audit-only: maintain reads it; planning never does. What is judged is
 `references/quality-criteria.md`'s; this file owns how a sweep finds, verifies and reports it.
@@ -16,12 +16,17 @@ detects stacks, selects and class-gates tools, runs each pinned invocation with 
 per file or directory, ordered by blast radius: weight × (1 + churn over § Complexity's churn
 window), the weight a cluster's file count or, where its candidates carry a `score`, their sum) and `coverage.json`. `run` covers every registered sweep in one pass and tags each
 candidate, row and cluster with its sweep; a candidate's `clusterKey` and `anchor` (stable, no line
-number) group a cluster. It persists per-file churn and each cluster's `coChange`, takes
+number) group a cluster, and a candidate that names a cluster carries `:<kind>:<clusterKey>` at the end
+of its id, so two candidates of one location and symbol stay distinct. It persists per-file churn and each cluster's `coChange`, takes
 `--hotspots <file>` (one repo-relative path per line, the hotspot scope for scanners that scope to
 it), and writes `judgment-inputs.json` for the judgment-routed kinds. `hygiene-sweep.mjs finalize`
 turns verdicts (`--judgments` for judgment-routed kinds) into pass-file entries, counts and one
 `section-<sweep>.md` per sweep; `--depth thorough` orders a section by co-change first, and
-`--history <file>` (the history inspector's table, § Report, store and ratchet) re-ranks it.
+`--history <file>` (the history inspector's table, § Report, store and ratchet) re-ranks it. `run`
+takes `--ref <ref>`, meaning what it does for `apply-pass --ref` (`finalize` reads the `judgment-inputs.json`
+`run` wrote and takes none): the open judgment records are
+read from the findings store committed at that ref, a failed read makes the judgment kinds partial with a
+degraded note, and with no flag the working-tree store is read.
 
 ## Classes and consent
 
@@ -46,12 +51,40 @@ order, so every sweep shares the one budget, one batched search per cluster, wit
   becomes `suspected (not verified: budget)`: ranked below verified, never dropped.
 - `cleared` — a false positive, the note its reason: dynamic name, framework-owned token, routed or
   lazily loaded, host binding, decorator alias, public entry point. Counted by reason, never a finding.
+  A duplication candidate is `verified` only when its instances mean the same thing, one fact that would
+  have to change together. Equal values or similar bodies that mean different things are `cleared` with
+  the reason `coincidental equality` (`100` as a percentage and `100` as a page size) or `deliberate
+  divergence` (two similar functions that differ on purpose), the note naming what each instance is for. A verifier that clears one instance of a cluster clears every
+  instance of it, so a cleared two-member cluster leaves no one-item finding behind.
   A complexity candidate in a generated file, data table or exhaustive enum switch, which the
   criterion does not count, is cleared `cohesive: generated`, `table` or `switch`.
 
 `severity` raises the kind's default with a reason, never lowers it. A verdict may carry `raiseReason`;
 a raise never passes the kind's `maxSeverity` unless that reason is one of the kind's `raiseBeyondCapWhen`. A noisy candidate (knip in static
 mode, any tool without installed dependencies) never ranks as verified.
+
+## Judgment
+
+One read-only, session-tier dispatch per pass serves every kind whose registry `route` is `judgment`,
+within the same per-dispatch budget as verification and never in place of it. It reads
+`judgment-inputs.json` (`{ "items": [...] }`, sorted by `id`; with no judgment-routed kind, no items and
+no dispatch). An item is a candidate of a judgment-routed kind (`candidate:<candidateId>`), material a
+scanner supplies for the model to compare (`material:<scannerId>:<key>`), or an open store record of a
+judgment-routed kind (`record:<findingId>`, its title and affected files). It writes
+`judgments.json`:
+
+```json
+{ "reached": ["<input id>"],
+  "verdicts": [{ "candidateId", "outcome", "note", "severity"?, "raiseReason"? }],
+  "added": [{ "sweep", "kind", "file", "line", "symbol", "clusterKey", "anchor", "detail", "outcome", "note", "severity"?, "raiseReason"? }] }
+```
+
+`verdicts` rule on listed candidates as verification does (same outcomes, same severity rule). `added`
+carries a candidate the model found itself; its note names the comparison that shows it, and a semantic
+duplicate's `clusterKey` and `anchor` are `semantic <sorted symbol names joined by ",">`. A
+judgment-routed kind is full only when every input whose `kinds` name it is in `reached`, open store
+records included, so a stored judgment finding resolves only on a pass that re-examined it. An
+unjudged candidate is `suspected` with note `not judged: budget`: ranked below verified, never dropped.
 
 ## Report, store and ratchet
 
@@ -79,14 +112,18 @@ omits it) keeps the lens kinds' resolution rules.
 One statement per sweep. Per kind: tool-checked, heuristic-only or not covered; every failed, unavailable, unconsented or
 partial source (a capped or size-skipped scan, a solution tsconfig's unchecked projects) and every
 degraded git source by name, each keeping its kind out of `fullKinds`, each blame-using scanner
-reporting its own sweep's blame budget; "dependencies not installed" without `node_modules`; "no
+reporting its own sweep's blame budget; for a heuristic scanner that declares the extensions it `reads`,
+the tracked source files outside them (§ Duplication); "dependencies not installed" without `node_modules`; "no
 <noun> tool for this stack; heuristic scan only" for a stack where none of that sweep's tools
 applies and the sweep has a built-in scanner, `<noun>` the sweep's registry noun, and "no <noun>
 tool for this stack; not measured" where it has none; each tool's per-sweep notes (a config file not
 read statically, a metric a fallback tool cannot measure, files excluded before measurement by
 category, lizard's skipped duplicate files); and the registry's `notCovered` list. The
 sweep runs in every pass and at every depth (`lean`, `standard`, `thorough`), whatever the
-`<concern>`; the statement says when it was partial.
+`<concern>`; the statement says when it was partial. A partial row's note says its kinds stay unresolved
+until the languages it lists are covered or excluded. A repo that tracks one shell or PowerShell script
+therefore sees the constant and env-read kinds stay unresolved: that is by design, so a gap is never read as
+a clean pass. It clears by covering the language with a registered tool or by excluding the path.
 
 ## Safety
 
@@ -103,6 +140,60 @@ stacks' tools use the raw adapter: their output reaches verification verbatim. B
 commented-out code, stale TODOs (older than `staleTodoDays`, which a repo-root `.devcycle-hygiene.json`
 `{ "staleTodoDays": <n> }` overrides), unused environment variables, CSS custom properties, classes
 and keyframes, Angular inputs and outputs, and static assets.
+
+## Duplication
+
+The duplication sweep records where one fact has more than one owner. Its kinds, titles and severity
+caps are the registry's; its method is:
+
+- **Constant scanner** — `duplicate-constant` (one named value declared in two or more files; anchor
+  `constant <name>=<value>`), `restated-literal` (a distinctive literal repeated in a file other than its
+  exported owner; anchor the owner's `<file>#<name>`) and `missing-owner` (one value declared under
+  different names sharing a name token, no shared owner; anchor `value <value>`). Two floors skip trivial
+  values. `duplicate-constant` and `missing-owner` skip an integer with |n| ≤ 10, `0.5`, `true`, `false`,
+  `null` and a string under 4 characters after trimming. `restated-literal` has a higher floor, because a
+  bare small value appears everywhere by chance: it also skips an integer with |n| < 100, a string under 8
+  characters and a plain lowercase word. A CSS custom property whose whole value is a number with a
+  length unit (`px`, `rem`, `em`, `%`, `vh`, `vw`, `ms`, `s`) is a declaration with the normalized value
+  `<number><unit>`, and a JS, TS or HTML string whose whole content is that value restates it; a length
+  number of 10 or less is trivial. A value normalizes as: numbers `String(Number(text without "_"))`,
+  strings their unquoted content, hex colours lower-cased. `missing-owner` name tokens split on `_`, `-` and camelCase
+  humps, lower-cased, 3+ letters. A comment on the declaration's line or one of the three lines above
+  matching `deliberate(ly)` / `intentional(ly)` followed within 40 characters by `copy` / `copied` /
+  `duplicate(d)` / `duplication`, or `keep in sync`, any case, clears that instance; once fewer than
+  two uncleared instances remain the whole group is cleared, reason `documented deliberate copy`.
+- **Env-read scanner** — `scattered-env-read`: one environment variable read directly in three or more
+  distinct files (anchor `env <NAME>`).
+- **Same-body scanner** — `duplicate-logic`: function bodies equal after comments and whitespace are
+  dropped and identifiers are renamed by first appearance (keywords and property names kept); bodies
+  under 40 normalized characters are skipped and two or more distinct names are required (anchor
+  `body <sorted names joined by ",">`).
+- **jscpd** — `duplicate-logic` from clone pairs the pinned tool reports, unioned into families (anchor
+  `clone <hash>`). Its exclusions are the `--ignore` list of its registry entry, and the coverage
+  statement names them.
+- **Signature index** — the judgment's material for `semantic-duplicate`: hotspot files only, at most
+  200 functions and the first 65536 characters per file, `truncated` marking a cut. The model compares
+  signatures and bodies across files; a semantic duplicate's anchor is given under § Judgment.
+
+Each of these scanners skips the paths of the `--ignore` list of the jscpd invocation (its registry field
+`excludePathsOf` names the tool whose list it shares, matched with `path.matchesGlob`), for declarations,
+sites and reads alike. The list drops tests, docs and test-named files, so they are out of scope for
+duplication detection, for jscpd and the heuristic scanners both; the statement names the globs with a
+count of the tracked files that matched, and those files count as excluded, never as unread.
+
+Each scanner also declares the extensions it `reads`; `duplicate-constants` declares as `reads` only the
+extensions it parses declarations from. `.vue`, `.svelte` and `.html` are scanned for restated literals but their
+script-block declarations are not, so such a file reads as unread for the declaration kinds. `SOURCE_EXTENSIONS` in `scripts/hygiene-scanners.mjs`
+is the one set of code extensions; a scanner that leaves tracked files of those extensions outside its
+`reads` is partial, so its kinds stay out of `fullKinds` and nothing stored on them resolves. Its note
+names the unread extensions with their counts and the first three files. When a tool ran for a scanner's kinds,
+the unread languages are a note on the scanner's row and the kind still counts complete, because the tool
+answers for it (jscpd answers for `duplicate-logic`); with no stack detected the statement still names this
+gap.
+
+Coverage per kind in the statement: tool-checked (`duplicate-logic`, by jscpd), heuristic-only (the
+scanners' kinds, and `duplicate-logic` where jscpd did not run), judgment (`semantic-duplicate`, over
+the hotspot files and the files of open records), and not covered (the registry's `notCovered`).
 
 ## Complexity
 

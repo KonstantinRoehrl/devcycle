@@ -4,8 +4,11 @@
 // parser: it keeps the lines that name a tracked file and a line number, parses the two outputs
 // that carry none (`outputFormat`), and surfaces every other line the tool's filter lets through as
 // a candidate on the file it names, so non-empty output is never read as a clean run. The full
-// output stays in the tool's scratch directory for verification to read.
-import { relative } from "node:path";
+// output stays in the tool's scratch directory for verification to read. The jscpd adapter reads
+// the report file the tool wrote under its scratch directory, not the run's output.
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { complexityResult } from "./hygiene-complexity.mjs";
 
 const LOCATION = /^(.+?)[:(](\d+)/;
@@ -204,6 +207,79 @@ export const tsc = {
   },
 };
 
+// jscpd reports clone pairs, so a clone in three files arrives as two or more pairs. Joining the two
+// instances of every pair makes a family the connected set, and the family's key is a hash of its
+// smallest normalized fragment, so the same clone keeps one key across passes while lines move.
+function readJscpdReport(scratch) {
+  try {
+    const report = JSON.parse(readFileSync(join(scratch, "report", "jscpd-report.json"), "utf8"));
+    if (!Array.isArray(report?.duplicates)) return { error: "no duplicates array" };
+    return { duplicates: report.duplicates };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
+// The globs a tool's first invocation excludes through `--ignore`; the heuristic scanners share this list, so it has one owner.
+export function ignoreGlobs(tool, mode) {
+  const args = tool.modes?.[mode]?.invocations?.[0]?.args ?? [];
+  return args.flatMap((arg, i) => (args[i - 1] === "--ignore" ? arg.split(",") : []));
+}
+
+function jscpdIgnores(ctx) {
+  const globs = ignoreGlobs(ctx.tool, ctx.mode);
+  return globs.length ? `excludes ${globs.join(", ")}` : null;
+}
+
+export const jscpd = {
+  normalize(runs, ctx) {
+    const { duplicates, error } = readJscpdReport(ctx.scratch);
+    if (error) return { ok: false, candidates: [], note: `jscpd report missing or unreadable: ${error}` };
+    const tracked = new Set(ctx.files);
+    const parent = new Map();
+    const find = (x) => {
+      while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); }
+      return x;
+    };
+    const instances = new Map();
+    const pairs = [];
+    for (const dup of duplicates) {
+      const ends = [dup.firstFile, dup.secondFile].map((side) => {
+        const file = relativize(String(side?.name ?? ""), ctx.repoRoot);
+        const key = `${file}:${side?.start}:${side?.end}`;
+        if (!instances.has(key)) instances.set(key, { key, file, line: side?.start, lines: dup.lines, tokens: dup.tokens, format: dup.format });
+        if (!parent.has(key)) parent.set(key, key);
+        return key;
+      });
+      parent.set(find(ends[0]), find(ends[1]));
+      pairs.push({ root: ends[0], fragment: String(dup.fragment ?? "").replace(/\s+/g, " ") });
+    }
+    const fragments = new Map();
+    for (const { root, fragment } of pairs) {
+      const family = find(root);
+      const smallest = fragments.get(family);
+      if (smallest === undefined || fragment < smallest) fragments.set(family, fragment);
+    }
+    const kept = new Map();
+    for (const inst of instances.values()) {
+      if (!tracked.has(inst.file)) continue;
+      const family = find(inst.key);
+      kept.set(family, [...(kept.get(family) ?? []), inst]);
+    }
+    const candidates = [];
+    for (const [family, members] of kept) {
+      if (members.length < 2) continue;
+      const clusterKey = `clone ${createHash("sha256").update(fragments.get(family)).digest("hex").slice(0, 12)}`;
+      for (const m of members) {
+        candidates.push({ kind: ctx.tool.kinds[0], file: m.file, line: m.line, symbol: null,
+          detail: `${m.lines} lines, ${m.tokens} tokens (${m.format})`, clusterKey, anchor: clusterKey, noisy: false });
+      }
+    }
+    candidates.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line));
+    return { ok: true, candidates, note: jscpdIgnores(ctx) };
+  },
+};
+
 // lizard's `--csv` output has no header and quotes its text fields; `""` inside one is a quote.
 const LIZARD_COLUMNS = 13;
 const LIZARD_NUMERIC = [0, 1, 2, 3, 4, 9, 10, 11, 12];
@@ -284,4 +360,4 @@ export const radon = {
   },
 };
 
-export const ADAPTERS = { raw, knip, tsc, lizard, radon };
+export const ADAPTERS = { raw, knip, tsc, jscpd, lizard, radon };

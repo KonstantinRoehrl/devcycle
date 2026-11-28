@@ -1,8 +1,11 @@
 // The hygiene sweep's built-in scanners: grep-level heuristics for what no registry tool covers.
 // Each returns candidates for verification to judge, never findings. Ids, kinds and the stacks a
 // scanner applies to are `references/hygiene-sweeps.json`'s `scanners`; this file owns only the
-// detection rules.
+// detection rules. It also owns SOURCE_EXTENSIONS, the one set that decides which tracked files count as
+// source code when a sweep reports the languages its scanners did not read.
 import { basename, extname } from "node:path";
+import { duplicateConstants, scatteredEnvReads } from "./hygiene-scanners-duplication.mjs";
+import { sameBodyHelpers, semanticIndex } from "./hygiene-scanners-clones.mjs";
 
 const SLASH_COMMENT_EXTS = new Set([".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".go", ".rs", ".cs", ".java"]);
 const HASH_COMMENT_EXTS = new Set([".py", ".rb", ".sh"]);
@@ -269,4 +272,9 @@ export const staticAssets = {
   },
 };
 
-export const SCANNERS = [commentedOutCode, staleTodo, unusedEnvVar, cssCustomProperties, cssClassesKeyframes, angularIo, staticAssets];
+// General-purpose source languages only: markup, data, lockfiles, images and docs are never "unread source".
+export const SOURCE_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx", ".vue", ".svelte", ".py", ".go", ".rs", ".cs", ".vb",
+  ".fs", ".java", ".kt", ".kts", ".scala", ".groovy", ".rb", ".php", ".swift", ".m", ".c", ".h", ".cc", ".cpp", ".hpp", ".dart", ".lua", ".pl", ".r",
+  ".jl", ".ex", ".exs", ".erl", ".hs", ".clj", ".sh", ".bash", ".ps1"]);
+
+export const SCANNERS = [commentedOutCode, staleTodo, unusedEnvVar, cssCustomProperties, cssClassesKeyframes, angularIo, staticAssets, duplicateConstants, scatteredEnvReads, sameBodyHelpers, semanticIndex];

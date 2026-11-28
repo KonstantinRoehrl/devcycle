@@ -63,15 +63,19 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
    line, to `.devcycle/maintain/sweep-<date>/hotspots.txt` before step 4, the file `run --hotspots` reads.
 4. **Deterministic-facts pre-pass.** Gather what tooling establishes exactly — dependency audit,
    lint, the hygiene sweep — and hand the lenses those facts as evidence.
-   The hygiene sweep runs first, covering every sweep `${CLAUDE_PLUGIN_ROOT}/references/hygiene-sweeps.json` registers (dead code and complexity) in one pass: `node "${CLAUDE_PLUGIN_ROOT}/scripts/hygiene-sweep.mjs" run --out .devcycle/maintain/sweep-<date> --hotspots .devcycle/maintain/sweep-<date>/hotspots.txt`
+   The hygiene sweep runs first, covering every sweep `${CLAUDE_PLUGIN_ROOT}/references/hygiene-sweeps.json` registers (dead code, duplication and complexity) in one pass: `node "${CLAUDE_PLUGIN_ROOT}/scripts/hygiene-sweep.mjs" run --out .devcycle/maintain/sweep-<date> --hotspots .devcycle/maintain/sweep-<date>/hotspots.txt`
    writes candidate clusters and coverage rows — tooling facts like the others — and its `finalize` (step 8) writes one section per registered sweep. Its contract is `${CLAUDE_PLUGIN_ROOT}/references/hygiene-sweeps.md`.
-   Add `--consent-executing` and `--consent-coverage` for each step 2 yes. It runs at every depth,
+   Add `--consent-executing` and `--consent-coverage` for each step 2 yes, `--ref "$base"` whenever
+   step 8's doc-tracking veto does not apply, and omit `--hotspots` when step 3 yields no list. It runs at every depth,
    and a `<concern>` narrows the lens criteria, never the sweep. `<dir>` below is its `--out`.
    - **Verify the sweep.** One dispatch per `references/hygiene-sweeps.md` § Verification reads
      `<dir>/candidates.json` and verifies the clusters whose `route` is `verification`; save the verdicts array it returns as `<dir>/verdicts.json`. On the
      coverage yes, run the repo's documented test command with coverage, writing under `<dir>/`, and
      keep its lcov path for step 8; a failed run or a non-lcov report is named in the coverage
      statement instead.
+   - **Judge the sweep.** One dispatch per `references/hygiene-sweeps.md` § Judgment reads
+     `<dir>/judgment-inputs.json`; save the object it returns as `<dir>/judgments.json`. With
+     `{ "items": [] }` it is not dispatched and step 8 omits `--judgments`.
    - **Plugin-only checks.** Only when `node "${CLAUDE_PLUGIN_ROOT}/scripts/self-dev-check.mjs" --is-source`
      prints `source`, also run the `duplication-check.mjs` pattern
      (`${CLAUDE_PLUGIN_ROOT}/scripts/duplication-check.mjs`), dead-export detection
@@ -130,10 +134,11 @@ land or delete that branch first, or to proceed knowingly. `skipped` lines are r
    § What belongs in `docs/` owns the defect-state split — so a folded issue's number stays on its
    `Origin:` line in the pass document.
    - **Fold in the sweep.** Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/hygiene-sweep.mjs" finalize --dir <dir> --verdicts <dir>/verdicts.json --run <runId> --depth <depth>`
-     (this pass's maintenance depth from step 1), adding `--lcov <file>` when step 4's coverage run
-     produced one and, at `thorough`, `--history <dir>/history.json` from step 5. Each
-     `<dir>/section-<sweep>.md` becomes its own section of the findings document, under the heading it
-     carries (**Dead code**, **Complexity hotspots**), and `<dir>/entries.json`'s entries join the pass file.
+     (this pass's maintenance depth from step 1), adding `--judgments <dir>/judgments.json` when step 4
+     judged, `--lcov <file>` when step 4's coverage run produced one and, at `thorough`,
+     `--history <dir>/history.json` from step 5. Each `<dir>/section-<sweep>.md` becomes its own section
+     of the findings document, under the heading it carries (**Dead code**, **Duplication / single source of truth**,
+     **Complexity hotspots**), and `<dir>/entries.json`'s entries join the pass file.
    - **Write the pass file.** Write `.devcycle/maintain/pass-<date>.json`, `<date>` the pass
      document's own: a JSON array with one `{ culpritKind, canonicalLocation, title, severity,
      confidence, affectedFiles, verify? }` entry per ranked finding except an `Origin: github-issue`
@@ -206,11 +211,11 @@ A repo-wide multi-lens pass is the unbounded fan-out shape that has historically
 
 - the existing per-lens delegation budget (`references/delegation.md`,
   ~30 tool calls / ~15 files) applies **per lens**;
-- a global pass ceiling of **at most 5 concurrent panel lenses** and **at most 9 total LLM dispatches
+- a global pass ceiling of **at most 5 concurrent panel lenses** and **at most 10 total LLM dispatches
   per pass** (≤5 lenses + 1 history inspector + 1 issue decompose/classify + 1 issue verification
-  + 1 sweep verification; the deterministic pre-pass, the sweep's `run` and `finalize`, and the
+  + 1 sweep verification + 1 sweep judgment; the deterministic pre-pass, the sweep's `run` and `finalize`, and the
   `issue-intake.mjs` fetch are bounded tool commands, not LLM lenses). Every hygiene sweep shares the
-  one sweep verification, so no later sweep raises this ceiling again.
+  one sweep verification and the one sweep judgment, so no later sweep raises this ceiling again.
   This ceiling counts **orchestration** dispatches only: the review panel's own per-finding
   adversarial verify + reconcile are a **separately-governed sub-fan-out**, bounded by the panel's
   own concurrency limit (`VERIFY_CONCURRENCY` in `workflows/review-panel.js`), and are **not**

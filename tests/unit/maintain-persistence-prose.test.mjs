@@ -126,8 +126,13 @@ test("step 4 runs the sweep at every depth, by consent, and verifies it in one d
   assert.match(step4, /--consent-coverage/);
   assert.match(step4, /references\/hygiene-sweeps\.md` § Verification/);
   assert.match(step4, /<dir>\/verdicts\.json/);
+  assert.match(step4, /\*\*Judge the sweep\.\*\*/);
+  assert.match(step4, /<dir>\/judgments\.json/);
   assert.match(step4, /every depth/);
   assert.match(step4, /--hotspots \.devcycle\/maintain\/sweep-<date>\/hotspots\.txt/);
+  assert.match(step4, /`--ref "\$base"` whenever\s+step 8's doc-tracking veto does not apply/);
+  assert.match(step4, /omit `--hotspots` when step 3 yields no list/);
+  assert.match(step4, /\*\*Judge the sweep\.\*\* One dispatch per `references\/hygiene-sweeps\.md` § Judgment/);
   assert.match(step4, /names every pre-pass source that did not run/);
   assert.match(step4, /every area or kind a source that did run left unchecked/);
 });
@@ -150,6 +155,8 @@ test("lenses get the verified clusters instead of the dead-code criterion", () =
 test("step 8 folds the sweep in and resolves a sweep kind only when its sources all ran", () => {
   assert.match(step8, /hygiene-sweep\.mjs" finalize --dir <dir> --verdicts <dir>\/verdicts\.json --run <runId>/);
   assert.match(step8, /--depth <depth>/);
+  assert.match(step8, /--judgments <dir>\/judgments\.json/);
+  assert.doesNotMatch(step8, /hygiene-sweep\.mjs" finalize[^\n]*--ref/);
   assert.match(step8, /<dir>\/section-<sweep>\.md/);
   assert.match(step8, /<dir>\/entries\.json/);
   assert.match(step8, /--sweep-coverage <dir>\/coverage\.json/);
@@ -179,4 +186,14 @@ test("the documentation criteria name a measuring source beyond the repo's conve
   assert.match(section, /Measured against the repo's/);
   for (const source of ["PEP 257", "Go doc comments", "TSDoc"]) assert.match(section, new RegExp(source));
   assert.match(between(criteria, "- **undocumented code**", "- docs-vs-reality"), /measured against:/);
+});
+
+const sweeps = read("../../references/hygiene-sweeps.md");
+const verification = between(sweeps, "## Verification", "## Judgment");
+
+test("verification clears coincidental equality and deliberate divergence, one instance clearing its whole cluster", () => {
+  assert.match(verification, /`verified` only when its instances mean the same thing/);
+  assert.match(verification, /`cleared` with\s+the reason `coincidental equality`/);
+  assert.match(verification, /`deliberate\s+divergence`/);
+  assert.match(verification, /clears one instance of a cluster clears every\s+instance of it/);
 });

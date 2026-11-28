@@ -1,19 +1,29 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { clusterCandidates, finalizeSweep, orderForVerification, runSweep, selectTools } from "../../scripts/hygiene-sweep.mjs";
 import { ADAPTERS } from "../../scripts/hygiene-adapters.mjs";
 import { loadRegistry } from "../../scripts/hygiene-registry.mjs";
 import { SCANNERS } from "../../scripts/hygiene-scanners.mjs";
-import { findingId, recordMaintenanceFinding } from "../../scripts/maintenance-findings.mjs";
+import { findingId, maintDir, recordMaintenanceFinding } from "../../scripts/maintenance-findings.mjs";
 import { gitToplevel, runsDirForRepo } from "../../scripts/run-record.mjs";
+
+// Every shipped sweep but duplication, so these tests pin the spine and not the duplication sweep's scanners and tools.
+function withoutDuplication() {
+  const reg = structuredClone(loadRegistry());
+  delete reg.sweeps.duplication;
+  reg.scanners = Object.fromEntries(Object.entries(reg.scanners).filter(([, s]) => s.sweep !== "duplication"));
+  reg.tools = reg.tools.filter((t) => t.sweep !== "duplication");
+  return reg;
+}
 
 // A second sweep beside dead code: one verification kind fed by a whole-tree scanner and a raw
 // tool, one judgment kind fed by a hotspot-scoped scanner that also hands the judgment material.
 function twoSweeps() {
-  const reg = structuredClone(loadRegistry());
+  const reg = withoutDuplication();
   reg.sweeps.twins = { title: "Twins", noun: "twins", notCovered: ["twins across languages"],
     kinds: { twin: { severity: "medium" }, "judged-twin": { severity: "low", route: "judgment" } } };
   reg.scanners["twin-scan"] = { sweep: "twins", kinds: ["twin"], stacks: null };
@@ -134,6 +144,50 @@ test("judgment inputs hold judgment-routed candidates, scanner material and the 
     title: "f and g", affectedFiles: ["src/a.js", "src/b.js"] }]);
 });
 
+const judgedRecord = (id, title) => ({ findingKind: "maintenance-finding", findingId: id, culpritKind: "judged-twin", title, severity: "low",
+  confidence: "verified", affectedFiles: ["src/a.js"], firstSeen: "2026-11-01", lastSeen: "2026-11-01", passes: 1, verify: "none" });
+
+// A repo whose branch `base` holds one judged-twin record that the checkout no longer has.
+function repoWithRecordOnlyAtBase() {
+  const repo = repoWith(TREE);
+  const id = findingId("judged-twin", "pair f,g");
+  recordMaintenanceFinding(repo, judgedRecord(id, "f and g"));
+  const vcs = (...a) => execFileSync("git", ["-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...a]);
+  vcs("init", "-q"); vcs("add", "."); vcs("commit", "-q", "-m", "base"); vcs("branch", "base");
+  rmSync(maintDir(repo), { recursive: true });
+  return { repo, id };
+}
+
+test("a store ref reads the open records as committed there, so a record the checkout lacks is still a judgment input", () => {
+  const { repo, id } = repoWithRecordOnlyAtBase();
+  const inputIds = (over) => {
+    const out = join(makeTempDir("hyg-multi-out-"), "sweep");
+    sweep({ repo, outDir: out, hotspots: ["src/a.js"], ...over });
+    return read(out, "judgment-inputs.json").items.filter((i) => i.type === "record").map((i) => i.id);
+  };
+  assert.deepEqual(inputIds({}), [], "with no ref the checkout's store is read");
+  assert.deepEqual(inputIds({ storeRef: "base" }), [`record:${id}`]);
+});
+
+test("a ref that cannot be read leaves the store unreadable: the judgment kind is not complete and the statement says so", () => {
+  const { repo } = repoWithRecordOnlyAtBase();
+  const { coverage } = sweep({ repo, hotspots: ["src/a.js"], storeRef: "no-such-ref" });
+  assert.match(coverage.degraded.join("\n"), /findings store unreadable \(.*no-such-ref/);
+  assert.ok(!coverage.sweeps.twins.fullKinds.includes("judged-twin"));
+});
+
+test("a findings store that cannot be read is degraded and costs the judgment kinds their completeness, while the rest stays complete", () => {
+  const repo = repoWith(TREE);
+  mkdirSync(dirname(maintDir(repo)), { recursive: true });
+  writeFileSync(maintDir(repo), "a file where the store directory belongs\n");
+  const { coverage } = sweep({ repo, hotspots: ["src/a.js"] });
+  assert.match(coverage.degraded.join("\n"), /^findings store unreadable \(.+\); open judgment records not re-examined$/m);
+  assert.ok(!coverage.sweeps.twins.fullKinds.includes("judged-twin"));
+  assert.ok(coverage.sweeps.twins.fullKinds.includes("twin"), "a verification kind is unaffected by the store");
+  const healthy = sweep({ repo: repoWith(TREE), hotspots: ["src/a.js"] }).coverage;
+  assert.ok(healthy.sweeps.twins.fullKinds.includes("judged-twin") && healthy.degraded.length === 0);
+});
+
 test("with dead code the only sweep, judgment inputs are empty", () => {
   const out = join(makeTempDir("hyg-multi-out-"), "sweep");
   runSweep({ repoRoot: repoWith(TREE), outDir: out, runTool: () => ({ status: 0, stdout: "", stderr: "", error: null }),
@@ -218,6 +272,25 @@ test("judgment-added candidates cluster and rank, and one that names no comparis
     /added judgment needs file, clusterKey and anchor/);
 });
 
+const judged = (over) => ({ sweep: "twins", kind: "judged-twin", file: "src/a.js", line: 1, symbol: "f", clusterKey: "semantic f,g",
+  anchor: "semantic f,g", detail: "f and g parse dates", outcome: "verified", note: "bodies compared", ...over });
+
+test("judgment-added candidates sharing file, line and symbol keep distinct ids when their clusters differ", () => {
+  const { counts, entries } = finalized({ judgments: { reached: [], verdicts: [],
+    added: [judged({}), judged({ clusterKey: "semantic f,h", anchor: "semantic f,h" })] } });
+  assert.equal(counts.sweeps.twins.categories["judged-twin"].verified, 2);
+  assert.deepEqual(entries.filter((e) => e.culpritKind === "judged-twin").map((e) => e.canonicalLocation).sort(), ["semantic f,g", "semantic f,h"]);
+});
+
+test("judgment-added candidates identical in file, line, symbol and cluster keep distinct ids when their kinds differ", () => {
+  const registry = twoSweeps();
+  registry.sweeps.twins.kinds["judged-sibling"] = { severity: "low", route: "judgment" };
+  const { counts } = finalized({ registry, judgments: { reached: [], verdicts: [], added: [judged({}), judged({ kind: "judged-sibling" })] } });
+  assert.equal(counts.sweeps.twins.categories["judged-twin"].verified, 1);
+  assert.equal(counts.sweeps.twins.categories["judged-sibling"].verified, 1);
+  assert.throws(() => finalized({ judgments: { reached: [], verdicts: [], added: [judged({}), judged({})] } }), /two added judgments for /);
+});
+
 test("a verdict answers only verification-routed candidates and a judgment only judgment-routed ones", () => {
   const judgedScan = { id: "twin-index", scan: ({ files }) => files.map((file) => ({ kind: "judged-twin", file, line: 2, symbol: "g", detail: "g looks like f" })) };
   const run = { scanners: [...SCANNERS, twinScan, judgedScan] };
@@ -226,7 +299,7 @@ test("a verdict answers only verification-routed candidates and a judgment only 
   assert.throws(() => finalized({ run, verdicts: (cs) => cs.filter((c) => c.kind === "judged-twin")
     .map((c) => ({ candidateId: c.id, outcome: "verified", note: "x" })) }), /verdict for ".*", which routes to judgment/);
   assert.throws(() => finalized({ run, verdicts: () => [], judgments: { reached: [], added: [],
-    verdicts: [{ candidateId: "twin-scan:src/a.js:1:LIMIT", outcome: "verified", note: "x" }] } }), /judgment for ".*", which routes to verification/);
+    verdicts: [{ candidateId: "twin-scan:src/a.js:1:LIMIT:twin:constant LIMIT=5", outcome: "verified", note: "x" }] } }), /judgment for ".*", which routes to verification/);
 });
 
 test("a severity raise stops at the kind's cap unless the verdict names a reason that passes it", () => {

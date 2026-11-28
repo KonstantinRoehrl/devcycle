@@ -36,8 +36,9 @@ test("history is dispatched at the fast tier within its traversal bound", () => 
 
 test("fan-out ceiling: bounded concurrent + total lenses with a hard stop", () => {
   assert.match(pb, /at most 5|5 concurrent/i);
-  assert.match(pb, /at most 9 total LLM dispatches/);
+  assert.match(pb, /at most 10 total LLM dispatches/);
   assert.match(pb, /\+ 1 sweep verification/);
+  assert.match(pb, /\+ 1 sweep judgment/);
   assert.match(pb, /hard stop|20%/i);
 });
 

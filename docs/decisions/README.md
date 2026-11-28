@@ -5,6 +5,90 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-28 — the duplication sweep's exclusions, scanner coverage and clearing rules are stated (#478)
+
+**Decision:** `references/hygiene-sweeps.md` now states that the shared jscpd `--ignore` list excludes
+tests, docs and test-named files for both jscpd and the four heuristic scanners, so they are out of scope
+for duplication detection and the coverage statement names the globs with a file count. It also states that
+`duplicate-constants` reads only declaring extensions, that a tool answering for a kind keeps it complete
+whatever its scanner leaves unread, that a partial row's kinds stay unresolved until its languages are
+covered or excluded, and that clearing one instance of a cluster clears all of them.
+
+**Supersedes:** the previous entry's omission of the shared exclusion list, and its figures for the
+playbook closure and the runtime surface.
+
+**Why:** the round-1 fix widened what duplication detection never sees without saying so, and a coverage
+note that implies a complete kind where a scanner leaves languages unread misleads the reader.
+
+**Budgets:** the prose edits moved these figures (old to new), each the measured value. The three duplication
+entries chain from the complexity entry's figures, since #481 landed first; the last figure is measured on the
+merged tree, so it also carries the two sweeps' shared doc edits:
+
+```text
+playbooks/maintaining-the-repo.md 95657 -> 96748
+surfaceTotal (surface-budget.json) 7820 -> 7829
+```
+
+and the fixtures now read:
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 96748
+budget: surface-budget.json surfaceTotal 7829
+```
+
+## 2026-11-28 — the duplication sweep's coverage, floors and verification rules are documented (#478)
+
+**Decision:** `references/hygiene-sweeps.md` now states the heuristic-gap coverage line, the shared
+`--ignore` exclusion, the separate floors for restated literals, the length-unit values, the candidate id
+suffix, the `--ref` store flag and the coincidental-equality rule in § Verification. The playbook's
+Judge-the-sweep bullet now cites § Judgment instead of restating it.
+
+**Supersedes:** the next entry's figures for the playbook closure and the runtime surface.
+
+**Why:** a coverage statement that reads complete for files no scanner reads, and a verification that
+cannot clear a coincidental match, are the failures the sweep exists to prevent, and a behaviour with no
+owner in the method prose drifts.
+
+**Budgets:** the prose edits moved these figures (old to new):
+
+```text
+playbooks/maintaining-the-repo.md 93281 -> 95657
+surfaceTotal (surface-budget.json) 7794 -> 7820
+```
+
+and the fixtures now read:
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 95657
+budget: surface-budget.json surfaceTotal 7820
+```
+
+## 2026-11-28 — maintain judges its hygiene sweeps in a tenth dispatch (#478)
+
+**Decision:** the pass ceiling rises from 9 to 10 total LLM dispatches, the tenth being one read-only
+judgment dispatch per pass over `judgment-inputs.json`.
+
+**Supersedes:** the 2026-11-22 ninth-dispatch entry's statement that no later sweep raises the ceiling.
+
+**Why:** semantic duplicates and comment judgments produce or clear candidates by reading code, and
+folding them into the verification budget would starve dead-code verification on a real repo. Every
+later sweep shares these two dispatches, so this is the last raise the sweep family needs.
+
+**Budgets:** the playbook step, the judgment and duplication method prose and the docs moved these
+figures (old to new):
+
+```text
+playbooks/maintaining-the-repo.md 88616 -> 93281
+surfaceTotal (surface-budget.json) 7733 -> 7794
+```
+
+and the fixtures now read:
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 93281
+budget: surface-budget.json surfaceTotal 7794
+```
+
 ## 2026-11-28 — Complexity replaces bloat as a quality criterion and joins the hygiene sweeps (#481)
 
 **Decision:** `references/quality-criteria.md`'s **bloat** bullet becomes **complexity**: a function or

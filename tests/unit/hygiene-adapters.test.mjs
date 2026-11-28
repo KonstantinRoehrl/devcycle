@@ -1,11 +1,12 @@
 import { test } from "node:test";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
-import { loadRegistry } from "../../scripts/hygiene-registry.mjs";
-import { ADAPTERS } from "../../scripts/hygiene-adapters.mjs";
+import { loadRegistry, validateRegistry } from "../../scripts/hygiene-registry.mjs";
+import { ADAPTERS, ignoreGlobs } from "../../scripts/hygiene-adapters.mjs";
 import { runSweep } from "../../scripts/hygiene-sweep.mjs";
 
 const OUTPUTS = fileURLToPath(new URL("../fixtures/maintain/sweep-tool-outputs/", import.meta.url));
@@ -165,4 +166,63 @@ test("tsc: a diagnostics exit with no diagnostic line is a failed run", () => {
   const broken = ADAPTERS.tsc.normalize([run("main", "error TS5083: Cannot read file '/repo/tsconfig.json'.\n", 2)], ctx({ tool: tool("tsc") }));
   assert.equal(broken.ok, false);
   assert.match(broken.note, /exit 2/);
+});
+
+const jscpdCtx = (report, over = {}) => {
+  const scratch = makeTempDir("hyg-jscpd-");
+  if (report !== undefined) {
+    mkdirSync(join(scratch, "report"), { recursive: true });
+    writeFileSync(join(scratch, "report", "jscpd-report.json"), typeof report === "string" ? report : JSON.stringify(report));
+  }
+  return { tool: { id: "jscpd", kinds: ["duplicate-logic"],
+    modes: { static: { invocations: [{ id: "main", args: ["--ignore", "**/dist/**,**/fixtures/**", "."] }] } } },
+    mode: "static", repoRoot: "/repo", scratch, files: ["src/a.ts", "src/b.ts", "src/c.ts", "src/d.ts"], read: () => null, ...over };
+};
+const side = (name, start) => ({ name, start, end: start + 11 });
+const pair = (a, b, fragment, extra = {}) => ({ format: "typescript", lines: 12, tokens: 60, fragment, firstFile: side(...a), secondFile: side(...b), ...extra });
+const cloneKey = (normalized) => `clone ${createHash("sha256").update(normalized).digest("hex").slice(0, 12)}`;
+const clone = (c) => `${c.kind}|${c.file}|${c.line}|${c.symbol}|${c.clusterKey === c.anchor}|${c.detail}`;
+
+test("jscpd: clone pairs union into families, one candidate per tracked instance under one family key", () => {
+  const result = ADAPTERS.jscpd.normalize([run("main", "")], jscpdCtx({ statistics: {}, duplicates: [
+    pair(["src/b.ts", 10], ["/repo/src/c.ts", 1], "const x = 1;\n  return x;", { tokens: 61 }),
+    pair(["src/a.ts", 3], ["src/b.ts", 10], "const x =   1;\nreturn x;"),
+    pair(["src/a.ts", 40], ["dist/a.js", 5], "other();"),
+    pair(["src/d.ts", 1], ["src/d.ts", 30], "zeta();\n  eta();", { format: "javascript", lines: 4, tokens: 52 }),
+  ] }));
+  assert.equal(result.ok, true);
+  const family = cloneKey("const x = 1; return x;");
+  assert.deepEqual(result.candidates.map(clone), [
+    "duplicate-logic|src/a.ts|3|null|true|12 lines, 60 tokens (typescript)",
+    "duplicate-logic|src/b.ts|10|null|true|12 lines, 61 tokens (typescript)",
+    "duplicate-logic|src/c.ts|1|null|true|12 lines, 61 tokens (typescript)",
+    "duplicate-logic|src/d.ts|1|null|true|4 lines, 52 tokens (javascript)",
+    "duplicate-logic|src/d.ts|30|null|true|4 lines, 52 tokens (javascript)",
+  ]);
+  assert.deepEqual([...new Set(result.candidates.slice(0, 3).map((c) => c.clusterKey))], [family]);
+  assert.equal(result.candidates[3].clusterKey, cloneKey("zeta(); eta();"));
+  assert.ok(result.candidates.every((c) => c.noisy === false));
+  assert.equal(result.note, "excludes **/dist/**, **/fixtures/**");
+});
+
+test("jscpd: a missing, unparsable or duplicates-less report fails the tool", () => {
+  for (const report of [undefined, "not json", { statistics: {} }]) {
+    const result = ADAPTERS.jscpd.normalize([run("main", "")], jscpdCtx(report));
+    assert.deepEqual({ ok: result.ok, candidates: result.candidates }, { ok: false, candidates: [] });
+    assert.match(result.note, /^jscpd report missing or unreadable: /);
+  }
+});
+
+test("the registry validator accepts a jscpd-adapter tool", () => {
+  const reg = structuredClone(loadRegistry());
+  reg.tools.find((t) => t.id === "vulture").adapter = "jscpd";
+  assert.deepEqual(validateRegistry(reg).filter((e) => /\.adapter: /.test(e)), []);
+});
+
+test("ignoreGlobs lists the --ignore globs of a tool's first invocation in one mode, and nothing for a tool that names none", () => {
+  const tool = { modes: { static: { invocations: [{ id: "main", args: [".", "--ignore", "**/dist/**,**/docs/**", "--min-lines", "5"] }, { id: "other", args: ["--ignore", "x"] }] } } };
+  assert.deepEqual(ignoreGlobs(tool, "static"), ["**/dist/**", "**/docs/**"]);
+  assert.deepEqual(ignoreGlobs(tool, "coverage"), []);
+  assert.deepEqual(ignoreGlobs({}, "static"), []);
+  assert.ok(ignoreGlobs(loadRegistry().tools.find((t) => t.id === "jscpd"), "static").includes("**/node_modules/**"));
 });
