@@ -112,3 +112,56 @@ test("one env var read directly in three or more files is one candidate per read
   });
   assert.equal(forms.length, 4);
 });
+
+test("the restated-literal floor is higher than the declaration floor: a bare number under 100 and a short or plain-word string restate nothing", () => {
+  const owners = [
+    "export const PAGE_LIMIT = 40;\n",
+    "export const PHASE_LABEL = \"pending\";\n",
+    "export const SHORT_KEY = \"ab-cd\";\n",
+    "export const WIDE_LIMIT = 250;\n",
+    "export const LONG_KEY = \"audit-trail\";\n",
+  ].join("");
+  const sites = "f(40, \"pending\", \"ab-cd\", 250, \"audit-trail\");\n";
+  assert.deepEqual(of(scan(duplicateConstants, { "src/owners.ts": owners, "src/site.ts": sites }), "restated-literal"), [
+    "restated-literal|src/site.ts|1|LONG_KEY|src/owners.ts#LONG_KEY|null",
+    "restated-literal|src/site.ts|1|WIDE_LIMIT|src/owners.ts#WIDE_LIMIT|null",
+  ]);
+});
+
+test("the declaration floor is unchanged: a two-digit constant is still a duplicate-constant", () => {
+  const found = scan(duplicateConstants, { "a.ts": "export const PAGE_LIMIT = 40;\n", "b.ts": "export const PAGE_LIMIT = 40;\n" });
+  assert.deepEqual(of(found, "duplicate-constant"), [
+    "duplicate-constant|a.ts|1|PAGE_LIMIT|constant PAGE_LIMIT=40|null",
+    "duplicate-constant|b.ts|1|PAGE_LIMIT|constant PAGE_LIMIT=40|null",
+  ]);
+});
+
+test("a CSS custom property holding a pixel length is an owner that a string or template literal restates", () => {
+  const found = scan(duplicateConstants, {
+    "src/theme.css": ":root { --gap: 16px; --pad: 24.0px; --hair: 2px; --wide: 40rem; --lead: 1.5rem; }\n",
+    "src/view.ts": "el.style.gap = \"16px\";\nel.style.padding = `24px`;\nel.style.border = \"2px\";\nel.style.margin = '40rem'; el.style.lineHeight = \"1.5rem\";\n",
+    "src/page.html": "<div data-pad=\"24px\"></div>\n",
+  });
+  assert.deepEqual(of(found, "restated-literal"), [
+    "restated-literal|src/page.html|1|--pad|src/theme.css#--pad|null",
+    "restated-literal|src/view.ts|1|--gap|src/theme.css#--gap|null",
+    "restated-literal|src/view.ts|2|--pad|src/theme.css#--pad|null",
+    "restated-literal|src/view.ts|4|--wide|src/theme.css#--wide|null",
+  ]);
+});
+
+test("a pixel length is not restated by another unit, by a sentence, or when it is a small length", () => {
+  const found = scan(duplicateConstants, {
+    "src/theme.css": ":root { --gap: 16px; --tick: 8px; }\n",
+    "src/view.ts": "a(\"16em\"); b(\"keep a 16px gap between rows\"); c(\"8px\"); d(\"16 px\"); e(16);\n",
+  });
+  assert.deepEqual(found, []);
+});
+
+test("a pixel length declared in two stylesheets under one name is a duplicate-constant", () => {
+  const found = scan(duplicateConstants, { "a.css": ":root { --gap: 16px; }\n", "b.css": ":root { --gap: 16px; }\n" });
+  assert.deepEqual(of(found, "duplicate-constant"), [
+    "duplicate-constant|a.css|1|--gap|constant --gap=16px|null",
+    "duplicate-constant|b.css|1|--gap|constant --gap=16px|null",
+  ]);
+});

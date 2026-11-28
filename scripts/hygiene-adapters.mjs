@@ -219,9 +219,14 @@ function readJscpdReport(scratch) {
   }
 }
 
+// The globs a tool's first invocation excludes through `--ignore`; the heuristic scanners share this list, so it has one owner.
+export function ignoreGlobs(tool, mode) {
+  const args = tool.modes?.[mode]?.invocations?.[0]?.args ?? [];
+  return args.flatMap((arg, i) => (args[i - 1] === "--ignore" ? arg.split(",") : []));
+}
+
 function jscpdIgnores(ctx) {
-  const args = ctx.tool.modes?.[ctx.mode]?.invocations?.[0]?.args ?? [];
-  const globs = args.flatMap((arg, i) => (args[i - 1] === "--ignore" ? arg.split(",") : []));
+  const globs = ignoreGlobs(ctx.tool, ctx.mode);
   return globs.length ? `excludes ${globs.join(", ")}` : null;
 }
 

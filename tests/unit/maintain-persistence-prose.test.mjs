@@ -130,6 +130,9 @@ test("step 4 runs the sweep at every depth, by consent, and verifies it in one d
   assert.match(step4, /<dir>\/judgments\.json/);
   assert.match(step4, /every depth/);
   assert.match(step4, /--hotspots \.devcycle\/maintain\/sweep-<date>\/hotspots\.txt/);
+  assert.match(step4, /`--ref "\$base"` whenever\s+step 8's doc-tracking veto does not apply/);
+  assert.match(step4, /omit `--hotspots` when step 3 yields no list/);
+  assert.match(step4, /\*\*Judge the sweep\.\*\* One dispatch per `references\/hygiene-sweeps\.md` § Judgment/);
   assert.match(step4, /names every pre-pass source that did not run/);
   assert.match(step4, /every area or kind a source that did run left unchecked/);
 });
@@ -153,6 +156,7 @@ test("step 8 folds the sweep in and resolves a sweep kind only when its sources 
   assert.match(step8, /hygiene-sweep\.mjs" finalize --dir <dir> --verdicts <dir>\/verdicts\.json --run <runId>/);
   assert.match(step8, /--depth <depth>/);
   assert.match(step8, /--judgments <dir>\/judgments\.json/);
+  assert.doesNotMatch(step8, /hygiene-sweep\.mjs" finalize[^\n]*--ref/);
   assert.match(step8, /<dir>\/section-<sweep>\.md/);
   assert.match(step8, /<dir>\/entries\.json/);
   assert.match(step8, /--sweep-coverage <dir>\/coverage\.json/);

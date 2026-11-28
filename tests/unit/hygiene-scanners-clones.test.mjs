@@ -73,6 +73,6 @@ test("the index caps functions per file and characters read per file", () => {
 
 test("both scanners are registered under the duplication sweep, the index on hotspot files only", () => {
   const { scanners } = loadRegistry();
-  assert.deepEqual(scanners["same-body-helpers"], { sweep: "duplication", kinds: ["duplicate-logic"], stacks: null });
-  assert.deepEqual(scanners["semantic-index"], { sweep: "duplication", kinds: ["semantic-duplicate"], stacks: null, scope: "hotspots" });
+  assert.deepEqual(scanners["same-body-helpers"], { sweep: "duplication", kinds: ["duplicate-logic"], stacks: null, excludePathsOf: "jscpd" });
+  assert.deepEqual(scanners["semantic-index"], { sweep: "duplication", kinds: ["semantic-duplicate"], stacks: null, scope: "hotspots", excludePathsOf: "jscpd" });
 });

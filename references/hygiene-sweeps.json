@@ -56,10 +56,10 @@
     "css-classes-keyframes": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": ["web"] },
     "angular-io": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": ["angular"] },
     "static-assets": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": null },
-    "duplicate-constants": { "sweep": "duplication", "kinds": ["duplicate-constant", "restated-literal", "missing-owner"], "stacks": null },
-    "scattered-env-reads": { "sweep": "duplication", "kinds": ["scattered-env-read"], "stacks": null },
-    "same-body-helpers": { "sweep": "duplication", "kinds": ["duplicate-logic"], "stacks": null },
-    "semantic-index": { "sweep": "duplication", "kinds": ["semantic-duplicate"], "stacks": null, "scope": "hotspots" }
+    "duplicate-constants": { "sweep": "duplication", "kinds": ["duplicate-constant", "restated-literal", "missing-owner"], "stacks": null, "excludePathsOf": "jscpd" },
+    "scattered-env-reads": { "sweep": "duplication", "kinds": ["scattered-env-read"], "stacks": null, "excludePathsOf": "jscpd" },
+    "same-body-helpers": { "sweep": "duplication", "kinds": ["duplicate-logic"], "stacks": null, "excludePathsOf": "jscpd" },
+    "semantic-index": { "sweep": "duplication", "kinds": ["semantic-duplicate"], "stacks": null, "scope": "hotspots", "excludePathsOf": "jscpd" }
   },
   "config": { "staleTodoDays": 365, "configFile": ".devcycle-hygiene.json", "hotspotCap": 30 },
   "tools": [
@@ -371,7 +371,7 @@
       "id": "jscpd", "sweep": "duplication", "stacks": ["js-ts", "python", "go", "rust", "dotnet", "web", "angular"], "kinds": ["duplicate-logic"],
       "adapter": "jscpd", "version": "5.4.3", "okExit": [0],
       "command": { "fetch": ["npx", "-y", "jscpd@5.4.3"] },
-      "modes": { "static": { "invocations": [ { "id": "main", "args": ["--reporters", "json", "--output", "{scratch}/report", "--silent", "--min-tokens", "50", "--ignore", "**/node_modules/**,**/dist/**,**/build/**,**/out/**,**/vendor/**,**/*.min.js,**/*.lock,**/package-lock.json,**/pnpm-lock.yaml,**/yarn.lock,**/fixtures/**,**/__fixtures__/**,**/generated/**", "."] } ] } }
+      "modes": { "static": { "invocations": [ { "id": "main", "args": ["--reporters", "json", "--output", "{scratch}/report", "--silent", "--min-tokens", "50", "--ignore", "**/node_modules/**,**/dist/**,**/build/**,**/out/**,**/vendor/**,**/*.min.js,**/*.lock,**/package-lock.json,**/pnpm-lock.yaml,**/yarn.lock,**/fixtures/**,**/__fixtures__/**,**/generated/**,**/tests/**,**/test/**,**/__tests__/**,**/docs/**,**/*.test.*,**/*.spec.*", "."] } ] } }
     }
   ]
 }

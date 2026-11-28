@@ -2,7 +2,7 @@
 // names, and the per-file function index the semantic-duplicate judgment reads. Both share one
 // function extractor. The first returns candidates for verification to judge, never findings.
 // Ids, kinds and stacks are `references/hygiene-sweeps.json`'s `scanners`; this file owns only
-// the detection rules.
+// the detection rules and the extensions each scanner `reads`.
 import { createHash } from "node:crypto";
 import { extname } from "node:path";
 
@@ -216,9 +216,11 @@ function normalizeBody(body, lang) {
 const bodyHash = (normalized) => createHash("sha256").update(normalized).digest("hex").slice(0, 12);
 const byFileThenLine = (a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line);
 const sourceFiles = (files) => files.filter((f) => LANGUAGES.has(extname(f)));
+const reads = [...LANGUAGES.keys()];
 
 export const sameBodyHelpers = {
   id: "same-body-helpers",
+  reads,
   scan({ files, read }) {
     const groups = new Map();
     for (const file of sourceFiles(files)) {
@@ -247,6 +249,7 @@ export const sameBodyHelpers = {
 
 export const semanticIndex = {
   id: "semantic-index",
+  reads,
   scan: () => [],
   material({ files, read }) {
     const out = [];

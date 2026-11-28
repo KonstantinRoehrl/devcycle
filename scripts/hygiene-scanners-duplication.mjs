@@ -1,7 +1,7 @@
 // The duplication sweep's built-in scanners: constants declared or restated across files, and
 // environment variables read directly from many files. Each returns candidates for verification
 // to judge, never findings. Ids, kinds and stacks are `references/hygiene-sweeps.json`'s
-// `scanners`; this file owns only the detection rules.
+// `scanners`; this file owns only the detection rules and the extensions each scanner `reads`.
 import { extname } from "node:path";
 
 const JS_EXTS = new Set([".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"]);
@@ -15,7 +15,10 @@ const NUMBER = "-?\\d[\\d_]*(?:\\.\\d+)?";
 const DQ = "\"(?:[^\"\\\\\\n]|\\\\.)*\"";
 const SQ = "'(?:[^'\\\\\\n]|\\\\.)*'";
 const TQ = "`(?:(?!\\$\\{)[^`\\\\])*`";
-const WHOLE_LITERAL = new RegExp(`^(?:(${NUMBER})|(${DQ}|${SQ}|${TQ})|(${HEX}))\\s*[;,]?\\s*(?:(?:\\/\\/|#|\\/\\*).*)?$`);
+const LENGTH = `(${NUMBER})(rem|em|ms|px|vh|vw|%|s)`;
+const WHOLE_HEX = new RegExp(`^${HEX}$`);
+const WHOLE_LENGTH = new RegExp(`^${LENGTH}$`);
+const WHOLE_LITERAL = new RegExp(`^(?:${LENGTH}|(${NUMBER})|(${DQ}|${SQ}|${TQ})|(${HEX}))\\s*[;,]?\\s*(?:(?:\\/\\/|#|\\/\\*).*)?$`);
 const tokenizer = (comment) => new RegExp(`(${DQ}|${SQ}|${TQ})|${comment}|(${HEX})|((?<![\\w.$-])${NUMBER}(?![\\w.]))`, "g");
 const SLASH_TOKENS = tokenizer("\\/\\/.*|\\/\\*.*?\\*\\/");
 const HASH_TOKENS = tokenizer("#.*");
@@ -26,6 +29,9 @@ const COMMENT_LOOKBACK = 3;
 const CLEARED = "documented deliberate copy";
 const TRIVIAL_INTEGER_MAX = 10;
 const TRIVIAL_STRING_MIN = 4;
+const TRIVIAL_LENGTH_MAX = 10;
+const RESTATED_INTEGER_BELOW = 100;
+const RESTATED_STRING_MIN = 8;
 const MIN_FILES = 2;
 const MIN_ENV_READ_FILES = 3;
 
@@ -45,24 +51,41 @@ const RUST_DECL = /^\s*(pub(?:\([^)]*\))?\s+)?(?:const|static)\s+(?:mut\s+)?([A-
 const CS_DECL = /\b((?:(?:public|private|protected|internal|static|readonly|new)\s+)*)const\s+[\w<>[\]?.]+\s+(\w+)\s*=\s*([^;]+);/g;
 const CSS_PROPERTY = /(--[\w-]+)\s*:\s*([^;}]+)/g;
 
-const isTrivial = ({ type, value }) => {
+const isTrivial = ({ type, value }, restated = false) => {
   if (type === "hex") return false;
-  if (type === "number") return (Number.isInteger(Number(value)) && Math.abs(Number(value)) <= TRIVIAL_INTEGER_MAX) || value === "0.5";
-  return value.trim().length < TRIVIAL_STRING_MIN || ["true", "false", "null"].includes(value);
+  if (type === "length") return Math.abs(parseFloat(value)) <= TRIVIAL_LENGTH_MAX;
+  if (type === "number") {
+    const n = Math.abs(Number(value));
+    return (Number.isInteger(n) && n < (restated ? RESTATED_INTEGER_BELOW : TRIVIAL_INTEGER_MAX + 1)) || value === "0.5";
+  }
+  const text = value.trim();
+  return text.length < (restated ? RESTATED_STRING_MIN : TRIVIAL_STRING_MIN) || ["true", "false", "null"].includes(value)
+    || (restated && /^[a-z]+$/.test(text));
 };
+
+const lengthValue = (number, unit) => `${Number(number.replaceAll("_", ""))}${unit}`;
 
 function normalize(type, text) {
   if (type === "number") return String(Number(text.replaceAll("_", "")));
   if (type === "hex") return text.toLowerCase();
   const content = text.slice(1, -1);
-  return new RegExp(`^${HEX}$`).test(content) ? content.toLowerCase() : content;
+  return WHOLE_HEX.test(content) ? content.toLowerCase() : content;
 }
+
+const literalOf = (type, text) => {
+  const value = normalize(type, text);
+  if (type !== "string") return { type, value };
+  const length = WHOLE_LENGTH.exec(value);
+  if (length) return { type: "length", value: lengthValue(length[1], length[2]) };
+  return WHOLE_HEX.test(value) ? { type: "hex", value } : { type, value };
+};
 
 function parseLiteral(rhs) {
   const m = WHOLE_LITERAL.exec(rhs.trim());
   if (!m) return null;
-  const type = m[1] !== undefined ? "number" : m[2] !== undefined ? "string" : "hex";
-  return { type, value: normalize(type, m[1] ?? m[2] ?? m[3]) };
+  if (m[1] !== undefined) return { type: "length", value: lengthValue(m[1], m[2]) };
+  const type = m[3] !== undefined ? "number" : m[4] !== undefined ? "string" : "hex";
+  return literalOf(type, m[3] ?? m[4] ?? m[5]);
 }
 
 function declarationsIn(file, lines) {
@@ -129,6 +152,7 @@ function groupCandidates(kind, decls, clusterKey, detail) {
 
 export const duplicateConstants = {
   id: "duplicate-constants",
+  reads: [...new Set([...DECLARING_EXTS, ...RESTATING_EXTS])],
   scan({ files, read }) {
     const decls = [];
     const restatingLines = [];
@@ -158,7 +182,7 @@ export const duplicateConstants = {
       out.push(...groupCandidates("missing-owner", owners, `value ${value}`, () => `${value} declared as ${names} with no shared owner`));
     }
 
-    const ownersByValue = Map.groupBy(distinctive.filter((d) => d.exported), (d) => d.value);
+    const ownersByValue = Map.groupBy(distinctive.filter((d) => d.exported && !isTrivial(d, true)), (d) => d.value);
     for (const group of ownersByValue.values()) group.sort((a, b) => (`${a.file}#${a.name}` < `${b.file}#${b.name}` ? -1 : 1));
     for (const { file, lines, declared } of restatingLines) {
       lines.forEach((text, i) => {
@@ -166,8 +190,8 @@ export const duplicateConstants = {
         for (const m of text.matchAll(extname(file) === ".py" ? HASH_TOKENS : SLASH_TOKENS)) {
           if (m[1] === undefined && m[2] === undefined && m[3] === undefined) continue;
           const type = m[1] !== undefined ? "string" : m[2] !== undefined ? "hex" : "number";
-          const literal = { type, value: normalize(type, m[0]) };
-          if (isTrivial(literal)) continue;
+          const literal = literalOf(type, m[0]);
+          if (isTrivial(literal, true)) continue;
           const owner = ownersByValue.get(literal.value)?.find((o) => o.file !== file);
           if (!owner) continue;
           const key = `${owner.file}#${owner.name}`;
@@ -181,6 +205,7 @@ export const duplicateConstants = {
 
 export const scatteredEnvReads = {
   id: "scattered-env-reads",
+  reads: [...ENV_READING_EXTS],
   scan({ files, read }) {
     const reads = [];
     for (const file of [...files].sort()) {

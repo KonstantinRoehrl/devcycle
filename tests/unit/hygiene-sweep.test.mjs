@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { loadRegistry } from "../../scripts/hygiene-registry.mjs";
 import { SCANNERS } from "../../scripts/hygiene-scanners.mjs";
-import { clusterCandidates, detectStacks, resolveCommand, runSweep, selectTools } from "../../scripts/hygiene-sweep.mjs";
+import { clusterCandidates, detectStacks, finalizeSweep, resolveCommand, runSweep, selectTools } from "../../scripts/hygiene-sweep.mjs";
 
 const SCRIPT = fileURLToPath(new URL("../../scripts/hygiene-sweep.mjs", import.meta.url));
 const registry = () => structuredClone(loadRegistry());
@@ -326,4 +326,83 @@ test("coverage names every kind some source produces, so a kind with no source i
   assert.ok(sourced.includes("dead-code") && sourced.includes("stale-todo"), `sourcedKinds: ${JSON.stringify(coverage.sourcedKinds)}`);
   assert.ok(!sourced.includes("test-coverage-gap"));
   assert.deepEqual(sourced.filter((k) => !coverage.sweepKinds.includes(k)), []);
+});
+
+// The real scanners and registry over an in-memory tree; every tool answers with nothing unless `report` is the jscpd report to replay.
+function duplicationSweep(tree, { report = null } = {}) {
+  const repo = repoWith(tree);
+  const runTool = ({ argv }) => {
+    if (report && argv.some((a) => a.startsWith("jscpd@"))) {
+      const dir = argv[argv.indexOf("--output") + 1];
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "jscpd-report.json"), JSON.stringify(report));
+    }
+    return ok("0.0.0\n");
+  };
+  const outDir = join(makeTempDir("hyg-dup-out-"), "sweep");
+  return { repo, outDir, ...runSweep({ repoRoot: repo, outDir, runTool, files: Object.keys(tree), churn: new Map(), onPath: () => true, hotspots: [] }) };
+}
+
+test("a candidate is identified by its kind and cluster too, so one line feeding two clusters keeps both candidates", () => {
+  const { clusters, candidates } = duplicationSweep({ "package.json": "{}", "a.js": "export const TIMEOUT_MS = 5000;\n",
+    "b.js": "export const TIMEOUT_MS = 5000;\n", "c.js": "export const REQUEST_TIMEOUT = 5000;\n" });
+  const owner = clusters.find((k) => k.clusterId === "missing-owner:value 5000");
+  assert.deepEqual([...owner.files].sort(), ["a.js", "b.js", "c.js"]);
+  assert.equal(owner.candidates.length, 3);
+  assert.equal(candidates.filter((c) => c.kind === "duplicate-constant").length, 2);
+  assert.equal(new Set(candidates.map((c) => c.id)).size, candidates.length);
+});
+
+test("two clone families that start on the same line of one file keep that file in both", () => {
+  const instance = (name, end) => ({ name, start: 1, end });
+  const clone = (second, end, fragment) => ({ firstFile: instance("src/big1.js", end), secondFile: instance(second, end), format: "javascript",
+    lines: end, tokens: end * 5, fragment });
+  const body = "export const noop = () => {};\n";
+  const { clusters } = duplicationSweep({ "package.json": "{}", "src/big1.js": body, "src/big2.js": body, "src/big3.js": body },
+    { report: { duplicates: [clone("src/big2.js", 20, "alpha alpha alpha"), clone("src/big3.js", 30, "omega omega omega")] } });
+  const families = clusters.filter((k) => /^duplicate-logic:clone /.test(k.clusterId));
+  assert.equal(families.length, 2);
+  assert.ok(families.every((k) => k.files.includes("src/big1.js") && k.candidates.length === 2), JSON.stringify(families));
+});
+
+const statementOf = (tree, over) => {
+  const swept = duplicationSweep(tree, over);
+  finalizeSweep({ outDir: swept.outDir, verdicts: [], repoRoot: swept.repo, previousCounts: null });
+  return { ...swept, statement: readFileSync(join(swept.outDir, "section-duplication.md"), "utf8").split("### Coverage")[1] };
+};
+const HEURISTIC_KINDS = ["duplicate-constant", "restated-literal", "missing-owner", "scattered-env-read"];
+
+test("source files in a language no scanner reads are named in the coverage statement and keep their kinds out of the full kinds", () => {
+  const { coverage, statement } = statementOf({ "a/A.java": "class A { static final int MAX_RETRIES = 12; }\n",
+    "b/B.java": "class B { static final int MAX_RETRIES = 12; }\n", "x.rb": "MAX_RETRIES = 12\n", "README.md": "# docs\n" });
+  assert.deepEqual(coverage.stacks, []);
+  assert.deepEqual(coverage.sweeps.duplication.noToolStacks, []);
+  for (const kind of [...HEURISTIC_KINDS, "duplicate-logic"]) assert.ok(!coverage.fullKinds.includes(kind), `${kind} must not read complete`);
+  assert.match(statement, /^- partial: duplicate-constants \(3 source files not scanned, their language is not read \(\.java: 2, \.rb: 1; a\/A\.java, b\/B\.java, x\.rb\)\)$/m);
+  assert.match(statement, /^- partial: scattered-env-reads \(3 source files not scanned/m);
+  assert.match(statement, /^- partial: same-body-helpers \(3 source files not scanned/m);
+  assert.doesNotMatch(statement, /README\.md/, "a markdown file is not a source file");
+  assert.doesNotMatch(statement, /`duplicate-constant`: [^\n]*; complete/);
+});
+
+test("a repo whose source languages the scanners all read still reads complete", () => {
+  const { coverage, statement } = statementOf({ "package.json": "{}", "src/a.ts": "export const MAX_RETRIES = 12;\n", "lib/b.py": "X = 1\n", "README.md": "# docs\n" });
+  for (const kind of HEURISTIC_KINDS) assert.ok(coverage.fullKinds.includes(kind), `${kind} should read complete`);
+  assert.doesNotMatch(statement, /not scanned, their language/);
+});
+
+test("a tool that ran for a kind answers for the languages its heuristic does not read", () => {
+  const { coverage, statement } = statementOf({ "package.json": "{}", "src/A.java": "class A {}\n", "src/a.ts": "export const A = 1;\n" }, { report: { duplicates: [] } });
+  assert.ok(coverage.fullKinds.includes("duplicate-logic"), "jscpd read the Java file");
+  assert.match(statement, /^- partial: duplicate-constants \(1 source file not scanned/m, "no tool covers the constant kinds");
+  assert.doesNotMatch(statement, /partial: same-body-helpers/);
+});
+
+test("the duplication scanners skip the paths jscpd excludes, the statement names them, and an excluded file is not unread source", () => {
+  const { candidates, coverage, statement } = statementOf({ "package.json": "{}", "src/a.js": "export const WAIT_MS = 4500;\n",
+    "tests/a.test.js": "export const WAIT_MS = 4500;\n", "docs/demo.rb": "x = 1\n", "src/gen/x.js": "const WAIT_MS = 4500;\n" });
+  assert.deepEqual(candidates.filter((c) => c.sweep === "duplication").map((c) => c.file), ["src/gen/x.js", "src/a.js"].sort());
+  assert.match(statement, /^- excluded from the heuristic scanners: 2 tracked files matching \*\*\/node_modules\/\*\*, .*\*\*\/tests\/\*\*.*\*\*\/docs\/\*\*/m);
+  assert.doesNotMatch(statement, /docs\/demo\.rb/);
+  assert.ok(coverage.fullKinds.includes("duplicate-constant"));
 });

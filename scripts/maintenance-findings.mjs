@@ -197,7 +197,7 @@ function resolveRefName(root, name) {
 }
 
 // The store as committed at a ref, so a pass can compare against its base without a worktree.
-function readMaintenanceFindingsAtRef(root, ref) {
+export function readMaintenanceFindingsAtRef(root, ref) {
   const at = resolveRefName(root, ref);
   return git(root, ["ls-tree", "-z", "--name-only", at, "--", `${STORE_PATH}/`])
     .split("\0")

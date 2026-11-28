@@ -167,6 +167,6 @@ test("the duplication sweep carries its kinds, default severities, routes and sc
   assert.deepEqual(sweep.notCovered, ["types and DTOs mirrored across a language boundary",
     "validation rules and error messages restated in prose", "routes and storage keys outside string literals",
     "semantic duplicates outside the hotspot files"]);
-  assert.deepEqual(reg.scanners["duplicate-constants"], { sweep: "duplication", kinds: ["duplicate-constant", "restated-literal", "missing-owner"], stacks: null });
-  assert.deepEqual(reg.scanners["scattered-env-reads"], { sweep: "duplication", kinds: ["scattered-env-read"], stacks: null });
+  assert.deepEqual(reg.scanners["duplicate-constants"], { sweep: "duplication", kinds: ["duplicate-constant", "restated-literal", "missing-owner"], stacks: null, excludePathsOf: "jscpd" });
+  assert.deepEqual(reg.scanners["scattered-env-reads"], { sweep: "duplication", kinds: ["scattered-env-read"], stacks: null, excludePathsOf: "jscpd" });
 });

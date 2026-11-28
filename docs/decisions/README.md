@@ -5,6 +5,33 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-28 — the duplication sweep's coverage, floors and verification rules are documented (#478)
+
+**Decision:** `references/hygiene-sweeps.md` now states the heuristic-gap coverage line, the shared
+`--ignore` exclusion, the separate floors for restated literals, the length-unit values, the candidate id
+suffix, the `--ref` store flag and the coincidental-equality rule in § Verification. The playbook's
+Judge-the-sweep bullet now cites § Judgment instead of restating it.
+
+**Supersedes:** the next entry's figures for the playbook closure and the runtime surface.
+
+**Why:** a coverage statement that reads complete for files no scanner reads, and a verification that
+cannot clear a coincidental match, are the failures the sweep exists to prevent, and a behaviour with no
+owner in the method prose drifts.
+
+**Budgets:** the prose edits moved these figures (old to new):
+
+```text
+playbooks/maintaining-the-repo.md 88934 -> 91310
+surfaceTotal (surface-budget.json) 7736 -> 7762
+```
+
+and the fixtures now read:
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 91310
+budget: surface-budget.json surfaceTotal 7762
+```
+
 ## 2026-11-28 — maintain judges its hygiene sweeps in a tenth dispatch (#478)
 
 **Decision:** the pass ceiling rises from 9 to 10 total LLM dispatches, the tenth being one read-only

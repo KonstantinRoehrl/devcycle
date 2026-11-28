@@ -41,6 +41,7 @@ const KNOWN = [
   ["a constant redefined in three files", "duplicate-constant", "constant RETRY_DELAY_MS=1500", 3],
   ["a literal restated where an exported constant exists", "restated-literal", "src/limits.ts#BRAND_TIMEOUT_MS", 1],
   ["a CSS token restated as a literal in TS", "restated-literal", "src/theme.css#--brand-color", 1],
+  ["a CSS pixel-length token restated as a string in TS", "restated-literal", "src/theme.css#--gutter", 1],
   ["two differently named helpers with the same body", "duplicate-logic", "body makeSlug,toSlug", 2],
   ["one env var read in three files", "scattered-env-read", "env API_BASE_URL", 3],
 ];

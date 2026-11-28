@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { makeTempDir } from "../../scripts/temp-dir.mjs";
 import { loadRegistry, validateRegistry } from "../../scripts/hygiene-registry.mjs";
-import { ADAPTERS } from "../../scripts/hygiene-adapters.mjs";
+import { ADAPTERS, ignoreGlobs } from "../../scripts/hygiene-adapters.mjs";
 import { runSweep } from "../../scripts/hygiene-sweep.mjs";
 
 const OUTPUTS = fileURLToPath(new URL("../fixtures/maintain/sweep-tool-outputs/", import.meta.url));
@@ -217,4 +217,12 @@ test("the registry validator accepts a jscpd-adapter tool", () => {
   const reg = structuredClone(loadRegistry());
   reg.tools.find((t) => t.id === "vulture").adapter = "jscpd";
   assert.deepEqual(validateRegistry(reg).filter((e) => /\.adapter: /.test(e)), []);
+});
+
+test("ignoreGlobs lists the --ignore globs of a tool's first invocation in one mode, and nothing for a tool that names none", () => {
+  const tool = { modes: { static: { invocations: [{ id: "main", args: [".", "--ignore", "**/dist/**,**/docs/**", "--min-lines", "5"] }, { id: "other", args: ["--ignore", "x"] }] } } };
+  assert.deepEqual(ignoreGlobs(tool, "static"), ["**/dist/**", "**/docs/**"]);
+  assert.deepEqual(ignoreGlobs(tool, "coverage"), []);
+  assert.deepEqual(ignoreGlobs({}, "static"), []);
+  assert.ok(ignoreGlobs(loadRegistry().tools.find((t) => t.id === "jscpd"), "static").includes("**/node_modules/**"));
 });

@@ -15,11 +15,16 @@ detects stacks, selects and class-gates tools, runs each pinned invocation with 
 per file or directory, ordered by blast radius: files × (1 + churn over the smaller of 500 commits
 or 6 months)) and `coverage.json`. `run` covers every registered sweep in one pass and tags each
 candidate, row and cluster with its sweep; a candidate's `clusterKey` and `anchor` (stable, no line
-number) group a cluster. It persists per-file churn and each cluster's `coChange`, takes
+number) group a cluster, and a candidate that names a cluster carries `:<kind>:<clusterKey>` at the end
+of its id, so two candidates of one location and symbol stay distinct. It persists per-file churn and each cluster's `coChange`, takes
 `--hotspots <file>` (one repo-relative path per line, the hotspot scope for scanners that scope to
 it), and writes `judgment-inputs.json` for the judgment-routed kinds. `hygiene-sweep.mjs finalize`
 turns verdicts (`--judgments` for judgment-routed kinds) into pass-file entries, counts and one
-`section-<sweep>.md` per sweep; `--depth thorough` orders a section by co-change first.
+`section-<sweep>.md` per sweep; `--depth thorough` orders a section by co-change first. `run`
+takes `--ref <ref>`, meaning what it does for `apply-pass --ref` (`finalize` reads the `judgment-inputs.json`
+`run` wrote and takes none): the open judgment records are
+read from the findings store committed at that ref, a failed read makes the judgment kinds partial with a
+degraded note, and with no flag the working-tree store is read.
 
 ## Classes and consent
 
@@ -44,6 +49,10 @@ order, so every sweep shares the one budget, one batched search per cluster, wit
   becomes `suspected (not verified: budget)`: ranked below verified, never dropped.
 - `cleared` — a false positive, the note its reason: dynamic name, framework-owned token, routed or
   lazily loaded, host binding, decorator alias, public entry point. Counted by reason, never a finding.
+  A duplication candidate is `verified` only when its instances mean the same thing, one fact that would
+  have to change together. Equal values or similar bodies that mean different things are `cleared` with
+  the reason `coincidental equality` (`100` as a percentage and `100` as a page size) or `deliberate
+  divergence` (two similar functions that differ on purpose), the note naming what each instance is for.
 
 `severity` raises the kind's default with a reason, never lowers it. A verdict may carry `raiseReason`;
 a raise never passes the kind's `maxSeverity` unless that reason is one of the kind's `raiseBeyondCapWhen`. A noisy candidate (knip in static
@@ -91,7 +100,8 @@ omits it) keeps the lens kinds' resolution rules.
 One statement per sweep. Per kind: tool-checked, heuristic-only or not covered; every failed, unavailable, unconsented or
 partial source (a capped or size-skipped scan, a solution tsconfig's unchecked projects) and every
 degraded git source by name, each keeping its kind out of `fullKinds`, each blame-using scanner
-reporting its own sweep's blame budget; "dependencies not installed" without `node_modules`; "no
+reporting its own sweep's blame budget; for a heuristic scanner that declares the extensions it `reads`,
+the tracked source files outside them (§ Duplication); "dependencies not installed" without `node_modules`; "no
 <noun> tool for this stack; heuristic scan only" for a stack where none of that sweep's tools
 applies, `<noun>` the sweep's registry noun; and the registry's `notCovered` list. The
 sweep runs in every pass and at every depth (`lean`, `standard`, `thorough`), whatever the
@@ -121,10 +131,15 @@ caps are the registry's; its method is:
 - **Constant scanner** — `duplicate-constant` (one named value declared in two or more files; anchor
   `constant <name>=<value>`), `restated-literal` (a distinctive literal repeated in a file other than its
   exported owner; anchor the owner's `<file>#<name>`) and `missing-owner` (one value declared under
-  different names sharing a name token, no shared owner; anchor `value <value>`). Trivial values are
-  skipped: an integer with |n| ≤ 10, `0.5`, `true`, `false`, `null`, a string under 4 characters after
-  trimming. A value normalizes as: numbers `String(Number(text without "_"))`, strings their unquoted
-  content, hex colours lower-cased. `missing-owner` name tokens split on `_`, `-` and camelCase
+  different names sharing a name token, no shared owner; anchor `value <value>`). Two floors skip trivial
+  values. `duplicate-constant` and `missing-owner` skip an integer with |n| ≤ 10, `0.5`, `true`, `false`,
+  `null` and a string under 4 characters after trimming. `restated-literal` has a higher floor, because a
+  bare small value appears everywhere by chance: it also skips an integer with |n| < 100, a string under 8
+  characters and a plain lowercase word. A CSS custom property whose whole value is a number with a
+  length unit (`px`, `rem`, `em`, `%`, `vh`, `vw`, `ms`, `s`) is a declaration with the normalized value
+  `<number><unit>`, and a JS, TS or HTML string whose whole content is that value restates it; a length
+  number of 10 or less is trivial. A value normalizes as: numbers `String(Number(text without "_"))`,
+  strings their unquoted content, hex colours lower-cased. `missing-owner` name tokens split on `_`, `-` and camelCase
   humps, lower-cased, 3+ letters. A comment on the declaration's line or one of the three lines above
   matching `deliberate(ly)` / `intentional(ly)` followed within 40 characters by `copy` / `copied` /
   `duplicate(d)` / `duplication`, or `keep in sync`, any case, clears that instance; once fewer than
@@ -141,6 +156,18 @@ caps are the registry's; its method is:
 - **Signature index** — the judgment's material for `semantic-duplicate`: hotspot files only, at most
   200 functions and the first 65536 characters per file, `truncated` marking a cut. The model compares
   signatures and bodies across files; a semantic duplicate's anchor is given under § Judgment.
+
+Each of these scanners skips the paths of the `--ignore` list of the jscpd invocation (its registry field
+`excludePathsOf` names the tool whose list it shares), for declarations, sites and reads alike; the
+statement says so with a count of the tracked files that matched, and those files count as excluded,
+never as unread.
+
+Each scanner also declares the extensions it `reads`. `SOURCE_EXTENSIONS` in `scripts/hygiene-scanners.mjs`
+is the one set of code extensions; a scanner that leaves tracked files of those extensions outside its
+`reads` is partial, so its kinds stay out of `fullKinds` and nothing stored on them resolves. Its note
+names the unread extensions with their counts and the first three files. A kind a tool already ran for is
+not held back (jscpd answers for `duplicate-logic`), and with no stack detected the statement still names
+this gap.
 
 Coverage per kind in the statement: tool-checked (`duplicate-logic`, by jscpd), heuristic-only (the
 scanners' kinds, and `duplicate-logic` where jscpd did not run), judgment (`semantic-duplicate`, over
