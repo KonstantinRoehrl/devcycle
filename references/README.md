@@ -19,7 +19,7 @@ one line per entry; the hub (`README.md`) mirrors this roster in its surface tab
 | `first-run-config.md` | devcycle's first-run configuration dialogue. |
 | `handoff.md` | What happens at a stage boundary — the handoff block, the three-value context action, the one-block-per-stage rule, and the await gate. |
 | `hygiene-sweeps.json` | The hygiene-sweep registry — each stack's signals, each sweep's culprit kinds with default severities, the built-in scanners, and every tool's pinned version, class and read-only invocation, loaded by `scripts/hygiene-registry.mjs`. |
-| `hygiene-sweeps.md` | The hygiene-sweep contract — flow, tool classes and consent, the verification dispatch and verdicts file, report, store and ratchet, coverage statement, safety, and the dead-code method. Audit-only: cited by the maintain playbook. |
+| `hygiene-sweeps.md` | The hygiene-sweep contract — flow, tool classes and consent, the verification dispatch and verdicts file, report, store and ratchet, coverage statement, safety, and the dead-code and complexity methods. Audit-only: cited by the maintain playbook. |
 | `impact-scoring.md` | How devcycle quantifies what a culprit cost. |
 | `issue-folding.md` | How a caller folds a repo's open GitHub issues into ranked, verified claims — fetch and screen, decompose, classify, verify, rank and cluster — with each step's maintain and triage switch. |
 | `ledger.md` | The ledger's own write format — its preamble records and its per-event line. |
