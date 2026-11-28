@@ -28,6 +28,19 @@
         "always-on or always-off feature flags",
         "unused config keys other than environment variables"
       ]
+    },
+    "complexity": {
+      "title": "Complexity hotspots",
+      "noun": "complexity",
+      "kinds": {
+        "complexity-hotspot": { "severity": "medium", "history": true },
+        "complexity-watch": { "severity": "low", "route": "watch" }
+      },
+      "notCovered": [
+        "CSS, SCSS and Less stylesheets",
+        "HTML and Angular templates",
+        "Svelte components"
+      ]
     }
   },
   "scanners": {
@@ -39,7 +52,51 @@
     "angular-io": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": ["angular"] },
     "static-assets": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": null }
   },
-  "config": { "staleTodoDays": 365, "configFile": ".devcycle-hygiene.json", "hotspotCap": 30 },
+  "config": { "staleTodoDays": 365, "configFile": ".devcycle-hygiene.json", "hotspotCap": 30, "hotCommits": 3 },
+  "complexity": {
+    "defaults": {
+    "js-ts": {
+      "ccn": { "value": 20, "source": "ESLint complexity", "url": "https://eslint.org/docs/latest/rules/complexity" },
+      "cognitive": { "value": 15, "source": "SonarJS cognitive-complexity", "url": "https://github.com/SonarSource/SonarJS/blob/master/packages/analysis/src/jsts/rules/S3776/config.ts" },
+      "nesting": { "value": 4, "source": "ESLint max-depth", "url": "https://eslint.org/docs/latest/rules/max-depth" },
+      "params": { "value": 3, "source": "ESLint max-params", "url": "https://eslint.org/docs/latest/rules/max-params" },
+      "nloc": { "value": 50, "source": "ESLint max-lines-per-function", "url": "https://eslint.org/docs/latest/rules/max-lines-per-function" },
+      "fileLines": { "value": 300, "source": "ESLint max-lines", "url": "https://eslint.org/docs/latest/rules/max-lines" }
+    },
+    "python": {
+      "ccn": { "value": 10, "source": "ruff mccabe max-complexity", "url": "https://docs.astral.sh/ruff/settings/#lint_mccabe_max-complexity" },
+      "cognitive": { "value": 15, "source": "SonarJS cognitive-complexity", "url": "https://github.com/SonarSource/SonarJS/blob/master/packages/analysis/src/jsts/rules/S3776/config.ts" },
+      "nesting": { "value": 5, "source": "pylint max-nested-blocks", "url": "https://pylint.readthedocs.io/en/stable/user_guide/configuration/all-options.html" },
+      "params": { "value": 5, "source": "pylint max-args", "url": "https://pylint.readthedocs.io/en/stable/user_guide/configuration/all-options.html" },
+      "nloc": { "value": 50, "source": "pylint max-statements", "url": "https://pylint.readthedocs.io/en/stable/user_guide/configuration/all-options.html" },
+      "fileLines": { "value": 1000, "source": "pylint max-module-lines", "url": "https://pylint.readthedocs.io/en/stable/user_guide/configuration/all-options.html" }
+    },
+    "go": {
+      "ccn": { "value": 30, "source": "golangci-lint gocyclo min-complexity", "url": "https://github.com/golangci/golangci-lint/blob/main/.golangci.reference.yml" },
+      "cognitive": { "value": 30, "source": "golangci-lint gocognit min-complexity", "url": "https://github.com/golangci/golangci-lint/blob/main/.golangci.reference.yml" },
+      "nesting": { "value": 5, "source": "golangci-lint nestif min-complexity", "url": "https://github.com/golangci/golangci-lint/blob/main/.golangci.reference.yml" },
+      "params": { "value": 3, "source": "ESLint max-params", "url": "https://eslint.org/docs/latest/rules/max-params" },
+      "nloc": { "value": 60, "source": "golangci-lint funlen lines", "url": "https://github.com/golangci/golangci-lint/blob/main/.golangci.reference.yml" },
+      "fileLines": { "value": 300, "source": "ESLint max-lines", "url": "https://eslint.org/docs/latest/rules/max-lines" }
+    },
+    "other": {
+      "ccn": { "value": 15, "source": "lizard CCN", "url": "https://github.com/terryyin/lizard/blob/master/lizard_core/options.py" },
+      "cognitive": { "value": 15, "source": "SonarJS cognitive-complexity", "url": "https://github.com/SonarSource/SonarJS/blob/master/packages/analysis/src/jsts/rules/S3776/config.ts" },
+      "nesting": { "value": 4, "source": "ESLint max-depth", "url": "https://eslint.org/docs/latest/rules/max-depth" },
+      "params": { "value": 3, "source": "ESLint max-params", "url": "https://eslint.org/docs/latest/rules/max-params" },
+      "nloc": { "value": 50, "source": "ESLint max-lines-per-function", "url": "https://eslint.org/docs/latest/rules/max-lines-per-function" },
+      "fileLines": { "value": 300, "source": "ESLint max-lines", "url": "https://eslint.org/docs/latest/rules/max-lines" }
+    }
+    },
+    "configKeys": {
+      "eslint": { "stack": "js-ts", "files": "eslint-row", "keys": { "complexity": "ccn", "max-depth": "nesting", "max-params": "params",
+        "max-lines": "fileLines", "max-lines-per-function": "nloc", "sonarjs/cognitive-complexity": "cognitive" } },
+      "python": { "stack": "python", "files": ["pyproject.toml", "ruff.toml", "setup.cfg", ".flake8", "tox.ini", ".pylintrc"],
+        "keys": { "max-complexity": "ccn", "max-args": "params", "max-nested-blocks": "nesting", "max-statements": "nloc", "max-module-lines": "fileLines" } },
+      "go": { "stack": "go", "files": [".golangci.yml", ".golangci.yaml", ".golangci.toml", ".golangci.json"],
+        "keys": { "gocyclo.min-complexity": "ccn", "gocognit.min-complexity": "cognitive", "nestif.min-complexity": "nesting", "funlen.lines": "nloc" } }
+    }
+  },
   "tools": [
     {
       "id": "knip", "sweep": "dead-code", "stacks": ["js-ts"], "kinds": ["dead-code", "test-only-code", "over-exported"],
@@ -344,6 +401,18 @@
       "when": { "anyFile": ["eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", "eslint.config.ts", ".eslintrc.json", ".eslintrc.js"] },
       "command": { "local": "node_modules/.bin/eslint", "versionArgs": ["--version"] },
       "modes": { "executing": { "invocations": [ { "id": "main", "args": ["-f", "unix", "--cache", "--cache-location", "{scratch}/eslintcache", "."] } ] } }
+    },
+    {
+      "id": "lizard", "sweep": "complexity", "stacks": ["js-ts", "python", "go", "rust", "dotnet"], "kinds": ["complexity-hotspot", "complexity-watch"],
+      "adapter": "lizard", "version": "1.26.1", "okExit": [0, 1],
+      "command": { "path": "lizard", "fetch": ["uvx", "lizard@1.26.1"], "versionArgs": ["--version"] },
+      "modes": { "static": { "invocations": [ { "id": "main", "args": ["--csv", "-Ecognitive", "-ENS", "."] } ] } }
+    },
+    {
+      "id": "radon", "sweep": "complexity", "stacks": ["python"], "kinds": ["complexity-hotspot", "complexity-watch"],
+      "adapter": "radon", "version": "6.0.1", "fallbackFor": "lizard", "okExit": [0],
+      "command": { "path": "radon", "fetch": ["uvx", "radon@6.0.1"], "versionArgs": ["--version"] },
+      "modes": { "static": { "invocations": [ { "id": "main", "args": ["cc", "-j", "."] } ] } }
     }
   ]
 }

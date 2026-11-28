@@ -5,6 +5,39 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-28 — Complexity replaces bloat as a quality criterion and joins the hygiene sweeps (#481)
+
+**Decision:** `references/quality-criteria.md`'s **bloat** bullet becomes **complexity**: a function or
+file harder to change than its job needs, measured against the repo's linter config, else the stack
+linter's documented default, with no number in the criterion. `references/hygiene-sweeps.md` gains a
+`## Complexity` method (lizard, radon as the Python fallback, the complexity × churn rank, hot versus
+watch, thresholds read from linter config) and its report, store and coverage sections gain the
+`watch` route, evidence lines, coverage notes and the thorough-only `--history` re-rank. The
+maintain playbook has the coordinator save the history inspector's churn table as `history.json` and
+pass it to `finalize --history`; the lenses get the hotspots as tooling facts and keep only the
+"needless layers, options or generality" judgment.
+
+**Why:** the measured half of bloat is deterministic and a tool states it exactly; spending a lens
+on it re-derives a tooling fact. The judgment half stays with the lenses.
+
+**Budgets:** the prose edits moved these figures (old to new):
+
+```text
+playbooks/maintaining-the-repo.md 84269 -> 88616
+playbooks/planning-waves.md 74754 -> 75152
+playbooks/reviewing-code.md 109467 -> 109865
+surfaceTotal (surface-budget.json) 7675 -> 7733
+```
+
+and the fixtures now read:
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 88616
+budget: context-budget.json playbooks/planning-waves.md 75152
+budget: context-budget.json playbooks/reviewing-code.md 109865
+budget: surface-budget.json surfaceTotal 7733
+```
+
 ## 2026-11-28 — maintain's hygiene sweep runs every registered sweep in one pass (#478)
 
 **Decision:** `hygiene-sweep.mjs run` covers every sweep `references/hygiene-sweeps.json` registers in

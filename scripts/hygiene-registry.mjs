@@ -1,9 +1,11 @@
 // The hygiene sweeps' registry loader and structural validator. references/hygiene-sweeps.json is the
 // single owner of the stacks, culprit kinds, scanners, config defaults and tool pins/invocations, and
-// of each sweep's title and noun and each kind's route and severity cap;
+// of each sweep's title and noun and each kind's route and severity cap, and of the complexity
+// defaults (each with its source and URL) and the key map of the config files they are read from;
 // scripts/validate.mjs (check 30) runs validateRegistry on it at every gate.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { ADAPTERS as ADAPTER_IMPLEMENTATIONS } from "./hygiene-adapters.mjs";
 
 export const REGISTRY_PATH = fileURLToPath(new URL("../references/hygiene-sweeps.json", import.meta.url));
 
@@ -11,13 +13,14 @@ const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const SIGNAL_RE = /^(\*\.[A-Za-z0-9]+|[^/*]+)$/;
 const VERSION_RE = /^v?\d+(\.\d+)*$/;
 const SEVERITIES = ["critical", "high", "medium", "low"];
-const ADAPTERS = ["knip", "tsc", "raw"];
+const ADAPTERS = Object.keys(ADAPTER_IMPLEMENTATIONS);
 const OUTPUT_FORMATS = ["lines", "cargo-machete", "purgecss-json"];
 const MODES = ["static", "executing"];
-const FORBIDDEN_ARGS = ["--fix", "--write", "--with-metadata", "--output-file", "--generate-badge"];
+const FORBIDDEN_ARGS = ["--fix", "--write", "--with-metadata", "--output-file", "--generate-badge", "-o", "--output_file"];
 // A flag whose value is a location the tool writes to: it must sit under {scratch}/, never in the repo.
 const OUTPUT_ARGS = ["--output", "--output-dir", "--out-dir", "--report-dir", "--target-dir"];
-const ROUTES = ["verification", "judgment"];
+const ROUTES = ["verification", "judgment", "watch"];
+export const METRICS = ["ccn", "cognitive", "nesting", "params", "nloc", "fileLines"];
 const WHEN_KEYS = ["anyFile", "packageDependency"];
 // `{scratch}` is a placeholder everywhere; `{project}` and `{projectSlug}` only for a tool with `projects`.
 // A brace group with commas is a glob, not a placeholder.
@@ -174,7 +177,73 @@ function kindErrors(path, def) {
     if (!isNonEmptyStringArray(def.raiseBeyondCapWhen)) errors.push(`${path}.raiseBeyondCapWhen: must be a non-empty array of strings`);
     else if (def.maxSeverity === undefined) errors.push(`${path}.raiseBeyondCapWhen: needs a maxSeverity`);
   }
-  if (def.route !== undefined && !ROUTES.includes(def.route)) errors.push(`${path}.route: must be ${ROUTES.join(" or ")}`);
+  if (def.route !== undefined && !ROUTES.includes(def.route)) errors.push(`${path}.route: must be one of ${ROUTES.join(", ")}`);
+  if (def.history !== undefined && typeof def.history !== "boolean") errors.push(`${path}.history: must be a boolean`);
+  return errors;
+}
+
+function fallbackErrors(tools) {
+  return tools.filter((t) => isObject(t) && t.fallbackFor !== undefined).flatMap((t) => {
+    const primary = tools.find((o) => isObject(o) && o !== t && o.id === t.fallbackFor);
+    const shares = primary && isStringArray(t.stacks) && isStringArray(primary.stacks) && t.stacks.some((s) => primary.stacks.includes(s));
+    return primary && primary.sweep === t.sweep && shares
+      ? []
+      : [`tools[${t.id}].fallbackFor: must name another tool of sweep ${t.sweep} that shares a stack`];
+  });
+}
+
+const isHttpsUrl = (v) => {
+  try {
+    return new URL(v).protocol === "https:";
+  } catch {
+    return false;
+  }
+};
+
+function metricErrors(path, entries) {
+  const errors = [];
+  for (const m of Object.keys(entries)) if (!METRICS.includes(m)) errors.push(`${path}.${m}: not a metric (${METRICS.join(", ")})`);
+  for (const m of METRICS) {
+    const e = entries[m];
+    const ok = isObject(e) && Number.isInteger(e.value) && e.value > 0 && typeof e.source === "string" && e.source && isHttpsUrl(e.url);
+    if (!ok) errors.push(`${path}.${m}: must be { value: a positive integer, source: a non-empty string, url: an https URL }`);
+  }
+  return errors;
+}
+
+function configKeyErrors(path, entry, defaults, tools) {
+  if (!isObject(entry)) return [`${path}: must be an object`];
+  const errors = [];
+  if (!isObject(defaults[entry.stack])) errors.push(`${path}.stack: must be a stack with defaults`);
+  const { files, keys } = entry;
+  if (files === "eslint-row") {
+    const eslint = tools.find((t) => isObject(t) && t.id === "eslint");
+    if (!eslint || !isNonEmptyStringArray(eslint.when?.anyFile))
+      errors.push(`${path}.files: "eslint-row" needs an eslint tool with when.anyFile`);
+  } else if (!isNonEmptyStringArray(files)) errors.push(`${path}.files: must be a non-empty array of file names or "eslint-row"`);
+  if (!isObject(keys) || !Object.keys(keys).length || !Object.values(keys).every((m) => METRICS.includes(m)))
+    errors.push(`${path}.keys: must map config keys to metrics`);
+  return errors;
+}
+
+function complexityErrors(complexity, stackKeys, tools) {
+  if (!isObject(complexity)) return ["complexity: must be an object"];
+  const errors = [];
+  const { defaults, configKeys } = complexity;
+  if (!isObject(defaults) || !isObject(defaults.other)) errors.push('complexity.defaults: must be an object with an "other" entry');
+  else
+    for (const [stack, entries] of Object.entries(defaults)) {
+      const path = `complexity.defaults.${stack}`;
+      if (stack !== "other" && !stackKeys.includes(stack)) errors.push(`${path}: not a stack`);
+      else if (!isObject(entries)) errors.push(`${path}: must be an object`);
+      else errors.push(...metricErrors(path, entries));
+    }
+  if (configKeys !== undefined) {
+    if (!isObject(configKeys)) errors.push("complexity.configKeys: must be an object");
+    else
+      for (const [family, entry] of Object.entries(configKeys))
+        errors.push(...configKeyErrors(`complexity.configKeys.${family}`, entry, isObject(defaults) ? defaults : {}, tools));
+  }
   return errors;
 }
 
@@ -235,6 +304,7 @@ export function validateRegistry(registry) {
   if (!isObject(config) || !Number.isInteger(config.staleTodoDays) || config.staleTodoDays <= 0) errors.push("config.staleTodoDays: must be a positive integer");
   if (!isObject(config) || typeof config.configFile !== "string" || !config.configFile) errors.push("config.configFile: must be a non-empty string");
   if (!isObject(config) || !Number.isInteger(config.hotspotCap) || config.hotspotCap <= 0) errors.push("config.hotspotCap: must be a positive integer");
+  if (!isObject(config) || !Number.isInteger(config.hotCommits) || config.hotCommits <= 0) errors.push("config.hotCommits: must be a positive integer");
   if (Array.isArray(registry.tools)) {
     const seen = new Set();
     registry.tools.forEach((tool, i) => {
@@ -244,7 +314,9 @@ export function validateRegistry(registry) {
         seen.add(tool.id);
       }
     });
+    errors.push(...fallbackErrors(registry.tools));
   }
+  if (registry.complexity !== undefined) errors.push(...complexityErrors(registry.complexity, stackKeys, Array.isArray(registry.tools) ? registry.tools : []));
   return errors;
 }
 
@@ -279,6 +351,7 @@ export function kindIndex(registry) {
         maxSeverity: def.maxSeverity ?? null,
         raiseBeyondCapWhen: def.raiseBeyondCapWhen ?? [],
         route: def.route ?? "verification",
+        history: def.history ?? false,
       });
   return index;
 }
