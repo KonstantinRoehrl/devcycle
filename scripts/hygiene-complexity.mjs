@@ -110,6 +110,12 @@ export function readThresholds({ files, read, registry, stacks }) {
 
 const lineCount = (text) => (text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0));
 const byText = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+const MAX_NAMED_FILES = 3;
+const plural = (n) => `${n} file${n === 1 ? "" : "s"}`;
+
+// An over-threshold function counts for at least 1: lizard reports a real 0 cognitive for a long
+// straight-line or wide-parameter function, which would otherwise rank the file below its churn.
+const weightOf = (row) => (row.cognitive > 0 ? row.cognitive : row.ccn > 0 ? row.ccn : 1);
 
 function overMetrics(row, limits) {
   return FUNCTION_METRICS.filter((m) => row[m] != null && limits[m] && row[m] > limits[m].value)
@@ -121,18 +127,20 @@ export function scoreFiles(rows, { thresholds, churn, lines, hotCommits, files, 
   const excluded = Object.fromEntries(EXCLUSION_ORDER.map((c) => [c, 0]));
   const byFile = new Map();
   for (const row of rows.filter((r) => known.has(r.file))) byFile.set(row.file, [...(byFile.get(row.file) ?? []), row]);
-  const candidates = [];
+  const candidates = [], unmeasured = [];
   for (const [file, fileRows] of [...byFile].sort(([a], [b]) => byText(a, b))) {
     const text = read(file) ?? "";
-    const category = exclusionCategory(file, { head: text.split("\n").slice(0, HEAD_LINES).join("\n"), attributes });
+    const head = (read.head?.(file) ?? text).split("\n").slice(0, HEAD_LINES).join("\n");
+    const category = exclusionCategory(file, { head, attributes });
     if (category) { excluded[category] += 1; continue; }
     const limits = thresholds.byStack[stackFor(file)] ?? thresholds.byStack.other;
     const total = lineCount(text);
+    if (read.oversize?.(file)) unmeasured.push(file);
     const over = fileRows.map((row) => ({ row, hits: overMetrics(row, limits) })).filter((o) => o.hits.length)
       .sort((a, b) => a.row.line - b.row.line);
     const excess = Math.max(0, total - (limits.fileLines?.value ?? Infinity));
     if (!over.length && !excess) continue;
-    const score = over.reduce((sum, o) => sum + (o.row.cognitive ?? o.row.ccn), 0) + excess;
+    const score = over.reduce((sum, o) => sum + weightOf(o.row), 0) + excess;
     const commits = churn.get(file) ?? 0;
     const evidence = over.map((o) => `\`${o.row.name}\` L${o.row.line}: ${o.hits.join(", ")}`);
     if (excess) evidence.push(`file: fileLines ${total} > ${limits.fileLines.value} (${limits.fileLines.source})`);
@@ -140,15 +148,18 @@ export function scoreFiles(rows, { thresholds, churn, lines, hotCommits, files, 
     candidates.push({ kind: commits >= hotCommits ? HOT_KIND : WATCH_KIND, file, line: null, symbol: null, clusterKey: file, anchor: file, score,
       detail: `${over.length} of ${fileRows.length} functions over threshold, ${total} lines; score ${score}`, evidence, noisy: false });
   }
-  return { candidates, excluded };
+  return { candidates, excluded, unmeasured };
 }
 
 export function complexityResult(rows, ctx, { notes = [] } = {}) {
   const attributes = ctx.files.includes(".gitattributes") ? linguistAttributes(ctx.read(".gitattributes") ?? "") : [];
   const thresholds = readThresholds({ files: ctx.files, read: ctx.read, registry: ctx.registry, stacks: ctx.stacks });
-  const { candidates, excluded } = scoreFiles(rows, { thresholds, churn: ctx.churn ?? new Map(), lines: ctx.lines ?? new Map(),
+  const { candidates, excluded, unmeasured } = scoreFiles(rows, { thresholds, churn: ctx.churn ?? new Map(), lines: ctx.lines ?? new Map(),
     hotCommits: ctx.config.hotCommits, files: ctx.files, read: ctx.read, attributes, stackOf });
   const dropped = EXCLUSION_ORDER.filter((c) => excluded[c]).map((c) => `${c} ${excluded[c]}`);
-  const coverage = [...thresholds.notes, ...(dropped.length ? [`excluded before measurement: ${dropped.join(", ")}`] : []), ...notes];
+  const unmeasuredNote = unmeasured.length
+    ? [`file length not measured for ${plural(unmeasured.length)} too large to read: ${unmeasured.slice(0, MAX_NAMED_FILES).join(", ")}${unmeasured.length > MAX_NAMED_FILES ? ", ..." : ""}`]
+    : [];
+  const coverage = [...thresholds.notes, ...unmeasuredNote,...(dropped.length ? [`excluded before measurement: ${dropped.join(", ")}`] : []), ...notes];
   return { ok: true, candidates, note: null, coverage };
 }

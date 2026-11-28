@@ -8,7 +8,7 @@
 // (judgment-routed kinds) into one section, entry list and count set per sweep.
 // `references/hygiene-sweeps.json` owns every pin, invocation, kind and severity read here.
 import { spawnSync } from "node:child_process";
-import { accessSync, constants, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, closeSync, constants, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
 import { basename, delimiter, dirname, extname, join, normalize, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseFlags } from "./cli-flags.mjs";
@@ -21,6 +21,7 @@ import { gitToplevel, recordPath, runsDirForRepo, writeLine } from "./run-record
 // The sweep an lcov report is evidence for: it shows which dead-code candidates no test reaches.
 const LCOV_SWEEP = "dead-code";
 const READ_CAP_BYTES = 1024 * 1024;
+const HEAD_BYTES = 8 * 1024;
 const BLAME_CAP_FILES = 200;
 // A binary file cannot name anything textually, so skipping it for size is not a gap in a scan.
 const BINARY_EXTS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".ico", ".bmp", ".woff", ".woff2", ".ttf", ".otf",
@@ -142,10 +143,12 @@ export function defaultRunTool({ argv, cwd, env }) {
 }
 
 // `read.scope` collects the text files a caller asked for that were over the read cap, so a scanner
-// that could not see them is reported partial.
+// that could not see them is reported partial. `read.head(rel)` is the text a header-marker check
+// needs: the whole file, or the first HEAD_BYTES of an oversize one; it never joins the scope.
+// `read.oversize(rel)` says whether `read` withheld the file for its size.
 function makeReader(repoRoot) {
   const cache = new Map();
-  const read = (rel) => {
+  const load = (rel) => {
     if (!cache.has(rel)) {
       let text = null, oversize = false;
       try {
@@ -156,11 +159,26 @@ function makeReader(repoRoot) {
       } catch { text = null; }
       cache.set(rel, { text, oversize });
     }
-    const hit = cache.get(rel);
+    return cache.get(rel);
+  };
+  const read = (rel) => {
+    const hit = load(rel);
     if (hit.oversize) read.scope?.add(rel);
     return hit.text;
   };
   read.scope = null;
+  read.oversize = (rel) => load(rel).oversize;
+  read.head = (rel) => {
+    const hit = load(rel);
+    if (!hit.oversize) return hit.text;
+    let fd;
+    try {
+      fd = openSync(join(repoRoot, rel), "r");
+      const buffer = Buffer.alloc(HEAD_BYTES);
+      const head = buffer.subarray(0, readSync(fd, buffer, 0, HEAD_BYTES, 0)).toString("utf8");
+      return head.includes("\u0000") ? null : head;
+    } catch { return null; } finally { if (fd !== undefined) closeSync(fd); }
+  };
   return read;
 }
 
