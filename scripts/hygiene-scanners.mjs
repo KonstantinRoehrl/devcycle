@@ -3,6 +3,7 @@
 // scanner applies to are `references/hygiene-sweeps.json`'s `scanners`; this file owns only the
 // detection rules.
 import { basename, extname } from "node:path";
+import { duplicateConstants, scatteredEnvReads } from "./hygiene-scanners-duplication.mjs";
 
 const SLASH_COMMENT_EXTS = new Set([".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".go", ".rs", ".cs", ".java"]);
 const HASH_COMMENT_EXTS = new Set([".py", ".rb", ".sh"]);
@@ -269,4 +270,4 @@ export const staticAssets = {
   },
 };
 
-export const SCANNERS = [commentedOutCode, staleTodo, unusedEnvVar, cssCustomProperties, cssClassesKeyframes, angularIo, staticAssets];
+export const SCANNERS = [commentedOutCode, staleTodo, unusedEnvVar, cssCustomProperties, cssClassesKeyframes, angularIo, staticAssets, duplicateConstants, scatteredEnvReads];

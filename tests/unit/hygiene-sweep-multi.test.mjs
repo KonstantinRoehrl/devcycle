@@ -9,10 +9,19 @@ import { SCANNERS } from "../../scripts/hygiene-scanners.mjs";
 import { findingId, recordMaintenanceFinding } from "../../scripts/maintenance-findings.mjs";
 import { gitToplevel, runsDirForRepo } from "../../scripts/run-record.mjs";
 
+// Dead code alone, whatever else ships, so these tests pin the spine and not the shipped sweeps.
+function deadCodeOnly() {
+  const reg = structuredClone(loadRegistry());
+  reg.sweeps = { "dead-code": reg.sweeps["dead-code"] };
+  reg.scanners = Object.fromEntries(Object.entries(reg.scanners).filter(([, s]) => s.sweep === "dead-code"));
+  reg.tools = reg.tools.filter((t) => t.sweep === "dead-code");
+  return reg;
+}
+
 // A second sweep beside dead code: one verification kind fed by a whole-tree scanner and a raw
 // tool, one judgment kind fed by a hotspot-scoped scanner that also hands the judgment material.
 function twoSweeps() {
-  const reg = structuredClone(loadRegistry());
+  const reg = deadCodeOnly();
   reg.sweeps.twins = { title: "Twins", noun: "twins", notCovered: ["twins across languages"],
     kinds: { twin: { severity: "medium" }, "judged-twin": { severity: "low", route: "judgment" } } };
   reg.scanners["twin-scan"] = { sweep: "twins", kinds: ["twin"], stacks: null };

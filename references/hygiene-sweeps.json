@@ -28,6 +28,24 @@
         "always-on or always-off feature flags",
         "unused config keys other than environment variables"
       ]
+    },
+    "duplication": {
+      "title": "Duplication / single source of truth",
+      "noun": "duplication",
+      "kinds": {
+        "duplicate-constant": { "severity": "medium" },
+        "restated-literal": { "severity": "medium" },
+        "missing-owner": { "severity": "medium" },
+        "duplicate-logic": { "severity": "medium" },
+        "semantic-duplicate": { "severity": "medium", "route": "judgment" },
+        "scattered-env-read": { "severity": "low" }
+      },
+      "notCovered": [
+        "types and DTOs mirrored across a language boundary",
+        "validation rules and error messages restated in prose",
+        "routes and storage keys outside string literals",
+        "semantic duplicates outside the hotspot files"
+      ]
     }
   },
   "scanners": {
@@ -37,7 +55,9 @@
     "css-custom-properties": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": ["web"] },
     "css-classes-keyframes": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": ["web"] },
     "angular-io": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": ["angular"] },
-    "static-assets": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": null }
+    "static-assets": { "sweep": "dead-code", "kinds": ["dead-code"], "stacks": null },
+    "duplicate-constants": { "sweep": "duplication", "kinds": ["duplicate-constant", "restated-literal", "missing-owner"], "stacks": null },
+    "scattered-env-reads": { "sweep": "duplication", "kinds": ["scattered-env-read"], "stacks": null }
   },
   "config": { "staleTodoDays": 365, "configFile": ".devcycle-hygiene.json", "hotspotCap": 30 },
   "tools": [

@@ -125,7 +125,7 @@ test("a kind routes to verification by default or to judgment, and kindIndex lis
     { sweep: "dead-code", severity: "low", maxSeverity: null, raiseBeyondCapWhen: [], route: "judgment" });
   const shipped = loadRegistry();
   assert.equal(kindIndex(shipped).get("dead-code").route, "verification");
-  assert.deepEqual([...kindIndex(shipped).keys()], Object.keys(shipped.sweeps["dead-code"].kinds));
+  assert.deepEqual([...kindIndex(shipped).keys()], Object.values(shipped.sweeps).flatMap((s) => Object.keys(s.kinds)));
 });
 
 test("a scanner may be scoped to the hotspot files, and the hotspot cap is configured", () => {
@@ -153,4 +153,20 @@ test("write flags are forbidden and every output location sits under {scratch}/"
   const ok = fresh();
   args(ok).push("--output", "{scratch}/report", "--report-dir={scratch}/r");
   assert.deepEqual(validateRegistry(ok), []);
+});
+
+test("the duplication sweep carries its kinds, default severities, routes and scanners", () => {
+  const reg = loadRegistry();
+  const sweep = reg.sweeps.duplication;
+  assert.deepEqual([sweep.title, sweep.noun], ["Duplication / single source of truth", "duplication"]);
+  assert.deepEqual(Object.fromEntries(Object.entries(sweep.kinds).map(([k, v]) => [k, [v.severity, v.route ?? "verification"]])), {
+    "duplicate-constant": ["medium", "verification"], "restated-literal": ["medium", "verification"],
+    "missing-owner": ["medium", "verification"], "duplicate-logic": ["medium", "verification"],
+    "semantic-duplicate": ["medium", "judgment"], "scattered-env-read": ["low", "verification"],
+  });
+  assert.deepEqual(sweep.notCovered, ["types and DTOs mirrored across a language boundary",
+    "validation rules and error messages restated in prose", "routes and storage keys outside string literals",
+    "semantic duplicates outside the hotspot files"]);
+  assert.deepEqual(reg.scanners["duplicate-constants"], { sweep: "duplication", kinds: ["duplicate-constant", "restated-literal", "missing-owner"], stacks: null });
+  assert.deepEqual(reg.scanners["scattered-env-reads"], { sweep: "duplication", kinds: ["scattered-env-read"], stacks: null });
 });
