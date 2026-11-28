@@ -5,6 +5,32 @@ reversal have somewhere to point. Newest first. Each entry: the decision, why, a
 supersedes. Historical documents (the dry-run report, platform notes, the founding spec)
 are evidence of their moment — they get a forward pointer here, never a rewrite.
 
+## 2026-11-28 — maintain judges its hygiene sweeps in a tenth dispatch (#478)
+
+**Decision:** the pass ceiling rises from 9 to 10 total LLM dispatches, the tenth being one read-only
+judgment dispatch per pass over `judgment-inputs.json`.
+
+**Supersedes:** the 2026-11-22 ninth-dispatch entry's statement that no later sweep raises the ceiling.
+
+**Why:** semantic duplicates and comment judgments produce or clear candidates by reading code, and
+folding them into the verification budget would starve dead-code verification on a real repo. Every
+later sweep shares these two dispatches, so this is the last raise the sweep family needs.
+
+**Budgets:** the playbook step, the judgment and duplication method prose and the docs moved these
+figures (old to new):
+
+```text
+playbooks/maintaining-the-repo.md 84269 -> 88934
+surfaceTotal (surface-budget.json) 7675 -> 7736
+```
+
+and the fixtures now read:
+
+```text
+budget: context-budget.json playbooks/maintaining-the-repo.md 88934
+budget: surface-budget.json surfaceTotal 7736
+```
+
 ## 2026-11-28 — maintain's hygiene sweep runs every registered sweep in one pass (#478)
 
 **Decision:** `hygiene-sweep.mjs run` covers every sweep `references/hygiene-sweeps.json` registers in

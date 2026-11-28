@@ -1,6 +1,6 @@
 # Hygiene sweeps
 
-The contract every `/devcycle:maintain` hygiene sweep follows, and the dead-code sweep's method.
+The contract every `/devcycle:maintain` hygiene sweep follows, and the dead-code and duplication sweeps' method.
 Audit-only: maintain reads it; planning never does. What is judged is
 `references/quality-criteria.md`'s; this file owns how a sweep finds, verifies and reports it.
 Stacks, tool pins, invocations, classes, culprit kinds and default severities live only in
@@ -49,6 +49,29 @@ order, so every sweep shares the one budget, one batched search per cluster, wit
 a raise never passes the kind's `maxSeverity` unless that reason is one of the kind's `raiseBeyondCapWhen`. A noisy candidate (knip in static
 mode, any tool without installed dependencies) never ranks as verified.
 
+## Judgment
+
+One read-only, session-tier dispatch per pass serves every kind whose registry `route` is `judgment`,
+within the same per-dispatch budget as verification and never in place of it. It reads
+`judgment-inputs.json` (`{ "items": [...] }`, sorted by `id`; with no judgment-routed kind, no items and
+no dispatch). An item is a candidate of a judgment-routed kind (`candidate:<candidateId>`), material a
+scanner supplies for the model to compare (`material:<scannerId>:<key>`), or an open store record of a
+judgment-routed kind (`record:<findingId>`, its title and affected files). It writes
+`judgments.json`:
+
+```json
+{ "reached": ["<input id>"],
+  "verdicts": [{ "candidateId", "outcome", "note", "severity"?, "raiseReason"? }],
+  "added": [{ "sweep", "kind", "file", "line", "symbol", "clusterKey", "anchor", "detail", "outcome", "note", "severity"?, "raiseReason"? }] }
+```
+
+`verdicts` rule on listed candidates as verification does (same outcomes, same severity rule). `added`
+carries a candidate the model found itself; its note names the comparison that shows it, and a semantic
+duplicate's `clusterKey` and `anchor` are `semantic <sorted symbol names joined by ",">`. A
+judgment-routed kind is full only when every input whose `kinds` name it is in `reached`, open store
+records included, so a stored judgment finding resolves only on a pass that re-examined it. An
+unjudged candidate is `suspected` with note `not judged: budget`: ranked below verified, never dropped.
+
 ## Report, store and ratchet
 
 One finding per cluster, its `canonicalLocation` the cluster anchor with no line, so the store's
@@ -89,3 +112,36 @@ stacks' tools use the raw adapter: their output reaches verification verbatim. B
 commented-out code, stale TODOs (older than `staleTodoDays`, which a repo-root `.devcycle-hygiene.json`
 `{ "staleTodoDays": <n> }` overrides), unused environment variables, CSS custom properties, classes
 and keyframes, Angular inputs and outputs, and static assets.
+
+## Duplication
+
+The duplication sweep records where one fact has more than one owner. Its kinds, titles and severity
+caps are the registry's; its method is:
+
+- **Constant scanner** — `duplicate-constant` (one named value declared in two or more files; anchor
+  `constant <name>=<value>`), `restated-literal` (a distinctive literal repeated in a file other than its
+  exported owner; anchor the owner's `<file>#<name>`) and `missing-owner` (one value declared under
+  different names sharing a name token, no shared owner; anchor `value <value>`). Trivial values are
+  skipped: an integer with |n| ≤ 10, `0.5`, `true`, `false`, `null`, a string under 4 characters after
+  trimming. A value normalizes as: numbers `String(Number(text without "_"))`, strings their unquoted
+  content, hex colours lower-cased. `missing-owner` name tokens split on `_`, `-` and camelCase
+  humps, lower-cased, 3+ letters. A comment on the declaration's line or one of the three lines above
+  matching `deliberate(ly)` / `intentional(ly)` followed within 40 characters by `copy` / `copied` /
+  `duplicate(d)` / `duplication`, or `keep in sync`, any case, clears that instance; once fewer than
+  two uncleared instances remain the whole group is cleared, reason `documented deliberate copy`.
+- **Env-read scanner** — `scattered-env-read`: one environment variable read directly in three or more
+  distinct files (anchor `env <NAME>`).
+- **Same-body scanner** — `duplicate-logic`: function bodies equal after comments and whitespace are
+  dropped and identifiers are renamed by first appearance (keywords and property names kept); bodies
+  under 40 normalized characters are skipped and two or more distinct names are required (anchor
+  `body <sorted names joined by ",">`).
+- **jscpd** — `duplicate-logic` from clone pairs the pinned tool reports, unioned into families (anchor
+  `clone <hash>`). Its exclusions are the `--ignore` list of its registry entry, and the coverage
+  statement names them.
+- **Signature index** — the judgment's material for `semantic-duplicate`: hotspot files only, at most
+  200 functions and the first 65536 characters per file, `truncated` marking a cut. The model compares
+  signatures and bodies across files; a semantic duplicate's anchor is given under § Judgment.
+
+Coverage per kind in the statement: tool-checked (`duplicate-logic`, by jscpd), heuristic-only (the
+scanners' kinds, and `duplicate-logic` where jscpd did not run), judgment (`semantic-duplicate`, over
+the hotspot files and the files of open records), and not covered (the registry's `notCovered`).

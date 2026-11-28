@@ -10,7 +10,7 @@ that hand-off — a box pointing at another box would say nothing a sentence doe
 What this playbook contributes on top of the engine: it resolves a maintenance depth (`lean` /
 `standard` / `thorough`) that gates which criteria apply, orients the pass graph-first (an
 availability probe picks a graph-backed research dispatch over a bounded `Explore` fallback),
-and runs a deterministic-facts pre-pass — dependency audit, lint, the hygiene sweeps, whose candidates one verification dispatch confirms, and the duplication, dead-export and cross-reference checks only when the repo is devcycle's own source — so the engine's lenses receive tooling facts instead of
+and runs a deterministic-facts pre-pass — dependency audit, lint, the hygiene sweeps (dead code and duplication), whose candidates one verification dispatch confirms and whose judgment-routed kinds one judgment dispatch reviews, and the duplication, dead-export and cross-reference checks only when the repo is devcycle's own source — so the engine's lenses receive tooling facts instead of
 re-deriving them. The confirmed criteria (plus **Abstraction** at `standard`, plus a history
 inspector's signal at `thorough`) are then handed to `reviewing-code.md` at `repo` scope, which
 owns the panel dispatch and dedup-and-rank, then hands off to
@@ -36,7 +36,7 @@ executing-class tools and, separately, a coverage run. The answers go on that re
 sweep's per-kind counts, which **Trending** compares against the latest earlier pass on this machine.
 A hygiene-sweep finding resolves out of the store only when every source behind its kind ran in full and the pass finalized its sweeps, each with its own section in the findings document.
 
-A fan-out ceiling bounds the whole pass: at most 5 concurrent panel lenses and 9 total LLM
+A fan-out ceiling bounds the whole pass: at most 5 concurrent panel lenses and 10 total LLM
 dispatches, with a hard stop at the ≥20% context-depth band. The playbook mutates no code and no
 GitHub issue at any depth; selecting a finding to act on starts a separate `/devcycle:cycle`.
 

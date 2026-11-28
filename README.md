@@ -257,8 +257,9 @@ plugin ships. Start there.
 - `/devcycle:maintain`'s hygiene sweep: `scripts/hygiene-sweep.mjs` runs every sweep
   `references/hygiene-sweeps.json` names in one pass, its pinned tools and the built-in scanners, into
   `.devcycle/maintain/`, fetching a
-  pinned tool through `npx` when the repo has none, and one verification dispatch confirms each
-  candidate before it ranks. A tool that can run repo code runs only on that pass's consent. The
+  pinned tool through `npx` when the repo has none, one verification dispatch confirms each
+  candidate before it ranks, and one judgment dispatch reviews the judgment-routed kinds. The dead-code
+  and duplication sweeps ship in it. A tool that can run repo code runs only on that pass's consent. The
   plugin-only checks run only in devcycle's own source (`self-dev-check.mjs --is-source`).
 - The evidence-and-verification contract's gates: planning runs `scripts/plan-check.mjs` in its
   self-review — one fail-closed gate over ten legs, including the gate-rules and
