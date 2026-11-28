@@ -1,0 +1,21 @@
+{
+  "package.json": "{\"name\":\"dup-fixture\",\"version\":\"1.0.0\",\"type\":\"module\"}\n",
+  "src/limits.ts": "export const MAX_RETRIES = 12;\nexport const PAGE_SIZE = 25;\nexport const BRAND_TIMEOUT_MS = 30000;\n",
+  "src/client.ts": "export const MAX_RETRIES = 12;\n",
+  "src/a/retry.ts": "const RETRY_DELAY_MS = 1500;\n\nexport const retryDelay = () => RETRY_DELAY_MS;\n",
+  "src/b/retry.ts": "const RETRY_DELAY_MS = 1500;\n\nexport const retryDelay = () => RETRY_DELAY_MS;\n",
+  "src/c/retry.ts": "const RETRY_DELAY_MS = 1500;\n\nexport const retryDelay = () => RETRY_DELAY_MS;\n",
+  "src/fetcher.ts": "export function fetchLater(done) {\n  setTimeout(done, 30000);\n}\n",
+  "src/theme.css": ":root {\n  --brand-color: #3366ff;\n}\n",
+  "src/banner.ts": "export function paintBanner(el) {\n  el.style.color = \"#3366ff\";\n}\n",
+  "src/format/a.ts": "export function toSlug(text) {\n  return text.trim().toLowerCase().replace(/\\s+/g, \"-\");\n}\n",
+  "src/format/b.ts": "export function makeSlug(value) {\n  return value.trim().toLowerCase().replace(/\\s+/g, \"-\");\n}\n",
+  "src/api.ts": "export function apiUrl(path) {\n  return process.env.API_BASE_URL + path;\n}\n",
+  "src/admin.ts": "export const adminBase = () => process.env.API_BASE_URL + \"/admin\";\n",
+  "src/report.ts": "export const reportBase = () => process.env.API_BASE_URL + \"/reports\";\n",
+  "src/report/summary.ts": "export function buildSummary(rows, title) {\n  const heading = `Summary: ${title}`;\n  const totals = { count: 0, amount: 0, flagged: 0 };\n  for (const row of rows) {\n    totals.count += 1;\n    totals.amount += row.amount;\n    if (row.flagged) {\n      totals.flagged += 1;\n    }\n  }\n  const average = totals.count ? totals.amount / totals.count : 0;\n  const lines = [`count: ${totals.count}`, `amount: ${totals.amount}`];\n  lines.push(`average: ${average.toFixed(2)}`);\n  lines.push(`flagged: ${totals.flagged}`);\n  return [heading, ...lines].join(\"\\n\");\n}\n",
+  "src/report/digest.ts": "export function buildDigest(rows, owner) {\n  const banner = `Digest for ${owner}`;\n  const totals = { count: 0, amount: 0, flagged: 0 };\n  for (const row of rows) {\n    totals.count += 1;\n    totals.amount += row.amount;\n    if (row.flagged) {\n      totals.flagged += 1;\n    }\n  }\n  const average = totals.count ? totals.amount / totals.count : 0;\n  const lines = [`count: ${totals.count}`, `amount: ${totals.amount}`];\n  lines.push(`average: ${average.toFixed(2)}`);\n  lines.push(`flagged: ${totals.flagged}`);\n  return `${banner} (${lines.join(\", \")})`;\n}\n",
+  "src/percent.ts": "export const FULL_PERCENT = 100;\n",
+  "src/paging.ts": "export const MAX_PAGE_ITEMS = 100;\n",
+  "src/vendor-shim.ts": "// deliberate copy: keeps the shim dependency-free (see src/limits.ts)\nexport const PAGE_SIZE = 25;\n"
+}

@@ -366,6 +366,12 @@
       "when": { "anyFile": ["eslint.config.js", "eslint.config.mjs", "eslint.config.cjs", "eslint.config.ts", ".eslintrc.json", ".eslintrc.js"] },
       "command": { "local": "node_modules/.bin/eslint", "versionArgs": ["--version"] },
       "modes": { "executing": { "invocations": [ { "id": "main", "args": ["-f", "unix", "--cache", "--cache-location", "{scratch}/eslintcache", "."] } ] } }
+    },
+    {
+      "id": "jscpd", "sweep": "duplication", "stacks": ["js-ts", "python", "go", "rust", "dotnet", "web", "angular"], "kinds": ["duplicate-logic"],
+      "adapter": "jscpd", "version": "5.4.3", "okExit": [0],
+      "command": { "fetch": ["npx", "-y", "jscpd@5.4.3"] },
+      "modes": { "static": { "invocations": [ { "id": "main", "args": ["--reporters", "json", "--output", "{scratch}/report", "--silent", "--min-tokens", "50", "--ignore", "**/node_modules/**,**/dist/**,**/build/**,**/out/**,**/vendor/**,**/*.min.js,**/*.lock,**/package-lock.json,**/pnpm-lock.yaml,**/yarn.lock,**/fixtures/**,**/__fixtures__/**,**/generated/**", "."] } ] } }
     }
   ]
 }

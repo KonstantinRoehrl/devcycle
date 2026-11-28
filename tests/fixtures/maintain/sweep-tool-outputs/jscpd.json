@@ -1,0 +1,71 @@
+{
+  "duplicates": [
+    {
+      "firstFile": {
+        "end": 15,
+        "endLoc": {
+          "column": 8,
+          "line": 15,
+          "position": 520
+        },
+        "name": "src/report/digest.ts",
+        "start": 2,
+        "startLoc": {
+          "column": 36,
+          "line": 2,
+          "position": 79
+        }
+      },
+      "format": "typescript",
+      "fragment": "  const banner = `Digest for ${owner}`;\n  const totals = { count: 0, amount: 0, flagged: 0 };\n  for (const row of rows) {\n    totals.count += 1;\n    totals.amount += row.amount;\n    if (row.flagged) {\n      totals.flagged += 1;\n    }\n  }\n  const average = totals.count ? totals.amount / totals.count : 0;\n  const lines = [`count: ${totals.count}`, `amount: ${totals.amount}`];\n  lines.push(`average: ${average.toFixed(2)}`);\n  lines.push(`flagged: ${totals.flagged}`);\n  return `${banner} (${lines.join(\", \")})`;",
+      "isNew": false,
+      "kind": "exact",
+      "lines": 14,
+      "secondFile": {
+        "end": 15,
+        "endLoc": {
+          "column": 8,
+          "line": 15,
+          "position": 520
+        },
+        "name": "src/report/summary.ts",
+        "start": 2,
+        "startLoc": {
+          "column": 35,
+          "line": 2,
+          "position": 79
+        }
+      },
+      "tokens": 116
+    }
+  ],
+  "statistics": {
+    "detectionDate": "2026-11-28T11:06:37.130Z",
+    "formats": {
+      "typescript": {
+        "clones": 1,
+        "duplicatedLines": 14,
+        "duplicatedTokens": 116,
+        "lines": 32,
+        "newClones": 0,
+        "newDuplicatedLines": 0,
+        "percentage": 43.75,
+        "percentageTokens": 40.70175438596491,
+        "sources": 2,
+        "tokens": 285
+      }
+    },
+    "total": {
+      "clones": 1,
+      "duplicatedLines": 14,
+      "duplicatedTokens": 116,
+      "lines": 32,
+      "newClones": 0,
+      "newDuplicatedLines": 0,
+      "percentage": 43.75,
+      "percentageTokens": 40.70175438596491,
+      "sources": 2,
+      "tokens": 285
+    }
+  }
+}
