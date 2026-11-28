@@ -1,17 +1,19 @@
 #!/usr/bin/env node
-// The hygiene sweep's deterministic spine. `run` detects the repo's stacks, runs the registry's
-// tools that apply (an executing-class mode only on this pass's consent) into scratch, normalizes
-// their output through an adapter, runs the built-in scanners, and writes candidate clusters and
-// coverage rows. The verification dispatch, not this script, decides what is a finding.
+// The hygiene sweep's deterministic spine. `run` covers every registered sweep in one pass: it
+// detects the repo's stacks, runs the registry's tools that apply (an executing-class mode only on
+// this pass's consent) into scratch, normalizes their output through an adapter, runs the built-in
+// scanners, and writes candidate clusters, coverage rows and the inputs of judgment-routed kinds.
+// The verification dispatch, not this script, decides what is a finding.
 // `references/hygiene-sweeps.json` owns every pin, invocation, kind and severity read here.
 import { spawnSync } from "node:child_process";
 import { accessSync, constants, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, delimiter, dirname, extname, join, normalize, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseFlags } from "./cli-flags.mjs";
-import { loadRegistry, sourcedKinds } from "./hygiene-registry.mjs";
+import { kindIndex, loadRegistry, sourcedKinds } from "./hygiene-registry.mjs";
 import { ADAPTERS } from "./hygiene-adapters.mjs";
 import { SCANNERS } from "./hygiene-scanners.mjs";
+import { readMaintenanceFindings } from "./maintenance-findings.mjs";
 import { gitToplevel, recordPath, runsDirForRepo, writeLine } from "./run-record.mjs";
 
 const SWEEP = "dead-code";
@@ -32,11 +34,13 @@ export function detectStacks(files, registry) {
     .map(([id]) => id);
 }
 
-export function selectTools(registry, { stacks, files, consent }) {
-  const tracked = new Set(files);
-  return registry.tools.filter((t) => t.sweep === SWEEP).map((tool) => {
+export function selectTools(registry, { stacks, files, consent, rootPackage = null }) {
+  const declared = new Set([...Object.keys(rootPackage?.dependencies ?? {}), ...Object.keys(rootPackage?.devDependencies ?? {})]);
+  return registry.tools.map((tool) => {
     const configs = tool.when?.anyFile ? files.filter((f) => tool.when.anyFile.includes(basename(f))) : null;
-    const applies = tool.stacks.some((s) => stacks.includes(s)) && (!configs || configs.length > 0);
+    const needed = tool.when?.packageDependency;
+    const applies = tool.stacks.some((s) => stacks.includes(s)) && (!configs || configs.length > 0) &&
+      (!needed || needed.some((name) => declared.has(name)));
     if (!applies) return { tool, mode: null, status: "not-applicable" };
     if (configs && !configs.some((f) => !f.includes("/")))
       return { tool, mode: null, status: "unavailable",
@@ -64,31 +68,48 @@ export function resolveCommand(tool, { repoRoot, onPath = onPathDefault }) {
 }
 
 export function churnByFile(repoRoot) {
-  const r = git(repoRoot, ["log", "--since=6 months ago", "-n", "500", "--name-only", "--format="]);
+  const r = git(repoRoot, ["log", "--since=6 months ago", "-n", "500", "--name-only", "--format=%x1e"]);
   const churn = new Map();
-  if (r.status !== 0) return { churn, error: firstLine(r.stderr) };
-  for (const f of r.stdout.split("\n").filter(Boolean)) churn.set(f, (churn.get(f) ?? 0) + 1);
-  return { churn, error: null };
+  if (r.status !== 0) return { churn, commits: [], error: firstLine(r.stderr) };
+  const commits = r.stdout.split("\x1e").map((part) => part.split("\n").filter(Boolean)).filter((list) => list.length);
+  for (const f of commits.flat()) churn.set(f, (churn.get(f) ?? 0) + 1);
+  return { churn, commits, error: null };
 }
 
 const firstLine = (text) => (text ?? "").split("\n").find((l) => l.trim())?.trim() ?? "no output";
 
-export function clusterCandidates(candidates, churn) {
+// A candidate with a `clusterKey` joins the cluster of every candidate sharing it and names that cluster's anchor.
+export function clusterCandidates(candidates, churn, commits = []) {
   const byId = new Map();
   for (const c of candidates.filter((x) => !x.cleared)) {
-    const anchor = c.line !== null || c.symbol !== null ? c.file : dirname(c.file);
-    const clusterId = `${c.kind}:${anchor}`;
-    const cl = byId.get(clusterId) ?? { clusterId, kind: c.kind, anchor, files: [], candidates: [], blastRadius: 0 };
+    const keyed = c.clusterKey !== undefined;
+    const anchor = keyed ? c.anchor : c.line !== null || c.symbol !== null ? c.file : dirname(c.file);
+    const clusterId = `${c.kind}:${keyed ? c.clusterKey : anchor}`;
+    const cl = byId.get(clusterId) ?? { clusterId, sweep: c.sweep, kind: c.kind, anchor, files: [], candidates: [], blastRadius: 0, coChange: 0 };
     if (!cl.files.includes(c.file)) cl.files.push(c.file);
     cl.candidates.push(c.id);
     byId.set(clusterId, cl);
   }
   const clusters = [...byId.values()];
+  const commitSets = commits.map((list) => new Set(list));
   for (const cl of clusters) {
     cl.files.sort();
     cl.blastRadius = cl.files.length * (1 + cl.files.reduce((n, f) => n + (churn.get(f) ?? 0), 0));
+    if (cl.files.length > 1) cl.coChange = commitSets.filter((set) => cl.files.filter((f) => set.has(f)).length >= 2).length;
   }
   return clusters.sort((a, b) => b.blastRadius - a.blastRadius || (a.clusterId < b.clusterId ? -1 : 1));
+}
+
+// Verification-routed clusters dealt one per sweep in turn, so a long sweep cannot starve the others
+// of the verification budget; judgment-routed clusters follow, in incoming order.
+export function orderForVerification(clusters, sweepOrder) {
+  const verification = clusters.filter((c) => (c.route ?? "verification") === "verification");
+  const order = [...new Set([...sweepOrder, ...verification.map((c) => c.sweep)])];
+  const queues = order.map((sweep) => verification.filter((c) => c.sweep === sweep));
+  const ordered = [];
+  for (let round = 0; queues.some((q) => round < q.length); round += 1)
+    for (const q of queues) if (round < q.length) ordered.push(q[round]);
+  return [...ordered, ...clusters.filter((c) => c.route === "judgment")];
 }
 
 export function defaultRunTool({ argv, cwd, env }) {
@@ -122,10 +143,10 @@ function makeReader(repoRoot) {
   return read;
 }
 
-function makeBlame(repoRoot) {
+function makeBlame(repoRoot, cap) {
   let used = 0;
   const blame = (rel) => {
-    if (used >= BLAME_CAP_FILES) { blame.capped = true; blame.skipped += 1; return null; }
+    if (used >= cap) { blame.capped = true; blame.skipped += 1; return null; }
     used += 1;
     const r = git(repoRoot, ["blame", "--line-porcelain", "--", rel]);
     if (r.status !== 0) { blame.failed.push(firstLine(r.stderr)); return null; }
@@ -219,7 +240,7 @@ function expandProjects(tool, repoRoot) {
 }
 
 function runOneTool({ tool, mode }, { repoRoot, outDir, files, read, dependenciesInstalled, runTool, onPath, anchorFiles }) {
-  const row = { source: tool.id, kinds: tool.kinds, class: mode, method: tool.adapter === "raw" ? "tool-raw" : "tool",
+  const row = { source: tool.id, sweep: tool.sweep, kinds: tool.kinds, class: mode, method: tool.adapter === "raw" ? "tool-raw" : "tool",
     downloaded: false, version: tool.version, note: null };
   const resolved = resolveCommand(tool, { repoRoot, onPath });
   if (!resolved) {
@@ -264,7 +285,7 @@ function runOneTool({ tool, mode }, { repoRoot, outDir, files, read, dependencie
   }
   const missingDeps = tool.needsDependencies && !dependenciesInstalled;
   const notes = [result.note, plan.note, ...plan.incomplete, missingDeps ? "dependencies not installed" : null].filter(Boolean);
-  const candidates = result.candidates.map((c) => ({ ...c, source: tool.id, noisy: Boolean(c.noisy || missingDeps) }));
+  const candidates = result.candidates.map((c) => ({ ...c, source: tool.id, sweep: tool.sweep, noisy: Boolean(c.noisy || missingDeps) }));
   const status = !result.ok ? "failed" : plan.incomplete.length ? "partial" : "ran";
   return { row: { ...row, status, note: notes.join("; ") || null }, candidates: result.ok ? candidates : [] };
 }
@@ -272,38 +293,54 @@ function runOneTool({ tool, mode }, { repoRoot, outDir, files, read, dependencie
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 // What kept a scanner from seeing everything, or null when it saw it all.
-function scannerGap(id, ctx, oversize) {
+function scannerGap(impl, blame, oversize, blameCap) {
   const gaps = [];
   if (oversize.size) gaps.push(`${plural(oversize.size, "file", "files")} over 1 MB not scanned (${[...oversize].slice(0, 3).join(", ")})`);
-  if (id === "stale-todo") {
-    if (ctx.blame.capped) gaps.push(`git blame capped at ${BLAME_CAP_FILES} files; ${plural(ctx.blame.skipped, "file with a TODO was", "files with a TODO were")} not aged`);
-    if (ctx.blame.failed.length) gaps.push(`git blame failed for ${plural(ctx.blame.failed.length, "file", "files")}: ${ctx.blame.failed[0]}`);
-  }
+  const [one, many] = impl.blameUnit ?? ["file was", "files were"];
+  if (blame.capped) gaps.push(`git blame capped at ${blameCap} files; ${plural(blame.skipped, one, many)} not aged`);
+  if (blame.failed.length) gaps.push(`git blame failed for ${plural(blame.failed.length, "file", "files")}: ${blame.failed[0]}`);
   return gaps.length ? gaps.join("; ") : null;
 }
 
-function runScanners(registry, stacks, ctx) {
-  const rows = [], candidates = [];
-  for (const [id, def] of Object.entries(registry.scanners).filter(([, d]) => d.sweep === SWEEP)) {
-    const row = { source: id, kinds: def.kinds, class: "heuristic", method: "heuristic", downloaded: false, version: null, note: null };
+// The files a hotspot-scoped scanner sees: the step 3 list when one was passed, else the most-churned files.
+function pickHotspots({ list, files, churn, cap }) {
+  const tracked = new Set(files);
+  if (list) return { source: "list", files: [...new Set(list)].filter((f) => tracked.has(f)) };
+  const ranked = [...churn].filter(([f, n]) => n > 0 && tracked.has(f)).sort(([a, x], [b, y]) => y - x || (a < b ? -1 : 1));
+  return { source: "churn", files: ranked.slice(0, cap).map(([f]) => f) };
+}
+
+function runScanners(registry, stacks, ctx, { scanners, hotspots, blameCap }) {
+  const rows = [], candidates = [], material = [];
+  const blames = new Map(Object.keys(registry.sweeps).map((sweep) => [sweep, makeBlame(ctx.repoRoot, blameCap)]));
+  const hotspotNote = hotspots.source === "list" ? `${hotspots.files.length} from the step 3 list`
+    : `the ${hotspots.files.length} highest-churn files (no --hotspots list)`;
+  for (const [id, def] of Object.entries(registry.scanners)) {
+    const row = { source: id, sweep: def.sweep, kinds: def.kinds, class: "heuristic", method: "heuristic", downloaded: false, version: null, note: null,
+      ...(def.scope ? { scope: def.scope } : {}) };
     if (def.stacks && !def.stacks.some((s) => stacks.includes(s))) { rows.push({ ...row, status: "not-applicable" }); continue; }
-    const impl = SCANNERS.find((s) => s.id === id);
+    const impl = scanners.find((s) => s.id === id);
     if (!impl) { rows.push({ ...row, status: "unavailable", note: "no implementation" }); continue; }
+    const blame = blames.get(def.sweep);
+    const scanCtx = { ...ctx, blame, files: def.scope === "hotspots" ? hotspots.files : ctx.files };
     try {
       ctx.read.scope = new Set();
-      const blamed = { failed: ctx.blame.failed.length, skipped: ctx.blame.skipped };
-      const found = impl.scan(ctx).map((c) => ({ ...c, source: id }));
+      const blamed = { failed: blame.failed.length, skipped: blame.skipped };
+      const found = impl.scan(scanCtx).map((c) => ({ ...c, source: id, sweep: def.sweep }));
+      const handed = impl.material ? impl.material(scanCtx) : [];
       candidates.push(...found);
-      const gap = scannerGap(id, { blame: { capped: ctx.blame.capped && ctx.blame.skipped > blamed.skipped, skipped: ctx.blame.skipped - blamed.skipped,
-        failed: ctx.blame.failed.slice(blamed.failed) } }, ctx.read.scope);
-      rows.push({ ...row, status: gap ? "partial" : "ran", note: gap });
+      material.push(...handed.map((m) => ({ id: `material:${id}:${m.key}`, type: "material", sweep: def.sweep, source: id, ...m })));
+      const gap = scannerGap(impl, { capped: blame.capped && blame.skipped > blamed.skipped, skipped: blame.skipped - blamed.skipped,
+        failed: blame.failed.slice(blamed.failed) }, ctx.read.scope, blameCap);
+      const note = [def.scope === "hotspots" ? `hotspot files only: ${hotspotNote}` : null, gap].filter(Boolean).join("; ") || null;
+      rows.push({ ...row, status: gap ? "partial" : "ran", note });
     } catch (err) {
       rows.push({ ...row, status: "failed", note: `scanner error: ${err.message}` });
     } finally {
       ctx.read.scope = null;
     }
   }
-  return { rows, candidates };
+  return { rows, candidates, material };
 }
 
 function fullKinds(sweepKinds, rows, registry, dependenciesInstalled) {
@@ -315,8 +352,43 @@ function fullKinds(sweepKinds, rows, registry, dependenciesInstalled) {
   });
 }
 
+// The repo-root package.json a `when.packageDependency` tool is judged against; null when it is absent or not a JSON object.
+function readRootPackage(repoRoot, files) {
+  if (!files.includes("package.json")) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8"));
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch { return null; }
+}
+
+const byIdAsc = (a, b) => (a.id < b.id ? -1 : 1);
+
+// What judgment-routed kinds hand the judgment dispatch: their candidates, their scanners' material,
+// and the open store records of those kinds. A store that cannot be read is reported and costs those kinds their completeness.
+function judgmentInputs({ repoRoot, kinds, candidates, material, degraded }) {
+  const judged = (kind) => kinds.get(kind)?.route === "judgment";
+  const items = [
+    ...candidates.filter((c) => judged(c.kind) && !c.cleared).map((c) => ({ id: `candidate:${c.id}`, type: "candidate", sweep: c.sweep,
+      kinds: [c.kind], candidateId: c.id, file: c.file, line: c.line, symbol: c.symbol, detail: c.detail ?? null })),
+    ...material,
+  ];
+  let storeReadable = true;
+  if ([...kinds.keys()].some(judged)) {
+    try {
+      for (const r of readMaintenanceFindings(repoRoot).filter((x) => judged(x.culpritKind) && x.lifecycle !== "dismissed"))
+        items.push({ id: `record:${r.findingId}`, type: "record", sweep: kinds.get(r.culpritKind).sweep, kinds: [r.culpritKind],
+          findingId: r.findingId, title: r.title, affectedFiles: r.affectedFiles });
+    } catch (err) {
+      storeReadable = false;
+      degraded.push(`findings store unreadable (${err.message}); open judgment records not re-examined`);
+    }
+  }
+  return { items: items.sort(byIdAsc), storeReadable };
+}
+
 export function runSweep({ repoRoot, outDir, consent = { executing: false, coverage: false }, registry = loadRegistry(),
-  runTool = defaultRunTool, files, churn, now = Date.now(), onPath = onPathDefault }) {
+  runTool = defaultRunTool, files, churn, commits = [], now = Date.now(), onPath = onPathDefault, hotspots = null,
+  scanners = SCANNERS, blameCap = BLAME_CAP_FILES }) {
   outDir = resolve(outDir);
   mkdirSync(outDir, { recursive: true });
   if (!files) {
@@ -328,6 +400,7 @@ export function runSweep({ repoRoot, outDir, consent = { executing: false, cover
   if (!churn) {
     const measured = churnByFile(repoRoot);
     churn = measured.churn;
+    commits = measured.commits;
     if (measured.error) degraded.push(`git log failed (${measured.error}); blast radius fell back to the file count`);
   }
   const stacks = detectStacks(files, registry);
@@ -336,9 +409,10 @@ export function runSweep({ repoRoot, outDir, consent = { executing: false, cover
   const config = sweepConfig(repoRoot, registry);
   const rows = [];
   const raw = [];
-  for (const sel of selectTools(registry, { stacks, files, consent })) {
+  const selections = selectTools(registry, { stacks, files, consent, rootPackage: readRootPackage(repoRoot, files) });
+  for (const sel of selections) {
     if (sel.status !== "run") {
-      rows.push({ source: sel.tool.id, kinds: sel.tool.kinds, class: sel.mode ?? Object.keys(sel.tool.modes)[0],
+      rows.push({ source: sel.tool.id, sweep: sel.tool.sweep, kinds: sel.tool.kinds, class: sel.mode ?? Object.keys(sel.tool.modes)[0],
         status: sel.status, method: sel.tool.adapter === "raw" ? "tool-raw" : "tool", downloaded: false,
         version: sel.tool.version, note: sel.status === "needs-consent" ? "executing class: needs this pass's consent" : sel.note ?? null });
       continue;
@@ -349,28 +423,38 @@ export function runSweep({ repoRoot, outDir, consent = { executing: false, cover
     rows.push(row);
     raw.push(...candidates);
   }
-  const scanned = runScanners(registry, stacks, { repoRoot, files, read, blame: makeBlame(repoRoot), now, config });
+  const hotspotSet = pickHotspots({ list: hotspots, files, churn, cap: registry.config.hotspotCap });
+  const scanned = runScanners(registry, stacks, { repoRoot, files, read, now, config }, { scanners, hotspots: hotspotSet, blameCap });
   rows.push(...scanned.rows);
   raw.push(...scanned.candidates);
   const seen = new Set();
   const candidates = [];
   for (const c of raw) {
-    const cand = { sweep: SWEEP, line: null, symbol: null, noisy: false, cleared: null, ...c };
+    const cand = { line: null, symbol: null, noisy: false, cleared: null, ...c };
     cand.id = `${cand.source}:${cand.file}:${cand.line ?? 0}:${cand.symbol ?? ""}`;
     if (!seen.has(cand.id)) { seen.add(cand.id); candidates.push(cand); }
   }
-  const clusters = clusterCandidates(candidates, churn);
-  const sweepKinds = Object.keys(registry.sweeps[SWEEP].kinds);
-  const toolStacks = new Set(registry.tools.filter((t) => t.sweep === SWEEP).flatMap((t) => t.stacks));
-  const coverage = {
-    sweep: SWEEP, stacks, dependenciesInstalled, consent, config, rows,
-    noToolStacks: stacks.filter((s) => !toolStacks.has(s)),
-    notCovered: registry.sweeps[SWEEP].notCovered, sweepKinds, sourcedKinds: sourcedKinds(registry, SWEEP), degraded,
-    fullKinds: fullKinds(sweepKinds, rows, registry, dependenciesInstalled),
-  };
-  writeFileSync(join(outDir, "candidates.json"), JSON.stringify({ sweep: SWEEP, candidates, clusters }, null, 2) + "\n");
+  const kinds = kindIndex(registry);
+  const clusters = clusterCandidates(candidates, churn, commits).map((cl) => ({ ...cl, route: kinds.get(cl.kind)?.route ?? "verification" }));
+  const judgment = judgmentInputs({ repoRoot, kinds, candidates, material: scanned.material, degraded });
+  const sweeps = {};
+  for (const [id, def] of Object.entries(registry.sweeps)) {
+    const sweepKinds = Object.keys(def.kinds);
+    const applicable = new Set(selections.filter((s) => s.tool.sweep === id && s.status !== "not-applicable").flatMap((s) => s.tool.stacks));
+    const complete = fullKinds(sweepKinds, rows.filter((r) => r.sweep === id), registry, dependenciesInstalled);
+    sweeps[id] = { title: def.title, noun: def.noun, noToolStacks: stacks.filter((s) => !applicable.has(s)), notCovered: def.notCovered,
+      sweepKinds, sourcedKinds: sourcedKinds(registry, id),
+      fullKinds: judgment.storeReadable ? complete : complete.filter((k) => kinds.get(k).route !== "judgment") };
+  }
+  const union = (field) => Object.values(sweeps).flatMap((s) => s[field]);
+  const coverage = { stacks, dependenciesInstalled, consent, config, hotspots: hotspotSet, degraded, rows, sweeps,
+    sweepKinds: union("sweepKinds"), sourcedKinds: union("sourcedKinds"), fullKinds: union("fullKinds") };
+  const churned = Object.fromEntries([...churn].filter(([, n]) => n > 0).sort(([a], [b]) => (a < b ? -1 : 1)));
+  const ordered = orderForVerification(clusters, Object.keys(registry.sweeps));
+  writeFileSync(join(outDir, "candidates.json"), JSON.stringify({ candidates, clusters: ordered, churn: churned }, null, 2) + "\n");
   writeFileSync(join(outDir, "coverage.json"), JSON.stringify(coverage, null, 2) + "\n");
-  return { candidates, clusters, coverage };
+  writeFileSync(join(outDir, "judgment-inputs.json"), JSON.stringify({ items: judgment.items }, null, 2) + "\n");
+  return { candidates, clusters: ordered, coverage };
 }
 
 const SEVERITY_ORDER = ["low", "medium", "high", "critical"];
@@ -471,8 +555,9 @@ function coverageStatement(coverage, kinds) {
   for (const r of coverage.rows)
     if (r.status !== "ran" && r.status !== "partial" && r.status !== "not-applicable") lines.push(`- not run: ${r.source} (${r.status}${r.note ? `: ${r.note}` : ""})`);
   for (const r of coverage.rows) if (r.downloaded) lines.push(`- downloaded: ${r.source} ${r.version}`);
-  for (const s of coverage.noToolStacks) lines.push(`- ${s}: no dead-code tool for this stack; heuristic scan only`);
-  lines.push(`- not covered: ${coverage.notCovered.join("; ")}`);
+  const { noToolStacks, notCovered } = coverage.sweeps?.[SWEEP] ?? coverage;
+  for (const s of noToolStacks) lines.push(`- ${s}: no dead-code tool for this stack; heuristic scan only`);
+  lines.push(`- not covered: ${notCovered.join("; ")}`);
   return lines.join("\n");
 }
 
@@ -556,7 +641,7 @@ export function finalizeSweep({ outDir, verdicts, lcov = null, runId = null, rep
   return { entries, counts, section, trending, ratchet };
 }
 
-const USAGE = "usage: hygiene-sweep.mjs run --out <dir> [--repo <root>] [--consent-executing] [--consent-coverage]\n" +
+const USAGE = "usage: hygiene-sweep.mjs run --out <dir> [--repo <root>] [--consent-executing] [--consent-coverage] [--hotspots <file>]\n" +
   "       hygiene-sweep.mjs finalize --dir <dir> --verdicts <file> [--lcov <file>] [--run <runId>] [--repo <root>]";
 
 function mainFinalize(rest) {
@@ -581,12 +666,17 @@ function main(argv) {
   const [sub, ...rest] = argv;
   if (sub === "finalize") return mainFinalize(rest);
   if (sub !== "run") throw new Error(USAGE);
-  const { flags } = parseFlags(rest, { "--out": "value", "--repo": "value", "--consent-executing": "none", "--consent-coverage": "none" },
+  const { flags } = parseFlags(rest, { "--out": "value", "--repo": "value", "--consent-executing": "none", "--consent-coverage": "none", "--hotspots": "value" },
     { requireValues: "nonEmpty" });
   if (!flags["--out"]) throw new Error(`--out is required; ${USAGE}`);
   const repoRoot = resolve(flags["--repo"] ?? process.cwd());
   const consent = { executing: Boolean(flags["--consent-executing"]), coverage: Boolean(flags["--consent-coverage"]) };
-  const { candidates, clusters, coverage } = runSweep({ repoRoot, outDir: flags["--out"], consent });
+  let hotspots = null;
+  if (flags["--hotspots"]) {
+    try { hotspots = readFileSync(flags["--hotspots"], "utf8").split("\n").map((l) => l.trim()).filter(Boolean); }
+    catch (err) { throw new Error(`cannot read ${flags["--hotspots"]}: ${err.message}`); }
+  }
+  const { candidates, clusters, coverage } = runSweep({ repoRoot, outDir: flags["--out"], consent, hotspots });
   const count = (s) => coverage.rows.filter((r) => r.status === s).length;
   process.stdout.write(JSON.stringify({ out: resolve(flags["--out"]), candidates: candidates.length, clusters: clusters.length,
     ran: count("ran"), partial: count("partial"), failed: count("failed"), unavailable: count("unavailable"), needsConsent: count("needs-consent"),
